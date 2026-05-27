@@ -7,6 +7,9 @@ import * as Option from "effect/Option";
 import * as DesktopEnvironment from "./DesktopEnvironment.ts";
 import * as DesktopConfig from "./DesktopConfig.ts";
 
+const toPortablePath = (value: string) => value.replaceAll("\\", "/").replace(/^[A-Z]:/i, "");
+const portablePathOption = Option.map(toPortablePath);
+
 const defaultInput = {
   dirname: "/repo/apps/desktop/dist-electron",
   homeDirectory: "/Users/alice",
@@ -53,25 +56,40 @@ describe("DesktopEnvironment", () => {
       );
 
       assert.equal(environment.isDevelopment, true);
-      assert.equal(environment.appDataDirectory, "/Users/alice/Library/Application Support");
-      assert.equal(environment.baseDir, "/tmp/t3");
-      assert.equal(environment.stateDir, "/tmp/t3/dev");
-      assert.equal(environment.desktopSettingsPath, "/tmp/t3/dev/desktop-settings.json");
-      assert.equal(environment.clientSettingsPath, "/tmp/t3/dev/client-settings.json");
-      assert.equal(environment.savedEnvironmentRegistryPath, "/tmp/t3/dev/saved-environments.json");
-      assert.equal(environment.serverSettingsPath, "/tmp/t3/dev/settings.json");
-      assert.equal(environment.logDir, "/tmp/t3/dev/logs");
-      assert.equal(environment.rootDir, "/repo");
-      assert.equal(environment.appRoot, "/repo");
-      assert.equal(environment.backendEntryPath, "/repo/apps/server/dist/bin.mjs");
-      assert.equal(environment.backendCwd, "/repo");
-      assert.equal(environment.appUserModelId, "com.t3tools.t3code.dev");
-      assert.equal(environment.linuxWmClass, "t3code-dev");
+      assert.equal(
+        toPortablePath(environment.appDataDirectory),
+        "/Users/alice/Library/Application Support",
+      );
+      assert.equal(toPortablePath(environment.baseDir), "/tmp/t3");
+      assert.equal(toPortablePath(environment.stateDir), "/tmp/t3/dev");
+      assert.equal(
+        toPortablePath(environment.desktopSettingsPath),
+        "/tmp/t3/dev/desktop-settings.json",
+      );
+      assert.equal(
+        toPortablePath(environment.clientSettingsPath),
+        "/tmp/t3/dev/client-settings.json",
+      );
+      assert.equal(
+        toPortablePath(environment.savedEnvironmentRegistryPath),
+        "/tmp/t3/dev/saved-environments.json",
+      );
+      assert.equal(toPortablePath(environment.serverSettingsPath), "/tmp/t3/dev/settings.json");
+      assert.equal(toPortablePath(environment.logDir), "/tmp/t3/dev/logs");
+      assert.equal(toPortablePath(environment.rootDir), "/repo");
+      assert.equal(toPortablePath(environment.appRoot), "/repo");
+      assert.equal(toPortablePath(environment.backendEntryPath), "/repo/apps/server/dist/bin.mjs");
+      assert.equal(toPortablePath(environment.backendCwd), "/repo");
+      assert.equal(environment.appUserModelId, "ai.kagura.kamicode.dev");
+      assert.equal(environment.linuxWmClass, "kamicode-dev");
       assert.deepEqual(
         Option.map(environment.devServerUrl, (url) => url.href),
         Option.some("http://localhost:5173/"),
       );
-      assert.deepEqual(environment.devRemoteT3ServerEntryPath, Option.some("/remote/server.mjs"));
+      assert.deepEqual(
+        portablePathOption(environment.devRemoteT3ServerEntryPath),
+        Option.some("/remote/server.mjs"),
+      );
       assert.deepEqual(environment.configuredBackendPort, Option.some(4949));
       assert.deepEqual(environment.commitHashOverride, Option.some("0123456789abcdef"));
       assert.deepEqual(environment.otlpTracesUrl, Option.some("http://127.0.0.1:4318/v1/traces"));
@@ -89,9 +107,30 @@ describe("DesktopEnvironment", () => {
       );
 
       assert.equal(environment.isDevelopment, false);
-      assert.equal(environment.stateDir, "/tmp/t3/userdata");
-      assert.equal(environment.logDir, "/tmp/t3/userdata/logs");
-      assert.equal(environment.serverSettingsPath, "/tmp/t3/userdata/settings.json");
+      assert.equal(toPortablePath(environment.stateDir), "/tmp/t3/userdata");
+      assert.equal(toPortablePath(environment.logDir), "/tmp/t3/userdata/logs");
+      assert.equal(
+        toPortablePath(environment.serverSettingsPath),
+        "/tmp/t3/userdata/settings.json",
+      );
+    }),
+  );
+
+  it.effect("defaults packaged state to the KamiCode home directory", () =>
+    Effect.gen(function* () {
+      const environment = yield* makeEnvironment({
+        isPackaged: true,
+        appPath: "/Applications/KamiCode.app/Contents/Resources/app.asar",
+        resourcesPath: "/Applications/KamiCode.app/Contents/Resources",
+      });
+
+      assert.equal(toPortablePath(environment.baseDir), "/Users/alice/.kamicode");
+      assert.equal(toPortablePath(environment.stateDir), "/Users/alice/.kamicode/userdata");
+      assert.equal(environment.userDataDirName, "kamicode");
+      assert.equal(environment.legacyUserDataDirName, "KamiCode (Alpha)");
+      assert.equal(environment.appUserModelId, "ai.kagura.kamicode");
+      assert.equal(environment.linuxDesktopEntryName, "kamicode.desktop");
+      assert.equal(environment.linuxWmClass, "kamicode");
     }),
   );
 
@@ -109,7 +148,7 @@ describe("DesktopEnvironment", () => {
         Option.some("/Users/alice"),
       );
       assert.deepEqual(
-        environment.resolvePickFolderDefaultPath({ initialPath: "~/project" }),
+        portablePathOption(environment.resolvePickFolderDefaultPath({ initialPath: "~/project" })),
         Option.some("/Users/alice/project"),
       );
     }),

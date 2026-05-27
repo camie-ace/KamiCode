@@ -20,7 +20,17 @@ npx t3
 
 ### Desktop app
 
-Install the latest version of the desktop app from [GitHub Releases](https://github.com/pingdotgg/t3code/releases), or from your favorite package registry:
+Install the latest version of the desktop app from [GitHub Releases](https://github.com/camie-ace/KamiCode/releases).
+
+Direct Windows x64 installer link:
+
+```bash
+https://github.com/camie-ace/KamiCode/releases/latest/download/KamiCode-Setup-x64.exe
+```
+
+Maintainers can publish a release by pushing a version tag like `v0.1.0`. See [docs/distribution.md](./docs/distribution.md).
+
+The package-registry install options below are inherited from upstream T3 Code and are not KamiCode distribution channels yet:
 
 #### Windows (`winget`)
 

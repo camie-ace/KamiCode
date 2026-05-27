@@ -1,5 +1,9 @@
 # Release Checklist
 
+KamiCode's active team distribution workflow is documented in [distribution.md](./distribution.md).
+
+The notes below are inherited from upstream T3 Code and are kept as reference material for the larger upstream release system.
+
 This document covers the unified release workflow for stable and nightly desktop releases.
 
 ## What the workflow does

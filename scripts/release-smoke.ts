@@ -6,6 +6,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  readdirSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -16,6 +17,18 @@ import * as Console from "effect/Console";
 import * as Effect from "effect/Effect";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const bunExecutable = process.env.npm_execpath?.toLowerCase().includes("bun")
+  ? process.env.npm_execpath
+  : "bun";
+
+function resolveSmokeTempParent(): string {
+  const configured = process.env.KAMICODE_RELEASE_SMOKE_TMPDIR?.trim();
+  if (configured) return configured;
+  if (process.platform === "win32") {
+    return join(process.env.SystemDrive ?? "C:", "kamicode-release-smoke");
+  }
+  return tmpdir();
+}
 
 const workspaceFiles = [
   "package.json",
@@ -182,7 +195,9 @@ function assertMissing(path: string, message: string): void {
   }
 }
 
-const tempRoot = mkdtempSync(join(tmpdir(), "t3-release-smoke-"));
+const tempParent = resolveSmokeTempParent();
+mkdirSync(tempParent, { recursive: true });
+const tempRoot = mkdtempSync(join(tempParent, "t3-release-smoke-"));
 
 try {
   copyWorkspaceManifestFixture(tempRoot);
@@ -203,7 +218,7 @@ try {
 
   rmSync(resolve(tempRoot, "bun.lock"), { force: true });
 
-  execFileSync("bun", ["install", "--ignore-scripts"], {
+  execFileSync(bunExecutable, ["install", "--ignore-scripts"], {
     cwd: tempRoot,
     stdio: "inherit",
   });
@@ -290,45 +305,47 @@ try {
   const mergedPreviewWindowsManifestPath = resolve(tempRoot, "release-assets/preview.yml");
   const { arm64Path: winDebugArm64Path, x64Path: winDebugX64Path } =
     writeWindowsBuilderDebugFixtures(tempRoot);
-  execFileSync(
-    "bash",
-    [
-      "-lc",
-      `
-        release_assets_dir=${JSON.stringify(resolve(tempRoot, "release-assets"))}
-        shopt -s nullglob
-        found_windows_manifest=false
-        for x64_manifest in "$release_assets_dir"/*-win-x64.yml; do
-          if [[ "$(basename "$x64_manifest")" == builder-debug-* ]]; then
-            continue
-          fi
+  const releaseAssetsDir = resolve(tempRoot, "release-assets");
+  let foundWindowsManifest = false;
+  for (const fileName of readdirSync(releaseAssetsDir)) {
+    if (!fileName.endsWith("-win-x64.yml") || fileName.startsWith("builder-debug-")) {
+      continue;
+    }
 
-          arm64_manifest="\${x64_manifest/-x64.yml/-arm64.yml}"
-          output_manifest="\${x64_manifest/-win-x64.yml/.yml}"
-          if [[ ! -f "$arm64_manifest" ]]; then
-            echo "Missing matching arm64 Windows manifest for $x64_manifest" >&2
-            exit 1
-          fi
+    const x64ManifestPath = resolve(releaseAssetsDir, fileName);
+    const arm64ManifestPath = resolve(
+      releaseAssetsDir,
+      fileName.replace("-win-x64.yml", "-win-arm64.yml"),
+    );
+    const outputManifestPath = resolve(releaseAssetsDir, fileName.replace("-win-x64.yml", ".yml"));
 
-          found_windows_manifest=true
-          ${JSON.stringify(process.execPath)} ${JSON.stringify(resolve(repoRoot, "scripts/merge-update-manifests.ts"))} --platform win \
-            "$arm64_manifest" \
-            "$x64_manifest" \
-            "$output_manifest"
-          rm -f "$arm64_manifest" "$x64_manifest"
-        done
+    if (!existsSync(arm64ManifestPath)) {
+      throw new Error(`Missing matching arm64 Windows manifest for ${x64ManifestPath}`);
+    }
 
-        if [[ "$found_windows_manifest" != true ]]; then
-          echo "No Windows updater manifests found to merge." >&2
-          exit 1
-        fi
-      `,
-    ],
-    {
-      cwd: repoRoot,
-      stdio: "inherit",
-    },
-  );
+    foundWindowsManifest = true;
+    execFileSync(
+      process.execPath,
+      [
+        resolve(repoRoot, "scripts/merge-update-manifests.ts"),
+        "--platform",
+        "win",
+        arm64ManifestPath,
+        x64ManifestPath,
+        outputManifestPath,
+      ],
+      {
+        cwd: repoRoot,
+        stdio: "inherit",
+      },
+    );
+    rmSync(arm64ManifestPath, { force: true });
+    rmSync(x64ManifestPath, { force: true });
+  }
+
+  if (!foundWindowsManifest) {
+    throw new Error("No Windows updater manifests found to merge.");
+  }
 
   const mergedWindowsManifest = readFileSync(mergedWindowsManifestPath, "utf8");
   assertContains(

@@ -18,32 +18,51 @@ import { fileURLToPath } from "node:url";
 
 const isDevelopment = Boolean(process.env.VITE_DEV_SERVER_URL);
 const APP_DISPLAY_NAME = isDevelopment ? "KamiCode (Dev)" : "KamiCode (Alpha)";
-const APP_BUNDLE_ID = isDevelopment ? "com.t3tools.t3code.dev" : "com.t3tools.t3code";
+const APP_BUNDLE_ID = isDevelopment
+  ? "ai.kagura.kamicode.dev"
+  : "ai.kagura.kamicode";
 const LAUNCHER_VERSION = 2;
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 export const desktopDir = resolve(__dirname, "..");
 const repoRoot = resolve(desktopDir, "..", "..");
 const defaultIconPath = join(desktopDir, "resources", "icon.icns");
-const developmentMacIconPngPath = join(repoRoot, "assets", "dev", "blueprint-macos-1024.png");
+const developmentMacIconPngPath = join(
+  repoRoot,
+  "assets",
+  "dev",
+  "blueprint-macos-1024.png",
+);
 
 function setPlistString(plistPath, key, value) {
-  const replaceResult = spawnSync("plutil", ["-replace", key, "-string", value, plistPath], {
-    encoding: "utf8",
-  });
+  const replaceResult = spawnSync(
+    "plutil",
+    ["-replace", key, "-string", value, plistPath],
+    {
+      encoding: "utf8",
+    },
+  );
   if (replaceResult.status === 0) {
     return;
   }
 
-  const insertResult = spawnSync("plutil", ["-insert", key, "-string", value, plistPath], {
-    encoding: "utf8",
-  });
+  const insertResult = spawnSync(
+    "plutil",
+    ["-insert", key, "-string", value, plistPath],
+    {
+      encoding: "utf8",
+    },
+  );
   if (insertResult.status === 0) {
     return;
   }
 
-  const details = [replaceResult.stderr, insertResult.stderr].filter(Boolean).join("\n");
-  throw new Error(`Failed to update plist key "${key}" at ${plistPath}: ${details}`.trim());
+  const details = [replaceResult.stderr, insertResult.stderr]
+    .filter(Boolean)
+    .join("\n");
+  throw new Error(
+    `Failed to update plist key "${key}" at ${plistPath}: ${details}`.trim(),
+  );
 }
 
 function runChecked(command, args) {
@@ -53,7 +72,9 @@ function runChecked(command, args) {
   }
 
   const details = [result.stdout, result.stderr].filter(Boolean).join("\n");
-  throw new Error(`Failed to run ${command} ${args.join(" ")}: ${details}`.trim());
+  throw new Error(
+    `Failed to run ${command} ${args.join(" ")}: ${details}`.trim(),
+  );
 }
 
 function ensureDevelopmentIconIcns(runtimeDir) {
@@ -65,7 +86,10 @@ function ensureDevelopmentIconIcns(runtimeDir) {
   }
 
   const sourceMtimeMs = statSync(developmentMacIconPngPath).mtimeMs;
-  if (existsSync(generatedIconPath) && statSync(generatedIconPath).mtimeMs >= sourceMtimeMs) {
+  if (
+    existsSync(generatedIconPath) &&
+    statSync(generatedIconPath).mtimeMs >= sourceMtimeMs
+  ) {
     return generatedIconPath;
   }
 
@@ -132,8 +156,15 @@ function buildMacLauncher(electronBinaryPath) {
   const sourceAppBundlePath = resolve(electronBinaryPath, "../../..");
   const runtimeDir = join(desktopDir, ".electron-runtime");
   const targetAppBundlePath = join(runtimeDir, `${APP_DISPLAY_NAME}.app`);
-  const targetBinaryPath = join(targetAppBundlePath, "Contents", "MacOS", "Electron");
-  const iconPath = isDevelopment ? ensureDevelopmentIconIcns(runtimeDir) : defaultIconPath;
+  const targetBinaryPath = join(
+    targetAppBundlePath,
+    "Contents",
+    "MacOS",
+    "Electron",
+  );
+  const iconPath = isDevelopment
+    ? ensureDevelopmentIconIcns(runtimeDir)
+    : defaultIconPath;
   const metadataPath = join(runtimeDir, "metadata.json");
 
   mkdirSync(runtimeDir, { recursive: true });
