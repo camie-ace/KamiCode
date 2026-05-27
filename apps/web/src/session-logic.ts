@@ -32,7 +32,11 @@ export const PROVIDER_OPTIONS: Array<{
   pickerSidebarBadge?: "new" | "soon";
 }> = [
   { value: ProviderDriverKind.make("codex"), label: "Codex", available: true },
-  { value: ProviderDriverKind.make("claudeAgent"), label: "Claude", available: true },
+  {
+    value: ProviderDriverKind.make("claudeAgent"),
+    label: "Claude",
+    available: true,
+  },
   {
     value: ProviderDriverKind.make("opencode"),
     label: "OpenCode",
@@ -59,12 +63,39 @@ export interface WorkLogEntry {
   toolTitle?: string;
   itemType?: ToolLifecycleItemType;
   requestKind?: PendingApproval["requestKind"];
+  evidenceRun?: EvidenceRunWorkEntry;
 }
 
 interface DerivedWorkLogEntry extends WorkLogEntry {
   activityKind: OrchestrationThreadActivity["kind"];
   collapseKey?: string;
   toolCallId?: string;
+}
+
+export interface EvidenceRunWorkEntry {
+  runId: string;
+  runner: string;
+  status: "pass" | "fail" | "blocked" | "error";
+  success: boolean;
+  goal?: string;
+  finalUrl?: string;
+  title?: string;
+  evidenceSummary?: string;
+  outputSummary?: string;
+  tracePath?: string;
+  summaryPath?: string;
+  markdownPath?: string;
+  durationMs?: number;
+  screenshots: ReadonlyArray<{
+    label: string;
+    path: string;
+  }>;
+  videos: ReadonlyArray<{
+    label: string;
+    path: string;
+  }>;
+  consoleErrors: ReadonlyArray<string>;
+  networkFailures: ReadonlyArray<string>;
 }
 
 export interface PendingApproval {
@@ -132,7 +163,10 @@ export function formatDuration(durationMs: number): string {
   return `${minutes}m ${seconds}s`;
 }
 
-export function formatElapsed(startIso: string, endIso: string | undefined): string | null {
+export function formatElapsed(
+  startIso: string,
+  endIso: string | undefined,
+): string | null {
   if (!endIso) return null;
   const startedAt = Date.parse(startIso);
   const endedAt = Date.parse(endIso);
@@ -142,8 +176,14 @@ export function formatElapsed(startIso: string, endIso: string | undefined): str
   return formatDuration(endedAt - startedAt);
 }
 
-type LatestTurnTiming = Pick<OrchestrationLatestTurn, "turnId" | "startedAt" | "completedAt">;
-type SessionActivityState = Pick<ThreadSession, "orchestrationStatus" | "activeTurnId">;
+type LatestTurnTiming = Pick<
+  OrchestrationLatestTurn,
+  "turnId" | "startedAt" | "completedAt"
+>;
+type SessionActivityState = Pick<
+  ThreadSession,
+  "orchestrationStatus" | "activeTurnId"
+>;
 
 export function isLatestTurnSettled(
   latestTurn: LatestTurnTiming | null,
@@ -162,7 +202,9 @@ export function deriveActiveWorkStartedAt(
   sendStartedAt: string | null,
 ): string | null {
   const runningTurnId =
-    session?.orchestrationStatus === "running" ? (session.activeTurnId ?? null) : null;
+    session?.orchestrationStatus === "running"
+      ? (session.activeTurnId ?? null)
+      : null;
   if (runningTurnId !== null) {
     if (latestTurn?.turnId === runningTurnId) {
       return latestTurn.startedAt ?? sendStartedAt;
@@ -175,7 +217,9 @@ export function deriveActiveWorkStartedAt(
   return sendStartedAt;
 }
 
-function requestKindFromRequestType(requestType: unknown): PendingApproval["requestKind"] | null {
+function requestKindFromRequestType(
+  requestType: unknown,
+): PendingApproval["requestKind"] | null {
   switch (requestType) {
     case "command_execution_approval":
     case "exec_command_approval":
@@ -191,7 +235,9 @@ function requestKindFromRequestType(requestType: unknown): PendingApproval["requ
   }
 }
 
-function isStalePendingRequestFailureDetail(detail: string | undefined): boolean {
+function isStalePendingRequestFailureDetail(
+  detail: string | undefined,
+): boolean {
   const normalized = detail?.toLowerCase();
   if (!normalized) {
     return false;
@@ -229,7 +275,10 @@ export function derivePendingApprovals(
         : payload
           ? requestKindFromRequestType(payload.requestType)
           : null;
-    const detail = payload && typeof payload.detail === "string" ? payload.detail : undefined;
+    const detail =
+      payload && typeof payload.detail === "string"
+        ? payload.detail
+        : undefined;
 
     if (activity.kind === "approval.requested" && requestId && requestKind) {
       openByRequestId.set(requestId, {
@@ -295,7 +344,10 @@ function parseUserInputQuestions(
             description: optionRecord.description,
           };
         })
-        .filter((option): option is UserInputQuestion["options"][number] => option !== null);
+        .filter(
+          (option): option is UserInputQuestion["options"][number] =>
+            option !== null,
+        );
       if (options.length === 0) {
         return null;
       }
@@ -326,7 +378,10 @@ export function derivePendingUserInputs(
       payload && typeof payload.requestId === "string"
         ? ApprovalRequestId.make(payload.requestId)
         : null;
-    const detail = payload && typeof payload.detail === "string" ? payload.detail : undefined;
+    const detail =
+      payload && typeof payload.detail === "string"
+        ? payload.detail
+        : undefined;
 
     if (activity.kind === "user-input.requested" && requestId) {
       const questions = parseUserInputQuestions(payload);
@@ -365,12 +420,17 @@ export function deriveActivePlanState(
   latestTurnId: TurnId | undefined,
 ): ActivePlanState | null {
   const ordered = [...activities].toSorted(compareActivitiesByOrder);
-  const allPlanActivities = ordered.filter((activity) => activity.kind === "turn.plan.updated");
+  const allPlanActivities = ordered.filter(
+    (activity) => activity.kind === "turn.plan.updated",
+  );
   // Prefer plan from the current turn; fall back to the most recent plan from any turn
   // so that TodoWrite tasks persist across follow-up messages.
   const latest = Option.firstSomeOf([
     ...(latestTurnId
-      ? Arr.findLast(allPlanActivities, (activity) => activity.turnId === latestTurnId)
+      ? Arr.findLast(
+          allPlanActivities,
+          (activity) => activity.turnId === latestTurnId,
+        )
       : Option.none()),
     Arr.last(allPlanActivities),
   ]).pipe(Option.getOrNull);
@@ -393,7 +453,9 @@ export function deriveActivePlanState(
         return null;
       }
       const status =
-        record.status === "completed" || record.status === "inProgress" ? record.status : "pending";
+        record.status === "completed" || record.status === "inProgress"
+          ? record.status
+          : "pending";
       return {
         step: record.step,
         status,
@@ -429,7 +491,8 @@ export function findLatestProposedPlan(
       .filter((proposedPlan) => proposedPlan.turnId === latestTurnId)
       .toSorted(
         (left, right) =>
-          left.updatedAt.localeCompare(right.updatedAt) || left.id.localeCompare(right.id),
+          left.updatedAt.localeCompare(right.updatedAt) ||
+          left.id.localeCompare(right.id),
       )
       .at(-1);
     if (matchingTurnPlan) {
@@ -440,7 +503,8 @@ export function findLatestProposedPlan(
   const latestPlan = [...proposedPlans]
     .toSorted(
       (left, right) =>
-        left.updatedAt.localeCompare(right.updatedAt) || left.id.localeCompare(right.id),
+        left.updatedAt.localeCompare(right.updatedAt) ||
+        left.id.localeCompare(right.id),
     )
     .at(-1);
   if (!latestPlan) {
@@ -452,12 +516,16 @@ export function findLatestProposedPlan(
 
 export function findSidebarProposedPlan(input: {
   threads: ReadonlyArray<Pick<Thread, "id" | "proposedPlans">>;
-  latestTurn: Pick<OrchestrationLatestTurn, "turnId" | "sourceProposedPlan"> | null;
+  latestTurn: Pick<
+    OrchestrationLatestTurn,
+    "turnId" | "sourceProposedPlan"
+  > | null;
   latestTurnSettled: boolean;
   threadId: ThreadId | string | null | undefined;
 }): LatestProposedPlanState | null {
   const activeThreadPlans =
-    input.threads.find((thread) => thread.id === input.threadId)?.proposedPlans ?? [];
+    input.threads.find((thread) => thread.id === input.threadId)
+      ?.proposedPlans ?? [];
 
   if (!input.latestTurnSettled) {
     const sourceProposedPlan = input.latestTurn?.sourceProposedPlan;
@@ -471,11 +539,17 @@ export function findSidebarProposedPlan(input: {
     }
   }
 
-  return findLatestProposedPlan(activeThreadPlans, input.latestTurn?.turnId ?? null);
+  return findLatestProposedPlan(
+    activeThreadPlans,
+    input.latestTurn?.turnId ?? null,
+  );
 }
 
 export function hasActionableProposedPlan(
-  proposedPlan: LatestProposedPlanState | Pick<ProposedPlan, "implementedAt"> | null,
+  proposedPlan:
+    | LatestProposedPlanState
+    | Pick<ProposedPlan, "implementedAt">
+    | null,
 ): boolean {
   return proposedPlan !== null && proposedPlan.implementedAt === null;
 }
@@ -486,7 +560,9 @@ export function deriveWorkLogEntries(
 ): WorkLogEntry[] {
   const ordered = [...activities].toSorted(compareActivitiesByOrder);
   const entries = ordered
-    .filter((activity) => (latestTurnId ? activity.turnId === latestTurnId : true))
+    .filter((activity) =>
+      latestTurnId ? activity.turnId === latestTurnId : true,
+    )
     .filter((activity) => activity.kind !== "tool.started")
     .filter((activity) => activity.kind !== "task.started")
     .filter((activity) => activity.kind !== "context-window.updated")
@@ -494,11 +570,14 @@ export function deriveWorkLogEntries(
     .filter((activity) => !isPlanBoundaryToolActivity(activity))
     .map(toDerivedWorkLogEntry);
   return collapseDerivedWorkLogEntries(entries).map(
-    ({ activityKind: _activityKind, collapseKey: _collapseKey, ...entry }) => entry,
+    ({ activityKind: _activityKind, collapseKey: _collapseKey, ...entry }) =>
+      entry,
   );
 }
 
-function isPlanBoundaryToolActivity(activity: OrchestrationThreadActivity): boolean {
+function isPlanBoundaryToolActivity(
+  activity: OrchestrationThreadActivity,
+): boolean {
   if (activity.kind !== "tool.updated" && activity.kind !== "tool.completed") {
     return false;
   }
@@ -507,10 +586,15 @@ function isPlanBoundaryToolActivity(activity: OrchestrationThreadActivity): bool
     activity.payload && typeof activity.payload === "object"
       ? (activity.payload as Record<string, unknown>)
       : null;
-  return typeof payload?.detail === "string" && payload.detail.startsWith("ExitPlanMode:");
+  return (
+    typeof payload?.detail === "string" &&
+    payload.detail.startsWith("ExitPlanMode:")
+  );
 }
 
-function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWorkLogEntry {
+function toDerivedWorkLogEntry(
+  activity: OrchestrationThreadActivity,
+): DerivedWorkLogEntry {
   const payload =
     activity.payload && typeof activity.payload === "object"
       ? (activity.payload as Record<string, unknown>)
@@ -518,9 +602,13 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
   const commandPreview = extractToolCommand(payload);
   const changedFiles = extractChangedFiles(payload);
   const title = extractToolTitle(payload);
-  const isTaskActivity = activity.kind === "task.progress" || activity.kind === "task.completed";
+  const evidenceRun = extractEvidenceRun(payload);
+  const isTaskActivity =
+    activity.kind === "task.progress" || activity.kind === "task.completed";
   const taskSummary =
-    isTaskActivity && typeof payload?.summary === "string" && payload.summary.length > 0
+    isTaskActivity &&
+    typeof payload?.summary === "string" &&
+    payload.summary.length > 0
       ? payload.summary
       : null;
   const taskDetailAsLabel =
@@ -575,6 +663,9 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
   if (requestKind) {
     entry.requestKind = requestKind;
   }
+  if (evidenceRun) {
+    entry.evidenceRun = evidenceRun;
+  }
   if (toolCallId) {
     entry.toolCallId = toolCallId;
   }
@@ -592,7 +683,10 @@ function collapseDerivedWorkLogEntries(
   for (const entry of entries) {
     const previous = collapsed.at(-1);
     if (previous && shouldCollapseToolLifecycleEntries(previous, entry)) {
-      collapsed[collapsed.length - 1] = mergeDerivedWorkLogEntries(previous, entry);
+      collapsed[collapsed.length - 1] = mergeDerivedWorkLogEntries(
+        previous,
+        entry,
+      );
       continue;
     }
     collapsed.push(entry);
@@ -604,16 +698,25 @@ function shouldCollapseToolLifecycleEntries(
   previous: DerivedWorkLogEntry,
   next: DerivedWorkLogEntry,
 ): boolean {
-  if (previous.activityKind !== "tool.updated" && previous.activityKind !== "tool.completed") {
+  if (
+    previous.activityKind !== "tool.updated" &&
+    previous.activityKind !== "tool.completed"
+  ) {
     return false;
   }
-  if (next.activityKind !== "tool.updated" && next.activityKind !== "tool.completed") {
+  if (
+    next.activityKind !== "tool.updated" &&
+    next.activityKind !== "tool.completed"
+  ) {
     return false;
   }
   if (previous.activityKind === "tool.completed") {
     return false;
   }
-  if (previous.collapseKey !== undefined && previous.collapseKey === next.collapseKey) {
+  if (
+    previous.collapseKey !== undefined &&
+    previous.collapseKey === next.collapseKey
+  ) {
     return true;
   }
   return (
@@ -629,13 +732,17 @@ function mergeDerivedWorkLogEntries(
   previous: DerivedWorkLogEntry,
   next: DerivedWorkLogEntry,
 ): DerivedWorkLogEntry {
-  const changedFiles = mergeChangedFiles(previous.changedFiles, next.changedFiles);
+  const changedFiles = mergeChangedFiles(
+    previous.changedFiles,
+    next.changedFiles,
+  );
   const detail = next.detail ?? previous.detail;
   const command = next.command ?? previous.command;
   const rawCommand = next.rawCommand ?? previous.rawCommand;
   const toolTitle = next.toolTitle ?? previous.toolTitle;
   const itemType = next.itemType ?? previous.itemType;
   const requestKind = next.requestKind ?? previous.requestKind;
+  const evidenceRun = next.evidenceRun ?? previous.evidenceRun;
   const collapseKey = next.collapseKey ?? previous.collapseKey;
   const toolCallId = next.toolCallId ?? previous.toolCallId;
   return {
@@ -648,6 +755,7 @@ function mergeDerivedWorkLogEntries(
     ...(toolTitle ? { toolTitle } : {}),
     ...(itemType ? { itemType } : {}),
     ...(requestKind ? { requestKind } : {}),
+    ...(evidenceRun ? { evidenceRun } : {}),
     ...(collapseKey ? { collapseKey } : {}),
     ...(toolCallId ? { toolCallId } : {}),
   };
@@ -664,17 +772,28 @@ function mergeChangedFiles(
   return [...new Set(merged)];
 }
 
-function deriveToolLifecycleCollapseKey(entry: DerivedWorkLogEntry): string | undefined {
-  if (entry.activityKind !== "tool.updated" && entry.activityKind !== "tool.completed") {
+function deriveToolLifecycleCollapseKey(
+  entry: DerivedWorkLogEntry,
+): string | undefined {
+  if (
+    entry.activityKind !== "tool.updated" &&
+    entry.activityKind !== "tool.completed"
+  ) {
     return undefined;
   }
   if (entry.toolCallId) {
     return `tool:${entry.toolCallId}`;
   }
-  const normalizedLabel = normalizeCompactToolLabel(entry.toolTitle ?? entry.label);
+  const normalizedLabel = normalizeCompactToolLabel(
+    entry.toolTitle ?? entry.label,
+  );
   const detail = entry.detail?.trim() ?? "";
   const itemType = entry.itemType ?? "";
-  if (normalizedLabel.length === 0 && detail.length === 0 && itemType.length === 0) {
+  if (
+    normalizedLabel.length === 0 &&
+    detail.length === 0 &&
+    itemType.length === 0
+  ) {
     return undefined;
   }
   return [itemType, normalizedLabel, detail].join("\u001f");
@@ -684,7 +803,9 @@ function normalizeCompactToolLabel(value: string): string {
   return value.replace(/\s+(?:complete|completed)\s*$/i, "").trim();
 }
 
-function toLatestProposedPlanState(proposedPlan: ProposedPlan): LatestProposedPlanState {
+function toLatestProposedPlanState(
+  proposedPlan: ProposedPlan,
+): LatestProposedPlanState {
   return {
     id: proposedPlan.id,
     createdAt: proposedPlan.createdAt,
@@ -697,7 +818,9 @@ function toLatestProposedPlanState(proposedPlan: ProposedPlan): LatestProposedPl
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
-  return value && typeof value === "object" ? (value as Record<string, unknown>) : null;
+  return value && typeof value === "object"
+    ? (value as Record<string, unknown>)
+    : null;
 }
 
 function asTrimmedString(value: unknown): string | null {
@@ -710,6 +833,18 @@ function asTrimmedString(value: unknown): string | null {
 
 function asNumber(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function asBoolean(value: unknown): boolean | null {
+  return typeof value === "boolean" ? value : null;
+}
+
+function parseJsonRecord(value: string): Record<string, unknown> | null {
+  try {
+    return asRecord(JSON.parse(value));
+  } catch {
+    return null;
+  }
 }
 
 function trimMatchingOuterQuotes(value: string): string {
@@ -735,7 +870,9 @@ function executableBasename(value: string): string | null {
   return last.length > 0 ? last.toLowerCase() : null;
 }
 
-function splitExecutableAndRest(value: string): { executable: string; rest: string } | null {
+function splitExecutableAndRest(
+  value: string,
+): { executable: string; rest: string } | null {
   const trimmed = value.trim();
   if (trimmed.length === 0) {
     return null;
@@ -788,7 +925,10 @@ function findShellWrapperSpec(shell: string) {
   );
 }
 
-function unwrapCommandRemainder(value: string, wrapperFlagPattern: RegExp): string | null {
+function unwrapCommandRemainder(
+  value: string,
+  wrapperFlagPattern: RegExp,
+): string | null {
   const match = wrapperFlagPattern.exec(value);
   if (!match) {
     return null;
@@ -848,7 +988,10 @@ function normalizeCommandValue(value: unknown): string | null {
   return formatted ? unwrapKnownShellCommandWrapper(formatted) : null;
 }
 
-function toRawToolCommand(value: unknown, normalizedCommand: string | null): string | null {
+function toRawToolCommand(
+  value: unknown,
+  normalizedCommand: string | null,
+): string | null {
   const formatted = formatCommandValue(value);
   if (!formatted || normalizedCommand === null) {
     return null;
@@ -871,7 +1014,9 @@ function extractToolCommand(payload: Record<string, unknown> | null): {
     itemInput?.command,
     itemResult?.command,
     data?.command,
-    itemType === "command_execution" && detail ? stripTrailingExitCode(detail).output : null,
+    itemType === "command_execution" && detail
+      ? stripTrailingExitCode(detail).output
+      : null,
   ];
 
   for (const candidate of candidates) {
@@ -891,13 +1036,154 @@ function extractToolCommand(payload: Record<string, unknown> | null): {
   };
 }
 
-function extractToolTitle(payload: Record<string, unknown> | null): string | null {
+function extractToolTitle(
+  payload: Record<string, unknown> | null,
+): string | null {
   return asTrimmedString(payload?.title);
 }
 
-function extractToolCallId(payload: Record<string, unknown> | null): string | null {
+function extractToolCallId(
+  payload: Record<string, unknown> | null,
+): string | null {
   const data = asRecord(payload?.data);
   return asTrimmedString(data?.toolCallId);
+}
+
+function isEvidenceStatus(
+  value: unknown,
+): value is EvidenceRunWorkEntry["status"] {
+  return (
+    value === "pass" ||
+    value === "fail" ||
+    value === "blocked" ||
+    value === "error"
+  );
+}
+
+function extractDynamicToolInputTextResult(
+  payload: Record<string, unknown> | null,
+): Record<string, unknown> | null {
+  const data = asRecord(payload?.data);
+  const contentItems = Array.isArray(data?.contentItems)
+    ? data.contentItems
+    : [];
+  for (const contentItem of contentItems) {
+    const record = asRecord(contentItem);
+    if (record?.type !== "inputText") {
+      continue;
+    }
+    const text = asTrimmedString(record.text);
+    if (!text) {
+      continue;
+    }
+    return parseJsonRecord(text);
+  }
+  return null;
+}
+
+function extractLabeledArtifacts(
+  value: unknown,
+): ReadonlyArray<{ label: string; path: string }> {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value
+    .map((entry, index) => {
+      if (typeof entry === "string") {
+        return {
+          label: `artifact-${index + 1}`,
+          path: entry,
+        };
+      }
+      const record = asRecord(entry);
+      const path = asTrimmedString(record?.path);
+      if (!path) {
+        return null;
+      }
+      return {
+        label: asTrimmedString(record?.label) ?? `artifact-${index + 1}`,
+        path,
+      };
+    })
+    .filter(
+      (entry): entry is { label: string; path: string } => entry !== null,
+    );
+}
+
+function extractStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value
+    .map((entry) => asTrimmedString(entry))
+    .filter((entry): entry is string => entry !== null);
+}
+
+function extractEvidenceRun(
+  payload: Record<string, unknown> | null,
+): EvidenceRunWorkEntry | null {
+  if (payload?.itemType !== "dynamic_tool_call") {
+    return null;
+  }
+
+  const result = extractDynamicToolInputTextResult(payload);
+  if (!result) {
+    return null;
+  }
+
+  const runId = asTrimmedString(result.runId);
+  const runner = asTrimmedString(result.runner);
+  const status = result.status;
+  if (!runId || !runner || !isEvidenceStatus(status)) {
+    return null;
+  }
+
+  const artifactPaths = asRecord(result.artifactPaths);
+  const screenshots = extractLabeledArtifacts(result.screenshots);
+  const fallbackScreenshots = extractLabeledArtifacts(
+    artifactPaths?.screenshots,
+  );
+  const videos = extractLabeledArtifacts(result.videos);
+  const fallbackVideoPath = asTrimmedString(artifactPaths?.video);
+  const normalizedVideos =
+    videos.length > 0
+      ? videos
+      : fallbackVideoPath
+        ? [{ label: "video", path: fallbackVideoPath }]
+        : [];
+
+  const entry: EvidenceRunWorkEntry = {
+    runId,
+    runner,
+    status,
+    success: asBoolean(result.success) ?? status === "pass",
+    screenshots: screenshots.length > 0 ? screenshots : fallbackScreenshots,
+    videos: normalizedVideos,
+    consoleErrors: extractStringArray(result.consoleErrors),
+    networkFailures: extractStringArray(result.networkFailures),
+  };
+
+  const goal = asTrimmedString(result.goal);
+  const finalUrl = asTrimmedString(result.finalUrl);
+  const title = asTrimmedString(result.title);
+  const evidenceSummary = asTrimmedString(result.evidenceSummary);
+  const outputSummary = asTrimmedString(result.outputSummary);
+  const tracePath = asTrimmedString(artifactPaths?.trace);
+  const summaryPath = asTrimmedString(artifactPaths?.summary);
+  const markdownPath = asTrimmedString(artifactPaths?.markdown);
+  const durationMs = asNumber(result.durationMs);
+
+  if (goal) entry.goal = goal;
+  if (finalUrl) entry.finalUrl = finalUrl;
+  if (title) entry.title = title;
+  if (evidenceSummary) entry.evidenceSummary = evidenceSummary;
+  if (outputSummary) entry.outputSummary = outputSummary;
+  if (tracePath) entry.tracePath = tracePath;
+  if (summaryPath) entry.summaryPath = summaryPath;
+  if (markdownPath) entry.markdownPath = markdownPath;
+  if (durationMs !== null) entry.durationMs = durationMs;
+
+  return entry;
 }
 
 function normalizeInlinePreview(value: string): string {
@@ -911,12 +1197,16 @@ function truncateInlinePreview(value: string, maxLength = 84): string {
   return `${value.slice(0, maxLength - 1).trimEnd()}…`;
 }
 
-function normalizePreviewForComparison(value: string | null | undefined): string | null {
+function normalizePreviewForComparison(
+  value: string | null | undefined,
+): string | null {
   const normalized = asTrimmedString(value);
   if (!normalized) {
     return null;
   }
-  return normalizeCompactToolLabel(normalizeInlinePreview(normalized)).toLowerCase();
+  return normalizeCompactToolLabel(
+    normalizeInlinePreview(normalized),
+  ).toLowerCase();
 }
 
 function summarizeToolTextOutput(value: string): string | null {
@@ -934,7 +1224,9 @@ function summarizeToolTextOutput(value: string): string | null {
   return null;
 }
 
-function summarizeToolRawOutput(payload: Record<string, unknown> | null): string | null {
+function summarizeToolRawOutput(
+  payload: Record<string, unknown> | null,
+): string | null {
   const data = asRecord(payload?.data);
   const rawOutput = asRecord(data?.rawOutput);
   if (!rawOutput) {
@@ -960,7 +1252,10 @@ function summarizeToolRawOutput(payload: Record<string, unknown> | null): string
   return null;
 }
 
-function isCommandToolDetail(payload: Record<string, unknown> | null, heading: string): boolean {
+function isCommandToolDetail(
+  payload: Record<string, unknown> | null,
+  heading: string,
+): boolean {
   const data = asRecord(payload?.data);
   const kind = asTrimmedString(data?.kind)?.toLowerCase();
   const title = asTrimmedString(payload?.title ?? heading)?.toLowerCase();
@@ -991,7 +1286,8 @@ function extractToolDetail(
 
   const rawOutputSummary = summarizeToolRawOutput(payload);
   if (rawOutputSummary) {
-    const normalizedRawOutputSummary = normalizePreviewForComparison(rawOutputSummary);
+    const normalizedRawOutputSummary =
+      normalizePreviewForComparison(rawOutputSummary);
     if (normalizedRawOutputSummary !== normalizedHeading) {
       return rawOutputSummary;
     }
@@ -1005,9 +1301,10 @@ function stripTrailingExitCode(value: string): {
   exitCode?: number | undefined;
 } {
   const trimmed = value.trim();
-  const match = /^(?<output>[\s\S]*?)(?:\s*<exited with exit code (?<code>\d+)>)\s*$/i.exec(
-    trimmed,
-  );
+  const match =
+    /^(?<output>[\s\S]*?)(?:\s*<exited with exit code (?<code>\d+)>)\s*$/i.exec(
+      trimmed,
+    );
   if (!match?.groups) {
     return {
       output: trimmed.length > 0 ? trimmed : null,
@@ -1024,7 +1321,10 @@ function stripTrailingExitCode(value: string): {
 function extractWorkLogItemType(
   payload: Record<string, unknown> | null,
 ): WorkLogEntry["itemType"] | undefined {
-  if (typeof payload?.itemType === "string" && isToolLifecycleItemType(payload.itemType)) {
+  if (
+    typeof payload?.itemType === "string" &&
+    isToolLifecycleItemType(payload.itemType)
+  ) {
     return payload.itemType;
   }
   return undefined;
@@ -1052,7 +1352,12 @@ function pushChangedFile(target: string[], seen: Set<string>, value: unknown) {
   target.push(normalized);
 }
 
-function collectChangedFiles(value: unknown, target: string[], seen: Set<string>, depth: number) {
+function collectChangedFiles(
+  value: unknown,
+  target: string[],
+  seen: Set<string>,
+  depth: number,
+) {
   if (depth > 4 || target.length >= 12) {
     return;
   }
@@ -1100,7 +1405,9 @@ function collectChangedFiles(value: unknown, target: string[], seen: Set<string>
   }
 }
 
-function extractChangedFiles(payload: Record<string, unknown> | null): string[] {
+function extractChangedFiles(
+  payload: Record<string, unknown> | null,
+): string[] {
   const changedFiles: string[] = [];
   const seen = new Set<string>();
   collectChangedFiles(asRecord(payload?.data), changedFiles, seen, 0);
@@ -1127,7 +1434,8 @@ function compareActivitiesByOrder(
   }
 
   const lifecycleRankComparison =
-    compareActivityLifecycleRank(left.kind) - compareActivityLifecycleRank(right.kind);
+    compareActivityLifecycleRank(left.kind) -
+    compareActivityLifecycleRank(right.kind);
   if (lifecycleRankComparison !== 0) {
     return lifecycleRankComparison;
   }
@@ -1153,7 +1461,9 @@ export function hasToolActivityForTurn(
   turnId: TurnId | null | undefined,
 ): boolean {
   if (!turnId) return false;
-  return activities.some((activity) => activity.turnId === turnId && activity.tone === "tool");
+  return activities.some(
+    (activity) => activity.turnId === turnId && activity.tone === "tool",
+  );
 }
 
 export function deriveTimelineEntries(
@@ -1167,12 +1477,14 @@ export function deriveTimelineEntries(
     createdAt: message.createdAt,
     message,
   }));
-  const proposedPlanRows: TimelineEntry[] = proposedPlans.map((proposedPlan) => ({
-    id: proposedPlan.id,
-    kind: "proposed-plan",
-    createdAt: proposedPlan.createdAt,
-    proposedPlan,
-  }));
+  const proposedPlanRows: TimelineEntry[] = proposedPlans.map(
+    (proposedPlan) => ({
+      id: proposedPlan.id,
+      kind: "proposed-plan",
+      createdAt: proposedPlan.createdAt,
+      proposedPlan,
+    }),
+  );
   const workRows: TimelineEntry[] = workEntries.map((entry) => ({
     id: entry.id,
     kind: "work",
@@ -1216,7 +1528,10 @@ export function deriveCompletionDividerBeforeEntryId(
   let inRangeMatch: string | null = null;
   let fallbackMatch: string | null = null;
   for (const timelineEntry of timelineEntries) {
-    if (timelineEntry.kind !== "message" || timelineEntry.message.role !== "assistant") {
+    if (
+      timelineEntry.kind !== "message" ||
+      timelineEntry.message.role !== "assistant"
+    ) {
       continue;
     }
     const messageAt = Date.parse(timelineEntry.message.createdAt);
@@ -1234,7 +1549,9 @@ export function deriveCompletionDividerBeforeEntryId(
 export function inferCheckpointTurnCountByTurnId(
   summaries: TurnDiffSummary[],
 ): Record<TurnId, number> {
-  const sorted = [...summaries].toSorted((a, b) => a.completedAt.localeCompare(b.completedAt));
+  const sorted = [...summaries].toSorted((a, b) =>
+    a.completedAt.localeCompare(b.completedAt),
+  );
   const result: Record<TurnId, number> = {};
   for (let index = 0; index < sorted.length; index += 1) {
     const summary = sorted[index];

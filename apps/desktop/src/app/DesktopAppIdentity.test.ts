@@ -38,7 +38,7 @@ interface ElectronAppCalls {
 const makeElectronAppLayer = (calls: ElectronAppCalls) =>
   Layer.succeed(ElectronApp.ElectronApp, {
     metadata: Effect.die("unexpected metadata read"),
-    name: Effect.succeed("T3 Code"),
+    name: Effect.succeed("KamiCode"),
     whenReady: Effect.void,
     quit: Effect.void,
     exit: () => Effect.void,
@@ -156,8 +156,8 @@ describe("DesktopAppIdentity", () => {
         const identity = yield* DesktopAppIdentity.DesktopAppIdentity;
         yield* identity.configure;
 
-        assert.deepEqual(calls.setName, ["T3 Code (Alpha)"]);
-        assert.equal(calls.setAboutPanelOptions[0]?.applicationName, "T3 Code (Alpha)");
+        assert.deepEqual(calls.setName, ["KamiCode (Alpha)"]);
+        assert.equal(calls.setAboutPanelOptions[0]?.applicationName, "KamiCode (Alpha)");
         assert.equal(calls.setAboutPanelOptions[0]?.applicationVersion, "1.2.3");
         assert.equal(calls.setAboutPanelOptions[0]?.version, "0123456789ab");
         assert.deepEqual(calls.setDockIcon, ["/icon.png"]);

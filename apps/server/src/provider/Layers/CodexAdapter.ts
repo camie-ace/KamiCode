@@ -60,9 +60,16 @@ import {
   type CodexSessionRuntimeOptions,
   type CodexSessionRuntimeShape,
 } from "./CodexSessionRuntime.ts";
-import { type EventNdjsonLogger, makeEventNdjsonLogger } from "./EventNdjsonLogger.ts";
-const isCodexAppServerProcessExitedError = Schema.is(CodexErrors.CodexAppServerProcessExitedError);
-const isCodexAppServerTransportError = Schema.is(CodexErrors.CodexAppServerTransportError);
+import {
+  type EventNdjsonLogger,
+  makeEventNdjsonLogger,
+} from "./EventNdjsonLogger.ts";
+const isCodexAppServerProcessExitedError = Schema.is(
+  CodexErrors.CodexAppServerProcessExitedError,
+);
+const isCodexAppServerTransportError = Schema.is(
+  CodexErrors.CodexAppServerTransportError,
+);
 const isCodexSessionRuntimeThreadIdMissingError = Schema.is(
   CodexSessionRuntimeThreadIdMissingError,
 );
@@ -97,7 +104,10 @@ function mapCodexRuntimeError(
   method: string,
   error: CodexSessionRuntimeError,
 ): ProviderAdapterError {
-  if (isCodexAppServerProcessExitedError(error) || isCodexAppServerTransportError(error)) {
+  if (
+    isCodexAppServerProcessExitedError(error) ||
+    isCodexAppServerTransportError(error)
+  ) {
     return new ProviderAdapterSessionClosedError({
       provider: PROVIDER,
       threadId,
@@ -146,11 +156,23 @@ function trimText(value: string | undefined | null): string | undefined {
   return trimmed && trimmed.length > 0 ? trimmed : undefined;
 }
 
+function recordFromUnknown(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object"
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function stringFromUnknown(value: unknown): string | undefined {
+  return typeof value === "string" ? trimText(value) : undefined;
+}
+
 const FATAL_CODEX_STDERR_SNIPPETS = ["failed to connect to websocket"];
 
 function isFatalCodexProcessStderrMessage(message: string): boolean {
   const normalized = message.toLowerCase();
-  return FATAL_CODEX_STDERR_SNIPPETS.some((snippet) => normalized.includes(snippet));
+  return FATAL_CODEX_STDERR_SNIPPETS.some((snippet) =>
+    normalized.includes(snippet),
+  );
 }
 
 function normalizeCodexTokenUsage(
@@ -180,7 +202,9 @@ function normalizeCodexTokenUsage(
     ...(reasoningOutputTokens !== undefined ? { reasoningOutputTokens } : {}),
     ...(usedTokens !== undefined ? { lastUsedTokens: usedTokens } : {}),
     ...(inputTokens !== undefined ? { lastInputTokens: inputTokens } : {}),
-    ...(cachedInputTokens !== undefined ? { lastCachedInputTokens: cachedInputTokens } : {}),
+    ...(cachedInputTokens !== undefined
+      ? { lastCachedInputTokens: cachedInputTokens }
+      : {}),
     ...(outputTokens !== undefined ? { lastOutputTokens: outputTokens } : {}),
     ...(reasoningOutputTokens !== undefined
       ? { lastReasoningOutputTokens: reasoningOutputTokens }
@@ -190,7 +214,9 @@ function normalizeCodexTokenUsage(
 }
 
 function toTurnStatus(
-  value: EffectCodexSchema.V2TurnCompletedNotification["turn"]["status"] | "cancelled",
+  value:
+    | EffectCodexSchema.V2TurnCompletedNotification["turn"]["status"]
+    | "cancelled",
 ): "completed" | "failed" | "cancelled" | "interrupted" {
   switch (value) {
     case "completed":
@@ -214,14 +240,22 @@ function normalizeItemType(raw: string | undefined | null): string {
     .toLowerCase();
 }
 
-function toCanonicalItemType(raw: string | undefined | null): CanonicalItemType {
+function toCanonicalItemType(
+  raw: string | undefined | null,
+): CanonicalItemType {
   const type = normalizeItemType(raw);
   if (type.includes("user")) return "user_message";
-  if (type.includes("agent message") || type.includes("assistant")) return "assistant_message";
-  if (type.includes("reasoning") || type.includes("thought")) return "reasoning";
+  if (type.includes("agent message") || type.includes("assistant"))
+    return "assistant_message";
+  if (type.includes("reasoning") || type.includes("thought"))
+    return "reasoning";
   if (type.includes("plan") || type.includes("todo")) return "plan";
   if (type.includes("command")) return "command_execution";
-  if (type.includes("file change") || type.includes("patch") || type.includes("edit"))
+  if (
+    type.includes("file change") ||
+    type.includes("patch") ||
+    type.includes("edit")
+  )
     return "file_change";
   if (type.includes("mcp")) return "mcp_tool_call";
   if (type.includes("dynamic tool")) return "dynamic_tool_call";
@@ -264,6 +298,60 @@ function itemTitle(itemType: CanonicalItemType): string | undefined {
   }
 }
 
+function dynamicToolTitle(payload: ProviderEvent["payload"]): string {
+  const record = recordFromUnknown(payload);
+  const namespace = stringFromUnknown(record?.namespace);
+  const tool = stringFromUnknown(record?.tool);
+  if (namespace === "kamicode" && tool === "kami_test_harness") {
+    return "Evidence run";
+  }
+  return "Tool call";
+}
+
+function parseDynamicToolInputTextResult(
+  payload: ProviderEvent["payload"],
+): Record<string, unknown> | null {
+  const record = recordFromUnknown(payload);
+  const contentItems = Array.isArray(record?.contentItems)
+    ? record.contentItems
+    : [];
+  for (const contentItem of contentItems) {
+    const content = recordFromUnknown(contentItem);
+    if (content?.type !== "inputText") {
+      continue;
+    }
+    const text = stringFromUnknown(content.text);
+    if (!text) {
+      continue;
+    }
+    try {
+      return recordFromUnknown(JSON.parse(text));
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
+function dynamicToolCompletionDetail(
+  payload: ProviderEvent["payload"],
+): string | undefined {
+  const result = parseDynamicToolInputTextResult(payload);
+  const outputSummary = stringFromUnknown(result?.outputSummary);
+  if (outputSummary) {
+    return outputSummary;
+  }
+  const evidenceSummary = stringFromUnknown(result?.evidenceSummary);
+  if (evidenceSummary) {
+    return evidenceSummary;
+  }
+  const status = stringFromUnknown(result?.status);
+  if (status) {
+    return `Status: ${status.toUpperCase()}`;
+  }
+  return undefined;
+}
+
 function itemDetail(item: CodexLifecycleItem): string | undefined {
   const candidates = [
     "command" in item ? item.command : undefined,
@@ -274,7 +362,8 @@ function itemDetail(item: CodexLifecycleItem): string | undefined {
     "prompt" in item ? item.prompt : undefined,
   ];
   for (const candidate of candidates) {
-    const trimmed = typeof candidate === "string" ? trimText(candidate) : undefined;
+    const trimmed =
+      typeof candidate === "string" ? trimText(candidate) : undefined;
     if (!trimmed) continue;
     return trimmed;
   }
@@ -304,7 +393,9 @@ function toRequestTypeFromMethod(method: string): CanonicalRequestType {
   }
 }
 
-function toRequestTypeFromKind(kind: ProviderRequestKind | undefined): CanonicalRequestType {
+function toRequestTypeFromKind(
+  kind: ProviderRequestKind | undefined,
+): CanonicalRequestType {
   switch (kind) {
     case "command":
       return "command_execution_approval";
@@ -322,13 +413,16 @@ function toCanonicalUserInputAnswers(
 ): ProviderUserInputAnswers {
   return Object.fromEntries(
     Object.entries(answers).map(([questionId, value]) => {
-      const normalizedAnswers = value.answers.length === 1 ? value.answers[0]! : [...value.answers];
+      const normalizedAnswers =
+        value.answers.length === 1 ? value.answers[0]! : [...value.answers];
       return [questionId, normalizedAnswers] as const;
     }),
   );
 }
 
-function toUserInputQuestions(questions: ReadonlyArray<CodexToolUserInputQuestion>) {
+function toUserInputQuestions(
+  questions: ReadonlyArray<CodexToolUserInputQuestion>,
+) {
   const parsedQuestions = questions
     .map((question) => {
       const options =
@@ -400,7 +494,9 @@ function contentStreamKindFromMethod(
   }
 }
 
-function asRuntimeItemId(itemId: ProviderEvent["itemId"] & string): RuntimeItemId {
+function asRuntimeItemId(
+  itemId: ProviderEvent["itemId"] & string,
+): RuntimeItemId {
   return RuntimeItemId.make(itemId);
 }
 
@@ -408,8 +504,12 @@ function asRuntimeRequestId(requestId: string): RuntimeRequestId {
   return RuntimeRequestId.make(requestId);
 }
 
-function eventRawSource(event: ProviderEvent): NonNullable<ProviderRuntimeEvent["raw"]>["source"] {
-  return event.kind === "request" ? "codex.app-server.request" : "codex.app-server.notification";
+function eventRawSource(
+  event: ProviderEvent,
+): NonNullable<ProviderRuntimeEvent["raw"]>["source"] {
+  return event.kind === "request"
+    ? "codex.app-server.request"
+    : "codex.app-server.notification";
 }
 
 function providerRefsFromEvent(
@@ -420,7 +520,9 @@ function providerRefsFromEvent(
   if (event.itemId) refs.providerItemId = event.itemId;
   if (event.requestId) refs.providerRequestId = event.requestId;
 
-  return Object.keys(refs).length > 0 ? (refs as ProviderRuntimeEvent["providerRefs"]) : undefined;
+  return Object.keys(refs).length > 0
+    ? (refs as ProviderRuntimeEvent["providerRefs"])
+    : undefined;
 }
 
 function runtimeEventBase(
@@ -435,7 +537,9 @@ function runtimeEventBase(
     createdAt: event.createdAt,
     ...(event.turnId ? { turnId: event.turnId } : {}),
     ...(event.itemId ? { itemId: asRuntimeItemId(event.itemId) } : {}),
-    ...(event.requestId ? { requestId: asRuntimeRequestId(event.requestId) } : {}),
+    ...(event.requestId
+      ? { requestId: asRuntimeRequestId(event.requestId) }
+      : {}),
     ...(refs ? { providerRefs: refs } : {}),
     raw: {
       source: eventRawSource(event),
@@ -507,9 +611,17 @@ function mapToRuntimeEvents(
   if (event.kind === "request") {
     if (event.method === "item/tool/requestUserInput") {
       const payload =
-        readPayload(EffectCodexSchema.ServerRequest__ToolRequestUserInputParams, event.payload) ??
-        readPayload(EffectCodexSchema.ToolRequestUserInputParams, event.payload);
-      const questions = payload ? toUserInputQuestions(payload.questions) : undefined;
+        readPayload(
+          EffectCodexSchema.ServerRequest__ToolRequestUserInputParams,
+          event.payload,
+        ) ??
+        readPayload(
+          EffectCodexSchema.ToolRequestUserInputParams,
+          event.payload,
+        );
+      const questions = payload
+        ? toUserInputQuestions(payload.questions)
+        : undefined;
       if (!questions) {
         return [];
       }
@@ -574,6 +686,38 @@ function mapToRuntimeEvents(
           requestType: toRequestTypeFromMethod(event.method),
           ...(detail ? { detail } : {}),
           ...(event.payload !== undefined ? { args: event.payload } : {}),
+        },
+      },
+    ];
+  }
+
+  if (event.method === "item/tool/call") {
+    return [
+      {
+        ...runtimeEventBase(event, canonicalThreadId),
+        type: "item.started",
+        payload: {
+          itemType: "dynamic_tool_call",
+          status: "inProgress",
+          title: dynamicToolTitle(event.payload),
+          ...(event.payload !== undefined ? { data: event.payload } : {}),
+        },
+      },
+    ];
+  }
+
+  if (event.method === "item/tool/call/completed") {
+    const detail = dynamicToolCompletionDetail(event.payload);
+    return [
+      {
+        ...runtimeEventBase(event, canonicalThreadId),
+        type: "item.completed",
+        payload: {
+          itemType: "dynamic_tool_call",
+          status: "completed",
+          title: dynamicToolTitle(event.payload),
+          ...(detail ? { detail } : {}),
+          ...(event.payload !== undefined ? { data: event.payload } : {}),
         },
       },
     ];
@@ -644,14 +788,19 @@ function mapToRuntimeEvents(
         type: "session.exited",
         payload: {
           ...(event.message ? { reason: event.message } : {}),
-          ...(event.method === "session/closed" ? { exitKind: "graceful" } : {}),
+          ...(event.method === "session/closed"
+            ? { exitKind: "graceful" }
+            : {}),
         },
       },
     ];
   }
 
   if (event.method === "thread/started") {
-    const payload = readPayload(EffectCodexSchema.V2ThreadStartedNotification, event.payload);
+    const payload = readPayload(
+      EffectCodexSchema.V2ThreadStartedNotification,
+      event.payload,
+    );
     if (!payload) {
       return [];
     }
@@ -675,7 +824,10 @@ function mapToRuntimeEvents(
   ) {
     const payload =
       event.method === "thread/status/changed"
-        ? readPayload(EffectCodexSchema.V2ThreadStatusChangedNotification, event.payload)
+        ? readPayload(
+            EffectCodexSchema.V2ThreadStatusChangedNotification,
+            event.payload,
+          )
         : undefined;
     return [
       {
@@ -699,18 +851,24 @@ function mapToRuntimeEvents(
   }
 
   if (event.method === "thread/name/updated") {
-    const payload = readPayload(EffectCodexSchema.V2ThreadNameUpdatedNotification, event.payload);
+    const payload = readPayload(
+      EffectCodexSchema.V2ThreadNameUpdatedNotification,
+      event.payload,
+    );
     return [
       {
         type: "thread.metadata.updated",
         ...runtimeEventBase(event, canonicalThreadId),
         payload: {
-          ...(trimText(payload?.threadName) ? { name: trimText(payload?.threadName) } : {}),
+          ...(trimText(payload?.threadName)
+            ? { name: trimText(payload?.threadName) }
+            : {}),
           ...(payload
             ? {
                 metadata: {
                   threadId: payload.threadId,
-                  ...(payload.threadName !== undefined && payload.threadName !== null
+                  ...(payload.threadName !== undefined &&
+                  payload.threadName !== null
                     ? { threadName: payload.threadName }
                     : {}),
                 },
@@ -726,7 +884,9 @@ function mapToRuntimeEvents(
       EffectCodexSchema.V2ThreadTokenUsageUpdatedNotification,
       event.payload,
     );
-    const normalizedUsage = payload ? normalizeCodexTokenUsage(payload.tokenUsage) : undefined;
+    const normalizedUsage = payload
+      ? normalizeCodexTokenUsage(payload.tokenUsage)
+      : undefined;
     if (!normalizedUsage) {
       return [];
     }
@@ -757,7 +917,10 @@ function mapToRuntimeEvents(
   }
 
   if (event.method === "turn/completed") {
-    const payload = readPayload(EffectCodexSchema.V2TurnCompletedNotification, event.payload);
+    const payload = readPayload(
+      EffectCodexSchema.V2TurnCompletedNotification,
+      event.payload,
+    );
     if (!payload) {
       return [];
     }
@@ -787,7 +950,10 @@ function mapToRuntimeEvents(
   }
 
   if (event.method === "turn/plan/updated") {
-    const payload = readPayload(EffectCodexSchema.V2TurnPlanUpdatedNotification, event.payload);
+    const payload = readPayload(
+      EffectCodexSchema.V2TurnPlanUpdatedNotification,
+      event.payload,
+    );
     if (!payload) {
       return [];
     }
@@ -796,11 +962,15 @@ function mapToRuntimeEvents(
         ...runtimeEventBase(event, canonicalThreadId),
         type: "turn.plan.updated",
         payload: {
-          ...(trimText(payload.explanation) ? { explanation: trimText(payload.explanation) } : {}),
+          ...(trimText(payload.explanation)
+            ? { explanation: trimText(payload.explanation) }
+            : {}),
           plan: payload.plan.map((step) => ({
             step: trimText(step.step) ?? "step",
             status:
-              step.status === "completed" || step.status === "inProgress" ? step.status : "pending",
+              step.status === "completed" || step.status === "inProgress"
+                ? step.status
+                : "pending",
           })),
         },
       },
@@ -808,7 +978,10 @@ function mapToRuntimeEvents(
   }
 
   if (event.method === "turn/diff/updated") {
-    const payload = readPayload(EffectCodexSchema.V2TurnDiffUpdatedNotification, event.payload);
+    const payload = readPayload(
+      EffectCodexSchema.V2TurnDiffUpdatedNotification,
+      event.payload,
+    );
     if (!payload) {
       return [];
     }
@@ -829,7 +1002,10 @@ function mapToRuntimeEvents(
   }
 
   if (event.method === "item/completed") {
-    const payload = readPayload(EffectCodexSchema.V2ItemCompletedNotification, event.payload);
+    const payload = readPayload(
+      EffectCodexSchema.V2ItemCompletedNotification,
+      event.payload,
+    );
     const item = payload?.item;
     if (!item) {
       return [];
@@ -850,7 +1026,11 @@ function mapToRuntimeEvents(
         },
       ];
     }
-    const completed = mapItemLifecycle(event, canonicalThreadId, "item.completed");
+    const completed = mapItemLifecycle(
+      event,
+      canonicalThreadId,
+      "item.completed",
+    );
     return completed ? [completed] : [];
   }
 
@@ -864,7 +1044,9 @@ function mapToRuntimeEvents(
         type: "item.updated",
         payload: {
           itemType:
-            event.method === "item/reasoning/summaryPartAdded" ? "reasoning" : "command_execution",
+            event.method === "item/reasoning/summaryPartAdded"
+              ? "reasoning"
+              : "command_execution",
           ...(event.payload !== undefined ? { data: event.payload } : {}),
         },
       },
@@ -872,7 +1054,10 @@ function mapToRuntimeEvents(
   }
 
   if (event.method === "item/plan/delta") {
-    const payload = readPayload(EffectCodexSchema.V2PlanDeltaNotification, event.payload);
+    const payload = readPayload(
+      EffectCodexSchema.V2PlanDeltaNotification,
+      event.payload,
+    );
     const delta = event.textDelta ?? payload?.delta;
     if (!delta || delta.length === 0) {
       return [];
@@ -889,7 +1074,10 @@ function mapToRuntimeEvents(
   }
 
   if (event.method === "item/agentMessage/delta") {
-    const payload = readPayload(EffectCodexSchema.V2AgentMessageDeltaNotification, event.payload);
+    const payload = readPayload(
+      EffectCodexSchema.V2AgentMessageDeltaNotification,
+      event.payload,
+    );
     const delta = event.textDelta ?? payload?.delta;
     if (!delta || delta.length === 0) {
       return [];
@@ -971,7 +1159,10 @@ function mapToRuntimeEvents(
   }
 
   if (event.method === "item/reasoning/textDelta") {
-    const payload = readPayload(EffectCodexSchema.V2ReasoningTextDeltaNotification, event.payload);
+    const payload = readPayload(
+      EffectCodexSchema.V2ReasoningTextDeltaNotification,
+      event.payload,
+    );
     const delta = event.textDelta ?? payload?.delta;
     if (!delta || delta.length === 0) {
       return [];
@@ -990,7 +1181,10 @@ function mapToRuntimeEvents(
   }
 
   if (event.method === "item/mcpToolCall/progress") {
-    const payload = readPayload(EffectCodexSchema.V2McpToolCallProgressNotification, event.payload);
+    const payload = readPayload(
+      EffectCodexSchema.V2McpToolCallProgressNotification,
+      event.payload,
+    );
     if (!payload) {
       return [];
     }
@@ -1027,7 +1221,10 @@ function mapToRuntimeEvents(
   }
 
   if (event.method === "item/tool/requestUserInput/answered") {
-    const payload = readPayload(EffectCodexSchema.ToolRequestUserInputResponse, event.payload);
+    const payload = readPayload(
+      EffectCodexSchema.ToolRequestUserInputResponse,
+      event.payload,
+    );
     if (!payload) {
       return [];
     }
@@ -1043,7 +1240,10 @@ function mapToRuntimeEvents(
   }
 
   if (event.method === "model/rerouted") {
-    const payload = readPayload(EffectCodexSchema.V2ModelReroutedNotification, event.payload);
+    const payload = readPayload(
+      EffectCodexSchema.V2ModelReroutedNotification,
+      event.payload,
+    );
     if (!payload) {
       return [];
     }
@@ -1061,7 +1261,10 @@ function mapToRuntimeEvents(
   }
 
   if (event.method === "deprecationNotice") {
-    const payload = readPayload(EffectCodexSchema.V2DeprecationNoticeNotification, event.payload);
+    const payload = readPayload(
+      EffectCodexSchema.V2DeprecationNoticeNotification,
+      event.payload,
+    );
     if (!payload) {
       return [];
     }
@@ -1071,14 +1274,19 @@ function mapToRuntimeEvents(
         ...runtimeEventBase(event, canonicalThreadId),
         payload: {
           summary: payload.summary,
-          ...(trimText(payload.details) ? { details: trimText(payload.details) } : {}),
+          ...(trimText(payload.details)
+            ? { details: trimText(payload.details) }
+            : {}),
         },
       },
     ];
   }
 
   if (event.method === "configWarning") {
-    const payload = readPayload(EffectCodexSchema.V2ConfigWarningNotification, event.payload);
+    const payload = readPayload(
+      EffectCodexSchema.V2ConfigWarningNotification,
+      event.payload,
+    );
     if (!payload) {
       return [];
     }
@@ -1088,7 +1296,9 @@ function mapToRuntimeEvents(
         ...runtimeEventBase(event, canonicalThreadId),
         payload: {
           summary: payload.summary,
-          ...(trimText(payload.details) ? { details: trimText(payload.details) } : {}),
+          ...(trimText(payload.details)
+            ? { details: trimText(payload.details) }
+            : {}),
           ...(trimText(payload.path) ? { path: trimText(payload.path) } : {}),
           ...(payload.range !== undefined && payload.range !== null
             ? { range: payload.range }
@@ -1099,7 +1309,12 @@ function mapToRuntimeEvents(
   }
 
   if (event.method === "account/updated") {
-    if (!readPayload(EffectCodexSchema.V2AccountUpdatedNotification, event.payload)) {
+    if (
+      !readPayload(
+        EffectCodexSchema.V2AccountUpdatedNotification,
+        event.payload,
+      )
+    ) {
       return [];
     }
     return [
@@ -1114,7 +1329,12 @@ function mapToRuntimeEvents(
   }
 
   if (event.method === "account/rateLimits/updated") {
-    if (!readPayload(EffectCodexSchema.V2AccountRateLimitsUpdatedNotification, event.payload)) {
+    if (
+      !readPayload(
+        EffectCodexSchema.V2AccountRateLimitsUpdatedNotification,
+        event.payload,
+      )
+    ) {
       return [];
     }
     return [
@@ -1143,7 +1363,9 @@ function mapToRuntimeEvents(
         payload: {
           success: payload.success,
           name: payload.name,
-          ...(trimText(payload.error) ? { error: trimText(payload.error) } : {}),
+          ...(trimText(payload.error)
+            ? { error: trimText(payload.error) }
+            : {}),
         },
       },
     ];
@@ -1207,7 +1429,10 @@ function mapToRuntimeEvents(
   }
 
   if (event.method === "thread/realtime/error") {
-    const payload = readPayload(EffectCodexSchema.V2ThreadRealtimeErrorNotification, event.payload);
+    const payload = readPayload(
+      EffectCodexSchema.V2ThreadRealtimeErrorNotification,
+      event.payload,
+    );
     const message = payload?.message ?? event.message ?? "Realtime error";
     return [
       {
@@ -1237,8 +1462,12 @@ function mapToRuntimeEvents(
   }
 
   if (event.method === "error") {
-    const payload = readPayload(EffectCodexSchema.V2ErrorNotification, event.payload);
-    const message = payload?.error.message ?? event.message ?? "Provider runtime error";
+    const payload = readPayload(
+      EffectCodexSchema.V2ErrorNotification,
+      event.payload,
+    );
+    const message =
+      payload?.error.message ?? event.message ?? "Provider runtime error";
     const willRetry = payload?.willRetry === true;
     return [
       {
@@ -1279,7 +1508,12 @@ function mapToRuntimeEvents(
   }
 
   if (event.method === "windows/worldWritableWarning") {
-    if (!readPayload(EffectCodexSchema.V2WindowsWorldWritableWarningNotification, event.payload)) {
+    if (
+      !readPayload(
+        EffectCodexSchema.V2WindowsWorldWritableWarningNotification,
+        event.payload,
+      )
+    ) {
       return [];
     }
     return [
@@ -1322,7 +1556,9 @@ function mapToRuntimeEvents(
               ...runtimeEventBase(event, canonicalThreadId),
               payload: {
                 message: failureMessage,
-                ...(event.payload !== undefined ? { detail: event.payload } : {}),
+                ...(event.payload !== undefined
+                  ? { detail: event.payload }
+                  : {}),
               },
             },
           ]
@@ -1346,7 +1582,8 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
   codexConfig: CodexSettings,
   options?: CodexAdapterLiveOptions,
 ) {
-  const boundInstanceId = options?.instanceId ?? ProviderInstanceId.make("codex");
+  const boundInstanceId =
+    options?.instanceId ?? ProviderInstanceId.make("codex");
   const fileSystem = yield* FileSystem.FileSystem;
   const childProcessSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   const serverConfig = yield* Effect.service(ServerConfig);
@@ -1382,6 +1619,7 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
           threadId: input.threadId,
           providerInstanceId: boundInstanceId,
           cwd: input.cwd ?? process.cwd(),
+          stateDir: serverConfig.stateDir,
           binaryPath: codexConfig.binaryPath,
           ...(options?.environment ? { environment: options.environment } : {}),
           ...(codexConfig.homePath ? { homePath: codexConfig.homePath } : {}),
@@ -1393,19 +1631,27 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
             ? { model: input.modelSelection.model }
             : {}),
           ...(input.modelSelection?.instanceId === boundInstanceId &&
-          getModelSelectionBooleanOptionValue(input.modelSelection, "fastMode") === true
+          getModelSelectionBooleanOptionValue(
+            input.modelSelection,
+            "fastMode",
+          ) === true
             ? { serviceTier: "fast" }
             : {}),
         };
         const sessionScope = yield* Scope.make("sequential");
         let sessionScopeTransferred = false;
         yield* Effect.addFinalizer(() =>
-          sessionScopeTransferred ? Effect.void : Scope.close(sessionScope, Exit.void),
+          sessionScopeTransferred
+            ? Effect.void
+            : Scope.close(sessionScope, Exit.void),
         );
         const createRuntime = options?.makeRuntime ?? makeCodexSessionRuntime;
         const runtime = yield* createRuntime(runtimeInput).pipe(
           Effect.provideService(Scope.Scope, sessionScope),
-          Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, childProcessSpawner),
+          Effect.provideService(
+            ChildProcessSpawner.ChildProcessSpawner,
+            childProcessSpawner,
+          ),
           Effect.mapError(
             (cause) =>
               new ProviderAdapterProcessError({
@@ -1422,12 +1668,15 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
             yield* writeNativeEvent(event);
             const runtimeEvents = mapToRuntimeEvents(event, event.threadId);
             if (runtimeEvents.length === 0) {
-              yield* Effect.logDebug("ignoring unhandled Codex provider event", {
-                method: event.method,
-                threadId: event.threadId,
-                turnId: event.turnId,
-                itemId: event.itemId,
-              });
+              yield* Effect.logDebug(
+                "ignoring unhandled Codex provider event",
+                {
+                  method: event.method,
+                  threadId: event.threadId,
+                  turnId: event.turnId,
+                  itemId: event.itemId,
+                },
+              );
               return;
             }
             yield* Queue.offerAll(runtimeEventQueue, runtimeEvents);
@@ -1446,7 +1695,9 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
           ),
           Effect.onError(() =>
             runtime.close.pipe(
-              Effect.andThen(Effect.ignore(Scope.close(sessionScope, Exit.void))),
+              Effect.andThen(
+                Effect.ignore(Scope.close(sessionScope, Exit.void)),
+              ),
               Effect.andThen(Fiber.interrupt(eventFiber)),
               Effect.ignore,
             ),
@@ -1498,41 +1749,60 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
     };
   });
 
-  const sendTurn: CodexAdapterShape["sendTurn"] = Effect.fn("sendTurn")(function* (input) {
-    const codexAttachments = yield* Effect.forEach(
-      input.attachments ?? [],
-      (attachment) => resolveAttachment(input, attachment),
-      { concurrency: 1 },
-    );
+  const sendTurn: CodexAdapterShape["sendTurn"] = Effect.fn("sendTurn")(
+    function* (input) {
+      const codexAttachments = yield* Effect.forEach(
+        input.attachments ?? [],
+        (attachment) => resolveAttachment(input, attachment),
+        { concurrency: 1 },
+      );
 
-    const session = yield* requireSession(input.threadId);
-    const reasoningEffort =
-      input.modelSelection?.instanceId === boundInstanceId
-        ? getModelSelectionStringOptionValue(input.modelSelection, "reasoningEffort")
-        : undefined;
-    const fastMode =
-      input.modelSelection?.instanceId === boundInstanceId
-        ? getModelSelectionBooleanOptionValue(input.modelSelection, "fastMode")
-        : undefined;
-    return yield* session.runtime
-      .sendTurn({
-        ...(input.input !== undefined ? { input: input.input } : {}),
-        ...(input.modelSelection?.instanceId === boundInstanceId
-          ? { model: input.modelSelection.model }
-          : {}),
-        ...(reasoningEffort
-          ? {
-              effort: reasoningEffort as EffectCodexSchema.V2TurnStartParams__ReasoningEffort,
-            }
-          : {}),
-        ...(fastMode === true ? { serviceTier: "fast" } : {}),
-        ...(input.interactionMode !== undefined ? { interactionMode: input.interactionMode } : {}),
-        ...(codexAttachments.length > 0 ? { attachments: codexAttachments } : {}),
-      })
-      .pipe(Effect.mapError((cause) => mapCodexRuntimeError(input.threadId, "turn/start", cause)));
-  });
+      const session = yield* requireSession(input.threadId);
+      const reasoningEffort =
+        input.modelSelection?.instanceId === boundInstanceId
+          ? getModelSelectionStringOptionValue(
+              input.modelSelection,
+              "reasoningEffort",
+            )
+          : undefined;
+      const fastMode =
+        input.modelSelection?.instanceId === boundInstanceId
+          ? getModelSelectionBooleanOptionValue(
+              input.modelSelection,
+              "fastMode",
+            )
+          : undefined;
+      return yield* session.runtime
+        .sendTurn({
+          ...(input.input !== undefined ? { input: input.input } : {}),
+          ...(input.modelSelection?.instanceId === boundInstanceId
+            ? { model: input.modelSelection.model }
+            : {}),
+          ...(reasoningEffort
+            ? {
+                effort:
+                  reasoningEffort as EffectCodexSchema.V2TurnStartParams__ReasoningEffort,
+              }
+            : {}),
+          ...(fastMode === true ? { serviceTier: "fast" } : {}),
+          ...(input.interactionMode !== undefined
+            ? { interactionMode: input.interactionMode }
+            : {}),
+          ...(codexAttachments.length > 0
+            ? { attachments: codexAttachments }
+            : {}),
+        })
+        .pipe(
+          Effect.mapError((cause) =>
+            mapCodexRuntimeError(input.threadId, "turn/start", cause),
+          ),
+        );
+    },
+  );
 
-  const requireSession = Effect.fn("requireSession")(function* (threadId: ThreadId) {
+  const requireSession = Effect.fn("requireSession")(function* (
+    threadId: ThreadId,
+  ) {
     const session = sessions.get(threadId);
     if (!session || session.stopped) {
       return yield* new ProviderAdapterSessionNotFoundError({
@@ -1543,7 +1813,10 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
     return session;
   });
 
-  const interruptTurn: CodexAdapterShape["interruptTurn"] = (threadId, turnId) =>
+  const interruptTurn: CodexAdapterShape["interruptTurn"] = (
+    threadId,
+    turnId,
+  ) =>
     requireSession(threadId).pipe(
       Effect.flatMap((session) => session.runtime.interruptTurn(turnId)),
       Effect.mapError((cause) =>
@@ -1567,7 +1840,10 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
       })),
     );
 
-  const rollbackThread: CodexAdapterShape["rollbackThread"] = (threadId, numTurns) => {
+  const rollbackThread: CodexAdapterShape["rollbackThread"] = (
+    threadId,
+    numTurns,
+  ) => {
     if (!Number.isInteger(numTurns) || numTurns < 1) {
       return Effect.fail(
         new ProviderAdapterValidationError({
@@ -1592,13 +1868,23 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
     );
   };
 
-  const respondToRequest: CodexAdapterShape["respondToRequest"] = (threadId, requestId, decision) =>
+  const respondToRequest: CodexAdapterShape["respondToRequest"] = (
+    threadId,
+    requestId,
+    decision,
+  ) =>
     requireSession(threadId).pipe(
-      Effect.flatMap((session) => session.runtime.respondToRequest(requestId, decision)),
+      Effect.flatMap((session) =>
+        session.runtime.respondToRequest(requestId, decision),
+      ),
       Effect.mapError((cause) =>
         cause._tag === "ProviderAdapterSessionNotFoundError"
           ? cause
-          : mapCodexRuntimeError(threadId, "item/requestApproval/decision", cause),
+          : mapCodexRuntimeError(
+              threadId,
+              "item/requestApproval/decision",
+              cause,
+            ),
       ),
     );
 
@@ -1608,7 +1894,9 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
     answers,
   ) =>
     requireSession(threadId).pipe(
-      Effect.flatMap((session) => session.runtime.respondToUserInput(requestId, answers)),
+      Effect.flatMap((session) =>
+        session.runtime.respondToUserInput(requestId, answers),
+      ),
       Effect.mapError((cause) =>
         cause._tag === "ProviderAdapterSessionNotFoundError"
           ? cause
@@ -1616,7 +1904,9 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
       ),
     );
 
-  const writeNativeEvent = Effect.fn("writeNativeEvent")(function* (event: ProviderEvent) {
+  const writeNativeEvent = Effect.fn("writeNativeEvent")(function* (
+    event: ProviderEvent,
+  ) {
     if (!nativeEventLogger) {
       return;
     }
@@ -1653,7 +1943,9 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
     );
 
   const hasSession: CodexAdapterShape["hasSession"] = (threadId) =>
-    Effect.succeed(Boolean(sessions.get(threadId) && !sessions.get(threadId)?.stopped));
+    Effect.succeed(
+      Boolean(sessions.get(threadId) && !sessions.get(threadId)?.stopped),
+    );
 
   const stopAll: CodexAdapterShape["stopAll"] = () =>
     Effect.forEach(Array.from(sessions.values()), stopSessionInternal, {

@@ -7,6 +7,7 @@ import type {
   OrchestrationSessionStatus,
   OrchestrationThreadActivity,
   ProjectScript as ContractProjectScript,
+  ProjectTestEnvironment as ContractProjectTestEnvironment,
   ThreadId,
   ProjectId,
   TurnId,
@@ -26,6 +27,7 @@ export const DEFAULT_THREAD_TERMINAL_HEIGHT = 280;
 export const DEFAULT_THREAD_TERMINAL_ID = "default";
 export const MAX_TERMINALS_PER_GROUP = 4;
 export type ProjectScript = ContractProjectScript;
+export type ProjectTestEnvironment = ContractProjectTestEnvironment;
 
 export interface ThreadTerminalGroup {
   id: string;
@@ -91,6 +93,7 @@ export interface Project {
   createdAt?: string | undefined;
   updatedAt?: string | undefined;
   scripts: ProjectScript[];
+  testEnvironments?: ProjectTestEnvironment[] | undefined;
 }
 
 export interface Thread {

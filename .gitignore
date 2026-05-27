@@ -3,6 +3,7 @@ node_modules
 .turbo
 .DS_Store
 *.log
+*.cpuprofile
 *.tsbuildinfo
 apps/*/dist
 .astro
@@ -11,6 +12,7 @@ packages/*/dist
 .env.local
 build/
 .logs/
+.kamicode-run/
 release/
 release-mock/
 .t3

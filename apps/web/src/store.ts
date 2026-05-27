@@ -26,6 +26,7 @@ import { create } from "zustand";
 import {
   type ChatMessage,
   type Project,
+  type ProjectTestEnvironment,
   type ProposedPlan,
   type SidebarThreadSummary,
   type Thread,
@@ -147,6 +148,12 @@ function mapProjectScripts(scripts: ReadonlyArray<Project["scripts"][number]>): 
   return scripts.map((script) => ({ ...script }));
 }
 
+function mapProjectTestEnvironments(
+  testEnvironments: ReadonlyArray<ProjectTestEnvironment>,
+): ProjectTestEnvironment[] {
+  return testEnvironments.map((environment) => ({ ...environment }));
+}
+
 function mapSession(session: OrchestrationSession): ThreadSession {
   return {
     provider: toLegacyProvider(session.providerName),
@@ -227,6 +234,7 @@ function mapProject(
     createdAt: project.createdAt,
     updatedAt: project.updatedAt,
     scripts: mapProjectScripts(project.scripts),
+    testEnvironments: mapProjectTestEnvironments(project.testEnvironments ?? []),
   };
 }
 
@@ -1160,6 +1168,7 @@ function applyEnvironmentOrchestrationEvent(
           repositoryIdentity: event.payload.repositoryIdentity ?? null,
           defaultModelSelection: event.payload.defaultModelSelection,
           scripts: event.payload.scripts,
+          testEnvironments: event.payload.testEnvironments ?? [],
           createdAt: event.payload.createdAt,
           updatedAt: event.payload.updatedAt,
           deletedAt: null,
@@ -1223,6 +1232,9 @@ function applyEnvironmentOrchestrationEvent(
           : {}),
         ...(event.payload.scripts !== undefined
           ? { scripts: mapProjectScripts(event.payload.scripts) }
+          : {}),
+        ...(event.payload.testEnvironments !== undefined
+          ? { testEnvironments: mapProjectTestEnvironments(event.payload.testEnvironments) }
           : {}),
         updatedAt: event.payload.updatedAt,
       };

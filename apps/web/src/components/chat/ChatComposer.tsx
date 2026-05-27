@@ -136,6 +136,23 @@ const runtimeModeConfig: Record<
 };
 
 const runtimeModeOptions = Object.keys(runtimeModeConfig) as RuntimeMode[];
+const interactionModeConfig: Record<
+  ProviderInteractionMode,
+  { label: string; description: string }
+> = {
+  default: {
+    label: "Build",
+    description: "Build mode lets the agent make changes normally.",
+  },
+  plan: {
+    label: "Plan",
+    description: "Plan mode asks the agent to produce a decision-complete plan first.",
+  },
+  test: {
+    label: "Test",
+    description: "Test mode asks the agent to validate behavior with evidence.",
+  },
+};
 const COMPOSER_PATH_QUERY_DEBOUNCE_MS = 120;
 const EMPTY_PROJECT_ENTRIES: ProjectEntry[] = [];
 const COMPOSER_FLOATING_LAYER_SELECTOR = [
@@ -185,11 +202,12 @@ const ComposerFooterModeControls = memo(function ComposerFooterModeControls(prop
   showPlanToggle: boolean;
   planSidebarLabel: string;
   planSidebarOpen: boolean;
-  onToggleInteractionMode: () => void;
+  onInteractionModeChange: (mode: ProviderInteractionMode) => void;
   onRuntimeModeChange: (mode: RuntimeMode) => void;
   onTogglePlanSidebar: () => void;
 }) {
   const runtimeModeOption = runtimeModeConfig[props.runtimeMode];
+  const interactionModeOption = interactionModeConfig[props.interactionMode];
   const RuntimeModeIcon = runtimeModeOption.icon;
 
   return (
@@ -203,16 +221,20 @@ const ComposerFooterModeControls = memo(function ComposerFooterModeControls(prop
             className="shrink-0 whitespace-nowrap px-2 text-muted-foreground/70 hover:text-foreground/80 sm:px-3"
             size="sm"
             type="button"
-            onClick={props.onToggleInteractionMode}
-            title={
-              props.interactionMode === "plan"
-                ? "Plan mode — click to return to normal build mode"
-                : "Default mode — click to enter plan mode"
-            }
+            onClick={() => {
+              const nextInteractionMode =
+                props.interactionMode === "default"
+                  ? "plan"
+                  : props.interactionMode === "plan"
+                    ? "test"
+                    : "default";
+              props.onInteractionModeChange(nextInteractionMode);
+            }}
+            title={`${interactionModeOption.description} Click to cycle modes.`}
           >
             <BotIcon />
             <span className="sr-only sm:not-sr-only">
-              {props.interactionMode === "plan" ? "Plan" : "Build"}
+              {interactionModeOption.label}
             </span>
           </Button>
 
@@ -886,6 +908,13 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           description: "Switch this thread into plan mode",
         },
         {
+          id: "slash:test",
+          type: "slash-command",
+          command: "test",
+          label: "/test",
+          description: "Switch this thread into test mode",
+        },
+        {
           id: "slash:default",
           type: "slash-command",
           command: "default",
@@ -1516,7 +1545,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           }
           return;
         }
-        void handleInteractionModeChange(item.command === "plan" ? "plan" : "default");
+        const nextInteractionMode =
+          item.command === "plan" || item.command === "test" ? item.command : "default";
+        void handleInteractionModeChange(nextInteractionMode);
         const applied = applyPromptReplacement(trigger.rangeStart, trigger.rangeEnd, "", {
           expectedText: snapshot.value.slice(trigger.rangeStart, trigger.rangeEnd),
         });
@@ -2355,7 +2386,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     runtimeMode={runtimeMode}
                     showInteractionModeToggle={composerProviderControls.showInteractionModeToggle}
                     traitsMenuContent={providerTraitsMenuContent}
-                    onToggleInteractionMode={toggleInteractionMode}
+                    onInteractionModeChange={handleInteractionModeChange}
                     onTogglePlanSidebar={togglePlanSidebar}
                     onRuntimeModeChange={handleRuntimeModeChange}
                   />
@@ -2374,7 +2405,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                       showPlanToggle={showPlanSidebarToggle}
                       planSidebarLabel={planSidebarLabel}
                       planSidebarOpen={planSidebarOpen}
-                      onToggleInteractionMode={toggleInteractionMode}
+                      onInteractionModeChange={handleInteractionModeChange}
                       onRuntimeModeChange={handleRuntimeModeChange}
                       onTogglePlanSidebar={togglePlanSidebar}
                     />

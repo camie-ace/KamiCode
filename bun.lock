@@ -17,7 +17,7 @@
     },
     "apps/desktop": {
       "name": "@t3tools/desktop",
-      "version": "0.0.23",
+      "version": "0.0.24",
       "dependencies": {
         "@effect/platform-node": "catalog:",
         "@t3tools/contracts": "workspace:*",
@@ -50,7 +50,7 @@
     },
     "apps/server": {
       "name": "t3",
-      "version": "0.0.23",
+      "version": "0.0.24",
       "bin": {
         "t3": "./dist/bin.mjs",
       },
@@ -64,6 +64,7 @@
         "@pierre/diffs": "catalog:",
         "effect": "catalog:",
         "node-pty": "^1.1.0",
+        "playwright": "^1.58.2",
       },
       "devDependencies": {
         "@effect/language-service": "catalog:",
@@ -83,7 +84,7 @@
     },
     "apps/web": {
       "name": "@t3tools/web",
-      "version": "0.0.23",
+      "version": "0.0.24",
       "dependencies": {
         "@base-ui/react": "^1.4.1",
         "@dnd-kit/core": "^6.3.1",
@@ -165,7 +166,7 @@
     },
     "packages/contracts": {
       "name": "@t3tools/contracts",
-      "version": "0.0.23",
+      "version": "0.0.24",
       "dependencies": {
         "effect": "catalog:",
       },

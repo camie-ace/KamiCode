@@ -3,8 +3,10 @@ import {
   CommandId,
   EventId,
   type ModelSelection,
+  type OrchestrationProjectShell,
   type OrchestrationEvent,
   ProviderDriverKind,
+  type ProviderInteractionMode,
   type ProjectId,
   type OrchestrationSession,
   ThreadId,
@@ -88,6 +90,41 @@ const HANDLED_TURN_START_KEY_MAX = 10_000;
 const HANDLED_TURN_START_KEY_TTL = Duration.minutes(30);
 const DEFAULT_RUNTIME_MODE: RuntimeMode = "full-access";
 const DEFAULT_THREAD_TITLE = "New thread";
+
+export function buildTestModeTurnInput(input: {
+  readonly interactionMode?: ProviderInteractionMode;
+  readonly messageText: string;
+  readonly project?: OrchestrationProjectShell | null;
+}): string {
+  const normalizedMessage = input.messageText.trim();
+  if (input.interactionMode !== "test") {
+    return normalizedMessage;
+  }
+
+  const project = input.project ?? null;
+  const defaultTestEnvironment =
+    project?.testEnvironments?.find((environment) => environment.isDefault) ?? null;
+  const lines = ["Test context:"];
+  if (project) {
+    lines.push(`- Project: ${project.title}`);
+    lines.push(`- Workspace root: ${project.workspaceRoot}`);
+  } else {
+    lines.push("- Project: unavailable");
+  }
+  lines.push(
+    defaultTestEnvironment
+      ? `- Default test URL: ${defaultTestEnvironment.baseUrl}`
+      : "- Default test URL: not configured",
+  );
+  lines.push("");
+  lines.push("User test request:");
+  lines.push(
+    normalizedMessage.length > 0
+      ? normalizedMessage
+      : "Test the current work based on the conversation context.",
+  );
+  return lines.join("\n");
+}
 
 export function providerErrorLabel(value: string | undefined): string {
   const normalized = value?.trim();
@@ -517,7 +554,7 @@ const make = Effect.gen(function* () {
     readonly messageText: string;
     readonly attachments?: ReadonlyArray<ChatAttachment>;
     readonly modelSelection?: ModelSelection;
-    readonly interactionMode?: "default" | "plan";
+    readonly interactionMode?: ProviderInteractionMode;
     readonly createdAt: string;
   }) {
     const thread = yield* resolveThread(input.threadId);
@@ -534,7 +571,15 @@ const make = Effect.gen(function* () {
     if (input.modelSelection !== undefined) {
       threadModelSelections.set(input.threadId, input.modelSelection);
     }
-    const normalizedInput = toNonEmptyProviderInput(input.messageText);
+    const project =
+      input.interactionMode === "test" ? yield* resolveProject(thread.projectId) : null;
+    const normalizedInput = toNonEmptyProviderInput(
+      buildTestModeTurnInput({
+        messageText: input.messageText,
+        project: project ?? null,
+        ...(input.interactionMode !== undefined ? { interactionMode: input.interactionMode } : {}),
+      }),
+    );
     const normalizedAttachments = input.attachments ?? [];
     const activeSession = yield* providerService
       .listSessions()

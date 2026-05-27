@@ -1,5 +1,7 @@
+// @effect-diagnostics nodeBuiltinImport:off
 import Mime from "@effect/platform-node/Mime";
 import { decodeOtlpTraceRecords } from "@t3tools/shared/observability";
+import * as NodePath from "node:path";
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -37,6 +39,7 @@ import {
 const PROJECT_FAVICON_CACHE_CONTROL = "public, max-age=3600";
 const FALLBACK_PROJECT_FAVICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="#6b728080" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-fallback="project-favicon"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-8l-2-2H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2Z"/></svg>`;
 const OTLP_TRACES_PROXY_PATH = "/api/observability/v1/traces";
+export const TEST_HARNESS_ARTIFACT_ROUTE_PATH = "/api/test-harness/artifact";
 const LOOPBACK_HOSTNAMES = new Set(["127.0.0.1", "::1", "localhost"]);
 
 export const browserApiCorsLayer = HttpRouter.cors({
@@ -61,6 +64,34 @@ export function resolveDevRedirectUrl(devUrl: URL, requestUrl: URL): string {
   return redirectUrl.toString();
 }
 
+export function resolveTestHarnessArtifactPath(input: {
+  readonly stateDir: string;
+  readonly artifactPath: string;
+}): string | null {
+  if (!input.artifactPath || input.artifactPath.includes("\0")) {
+    return null;
+  }
+
+  const artifactRoot = NodePath.resolve(input.stateDir, "test-harness");
+  const filePath = NodePath.resolve(input.artifactPath);
+  const normalizeForPlatform = (value: string) =>
+    process.platform === "win32" ? value.toLowerCase() : value;
+  const normalizedRoot = normalizeForPlatform(artifactRoot);
+  const normalizedFilePath = normalizeForPlatform(filePath);
+  const rootPrefix = normalizedRoot.endsWith(NodePath.sep)
+    ? normalizedRoot
+    : `${normalizedRoot}${NodePath.sep}`;
+
+  if (
+    normalizedFilePath === normalizedRoot ||
+    normalizedFilePath.startsWith(rootPrefix)
+  ) {
+    return filePath;
+  }
+
+  return null;
+}
+
 const requireAuthenticatedRequest = Effect.gen(function* () {
   const request = yield* HttpServerRequest.HttpServerRequest;
   const serverAuth = yield* ServerAuth;
@@ -81,7 +112,9 @@ export const serverEnvironmentRouteLayer = HttpRouter.add(
   }),
 );
 
-class DecodeOtlpTraceRecordsError extends Data.TaggedError("DecodeOtlpTraceRecordsError")<{
+class DecodeOtlpTraceRecordsError extends Data.TaggedError(
+  "DecodeOtlpTraceRecordsError",
+)<{
   readonly cause: unknown;
   readonly bodyJson: OtlpTracer.TraceData;
 }> {}
@@ -129,7 +162,9 @@ export const otlpTracesProxyRouteLayer = HttpRouter.add(
           }),
         ),
         Effect.catch(() =>
-          Effect.succeed(HttpServerResponse.text("Trace export failed.", { status: 502 })),
+          Effect.succeed(
+            HttpServerResponse.text("Trace export failed.", { status: 502 }),
+          ),
         ),
       );
   }).pipe(Effect.catchTag("AuthError", respondToAuthError)),
@@ -147,14 +182,20 @@ export const attachmentsRouteLayer = HttpRouter.add(
     }
 
     const config = yield* ServerConfig;
-    const rawRelativePath = url.value.pathname.slice(ATTACHMENTS_ROUTE_PREFIX.length);
-    const normalizedRelativePath = normalizeAttachmentRelativePath(rawRelativePath);
+    const rawRelativePath = url.value.pathname.slice(
+      ATTACHMENTS_ROUTE_PREFIX.length,
+    );
+    const normalizedRelativePath =
+      normalizeAttachmentRelativePath(rawRelativePath);
     if (!normalizedRelativePath) {
-      return HttpServerResponse.text("Invalid attachment path", { status: 400 });
+      return HttpServerResponse.text("Invalid attachment path", {
+        status: 400,
+      });
     }
 
     const isIdLookup =
-      !normalizedRelativePath.includes("/") && !normalizedRelativePath.includes(".");
+      !normalizedRelativePath.includes("/") &&
+      !normalizedRelativePath.includes(".");
     const filePath = isIdLookup
       ? resolveAttachmentPathById({
           attachmentsDir: config.attachmentsDir,
@@ -165,9 +206,12 @@ export const attachmentsRouteLayer = HttpRouter.add(
           relativePath: normalizedRelativePath,
         });
     if (!filePath) {
-      return HttpServerResponse.text(isIdLookup ? "Not Found" : "Invalid attachment path", {
-        status: isIdLookup ? 404 : 400,
-      });
+      return HttpServerResponse.text(
+        isIdLookup ? "Not Found" : "Invalid attachment path",
+        {
+          status: isIdLookup ? 404 : 400,
+        },
+      );
     }
 
     const fileSystem = yield* FileSystem.FileSystem;
@@ -185,7 +229,61 @@ export const attachmentsRouteLayer = HttpRouter.add(
       },
     }).pipe(
       Effect.catch(() =>
-        Effect.succeed(HttpServerResponse.text("Internal Server Error", { status: 500 })),
+        Effect.succeed(
+          HttpServerResponse.text("Internal Server Error", { status: 500 }),
+        ),
+      ),
+    );
+  }).pipe(Effect.catchTag("AuthError", respondToAuthError)),
+);
+
+export const testHarnessArtifactRouteLayer = HttpRouter.add(
+  "GET",
+  TEST_HARNESS_ARTIFACT_ROUTE_PATH,
+  Effect.gen(function* () {
+    yield* requireAuthenticatedRequest;
+    const request = yield* HttpServerRequest.HttpServerRequest;
+    const url = HttpServerRequest.toURL(request);
+    if (Option.isNone(url)) {
+      return HttpServerResponse.text("Bad Request", { status: 400 });
+    }
+
+    const requestedPath = url.value.searchParams.get("path");
+    if (!requestedPath) {
+      return HttpServerResponse.text("Missing path parameter", { status: 400 });
+    }
+
+    const config = yield* ServerConfig;
+    const filePath = resolveTestHarnessArtifactPath({
+      stateDir: config.stateDir,
+      artifactPath: requestedPath,
+    });
+    if (!filePath) {
+      return HttpServerResponse.text("Invalid artifact path", { status: 403 });
+    }
+
+    const fileSystem = yield* FileSystem.FileSystem;
+    const fileInfo = yield* fileSystem
+      .stat(filePath)
+      .pipe(Effect.catch(() => Effect.succeed(null)));
+    if (!fileInfo || fileInfo.type !== "File") {
+      return HttpServerResponse.text("Not Found", { status: 404 });
+    }
+
+    const contentType = Mime.getType(filePath) ?? "application/octet-stream";
+    const filename = NodePath.basename(filePath).replace(/"/g, "");
+    return yield* HttpServerResponse.file(filePath, {
+      status: 200,
+      contentType,
+      headers: {
+        "Cache-Control": "private, max-age=3600",
+        "Content-Disposition": `inline; filename="${filename}"`,
+      },
+    }).pipe(
+      Effect.catch(() =>
+        Effect.succeed(
+          HttpServerResponse.text("Internal Server Error", { status: 500 }),
+        ),
       ),
     );
   }).pipe(Effect.catchTag("AuthError", respondToAuthError)),
@@ -226,7 +324,9 @@ export const projectFaviconRouteLayer = HttpRouter.add(
       },
     }).pipe(
       Effect.catch(() =>
-        Effect.succeed(HttpServerResponse.text("Internal Server Error", { status: 500 })),
+        Effect.succeed(
+          HttpServerResponse.text("Internal Server Error", { status: 500 }),
+        ),
       ),
     );
   }).pipe(Effect.catchTag("AuthError", respondToAuthError)),
@@ -245,25 +345,36 @@ export const staticAndDevRouteLayer = HttpRouter.add(
 
     const config = yield* ServerConfig;
     if (config.devUrl && isLoopbackHostname(url.value.hostname)) {
-      return HttpServerResponse.redirect(resolveDevRedirectUrl(config.devUrl, url.value), {
-        status: 302,
-      });
+      return HttpServerResponse.redirect(
+        resolveDevRedirectUrl(config.devUrl, url.value),
+        {
+          status: 302,
+        },
+      );
     }
 
-    const staticDir = config.staticDir ?? (config.devUrl ? yield* resolveStaticDir() : undefined);
+    const staticDir =
+      config.staticDir ??
+      (config.devUrl ? yield* resolveStaticDir() : undefined);
     if (!staticDir) {
-      return HttpServerResponse.text("No static directory configured and no dev URL set.", {
-        status: 503,
-      });
+      return HttpServerResponse.text(
+        "No static directory configured and no dev URL set.",
+        {
+          status: 503,
+        },
+      );
     }
 
     const fileSystem = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
     const staticRoot = path.resolve(staticDir);
-    const staticRequestPath = url.value.pathname === "/" ? "/index.html" : url.value.pathname;
+    const staticRequestPath =
+      url.value.pathname === "/" ? "/index.html" : url.value.pathname;
     const rawStaticRelativePath = staticRequestPath.replace(/^[/\\]+/, "");
     const hasRawLeadingParentSegment = rawStaticRelativePath.startsWith("..");
-    const staticRelativePath = path.normalize(rawStaticRelativePath).replace(/^[/\\]+/, "");
+    const staticRelativePath = path
+      .normalize(rawStaticRelativePath)
+      .replace(/^[/\\]+/, "");
     const hasPathTraversalSegment = staticRelativePath.startsWith("..");
     if (
       staticRelativePath.length === 0 ||
@@ -271,23 +382,31 @@ export const staticAndDevRouteLayer = HttpRouter.add(
       hasPathTraversalSegment ||
       staticRelativePath.includes("\0")
     ) {
-      return HttpServerResponse.text("Invalid static file path", { status: 400 });
+      return HttpServerResponse.text("Invalid static file path", {
+        status: 400,
+      });
     }
 
     const isWithinStaticRoot = (candidate: string) =>
       candidate === staticRoot ||
-      candidate.startsWith(staticRoot.endsWith(path.sep) ? staticRoot : `${staticRoot}${path.sep}`);
+      candidate.startsWith(
+        staticRoot.endsWith(path.sep) ? staticRoot : `${staticRoot}${path.sep}`,
+      );
 
     let filePath = path.resolve(staticRoot, staticRelativePath);
     if (!isWithinStaticRoot(filePath)) {
-      return HttpServerResponse.text("Invalid static file path", { status: 400 });
+      return HttpServerResponse.text("Invalid static file path", {
+        status: 400,
+      });
     }
 
     const ext = path.extname(filePath);
     if (!ext) {
       filePath = path.resolve(filePath, "index.html");
       if (!isWithinStaticRoot(filePath)) {
-        return HttpServerResponse.text("Invalid static file path", { status: 400 });
+        return HttpServerResponse.text("Invalid static file path", {
+          status: 400,
+        });
       }
     }
 

@@ -1,3 +1,7 @@
+// @effect-diagnostics nodeBuiltinImport:off
+import * as fs from "node:fs";
+import * as path from "node:path";
+
 import {
   ApprovalRequestId,
   DEFAULT_MODEL,
@@ -40,8 +44,17 @@ import { expandHomePath } from "../../pathExpansion.ts";
 import {
   CODEX_DEFAULT_MODE_DEVELOPER_INSTRUCTIONS,
   CODEX_PLAN_MODE_DEVELOPER_INSTRUCTIONS,
+  CODEX_TEST_MODE_DEVELOPER_INSTRUCTIONS,
 } from "../CodexDeveloperInstructions.ts";
+import {
+  KAMI_TEST_HARNESS_DYNAMIC_TOOL_SPEC,
+  isKamiTestHarnessDynamicToolCall,
+  runBrowserHarnessDynamicTool,
+} from "../../testing/browserHarnessDynamicTool.ts";
 const decodeV2TurnStartResponse = Schema.decodeUnknownEffect(EffectCodexSchema.V2TurnStartResponse);
+const decodeV2ThreadStartResponse = Schema.decodeUnknownEffect(
+  EffectCodexSchema.V2ThreadStartResponse,
+);
 
 const PROVIDER = ProviderDriverKind.make("codex");
 
@@ -61,6 +74,10 @@ const RECOVERABLE_THREAD_RESUME_ERROR_SNIPPETS = [
   "unknown thread",
   "does not exist",
 ];
+const PROJECT_MEMORY_DIRECTORY = ".camie";
+const PROJECT_MEMORY_FILENAME = "project-memory.md";
+const PROJECT_MEMORY_FILE = path.join(PROJECT_MEMORY_DIRECTORY, PROJECT_MEMORY_FILENAME);
+const PROJECT_MEMORY_MAX_CHARS = 40_000;
 
 export const CodexResumeCursorSchema = Schema.Struct({
   threadId: Schema.String,
@@ -88,6 +105,9 @@ const formatSchemaIssue = SchemaIssue.makeFormatterDefault();
 
 export type CodexResumeCursor = typeof CodexResumeCursorSchema.Type;
 type CodexServiceTier = NonNullable<EffectCodexSchema.V2ThreadStartParams["serviceTier"]>;
+export type CodexThreadStartParamsWithDynamicTools = EffectCodexSchema.V2ThreadStartParams & {
+  readonly dynamicTools?: ReadonlyArray<EffectCodexSchema.V2ThreadStartParams__DynamicToolSpec>;
+};
 type CodexThreadItem =
   | EffectCodexSchema.V2ThreadReadResponse["thread"]["turns"][number]["items"][number]
   | EffectCodexSchema.V2ThreadRollbackResponse["thread"]["turns"][number]["items"][number];
@@ -99,6 +119,7 @@ export interface CodexSessionRuntimeOptions {
   readonly homePath?: string;
   readonly environment?: NodeJS.ProcessEnv;
   readonly cwd: string;
+  readonly stateDir?: string;
   readonly runtimeMode: RuntimeMode;
   readonly model?: string;
   readonly serviceTier?: CodexServiceTier | undefined;
@@ -282,17 +303,18 @@ function runtimeModeToThreadConfig(input: RuntimeMode): {
   }
 }
 
-function buildThreadStartParams(input: {
+export function buildThreadStartParams(input: {
   readonly cwd: string;
   readonly runtimeMode: RuntimeMode;
   readonly model: string | undefined;
   readonly serviceTier: CodexServiceTier | undefined;
-}): EffectCodexSchema.V2ThreadStartParams {
+}): CodexThreadStartParamsWithDynamicTools {
   const config = runtimeModeToThreadConfig(input.runtimeMode);
   return {
     cwd: input.cwd,
     approvalPolicy: config.approvalPolicy,
     sandbox: config.sandbox,
+    dynamicTools: [KAMI_TEST_HARNESS_DYNAMIC_TOOL_SPEC],
     ...(input.model ? { model: input.model } : {}),
     ...(input.serviceTier ? { serviceTier: input.serviceTier } : {}),
   };
@@ -318,24 +340,94 @@ function runtimeModeToTurnSandboxPolicy(
   }
 }
 
+function findProjectMemoryPath(cwd: string): string | undefined {
+  let current = path.resolve(cwd);
+
+  while (true) {
+    const candidate = path.join(current, PROJECT_MEMORY_FILE);
+    if (fs.existsSync(candidate)) {
+      return candidate;
+    }
+
+    const parent = path.dirname(current);
+    if (parent === current) {
+      return undefined;
+    }
+    current = parent;
+  }
+}
+
+function readProjectMemory(cwd: string): string | undefined {
+  const memoryPath = findProjectMemoryPath(cwd);
+  if (!memoryPath) {
+    return undefined;
+  }
+
+  try {
+    const stat = fs.statSync(memoryPath);
+    if (!stat.isFile()) {
+      return undefined;
+    }
+
+    const memory = fs.readFileSync(memoryPath, "utf8").trim();
+    if (!memory) {
+      return undefined;
+    }
+
+    if (memory.length <= PROJECT_MEMORY_MAX_CHARS) {
+      return memory;
+    }
+
+    return `${memory.slice(0, PROJECT_MEMORY_MAX_CHARS)}\n\n[Project memory truncated by T3 Code before injection.]`;
+  } catch {
+    return undefined;
+  }
+}
+
+export function appendProjectMemoryInstructions(
+  developerInstructions: string,
+  projectMemory: string | undefined,
+): string {
+  const policy = `<project_memory_policy>
+At the beginning of each turn, T3 Code injects .camie/project-memory.md here when it exists.
+Treat the injected project memory as durable repo-specific context before answering.
+Before finalizing a turn, update .camie/project-memory.md when you learned durable repo-specific facts, decisions, paths, commands, constraints, or user preferences worth preserving.
+</project_memory_policy>`;
+
+  if (!projectMemory?.trim()) {
+    return `${developerInstructions}\n\n${policy}`;
+  }
+
+  return `${developerInstructions}\n\n${policy}\n\n<project_memory path=".camie/project-memory.md">\n${projectMemory.trim()}\n</project_memory>`;
+}
+
 function buildCodexCollaborationMode(input: {
   readonly interactionMode?: ProviderInteractionMode;
   readonly model?: string;
   readonly effort?: EffectCodexSchema.V2TurnStartParams__ReasoningEffort;
+  readonly projectMemory?: string;
 }): EffectCodexSchema.V2TurnStartParams__CollaborationMode | undefined {
-  if (input.interactionMode === undefined) {
+  if (input.interactionMode === undefined && input.projectMemory === undefined) {
     return undefined;
   }
   const model = normalizeCodexModelSlug(input.model) ?? DEFAULT_MODEL;
+  const interactionMode = input.interactionMode ?? "default";
+  const mode = interactionMode === "plan" ? "plan" : "default";
+  const developerInstructions =
+    interactionMode === "plan"
+      ? CODEX_PLAN_MODE_DEVELOPER_INSTRUCTIONS
+      : interactionMode === "test"
+        ? CODEX_TEST_MODE_DEVELOPER_INSTRUCTIONS
+        : CODEX_DEFAULT_MODE_DEVELOPER_INSTRUCTIONS;
   return {
-    mode: input.interactionMode,
+    mode,
     settings: {
       model,
       reasoning_effort: input.effort ?? "medium",
-      developer_instructions:
-        input.interactionMode === "plan"
-          ? CODEX_PLAN_MODE_DEVELOPER_INSTRUCTIONS
-          : CODEX_DEFAULT_MODE_DEVELOPER_INSTRUCTIONS,
+      developer_instructions: appendProjectMemoryInstructions(
+        developerInstructions,
+        input.projectMemory,
+      ),
     },
   };
 }
@@ -352,6 +444,7 @@ export function buildTurnStartParams(input: {
   readonly serviceTier?: CodexServiceTier;
   readonly effort?: EffectCodexSchema.V2TurnStartParams__ReasoningEffort;
   readonly interactionMode?: ProviderInteractionMode;
+  readonly projectMemory?: string;
 }): Effect.Effect<
   CodexTurnStartParamsWithCollaborationMode,
   CodexErrors.CodexAppServerProtocolParseError
@@ -372,6 +465,7 @@ export function buildTurnStartParams(input: {
     ...(input.interactionMode ? { interactionMode: input.interactionMode } : {}),
     ...(input.model ? { model: input.model } : {}),
     ...(input.effort ? { effort: input.effort } : {}),
+    ...(input.projectMemory ? { projectMemory: input.projectMemory } : {}),
   });
 
   return decodeCodexTurnStartParamsWithCollaborationMode({
@@ -423,10 +517,35 @@ type CodexThreadOpenResponse =
 type CodexThreadOpenMethod = "thread/start" | "thread/resume";
 
 interface CodexThreadOpenClient {
+  readonly raw?: {
+    readonly request: (
+      method: "thread/start",
+      payload: unknown,
+    ) => Effect.Effect<unknown, CodexErrors.CodexAppServerError>;
+  };
   readonly request: <M extends CodexThreadOpenMethod>(
     method: M,
     payload: CodexRpc.ClientRequestParamsByMethod[M],
   ) => Effect.Effect<CodexRpc.ClientRequestResponsesByMethod[M], CodexErrors.CodexAppServerError>;
+}
+
+function requestCodexThreadStart(
+  client: CodexThreadOpenClient,
+  payload: CodexThreadStartParamsWithDynamicTools,
+): Effect.Effect<CodexRpc.ClientRequestResponsesByMethod["thread/start"], CodexErrors.CodexAppServerError> {
+  if (client.raw) {
+    return client.raw.request("thread/start", payload).pipe(
+      Effect.flatMap((rawResponse) =>
+        decodeV2ThreadStartResponse(rawResponse).pipe(
+          Effect.mapError((error) =>
+            toProtocolParseError("Invalid thread/start response payload", error),
+          ),
+        ),
+      ),
+    );
+  }
+
+  return client.request("thread/start", payload);
 }
 
 export const openCodexThread = (input: {
@@ -447,7 +566,7 @@ export const openCodexThread = (input: {
   });
 
   if (resumeThreadId === undefined) {
-    return input.client.request("thread/start", startParams);
+    return requestCodexThreadStart(input.client, startParams);
   }
 
   return input.client
@@ -463,7 +582,7 @@ export const openCodexThread = (input: {
           resumeThreadId,
           recoverable: true,
           cause: error.message,
-        }).pipe(Effect.andThen(input.client.request("thread/start", startParams))),
+        }).pipe(Effect.andThen(requestCodexThreadStart(input.client, startParams))),
       ),
     );
 };
@@ -1093,6 +1212,56 @@ export const makeCodexSessionRuntime = (
       }),
     );
 
+    yield* client.handleServerRequest("item/tool/call", (payload) =>
+      Effect.gen(function* () {
+        if (!isKamiTestHarnessDynamicToolCall(payload)) {
+          return yield* CodexErrors.CodexAppServerRequestError.methodNotFound(
+            `item/tool/call:${payload.namespace ? `${payload.namespace}.` : ""}${payload.tool}`,
+          );
+        }
+
+        const turnId = TurnId.make(payload.turnId);
+        const itemId = ProviderItemId.make(payload.callId);
+
+        yield* emitEvent({
+          kind: "notification",
+          threadId: options.threadId,
+          method: "item/tool/call",
+          turnId,
+          itemId,
+          payload: {
+            callId: payload.callId,
+            tool: payload.tool,
+            namespace: payload.namespace ?? null,
+            status: "started",
+          },
+        });
+
+        const response = yield* runBrowserHarnessDynamicTool({
+          rawArguments: payload.arguments,
+          cwd: options.cwd,
+          ...(options.stateDir ? { stateDir: options.stateDir } : {}),
+        });
+
+        yield* emitEvent({
+          kind: "notification",
+          threadId: options.threadId,
+          method: "item/tool/call/completed",
+          turnId,
+          itemId,
+          payload: {
+            callId: payload.callId,
+            tool: payload.tool,
+            namespace: payload.namespace ?? null,
+            success: response.success,
+            contentItems: response.contentItems,
+          },
+        });
+
+        return response;
+      }),
+    );
+
     yield* client.handleUnknownServerRequest((method) =>
       Effect.fail(CodexErrors.CodexAppServerRequestError.methodNotFound(method)),
     );
@@ -1244,6 +1413,7 @@ export const makeCodexSessionRuntime = (
           const normalizedModel = normalizeCodexModelSlug(
             input.model ?? (yield* Ref.get(sessionRef)).model,
           );
+          const projectMemory = readProjectMemory(options.cwd);
           const params = yield* buildTurnStartParams({
             threadId: providerThreadId,
             runtimeMode: options.runtimeMode,
@@ -1253,6 +1423,7 @@ export const makeCodexSessionRuntime = (
             ...(input.serviceTier ? { serviceTier: input.serviceTier } : {}),
             ...(input.effort ? { effort: input.effort } : {}),
             ...(input.interactionMode ? { interactionMode: input.interactionMode } : {}),
+            ...(projectMemory ? { projectMemory } : {}),
           });
           const rawResponse = yield* client.raw.request("turn/start", params);
           const response = yield* decodeV2TurnStartResponse(rawResponse).pipe(

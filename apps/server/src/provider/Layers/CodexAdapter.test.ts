@@ -59,7 +59,9 @@ const asEventId = (value: string): EventId => EventId.make(value);
 const asItemId = (value: string): ProviderItemId => ProviderItemId.make(value);
 
 class FakeCodexRuntime implements CodexSessionRuntimeShape {
-  private readonly eventQueue = Effect.runSync(Queue.unbounded<ProviderEvent>());
+  private readonly eventQueue = Effect.runSync(
+    Queue.unbounded<ProviderEvent>(),
+  );
   private readonly now = "2026-01-01T00:00:00.000Z";
 
   public readonly startImpl = vi.fn(() =>
@@ -76,7 +78,9 @@ class FakeCodexRuntime implements CodexSessionRuntimeShape {
   );
 
   public readonly sendTurnImpl = vi.fn(
-    (_input: CodexSessionRuntimeSendTurnInput): Promise<ProviderTurnStartResult> =>
+    (
+      _input: CodexSessionRuntimeSendTurnInput,
+    ): Promise<ProviderTurnStartResult> =>
       Promise.resolve({
         threadId: this.options.threadId,
         turnId: asTurnId("turn-1"),
@@ -104,13 +108,17 @@ class FakeCodexRuntime implements CodexSessionRuntimeShape {
   );
 
   public readonly respondToRequestImpl = vi.fn(
-    (_requestId: ApprovalRequestId, _decision: ProviderApprovalDecision): Promise<void> =>
-      Promise.resolve(undefined),
+    (
+      _requestId: ApprovalRequestId,
+      _decision: ProviderApprovalDecision,
+    ): Promise<void> => Promise.resolve(undefined),
   );
 
   public readonly respondToUserInputImpl = vi.fn(
-    (_requestId: ApprovalRequestId, _answers: ProviderUserInputAnswers): Promise<void> =>
-      Promise.resolve(undefined),
+    (
+      _requestId: ApprovalRequestId,
+      _answers: ProviderUserInputAnswers,
+    ): Promise<void> => Promise.resolve(undefined),
   );
 
   public readonly closeImpl = vi.fn(() => Promise.resolve(undefined));
@@ -141,12 +149,20 @@ class FakeCodexRuntime implements CodexSessionRuntimeShape {
     return Effect.promise(() => this.rollbackThreadImpl(numTurns));
   }
 
-  respondToRequest(requestId: ApprovalRequestId, decision: ProviderApprovalDecision) {
+  respondToRequest(
+    requestId: ApprovalRequestId,
+    decision: ProviderApprovalDecision,
+  ) {
     return Effect.promise(() => this.respondToRequestImpl(requestId, decision));
   }
 
-  respondToUserInput(requestId: ApprovalRequestId, answers: ProviderUserInputAnswers) {
-    return Effect.promise(() => this.respondToUserInputImpl(requestId, answers));
+  respondToUserInput(
+    requestId: ApprovalRequestId,
+    answers: ProviderUserInputAnswers,
+  ) {
+    return Effect.promise(() =>
+      this.respondToUserInputImpl(requestId, answers),
+    );
   }
 
   get events() {
@@ -176,7 +192,9 @@ function makeRuntimeFactory() {
   };
 }
 
-function makeScopedRuntimeFactory(options?: { readonly failConstruction?: boolean }) {
+function makeScopedRuntimeFactory(options?: {
+  readonly failConstruction?: boolean;
+}) {
   const runtimes: Array<FakeCodexRuntime> = [];
   const releasedThreadIds: Array<ThreadId> = [];
 
@@ -211,14 +229,19 @@ function makeScopedRuntimeFactory(options?: { readonly failConstruction?: boolea
   };
 }
 
-const providerSessionDirectoryTestLayer = Layer.succeed(ProviderSessionDirectory, {
-  upsert: () => Effect.void,
-  getProvider: () =>
-    Effect.die(new Error("ProviderSessionDirectory.getProvider is not used in test")),
-  getBinding: () => Effect.succeed(Option.none()),
-  listThreadIds: () => Effect.succeed([]),
-  listBindings: () => Effect.succeed([]),
-});
+const providerSessionDirectoryTestLayer = Layer.succeed(
+  ProviderSessionDirectory,
+  {
+    upsert: () => Effect.void,
+    getProvider: () =>
+      Effect.die(
+        new Error("ProviderSessionDirectory.getProvider is not used in test"),
+      ),
+    getBinding: () => Effect.succeed(Option.none()),
+    listThreadIds: () => Effect.succeed([]),
+    listBindings: () => Effect.succeed([]),
+  },
+);
 
 const validationRuntimeFactory = makeRuntimeFactory();
 const validationLayer = it.layer(
@@ -239,28 +262,30 @@ const validationLayer = it.layer(
 );
 
 validationLayer("CodexAdapterLive validation", (it) => {
-  it.effect("returns validation error for non-codex provider on startSession", () =>
-    Effect.gen(function* () {
-      const adapter = yield* CodexAdapter;
-      const result = yield* adapter
-        .startSession({
-          provider: ProviderDriverKind.make("claudeAgent"),
-          threadId: asThreadId("thread-1"),
-          runtimeMode: "full-access",
-        })
-        .pipe(Effect.result);
+  it.effect(
+    "returns validation error for non-codex provider on startSession",
+    () =>
+      Effect.gen(function* () {
+        const adapter = yield* CodexAdapter;
+        const result = yield* adapter
+          .startSession({
+            provider: ProviderDriverKind.make("claudeAgent"),
+            threadId: asThreadId("thread-1"),
+            runtimeMode: "full-access",
+          })
+          .pipe(Effect.result);
 
-      assert.equal(result._tag, "Failure");
-      assert.deepStrictEqual(
-        result.failure,
-        new ProviderAdapterValidationError({
-          provider: ProviderDriverKind.make("codex"),
-          operation: "startSession",
-          issue: "Expected provider 'codex' but received 'claudeAgent'.",
-        }),
-      );
-      assert.equal(validationRuntimeFactory.factory.mock.calls.length, 0);
-    }),
+        assert.equal(result._tag, "Failure");
+        assert.deepStrictEqual(
+          result.failure,
+          new ProviderAdapterValidationError({
+            provider: ProviderDriverKind.make("codex"),
+            operation: "startSession",
+            issue: "Expected provider 'codex' but received 'claudeAgent'.",
+          }),
+        );
+        assert.equal(validationRuntimeFactory.factory.mock.calls.length, 0);
+      }),
   );
   it.effect("maps codex model options before starting a session", () =>
     Effect.gen(function* () {
@@ -270,21 +295,27 @@ validationLayer("CodexAdapterLive validation", (it) => {
       yield* adapter.startSession({
         provider: ProviderDriverKind.make("codex"),
         threadId: asThreadId("thread-1"),
-        modelSelection: createModelSelection(ProviderInstanceId.make("codex"), "gpt-5.3-codex", [
-          { id: "fastMode", value: true },
-        ]),
+        modelSelection: createModelSelection(
+          ProviderInstanceId.make("codex"),
+          "gpt-5.3-codex",
+          [{ id: "fastMode", value: true }],
+        ),
         runtimeMode: "full-access",
       });
 
-      assert.deepStrictEqual(validationRuntimeFactory.factory.mock.calls[0]?.[0], {
-        binaryPath: "codex",
-        cwd: process.cwd(),
-        model: "gpt-5.3-codex",
-        providerInstanceId: ProviderInstanceId.make("codex"),
-        serviceTier: "fast",
-        threadId: asThreadId("thread-1"),
-        runtimeMode: "full-access",
-      });
+      assert.deepStrictEqual(
+        validationRuntimeFactory.factory.mock.calls[0]?.[0],
+        {
+          binaryPath: "codex",
+          cwd: process.cwd(),
+          model: "gpt-5.3-codex",
+          providerInstanceId: ProviderInstanceId.make("codex"),
+          serviceTier: "fast",
+          stateDir: path.join(process.cwd(), "userdata"),
+          threadId: asThreadId("thread-1"),
+          runtimeMode: "full-access",
+        },
+      );
     }),
   );
 });
@@ -308,22 +339,27 @@ const sessionErrorLayer = it.layer(
 );
 
 sessionErrorLayer("CodexAdapterLive session errors", (it) => {
-  it.effect("maps missing adapter sessions to ProviderAdapterSessionNotFoundError", () =>
-    Effect.gen(function* () {
-      const adapter = yield* CodexAdapter;
-      const result = yield* adapter
-        .sendTurn({
-          threadId: asThreadId("sess-missing"),
-          input: "hello",
-          attachments: [],
-        })
-        .pipe(Effect.result);
+  it.effect(
+    "maps missing adapter sessions to ProviderAdapterSessionNotFoundError",
+    () =>
+      Effect.gen(function* () {
+        const adapter = yield* CodexAdapter;
+        const result = yield* adapter
+          .sendTurn({
+            threadId: asThreadId("sess-missing"),
+            input: "hello",
+            attachments: [],
+          })
+          .pipe(Effect.result);
 
-      assert.equal(result._tag, "Failure");
-      assert.equal(result.failure._tag, "ProviderAdapterSessionNotFoundError");
-      assert.equal(result.failure.provider, "codex");
-      assert.equal(result.failure.threadId, "sess-missing");
-    }),
+        assert.equal(result._tag, "Failure");
+        assert.equal(
+          result.failure._tag,
+          "ProviderAdapterSessionNotFoundError",
+        );
+        assert.equal(result.failure.provider, "codex");
+        assert.equal(result.failure.threadId, "sess-missing");
+      }),
   );
 
   it.effect("maps codex model options before sending a turn", () =>
@@ -342,59 +378,8 @@ sessionErrorLayer("CodexAdapterLive session errors", (it) => {
         adapter.sendTurn({
           threadId: asThreadId("sess-missing"),
           input: "hello",
-          modelSelection: createModelSelection(ProviderInstanceId.make("codex"), "gpt-5.3-codex", [
-            { id: "reasoningEffort", value: "high" },
-            { id: "fastMode", value: true },
-          ]),
-          attachments: [],
-        }),
-      );
-
-      assert.deepStrictEqual(runtime.sendTurnImpl.mock.calls[0]?.[0], {
-        input: "hello",
-        model: "gpt-5.3-codex",
-        effort: "high",
-        serviceTier: "fast",
-      });
-    }),
-  );
-
-  it.effect("maps codex model options for the adapter's bound custom instance id", () => {
-    const customInstanceId = ProviderInstanceId.make("codex_personal");
-    const customRuntimeFactory = makeRuntimeFactory();
-    const customLayer = Layer.effect(
-      CodexAdapter,
-      Effect.gen(function* () {
-        const codexConfig = decodeCodexSettings({});
-        return yield* makeCodexAdapter(codexConfig, {
-          instanceId: customInstanceId,
-          makeRuntime: customRuntimeFactory.factory,
-        });
-      }),
-    ).pipe(
-      Layer.provideMerge(ServerConfig.layerTest(process.cwd(), process.cwd())),
-      Layer.provideMerge(ServerSettingsService.layerTest()),
-      Layer.provideMerge(providerSessionDirectoryTestLayer),
-      Layer.provideMerge(NodeServices.layer),
-    );
-
-    return Effect.gen(function* () {
-      const adapter = yield* CodexAdapter;
-      yield* adapter.startSession({
-        provider: ProviderDriverKind.make("codex"),
-        threadId: asThreadId("sess-custom-instance"),
-        runtimeMode: "full-access",
-      });
-      const runtime = customRuntimeFactory.lastRuntime;
-      assert.ok(runtime);
-      runtime.sendTurnImpl.mockClear();
-
-      yield* Effect.ignore(
-        adapter.sendTurn({
-          threadId: asThreadId("sess-custom-instance"),
-          input: "hello",
           modelSelection: createModelSelection(
-            ProviderInstanceId.make("codex_personal"),
+            ProviderInstanceId.make("codex"),
             "gpt-5.3-codex",
             [
               { id: "reasoningEffort", value: "high" },
@@ -411,8 +396,68 @@ sessionErrorLayer("CodexAdapterLive session errors", (it) => {
         effort: "high",
         serviceTier: "fast",
       });
-    }).pipe(Effect.provide(customLayer));
-  });
+    }),
+  );
+
+  it.effect(
+    "maps codex model options for the adapter's bound custom instance id",
+    () => {
+      const customInstanceId = ProviderInstanceId.make("codex_personal");
+      const customRuntimeFactory = makeRuntimeFactory();
+      const customLayer = Layer.effect(
+        CodexAdapter,
+        Effect.gen(function* () {
+          const codexConfig = decodeCodexSettings({});
+          return yield* makeCodexAdapter(codexConfig, {
+            instanceId: customInstanceId,
+            makeRuntime: customRuntimeFactory.factory,
+          });
+        }),
+      ).pipe(
+        Layer.provideMerge(
+          ServerConfig.layerTest(process.cwd(), process.cwd()),
+        ),
+        Layer.provideMerge(ServerSettingsService.layerTest()),
+        Layer.provideMerge(providerSessionDirectoryTestLayer),
+        Layer.provideMerge(NodeServices.layer),
+      );
+
+      return Effect.gen(function* () {
+        const adapter = yield* CodexAdapter;
+        yield* adapter.startSession({
+          provider: ProviderDriverKind.make("codex"),
+          threadId: asThreadId("sess-custom-instance"),
+          runtimeMode: "full-access",
+        });
+        const runtime = customRuntimeFactory.lastRuntime;
+        assert.ok(runtime);
+        runtime.sendTurnImpl.mockClear();
+
+        yield* Effect.ignore(
+          adapter.sendTurn({
+            threadId: asThreadId("sess-custom-instance"),
+            input: "hello",
+            modelSelection: createModelSelection(
+              ProviderInstanceId.make("codex_personal"),
+              "gpt-5.3-codex",
+              [
+                { id: "reasoningEffort", value: "high" },
+                { id: "fastMode", value: true },
+              ],
+            ),
+            attachments: [],
+          }),
+        );
+
+        assert.deepStrictEqual(runtime.sendTurnImpl.mock.calls[0]?.[0], {
+          input: "hello",
+          model: "gpt-5.3-codex",
+          effort: "high",
+          serviceTier: "fast",
+        });
+      }).pipe(Effect.provide(customLayer));
+    },
+  );
 });
 
 const lifecycleRuntimeFactory = makeRuntimeFactory();
@@ -448,95 +493,174 @@ function startLifecycleRuntime() {
 }
 
 lifecycleLayer("CodexAdapterLive lifecycle", (it) => {
-  it.effect("maps completed agent message items to canonical item.completed events", () =>
-    Effect.gen(function* () {
-      const { adapter, runtime } = yield* startLifecycleRuntime();
-      const firstEventFiber = yield* Stream.runHead(adapter.streamEvents).pipe(Effect.forkChild);
+  it.effect(
+    "maps completed agent message items to canonical item.completed events",
+    () =>
+      Effect.gen(function* () {
+        const { adapter, runtime } = yield* startLifecycleRuntime();
+        const firstEventFiber = yield* Stream.runHead(
+          adapter.streamEvents,
+        ).pipe(Effect.forkChild);
 
-      const event: ProviderEvent = {
-        id: asEventId("evt-msg-complete"),
-        kind: "notification",
-        provider: ProviderDriverKind.make("codex"),
-        createdAt: "2026-01-01T00:00:00.000Z",
-        method: "item/completed",
-        threadId: asThreadId("thread-1"),
-        turnId: asTurnId("turn-1"),
-        itemId: asItemId("msg_1"),
-        payload: {
-          completedAtMs: 1_778_000_000_000,
-          threadId: "thread-1",
-          turnId: "turn-1",
-          item: {
-            type: "agentMessage",
-            id: "msg_1",
-            text: "done",
+        const event: ProviderEvent = {
+          id: asEventId("evt-msg-complete"),
+          kind: "notification",
+          provider: ProviderDriverKind.make("codex"),
+          createdAt: "2026-01-01T00:00:00.000Z",
+          method: "item/completed",
+          threadId: asThreadId("thread-1"),
+          turnId: asTurnId("turn-1"),
+          itemId: asItemId("msg_1"),
+          payload: {
+            completedAtMs: 1_778_000_000_000,
+            threadId: "thread-1",
+            turnId: "turn-1",
+            item: {
+              type: "agentMessage",
+              id: "msg_1",
+              text: "done",
+            },
           },
-        },
-      };
+        };
 
-      yield* runtime.emit(event);
-      const firstEvent = yield* Fiber.join(firstEventFiber);
+        yield* runtime.emit(event);
+        const firstEvent = yield* Fiber.join(firstEventFiber);
 
-      assert.equal(firstEvent._tag, "Some");
-      if (firstEvent._tag !== "Some") {
-        return;
-      }
-      assert.equal(firstEvent.value.type, "item.completed");
-      if (firstEvent.value.type !== "item.completed") {
-        return;
-      }
-      assert.equal(firstEvent.value.itemId, "msg_1");
-      assert.equal(firstEvent.value.turnId, "turn-1");
-      assert.equal(firstEvent.value.payload.itemType, "assistant_message");
-    }),
+        assert.equal(firstEvent._tag, "Some");
+        if (firstEvent._tag !== "Some") {
+          return;
+        }
+        assert.equal(firstEvent.value.type, "item.completed");
+        if (firstEvent.value.type !== "item.completed") {
+          return;
+        }
+        assert.equal(firstEvent.value.itemId, "msg_1");
+        assert.equal(firstEvent.value.turnId, "turn-1");
+        assert.equal(firstEvent.value.payload.itemType, "assistant_message");
+      }),
   );
 
-  it.effect("maps completed plan items to canonical proposed-plan completion events", () =>
-    Effect.gen(function* () {
-      const { adapter, runtime } = yield* startLifecycleRuntime();
-      const firstEventFiber = yield* Stream.runHead(adapter.streamEvents).pipe(Effect.forkChild);
+  it.effect(
+    "maps Kami test harness completions to dynamic tool item events",
+    () =>
+      Effect.gen(function* () {
+        const { adapter, runtime } = yield* startLifecycleRuntime();
+        const firstEventFiber = yield* Stream.runHead(
+          adapter.streamEvents,
+        ).pipe(Effect.forkChild);
+        const evidenceText =
+          '{"runner":"playwright","status":"fail","success":false,"runId":"run-1","outputSummary":"Pairing screen was visible.","artifactPaths":{"trace":"C:/Users/THIS PC/.t3/dev/test-harness/run-1/trace.zip"}}\n';
 
-      const event: ProviderEvent = {
-        id: asEventId("evt-plan-complete"),
-        kind: "notification",
-        provider: ProviderDriverKind.make("codex"),
-        createdAt: "2026-01-01T00:00:00.000Z",
-        method: "item/completed",
-        threadId: asThreadId("thread-1"),
-        turnId: asTurnId("turn-1"),
-        itemId: asItemId("plan_1"),
-        payload: {
-          completedAtMs: 1_778_000_000_000,
-          threadId: "thread-1",
-          turnId: "turn-1",
-          item: {
-            type: "plan",
-            id: "plan_1",
-            text: "## Final plan\n\n- one\n- two",
+        yield* runtime.emit({
+          id: asEventId("evt-evidence-complete"),
+          kind: "notification",
+          provider: ProviderDriverKind.make("codex"),
+          createdAt: "2026-01-01T00:00:00.000Z",
+          method: "item/tool/call/completed",
+          threadId: asThreadId("thread-1"),
+          turnId: asTurnId("turn-1"),
+          itemId: asItemId("call_1"),
+          payload: {
+            callId: "call_1",
+            namespace: "kamicode",
+            tool: "kami_test_harness",
+            success: false,
+            contentItems: [
+              {
+                type: "inputText",
+                text: evidenceText,
+              },
+            ],
           },
-        },
-      };
+        } satisfies ProviderEvent);
 
-      yield* runtime.emit(event);
-      const firstEvent = yield* Fiber.join(firstEventFiber);
+        const firstEvent = yield* Fiber.join(firstEventFiber);
 
-      assert.equal(firstEvent._tag, "Some");
-      if (firstEvent._tag !== "Some") {
-        return;
-      }
-      assert.equal(firstEvent.value.type, "turn.proposed.completed");
-      if (firstEvent.value.type !== "turn.proposed.completed") {
-        return;
-      }
-      assert.equal(firstEvent.value.turnId, "turn-1");
-      assert.equal(firstEvent.value.payload.planMarkdown, "## Final plan\n\n- one\n- two");
-    }),
+        assert.equal(firstEvent._tag, "Some");
+        if (firstEvent._tag !== "Some") {
+          return;
+        }
+        assert.equal(firstEvent.value.type, "item.completed");
+        if (firstEvent.value.type !== "item.completed") {
+          return;
+        }
+        assert.equal(firstEvent.value.itemId, "call_1");
+        assert.equal(firstEvent.value.payload.itemType, "dynamic_tool_call");
+        assert.equal(firstEvent.value.payload.title, "Evidence run");
+        assert.equal(
+          firstEvent.value.payload.detail,
+          "Pairing screen was visible.",
+        );
+        assert.deepEqual(firstEvent.value.payload.data, {
+          callId: "call_1",
+          namespace: "kamicode",
+          tool: "kami_test_harness",
+          success: false,
+          contentItems: [
+            {
+              type: "inputText",
+              text: evidenceText,
+            },
+          ],
+        });
+      }),
+  );
+
+  it.effect(
+    "maps completed plan items to canonical proposed-plan completion events",
+    () =>
+      Effect.gen(function* () {
+        const { adapter, runtime } = yield* startLifecycleRuntime();
+        const firstEventFiber = yield* Stream.runHead(
+          adapter.streamEvents,
+        ).pipe(Effect.forkChild);
+
+        const event: ProviderEvent = {
+          id: asEventId("evt-plan-complete"),
+          kind: "notification",
+          provider: ProviderDriverKind.make("codex"),
+          createdAt: "2026-01-01T00:00:00.000Z",
+          method: "item/completed",
+          threadId: asThreadId("thread-1"),
+          turnId: asTurnId("turn-1"),
+          itemId: asItemId("plan_1"),
+          payload: {
+            completedAtMs: 1_778_000_000_000,
+            threadId: "thread-1",
+            turnId: "turn-1",
+            item: {
+              type: "plan",
+              id: "plan_1",
+              text: "## Final plan\n\n- one\n- two",
+            },
+          },
+        };
+
+        yield* runtime.emit(event);
+        const firstEvent = yield* Fiber.join(firstEventFiber);
+
+        assert.equal(firstEvent._tag, "Some");
+        if (firstEvent._tag !== "Some") {
+          return;
+        }
+        assert.equal(firstEvent.value.type, "turn.proposed.completed");
+        if (firstEvent.value.type !== "turn.proposed.completed") {
+          return;
+        }
+        assert.equal(firstEvent.value.turnId, "turn-1");
+        assert.equal(
+          firstEvent.value.payload.planMarkdown,
+          "## Final plan\n\n- one\n- two",
+        );
+      }),
   );
 
   it.effect("maps plan deltas to canonical proposed-plan delta events", () =>
     Effect.gen(function* () {
       const { adapter, runtime } = yield* startLifecycleRuntime();
-      const firstEventFiber = yield* Stream.runHead(adapter.streamEvents).pipe(Effect.forkChild);
+      const firstEventFiber = yield* Stream.runHead(adapter.streamEvents).pipe(
+        Effect.forkChild,
+      );
 
       yield* runtime.emit({
         id: asEventId("evt-plan-delta"),
@@ -570,41 +694,47 @@ lifecycleLayer("CodexAdapterLive lifecycle", (it) => {
     }),
   );
 
-  it.effect("maps session/closed lifecycle events to canonical session.exited runtime events", () =>
-    Effect.gen(function* () {
-      const { adapter, runtime } = yield* startLifecycleRuntime();
-      const firstEventFiber = yield* Stream.runHead(adapter.streamEvents).pipe(Effect.forkChild);
+  it.effect(
+    "maps session/closed lifecycle events to canonical session.exited runtime events",
+    () =>
+      Effect.gen(function* () {
+        const { adapter, runtime } = yield* startLifecycleRuntime();
+        const firstEventFiber = yield* Stream.runHead(
+          adapter.streamEvents,
+        ).pipe(Effect.forkChild);
 
-      const event: ProviderEvent = {
-        id: asEventId("evt-session-closed"),
-        kind: "session",
-        provider: ProviderDriverKind.make("codex"),
-        threadId: asThreadId("thread-1"),
-        createdAt: "2026-01-01T00:00:00.000Z",
-        method: "session/closed",
-        message: "Session stopped",
-      };
+        const event: ProviderEvent = {
+          id: asEventId("evt-session-closed"),
+          kind: "session",
+          provider: ProviderDriverKind.make("codex"),
+          threadId: asThreadId("thread-1"),
+          createdAt: "2026-01-01T00:00:00.000Z",
+          method: "session/closed",
+          message: "Session stopped",
+        };
 
-      yield* runtime.emit(event);
-      const firstEvent = yield* Fiber.join(firstEventFiber);
+        yield* runtime.emit(event);
+        const firstEvent = yield* Fiber.join(firstEventFiber);
 
-      assert.equal(firstEvent._tag, "Some");
-      if (firstEvent._tag !== "Some") {
-        return;
-      }
-      assert.equal(firstEvent.value.type, "session.exited");
-      if (firstEvent.value.type !== "session.exited") {
-        return;
-      }
-      assert.equal(firstEvent.value.threadId, "thread-1");
-      assert.equal(firstEvent.value.payload.reason, "Session stopped");
-    }),
+        assert.equal(firstEvent._tag, "Some");
+        if (firstEvent._tag !== "Some") {
+          return;
+        }
+        assert.equal(firstEvent.value.type, "session.exited");
+        if (firstEvent.value.type !== "session.exited") {
+          return;
+        }
+        assert.equal(firstEvent.value.threadId, "thread-1");
+        assert.equal(firstEvent.value.payload.reason, "Session stopped");
+      }),
   );
 
   it.effect("maps retryable Codex error notifications to runtime.warning", () =>
     Effect.gen(function* () {
       const { adapter, runtime } = yield* startLifecycleRuntime();
-      const firstEventFiber = yield* Stream.runHead(adapter.streamEvents).pipe(Effect.forkChild);
+      const firstEventFiber = yield* Stream.runHead(adapter.streamEvents).pipe(
+        Effect.forkChild,
+      );
 
       yield* runtime.emit({
         id: asEventId("evt-retryable-error"),
@@ -642,7 +772,9 @@ lifecycleLayer("CodexAdapterLive lifecycle", (it) => {
   it.effect("maps process stderr notifications to runtime.warning", () =>
     Effect.gen(function* () {
       const { adapter, runtime } = yield* startLifecycleRuntime();
-      const firstEventFiber = yield* Stream.runHead(adapter.streamEvents).pipe(Effect.forkChild);
+      const firstEventFiber = yield* Stream.runHead(adapter.streamEvents).pipe(
+        Effect.forkChild,
+      );
 
       yield* runtime.emit({
         id: asEventId("evt-process-stderr"),
@@ -673,44 +805,53 @@ lifecycleLayer("CodexAdapterLive lifecycle", (it) => {
     }),
   );
 
-  it.effect("maps realtime started notifications with upstream realtime session ids", () =>
-    Effect.gen(function* () {
-      const { adapter, runtime } = yield* startLifecycleRuntime();
-      const firstEventFiber = yield* Stream.runHead(adapter.streamEvents).pipe(Effect.forkChild);
+  it.effect(
+    "maps realtime started notifications with upstream realtime session ids",
+    () =>
+      Effect.gen(function* () {
+        const { adapter, runtime } = yield* startLifecycleRuntime();
+        const firstEventFiber = yield* Stream.runHead(
+          adapter.streamEvents,
+        ).pipe(Effect.forkChild);
 
-      yield* runtime.emit({
-        id: asEventId("evt-realtime-started"),
-        kind: "notification",
-        provider: ProviderDriverKind.make("codex"),
-        threadId: asThreadId("thread-1"),
-        createdAt: "2026-01-01T00:00:00.000Z",
-        method: "thread/realtime/started",
-        payload: {
-          threadId: "thread-1",
-          realtimeSessionId: "realtime-session-1",
-          version: "v2",
-        },
-      } satisfies ProviderEvent);
+        yield* runtime.emit({
+          id: asEventId("evt-realtime-started"),
+          kind: "notification",
+          provider: ProviderDriverKind.make("codex"),
+          threadId: asThreadId("thread-1"),
+          createdAt: "2026-01-01T00:00:00.000Z",
+          method: "thread/realtime/started",
+          payload: {
+            threadId: "thread-1",
+            realtimeSessionId: "realtime-session-1",
+            version: "v2",
+          },
+        } satisfies ProviderEvent);
 
-      const firstEvent = yield* Fiber.join(firstEventFiber);
+        const firstEvent = yield* Fiber.join(firstEventFiber);
 
-      assert.equal(firstEvent._tag, "Some");
-      if (firstEvent._tag !== "Some") {
-        return;
-      }
-      assert.equal(firstEvent.value.type, "thread.realtime.started");
-      if (firstEvent.value.type !== "thread.realtime.started") {
-        return;
-      }
-      assert.equal(firstEvent.value.threadId, "thread-1");
-      assert.equal(firstEvent.value.payload.realtimeSessionId, "realtime-session-1");
-    }),
+        assert.equal(firstEvent._tag, "Some");
+        if (firstEvent._tag !== "Some") {
+          return;
+        }
+        assert.equal(firstEvent.value.type, "thread.realtime.started");
+        if (firstEvent.value.type !== "thread.realtime.started") {
+          return;
+        }
+        assert.equal(firstEvent.value.threadId, "thread-1");
+        assert.equal(
+          firstEvent.value.payload.realtimeSessionId,
+          "realtime-session-1",
+        );
+      }),
   );
 
   it.effect("maps fatal websocket stderr notifications to runtime.error", () =>
     Effect.gen(function* () {
       const { adapter, runtime } = yield* startLifecycleRuntime();
-      const firstEventFiber = yield* Stream.runHead(adapter.streamEvents).pipe(Effect.forkChild);
+      const firstEventFiber = yield* Stream.runHead(adapter.streamEvents).pipe(
+        Effect.forkChild,
+      );
 
       yield* runtime.emit({
         id: asEventId("evt-process-stderr-websocket"),
@@ -746,7 +887,9 @@ lifecycleLayer("CodexAdapterLive lifecycle", (it) => {
   it.effect("preserves request type when mapping serverRequest/resolved", () =>
     Effect.gen(function* () {
       const { adapter, runtime } = yield* startLifecycleRuntime();
-      const firstEventFiber = yield* Stream.runHead(adapter.streamEvents).pipe(Effect.forkChild);
+      const firstEventFiber = yield* Stream.runHead(adapter.streamEvents).pipe(
+        Effect.forkChild,
+      );
 
       const event: ProviderEvent = {
         id: asEventId("evt-request-resolved"),
@@ -774,49 +917,61 @@ lifecycleLayer("CodexAdapterLive lifecycle", (it) => {
       if (firstEvent.value.type !== "request.resolved") {
         return;
       }
-      assert.equal(firstEvent.value.payload.requestType, "command_execution_approval");
+      assert.equal(
+        firstEvent.value.payload.requestType,
+        "command_execution_approval",
+      );
     }),
   );
 
-  it.effect("preserves file-read request type when mapping serverRequest/resolved", () =>
-    Effect.gen(function* () {
-      const { adapter, runtime } = yield* startLifecycleRuntime();
-      const firstEventFiber = yield* Stream.runHead(adapter.streamEvents).pipe(Effect.forkChild);
+  it.effect(
+    "preserves file-read request type when mapping serverRequest/resolved",
+    () =>
+      Effect.gen(function* () {
+        const { adapter, runtime } = yield* startLifecycleRuntime();
+        const firstEventFiber = yield* Stream.runHead(
+          adapter.streamEvents,
+        ).pipe(Effect.forkChild);
 
-      const event: ProviderEvent = {
-        id: asEventId("evt-file-read-request-resolved"),
-        kind: "notification",
-        provider: ProviderDriverKind.make("codex"),
-        threadId: asThreadId("thread-1"),
-        createdAt: "2026-01-01T00:00:00.000Z",
-        method: "serverRequest/resolved",
-        requestKind: "file-read",
-        requestId: ApprovalRequestId.make("req-file-read-1"),
-        payload: {
-          threadId: "thread-1",
-          requestId: "req-file-read-1",
-        },
-      };
+        const event: ProviderEvent = {
+          id: asEventId("evt-file-read-request-resolved"),
+          kind: "notification",
+          provider: ProviderDriverKind.make("codex"),
+          threadId: asThreadId("thread-1"),
+          createdAt: "2026-01-01T00:00:00.000Z",
+          method: "serverRequest/resolved",
+          requestKind: "file-read",
+          requestId: ApprovalRequestId.make("req-file-read-1"),
+          payload: {
+            threadId: "thread-1",
+            requestId: "req-file-read-1",
+          },
+        };
 
-      yield* runtime.emit(event);
-      const firstEvent = yield* Fiber.join(firstEventFiber);
+        yield* runtime.emit(event);
+        const firstEvent = yield* Fiber.join(firstEventFiber);
 
-      assert.equal(firstEvent._tag, "Some");
-      if (firstEvent._tag !== "Some") {
-        return;
-      }
-      assert.equal(firstEvent.value.type, "request.resolved");
-      if (firstEvent.value.type !== "request.resolved") {
-        return;
-      }
-      assert.equal(firstEvent.value.payload.requestType, "file_read_approval");
-    }),
+        assert.equal(firstEvent._tag, "Some");
+        if (firstEvent._tag !== "Some") {
+          return;
+        }
+        assert.equal(firstEvent.value.type, "request.resolved");
+        if (firstEvent.value.type !== "request.resolved") {
+          return;
+        }
+        assert.equal(
+          firstEvent.value.payload.requestType,
+          "file_read_approval",
+        );
+      }),
   );
 
   it.effect("preserves explicit empty multi-select user-input answers", () =>
     Effect.gen(function* () {
       const { adapter, runtime } = yield* startLifecycleRuntime();
-      const firstEventFiber = yield* Stream.runHead(adapter.streamEvents).pipe(Effect.forkChild);
+      const firstEventFiber = yield* Stream.runHead(adapter.streamEvents).pipe(
+        Effect.forkChild,
+      );
 
       const event: ProviderEvent = {
         id: asEventId("evt-user-input-empty"),
@@ -851,47 +1006,49 @@ lifecycleLayer("CodexAdapterLive lifecycle", (it) => {
     }),
   );
 
-  it.effect("maps windowsSandbox/setupCompleted to session state and warning on failure", () =>
-    Effect.gen(function* () {
-      const { adapter, runtime } = yield* startLifecycleRuntime();
-      const eventsFiber = yield* Stream.runCollect(Stream.take(adapter.streamEvents, 2)).pipe(
-        Effect.forkChild,
-      );
+  it.effect(
+    "maps windowsSandbox/setupCompleted to session state and warning on failure",
+    () =>
+      Effect.gen(function* () {
+        const { adapter, runtime } = yield* startLifecycleRuntime();
+        const eventsFiber = yield* Stream.runCollect(
+          Stream.take(adapter.streamEvents, 2),
+        ).pipe(Effect.forkChild);
 
-      const event: ProviderEvent = {
-        id: asEventId("evt-windows-sandbox-failed"),
-        kind: "notification",
-        provider: ProviderDriverKind.make("codex"),
-        threadId: asThreadId("thread-1"),
-        createdAt: "2026-01-01T00:00:00.000Z",
-        method: "windowsSandbox/setupCompleted",
-        message: "Sandbox setup failed",
-        payload: {
-          mode: "unelevated",
-          success: false,
-          error: "unsupported environment",
-        },
-      };
+        const event: ProviderEvent = {
+          id: asEventId("evt-windows-sandbox-failed"),
+          kind: "notification",
+          provider: ProviderDriverKind.make("codex"),
+          threadId: asThreadId("thread-1"),
+          createdAt: "2026-01-01T00:00:00.000Z",
+          method: "windowsSandbox/setupCompleted",
+          message: "Sandbox setup failed",
+          payload: {
+            mode: "unelevated",
+            success: false,
+            error: "unsupported environment",
+          },
+        };
 
-      yield* runtime.emit(event);
-      const events = Array.from(yield* Fiber.join(eventsFiber));
+        yield* runtime.emit(event);
+        const events = Array.from(yield* Fiber.join(eventsFiber));
 
-      assert.equal(events.length, 2);
+        assert.equal(events.length, 2);
 
-      const firstEvent = events[0];
-      const secondEvent = events[1];
+        const firstEvent = events[0];
+        const secondEvent = events[1];
 
-      assert.equal(firstEvent?.type, "session.state.changed");
-      if (firstEvent?.type === "session.state.changed") {
-        assert.equal(firstEvent.payload.state, "error");
-        assert.equal(firstEvent.payload.reason, "Sandbox setup failed");
-      }
+        assert.equal(firstEvent?.type, "session.state.changed");
+        if (firstEvent?.type === "session.state.changed") {
+          assert.equal(firstEvent.payload.state, "error");
+          assert.equal(firstEvent.payload.reason, "Sandbox setup failed");
+        }
 
-      assert.equal(secondEvent?.type, "runtime.warning");
-      if (secondEvent?.type === "runtime.warning") {
-        assert.equal(secondEvent.payload.message, "Sandbox setup failed");
-      }
-    }),
+        assert.equal(secondEvent?.type, "runtime.warning");
+        if (secondEvent?.type === "runtime.warning") {
+          assert.equal(secondEvent.payload.message, "Sandbox setup failed");
+        }
+      }),
   );
 
   it.effect(
@@ -899,9 +1056,9 @@ lifecycleLayer("CodexAdapterLive lifecycle", (it) => {
     () =>
       Effect.gen(function* () {
         const { adapter, runtime } = yield* startLifecycleRuntime();
-        const eventsFiber = yield* Stream.runCollect(Stream.take(adapter.streamEvents, 2)).pipe(
-          Effect.forkChild,
-        );
+        const eventsFiber = yield* Stream.runCollect(
+          Stream.take(adapter.streamEvents, 2),
+        ).pipe(Effect.forkChild);
 
         yield* runtime.emit({
           id: asEventId("evt-user-input-requested"),
@@ -965,68 +1122,72 @@ lifecycleLayer("CodexAdapterLive lifecycle", (it) => {
       }),
   );
 
-  it.effect("unwraps Codex token usage payloads for context window events", () =>
-    Effect.gen(function* () {
-      const { adapter, runtime } = yield* startLifecycleRuntime();
-      const firstEventFiber = yield* Stream.runHead(adapter.streamEvents).pipe(Effect.forkChild);
+  it.effect(
+    "unwraps Codex token usage payloads for context window events",
+    () =>
+      Effect.gen(function* () {
+        const { adapter, runtime } = yield* startLifecycleRuntime();
+        const firstEventFiber = yield* Stream.runHead(
+          adapter.streamEvents,
+        ).pipe(Effect.forkChild);
 
-      yield* runtime.emit({
-        id: asEventId("evt-codex-thread-token-usage-updated"),
-        kind: "notification",
-        provider: ProviderDriverKind.make("codex"),
-        threadId: asThreadId("thread-1"),
-        turnId: asTurnId("turn-1"),
-        createdAt: "2026-01-01T00:00:00.000Z",
-        method: "thread/tokenUsage/updated",
-        payload: {
-          threadId: "thread-1",
-          turnId: "turn-1",
-          tokenUsage: {
-            total: {
-              inputTokens: 11_833,
-              cachedInputTokens: 3456,
-              outputTokens: 6,
-              reasoningOutputTokens: 0,
-              totalTokens: 11_839,
+        yield* runtime.emit({
+          id: asEventId("evt-codex-thread-token-usage-updated"),
+          kind: "notification",
+          provider: ProviderDriverKind.make("codex"),
+          threadId: asThreadId("thread-1"),
+          turnId: asTurnId("turn-1"),
+          createdAt: "2026-01-01T00:00:00.000Z",
+          method: "thread/tokenUsage/updated",
+          payload: {
+            threadId: "thread-1",
+            turnId: "turn-1",
+            tokenUsage: {
+              total: {
+                inputTokens: 11_833,
+                cachedInputTokens: 3456,
+                outputTokens: 6,
+                reasoningOutputTokens: 0,
+                totalTokens: 11_839,
+              },
+              last: {
+                inputTokens: 120,
+                cachedInputTokens: 0,
+                outputTokens: 6,
+                reasoningOutputTokens: 0,
+                totalTokens: 126,
+              },
+              modelContextWindow: 258_400,
             },
-            last: {
-              inputTokens: 120,
-              cachedInputTokens: 0,
-              outputTokens: 6,
-              reasoningOutputTokens: 0,
-              totalTokens: 126,
-            },
-            modelContextWindow: 258_400,
           },
-        },
-      } satisfies ProviderEvent);
+        } satisfies ProviderEvent);
 
-      const firstEvent = yield* Fiber.join(firstEventFiber);
-      assert.equal(firstEvent._tag, "Some");
-      if (firstEvent._tag !== "Some") {
-        return;
-      }
-      assert.equal(firstEvent.value.type, "thread.token-usage.updated");
-      if (firstEvent.value.type !== "thread.token-usage.updated") {
-        return;
-      }
+        const firstEvent = yield* Fiber.join(firstEventFiber);
+        assert.equal(firstEvent._tag, "Some");
+        if (firstEvent._tag !== "Some") {
+          return;
+        }
+        assert.equal(firstEvent.value.type, "thread.token-usage.updated");
+        if (firstEvent.value.type !== "thread.token-usage.updated") {
+          return;
+        }
 
-      assert.deepEqual(firstEvent.value.payload.usage, {
-        usedTokens: 126,
-        totalProcessedTokens: 11_839,
-        maxTokens: 258_400,
-        inputTokens: 120,
-        cachedInputTokens: 0,
-        outputTokens: 6,
-        reasoningOutputTokens: 0,
-        lastUsedTokens: 126,
-        lastInputTokens: 120,
-        lastCachedInputTokens: 0,
-        lastOutputTokens: 6,
-        lastReasoningOutputTokens: 0,
-        compactsAutomatically: true,
-      });
-    }),
+        assert.deepEqual(firstEvent.value.payload.usage, {
+          usedTokens: 126,
+          totalProcessedTokens: 11_839,
+          maxTokens: 258_400,
+          inputTokens: 120,
+          cachedInputTokens: 0,
+          outputTokens: 6,
+          reasoningOutputTokens: 0,
+          lastUsedTokens: 126,
+          lastInputTokens: 120,
+          lastCachedInputTokens: 0,
+          lastOutputTokens: 6,
+          lastReasoningOutputTokens: 0,
+          compactsAutomatically: true,
+        });
+      }),
   );
 });
 
@@ -1074,7 +1235,9 @@ scopedLifecycleLayer("CodexAdapterLive scoped lifecycle", (it) => {
   );
 });
 
-const scopedFailureRuntimeFactory = makeScopedRuntimeFactory({ failConstruction: true });
+const scopedFailureRuntimeFactory = makeScopedRuntimeFactory({
+  failConstruction: true,
+});
 const scopedFailureLayer = it.layer(
   Layer.effect(
     CodexAdapter,
@@ -1093,32 +1256,39 @@ const scopedFailureLayer = it.layer(
 );
 
 scopedFailureLayer("CodexAdapterLive scoped startup failure", (it) => {
-  it.effect("closes the externally owned session scope when startSession fails", () =>
-    Effect.gen(function* () {
-      scopedFailureRuntimeFactory.releasedThreadIds.length = 0;
-      const adapter = yield* CodexAdapter;
+  it.effect(
+    "closes the externally owned session scope when startSession fails",
+    () =>
+      Effect.gen(function* () {
+        scopedFailureRuntimeFactory.releasedThreadIds.length = 0;
+        const adapter = yield* CodexAdapter;
 
-      const result = yield* adapter
-        .startSession({
-          provider: ProviderDriverKind.make("codex"),
-          threadId: asThreadId("thread-fail"),
-          runtimeMode: "full-access",
-        })
-        .pipe(Effect.result);
+        const result = yield* adapter
+          .startSession({
+            provider: ProviderDriverKind.make("codex"),
+            threadId: asThreadId("thread-fail"),
+            runtimeMode: "full-access",
+          })
+          .pipe(Effect.result);
 
-      assert.equal(result._tag, "Failure");
-      assert.equal(result.failure._tag, "ProviderAdapterProcessError");
-      assert.deepStrictEqual(scopedFailureRuntimeFactory.releasedThreadIds, [
-        asThreadId("thread-fail"),
-      ]);
-      assert.equal(yield* adapter.hasSession(asThreadId("thread-fail")), false);
-    }),
+        assert.equal(result._tag, "Failure");
+        assert.equal(result.failure._tag, "ProviderAdapterProcessError");
+        assert.deepStrictEqual(scopedFailureRuntimeFactory.releasedThreadIds, [
+          asThreadId("thread-fail"),
+        ]);
+        assert.equal(
+          yield* adapter.hasSession(asThreadId("thread-fail")),
+          false,
+        );
+      }),
   );
 });
 
 it.effect("flushes managed native logs when the adapter layer shuts down", () =>
   Effect.gen(function* () {
-    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "t3-codex-adapter-native-log-"));
+    const tempDir = fs.mkdtempSync(
+      path.join(os.tmpdir(), "t3-codex-adapter-native-log-"),
+    );
     const basePath = path.join(tempDir, "provider-native.ndjson");
     const runtimeFactory = makeRuntimeFactory();
     const scope = yield* Scope.make("sequential");
@@ -1135,13 +1305,17 @@ it.effect("flushes managed native logs when the adapter layer shuts down", () =>
           });
         }),
       ).pipe(
-        Layer.provideMerge(ServerConfig.layerTest(process.cwd(), process.cwd())),
+        Layer.provideMerge(
+          ServerConfig.layerTest(process.cwd(), process.cwd()),
+        ),
         Layer.provideMerge(ServerSettingsService.layerTest()),
         Layer.provideMerge(providerSessionDirectoryTestLayer),
         Layer.provideMerge(NodeServices.layer),
       );
       const context = yield* Layer.buildWithScope(layer, scope);
-      const adapter = yield* Effect.service(CodexAdapter).pipe(Effect.provide(context));
+      const adapter = yield* Effect.service(CodexAdapter).pipe(
+        Effect.provide(context),
+      );
 
       yield* adapter.startSession({
         provider: ProviderDriverKind.make("codex"),
@@ -1152,7 +1326,9 @@ it.effect("flushes managed native logs when the adapter layer shuts down", () =>
       const runtime = runtimeFactory.lastRuntime;
       assert.ok(runtime);
 
-      const firstEventFiber = yield* Stream.runHead(adapter.streamEvents).pipe(Effect.forkChild);
+      const firstEventFiber = yield* Stream.runHead(adapter.streamEvents).pipe(
+        Effect.forkChild,
+      );
       yield* runtime.emit({
         id: asEventId("evt-native-log"),
         kind: "notification",

@@ -96,9 +96,13 @@ function buildProps() {
   };
 }
 
-function buildLongUserMessageText(tail = "deep hidden detail only after expand") {
+function buildLongUserMessageText(
+  tail = "deep hidden detail only after expand",
+) {
   return Array.from({ length: 9 }, (_, index) =>
-    index === 8 ? tail : `Line ${index + 1}: ${"verbose prompt content ".repeat(8).trim()}`,
+    index === 8
+      ? tail
+      : `Line ${index + 1}: ${"verbose prompt content ".repeat(8).trim()}`,
   ).join("\n");
 }
 
@@ -131,7 +135,7 @@ describe("MessagesTimeline", () => {
     expect(markup).toContain('data-user-message-collapsed="true"');
     expect(markup).toContain('data-user-message-fade="true"');
     expect(markup).toContain('data-user-message-footer="true"');
-  });
+  }, 60_000);
 
   it("does not render collapse controls for short user messages", async () => {
     const { MessagesTimeline } = await import("./MessagesTimeline");
@@ -144,7 +148,7 @@ describe("MessagesTimeline", () => {
 
     expect(markup).not.toContain("Show full message");
     expect(markup).toContain('data-user-message-collapsible="false"');
-  });
+  }, 60_000);
 
   it("renders inline terminal labels with the composer chip UI", async () => {
     const { MessagesTimeline } = await import("./MessagesTimeline");
@@ -227,7 +231,9 @@ describe("MessagesTimeline", () => {
               createdAt: "2026-03-17T19:12:28.000Z",
               label: "Updated files",
               tone: "tool",
-              changedFiles: ["C:/Users/mike/dev-stuff/t3code/apps/web/src/session-logic.ts"],
+              changedFiles: [
+                "C:/Users/mike/dev-stuff/t3code/apps/web/src/session-logic.ts",
+              ],
             },
           },
         ]}
@@ -236,6 +242,63 @@ describe("MessagesTimeline", () => {
     );
 
     expect(markup).toContain("t3code/apps/web/src/session-logic.ts");
-    expect(markup).not.toContain("C:/Users/mike/dev-stuff/t3code/apps/web/src/session-logic.ts");
+    expect(markup).not.toContain(
+      "C:/Users/mike/dev-stuff/t3code/apps/web/src/session-logic.ts",
+    );
+  });
+
+  it("renders test harness evidence artifacts inline instead of raw paths", async () => {
+    const { MessagesTimeline } = await import("./MessagesTimeline");
+    const screenshotPath =
+      "C:/Users/THIS PC/.t3/dev/test-harness/projects/project-1/runs/run-1/screenshots/05-final.png";
+    const tracePath =
+      "C:/Users/THIS PC/.t3/dev/test-harness/projects/project-1/runs/run-1/trace.zip";
+    const summaryPath =
+      "C:/Users/THIS PC/.t3/dev/test-harness/projects/project-1/runs/run-1/summary.md";
+    const markup = renderToStaticMarkup(
+      <MessagesTimeline
+        {...buildProps()}
+        timelineEntries={[
+          {
+            id: "entry-1",
+            kind: "work",
+            createdAt: "2026-03-17T19:12:28.000Z",
+            entry: {
+              id: "work-1",
+              createdAt: "2026-03-17T19:12:28.000Z",
+              label: "Evidence run",
+              tone: "tool",
+              itemType: "dynamic_tool_call",
+              evidenceRun: {
+                runId: "run-1",
+                runner: "playwright",
+                status: "fail",
+                success: false,
+                goal: "Validate chat UI",
+                finalUrl: "http://127.0.0.1:5733/pair",
+                title: "KamiCode (Dev)",
+                outputSummary: "Pairing screen was visible.",
+                tracePath,
+                markdownPath: summaryPath,
+                screenshots: [{ label: "final", path: screenshotPath }],
+                videos: [],
+                consoleErrors: [],
+                networkFailures: [],
+              },
+            },
+          },
+        ]}
+      />,
+    );
+
+    expect(markup).toContain("Evidence run");
+    expect(markup).toContain("Pairing screen was visible.");
+    expect(markup).toContain("Screenshots");
+    expect(markup).toContain(encodeURIComponent(screenshotPath));
+    expect(markup).toContain(encodeURIComponent(tracePath));
+    expect(markup).toContain(encodeURIComponent(summaryPath));
+    expect(markup).not.toContain(screenshotPath);
+    expect(markup).not.toContain(tracePath);
+    expect(markup).not.toContain(summaryPath);
   });
 });

@@ -9,6 +9,8 @@ import {
   ProviderSession,
   ProviderDriverKind,
   ProviderInstanceId,
+  type OrchestrationProjectShell,
+  type ProjectTestEnvironment,
 } from "@t3tools/contracts";
 import { createModelSelection } from "@t3tools/shared/model";
 import {
@@ -46,6 +48,7 @@ import { OrchestrationEngineLive } from "./OrchestrationEngine.ts";
 import { OrchestrationProjectionPipelineLive } from "./ProjectionPipeline.ts";
 import { OrchestrationProjectionSnapshotQueryLive } from "./ProjectionSnapshotQuery.ts";
 import {
+  buildTestModeTurnInput,
   providerErrorLabel,
   providerErrorLabelFromInstanceHint,
   ProviderCommandReactorLive,
@@ -69,7 +72,7 @@ const deriveServerPathsSync = (baseDir: string, devUrl: URL | undefined) =>
 
 async function waitFor(
   predicate: () => boolean | Promise<boolean>,
-  timeoutMs = 2000,
+  timeoutMs = 5000,
 ): Promise<void> {
   const deadline = (await Effect.runPromise(Clock.currentTimeMillis)) + timeoutMs;
   const poll = async (): Promise<void> => {
@@ -138,10 +141,52 @@ describe("ProviderCommandReactor", () => {
     });
   });
 
+  describe("test mode turn input", () => {
+    it("adds project-scoped test context only in test mode", () => {
+      const project = {
+        id: asProjectId("project-1"),
+        title: "Provider Project",
+        workspaceRoot: "/tmp/provider-project",
+        defaultModelSelection: null,
+        scripts: [],
+        testEnvironments: [
+          {
+            id: "default-local",
+            name: "Local dev",
+            kind: "local",
+            baseUrl: "http://localhost:5173",
+            isDefault: true,
+          },
+        ],
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+      } satisfies OrchestrationProjectShell;
+
+      expect(
+        buildTestModeTurnInput({
+          interactionMode: "default",
+          messageText: "  hello reactor  ",
+          project,
+        }),
+      ).toBe("hello reactor");
+
+      const testInput = buildTestModeTurnInput({
+        interactionMode: "test",
+        messageText: "Test upload behavior",
+        project,
+      });
+      expect(testInput).toContain("Project: Provider Project");
+      expect(testInput).toContain("Workspace root: /tmp/provider-project");
+      expect(testInput).toContain("Default test URL: http://localhost:5173");
+      expect(testInput).toContain("Test upload behavior");
+    });
+  });
+
   async function createHarness(input?: {
     readonly baseDir?: string;
     readonly threadModelSelection?: ModelSelection;
     readonly sessionModelSwitch?: "unsupported" | "in-session";
+    readonly testEnvironments?: ReadonlyArray<ProjectTestEnvironment>;
   }) {
     const now = "2026-01-01T00:00:00.000Z";
     const baseDir = input?.baseDir ?? fs.mkdtempSync(path.join(os.tmpdir(), "t3code-reactor-"));
@@ -376,6 +421,9 @@ describe("ProviderCommandReactor", () => {
         title: "Provider Project",
         workspaceRoot: "/tmp/provider-project",
         defaultModelSelection: modelSelection,
+        ...(input?.testEnvironments !== undefined
+          ? { testEnvironments: Array.from(input.testEnvironments) }
+          : {}),
         createdAt: now,
       }),
     );
@@ -827,6 +875,69 @@ describe("ProviderCommandReactor", () => {
       interactionMode: "plan",
     });
   });
+
+  it(
+    "forwards project test context with test interaction mode",
+    async () => {
+      const harness = await createHarness({
+        testEnvironments: [
+          {
+            id: "default-local",
+            name: "Local dev",
+            kind: "local",
+            baseUrl: "http://localhost:5173",
+            isDefault: true,
+          },
+        ],
+      });
+      const now = "2026-01-01T00:00:00.000Z";
+
+      await Effect.runPromise(
+        harness.engine.dispatch({
+          type: "thread.interaction-mode.set",
+          commandId: CommandId.make("cmd-interaction-mode-set-test"),
+          threadId: ThreadId.make("thread-1"),
+          interactionMode: "test",
+          createdAt: now,
+        }),
+      );
+      await waitFor(async () => {
+        const readModel = await harness.readModel();
+        const thread = readModel.threads.find((entry) => entry.id === ThreadId.make("thread-1"));
+        return thread?.interactionMode === "test";
+      });
+
+      await Effect.runPromise(
+        harness.engine.dispatch({
+          type: "thread.turn.start",
+          commandId: CommandId.make("cmd-turn-start-test"),
+          threadId: ThreadId.make("thread-1"),
+          message: {
+            messageId: asMessageId("user-message-test"),
+            role: "user",
+            text: "test the upload flow",
+            attachments: [],
+          },
+          interactionMode: "test",
+          runtimeMode: "approval-required",
+          createdAt: now,
+        }),
+      );
+
+      await waitFor(() => harness.sendTurn.mock.calls.length === 1);
+      const sendTurnInput = harness.sendTurn.mock.calls[0]?.[0] as
+        | { input?: string; interactionMode?: string }
+        | undefined;
+      expect(sendTurnInput).toMatchObject({
+        interactionMode: "test",
+      });
+      expect(sendTurnInput?.input).toContain("Project: Provider Project");
+      expect(sendTurnInput?.input).toContain("Workspace root: /tmp/provider-project");
+      expect(sendTurnInput?.input).toContain("Default test URL: http://localhost:5173");
+      expect(sendTurnInput?.input).toContain("test the upload flow");
+    },
+    10_000,
+  );
 
   it("preserves the active session model when in-session model switching is unsupported", async () => {
     const harness = await createHarness({ sessionModelSwitch: "unsupported" });

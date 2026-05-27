@@ -1,6 +1,7 @@
 import {
   type EnvironmentId,
   type EditorId,
+  type ProjectTestEnvironment,
   type ProjectScript,
   type ResolvedKeybindingsConfig,
   type ThreadId,
@@ -13,6 +14,7 @@ import { DiffIcon, TerminalSquareIcon } from "lucide-react";
 import { Badge } from "../ui/badge";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import ProjectScriptsControl, { type NewProjectScriptInput } from "../ProjectScriptsControl";
+import ProjectTestEnvironmentControl from "../ProjectTestEnvironmentControl";
 import { Toggle } from "../ui/toggle";
 import { SidebarTrigger } from "../ui/sidebar";
 import { OpenInPicker } from "./OpenInPicker";
@@ -36,10 +38,12 @@ interface ChatHeaderProps {
   diffToggleShortcutLabel: string | null;
   gitCwd: string | null;
   diffOpen: boolean;
+  activeProjectTestEnvironments: ProjectTestEnvironment[] | undefined;
   onRunProjectScript: (script: ProjectScript) => void;
   onAddProjectScript: (input: NewProjectScriptInput) => Promise<void>;
   onUpdateProjectScript: (scriptId: string, input: NewProjectScriptInput) => Promise<void>;
   onDeleteProjectScript: (scriptId: string) => Promise<void>;
+  onUpdateProjectTestEnvironments: (testEnvironments: ProjectTestEnvironment[]) => Promise<void>;
   onToggleTerminal: () => void;
   onToggleDiff: () => void;
 }
@@ -74,10 +78,12 @@ export const ChatHeader = memo(function ChatHeader({
   diffToggleShortcutLabel,
   gitCwd,
   diffOpen,
+  activeProjectTestEnvironments,
   onRunProjectScript,
   onAddProjectScript,
   onUpdateProjectScript,
   onDeleteProjectScript,
+  onUpdateProjectTestEnvironments,
   onToggleTerminal,
   onToggleDiff,
 }: ChatHeaderProps) {
@@ -119,6 +125,12 @@ export const ChatHeader = memo(function ChatHeader({
             onAddScript={onAddProjectScript}
             onUpdateScript={onUpdateProjectScript}
             onDeleteScript={onDeleteProjectScript}
+          />
+        )}
+        {activeProjectTestEnvironments && (
+          <ProjectTestEnvironmentControl
+            testEnvironments={activeProjectTestEnvironments}
+            onUpdateTestEnvironments={onUpdateProjectTestEnvironments}
           />
         )}
         {showOpenInPicker && (

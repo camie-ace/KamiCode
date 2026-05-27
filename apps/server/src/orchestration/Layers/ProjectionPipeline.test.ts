@@ -2228,7 +2228,7 @@ engineLayer("OrchestrationProjectionPipeline via engine dispatch", (it) => {
     }),
   );
 
-  it.effect("projects persist updated scripts from project.meta.update", () =>
+  it.effect("projects persist updated metadata from project.meta.update", () =>
     Effect.gen(function* () {
       const engine = yield* OrchestrationEngineService;
       const sql = yield* SqlClient.SqlClient;
@@ -2260,6 +2260,15 @@ engineLayer("OrchestrationProjectionPipeline via engine dispatch", (it) => {
             runOnWorktreeCreate: false,
           },
         ],
+        testEnvironments: [
+          {
+            id: "default-local",
+            name: "Local dev",
+            kind: "local",
+            baseUrl: "http://localhost:5173",
+            isDefault: true,
+          },
+        ],
         defaultModelSelection: {
           instanceId: ProviderInstanceId.make("codex"),
           model: "gpt-5",
@@ -2268,10 +2277,12 @@ engineLayer("OrchestrationProjectionPipeline via engine dispatch", (it) => {
 
       const projectRows = yield* sql<{
         readonly scriptsJson: string;
+        readonly testEnvironmentsJson: string;
         readonly defaultModelSelection: string;
       }>`
         SELECT
           scripts_json AS "scriptsJson",
+          test_environments_json AS "testEnvironmentsJson",
           default_model_selection_json AS "defaultModelSelection"
         FROM projection_projects
         WHERE project_id = 'project-scripts'
@@ -2280,6 +2291,8 @@ engineLayer("OrchestrationProjectionPipeline via engine dispatch", (it) => {
         {
           scriptsJson:
             '[{"id":"script-1","name":"Build","command":"bun run build","icon":"build","runOnWorktreeCreate":false}]',
+          testEnvironmentsJson:
+            '[{"id":"default-local","name":"Local dev","kind":"local","baseUrl":"http://localhost:5173","isDefault":true}]',
           defaultModelSelection: '{"instanceId":"codex","model":"gpt-5"}',
         },
       ]);

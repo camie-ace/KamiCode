@@ -48,6 +48,7 @@ import {
   toOpenCodeQuestionAnswers,
   type OpenCodeServerConnection,
 } from "../opencodeRuntime.ts";
+import { applyTestModePromptPrefix } from "../TestModeInstructions.ts";
 import * as Option from "effect/Option";
 
 const PROVIDER = ProviderDriverKind.make("opencode");
@@ -1046,7 +1047,7 @@ export function makeOpenCodeAdapter(
               });
               const openCodeSession = yield* runOpenCodeSdk("session.create", () =>
                 client.session.create({
-                  title: `T3 Code ${input.threadId}`,
+                  title: `KamiCode ${input.threadId}`,
                   permission: buildOpenCodePermissionRules(input.runtimeMode),
                 }),
               );
@@ -1164,7 +1165,10 @@ export function makeOpenCodeAdapter(
         });
       }
 
-      const text = input.input?.trim();
+      const text = applyTestModePromptPrefix({
+        interactionMode: input.interactionMode,
+        prompt: input.input?.trim() ?? "",
+      });
       const fileParts = toOpenCodeFileParts({
         attachments: input.attachments,
         resolveAttachmentPath: (attachment) =>

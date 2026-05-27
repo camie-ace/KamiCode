@@ -83,6 +83,7 @@ import {
   type ProviderAdapterError,
 } from "../Errors.ts";
 import { type ClaudeAdapterShape } from "../Services/ClaudeAdapter.ts";
+import { applyTestModePromptPrefix } from "../TestModeInstructions.ts";
 import { type EventNdjsonLogger, makeEventNdjsonLogger } from "./EventNdjsonLogger.ts";
 const encodeUnknownJsonStringExit = Schema.encodeUnknownExit(Schema.UnknownFromJsonString);
 const decodeUnknownJsonStringExit = Schema.decodeUnknownExit(Schema.UnknownFromJsonString);
@@ -605,7 +606,10 @@ function buildPromptText(
   const caps = getClaudeModelCapabilities(claudeModel);
 
   const promptEffort = resolvePromptInjectedEffort(caps, rawEffort);
-  return applyClaudePromptEffortPrefix(input.input?.trim() ?? "", promptEffort);
+  return applyTestModePromptPrefix({
+    interactionMode: input.interactionMode,
+    prompt: applyClaudePromptEffortPrefix(input.input?.trim() ?? "", promptEffort),
+  });
 }
 
 function buildUserMessage(input: {
@@ -3106,14 +3110,14 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
 
     // Apply interaction mode by switching the SDK's permission mode.
     // "plan" maps directly to the SDK's "plan" permission mode;
-    // "default" restores the session's original permission mode.
+    // "default" and "test" restore the session's original permission mode.
     // When interactionMode is absent we leave the current mode unchanged.
     if (input.interactionMode === "plan") {
       yield* Effect.tryPromise({
         try: () => context.query.setPermissionMode("plan"),
         catch: (cause) => toRequestError(input.threadId, "turn/setPermissionMode", cause),
       });
-    } else if (input.interactionMode === "default") {
+    } else if (input.interactionMode === "default" || input.interactionMode === "test") {
       yield* Effect.tryPromise({
         try: () => context.query.setPermissionMode(context.basePermissionMode ?? "default"),
         catch: (cause) => toRequestError(input.threadId, "turn/setPermissionMode", cause),

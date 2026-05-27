@@ -41,7 +41,9 @@ function makeActivity(overrides: {
     tone: overrides.tone ?? "tool",
     payload,
     turnId: overrides.turnId ? TurnId.make(overrides.turnId) : null,
-    ...(overrides.sequence !== undefined ? { sequence: overrides.sequence } : {}),
+    ...(overrides.sequence !== undefined
+      ? { sequence: overrides.sequence }
+      : {}),
   };
 }
 
@@ -617,7 +619,10 @@ describe("deriveWorkLogEntries", () => {
     ];
 
     const entries = deriveWorkLogEntries(activities, undefined);
-    expect(entries.map((entry) => entry.id)).toEqual(["task-progress", "task-complete"]);
+    expect(entries.map((entry) => entry.id)).toEqual([
+      "task-progress",
+      "task-complete",
+    ]);
   });
 
   it("uses payload summary as label for task entries when available", () => {
@@ -655,14 +660,23 @@ describe("deriveWorkLogEntries", () => {
 
   it("filters by turn id when provided", () => {
     const activities: OrchestrationThreadActivity[] = [
-      makeActivity({ id: "turn-1", turnId: "turn-1", summary: "Tool call", kind: "tool.started" }),
+      makeActivity({
+        id: "turn-1",
+        turnId: "turn-1",
+        summary: "Tool call",
+        kind: "tool.started",
+      }),
       makeActivity({
         id: "turn-2",
         turnId: "turn-2",
         summary: "Tool call complete",
         kind: "tool.completed",
       }),
-      makeActivity({ id: "no-turn", summary: "Checkpoint captured", tone: "info" }),
+      makeActivity({
+        id: "no-turn",
+        summary: "Checkpoint captured",
+        tone: "info",
+      }),
     ];
 
     const entries = deriveWorkLogEntries(activities, TurnId.make("turn-2"));
@@ -698,7 +712,8 @@ describe("deriveWorkLogEntries", () => {
         kind: "tool.updated",
         summary: "Tool call",
         payload: {
-          detail: 'ExitPlanMode: {"allowedPrompts":[{"tool":"Bash","prompt":"run tests"}]}',
+          detail:
+            'ExitPlanMode: {"allowedPrompts":[{"tool":"Bash","prompt":"run tests"}]}',
         },
       }),
       makeActivity({
@@ -779,7 +794,8 @@ describe("deriveWorkLogEntries", () => {
           itemType: "command_execution",
           data: {
             item: {
-              command: "\"C:\\Program Files\\PowerShell\\7\\pwsh.exe\" -Command 'bun run lint'",
+              command:
+                "\"C:\\Program Files\\PowerShell\\7\\pwsh.exe\" -Command 'bun run lint'",
             },
           },
         },
@@ -803,7 +819,11 @@ describe("deriveWorkLogEntries", () => {
           itemType: "command_execution",
           data: {
             item: {
-              command: ["C:\\Program Files\\PowerShell\\7\\pwsh.exe", "-Command", "rg -n foo ."],
+              command: [
+                "C:\\Program Files\\PowerShell\\7\\pwsh.exe",
+                "-Command",
+                "rg -n foo .",
+              ],
             },
           },
         },
@@ -875,7 +895,8 @@ describe("deriveWorkLogEntries", () => {
             item: {
               command: ["bun", "run", "dev"],
               result: {
-                content: '{ "dev": "vite dev --port 3000" } <exited with exit code 0>',
+                content:
+                  '{ "dev": "vite dev --port 3000" } <exited with exit code 0>',
                 exitCode: 0,
               },
             },
@@ -937,6 +958,88 @@ describe("deriveWorkLogEntries", () => {
     const [entry] = deriveWorkLogEntries(activities, undefined);
     expect(entry?.toolTitle).toBe("Read File");
     expect(entry?.detail).toBeUndefined();
+  });
+
+  it("extracts evidence run artifacts from Kami test harness tool results", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "evidence-complete",
+        kind: "tool.completed",
+        summary: "Evidence run",
+        payload: {
+          itemType: "dynamic_tool_call",
+          title: "Evidence run",
+          detail: "Pairing screen was visible.",
+          data: {
+            callId: "call-1",
+            namespace: "kamicode",
+            tool: "kami_test_harness",
+            success: true,
+            contentItems: [
+              {
+                type: "inputText",
+                text: `${JSON.stringify({
+                  runner: "playwright",
+                  status: "fail",
+                  success: false,
+                  runId: "run-1",
+                  goal: "Validate chat UI is visible",
+                  finalUrl: "http://127.0.0.1:5733/pair",
+                  title: "KamiCode (Dev)",
+                  evidenceSummary:
+                    "Observed pairing screen instead of chat UI.",
+                  outputSummary: "Pairing screen was visible.",
+                  artifactPaths: {
+                    trace:
+                      "C:/Users/THIS PC/.t3/dev/test-harness/run-1/trace.zip",
+                    screenshots: [
+                      "C:/Users/THIS PC/.t3/dev/test-harness/run-1/screenshots/01-start.png",
+                    ],
+                    summary:
+                      "C:/Users/THIS PC/.t3/dev/test-harness/run-1/summary.json",
+                    markdown:
+                      "C:/Users/THIS PC/.t3/dev/test-harness/run-1/summary.md",
+                  },
+                  screenshots: [
+                    {
+                      label: "final",
+                      path: "C:/Users/THIS PC/.t3/dev/test-harness/run-1/screenshots/05-final.png",
+                    },
+                  ],
+                  videos: [],
+                  consoleErrors: ["[warning] slow"],
+                  networkFailures: ["GET /missing 404"],
+                  durationMs: 1200,
+                })}\n`,
+              },
+            ],
+          },
+        },
+      }),
+    ];
+
+    const [entry] = deriveWorkLogEntries(activities, undefined);
+    expect(entry?.evidenceRun).toMatchObject({
+      runId: "run-1",
+      runner: "playwright",
+      status: "fail",
+      success: false,
+      goal: "Validate chat UI is visible",
+      finalUrl: "http://127.0.0.1:5733/pair",
+      title: "KamiCode (Dev)",
+      outputSummary: "Pairing screen was visible.",
+      tracePath: "C:/Users/THIS PC/.t3/dev/test-harness/run-1/trace.zip",
+      markdownPath: "C:/Users/THIS PC/.t3/dev/test-harness/run-1/summary.md",
+      durationMs: 1200,
+    });
+    expect(entry?.evidenceRun?.screenshots).toEqual([
+      {
+        label: "final",
+        path: "C:/Users/THIS PC/.t3/dev/test-harness/run-1/screenshots/05-final.png",
+      },
+    ]);
+    expect(entry?.evidenceRun?.consoleErrors).toEqual(["[warning] slow"]);
+    expect(entry?.evidenceRun?.networkFailures).toEqual(["GET /missing 404"]);
   });
 
   it("uses grep raw output summaries instead of repeating the generic tool label", () => {
@@ -1219,7 +1322,10 @@ describe("deriveWorkLogEntries", () => {
 
     const entries = deriveWorkLogEntries(activities, undefined);
 
-    expect(entries.map((entry) => entry.id)).toEqual(["tool-1-complete", "tool-2-complete"]);
+    expect(entries.map((entry) => entry.id)).toEqual([
+      "tool-1-complete",
+      "tool-2-complete",
+    ]);
   });
 
   it("collapses same-timestamp lifecycle rows even when completed sorts before updated by id", () => {
@@ -1299,7 +1405,11 @@ describe("deriveTimelineEntries", () => {
       ],
     );
 
-    expect(entries.map((entry) => entry.kind)).toEqual(["message", "proposed-plan", "work"]);
+    expect(entries.map((entry) => entry.kind)).toEqual([
+      "message",
+      "proposed-plan",
+      "work",
+    ]);
     expect(entries[1]).toMatchObject({
       kind: "proposed-plan",
       proposedPlan: {
@@ -1390,7 +1500,12 @@ describe("deriveWorkLogEntries context window handling", () => {
 describe("hasToolActivityForTurn", () => {
   it("returns false when turn id is missing", () => {
     const activities: OrchestrationThreadActivity[] = [
-      makeActivity({ id: "tool-1", turnId: "turn-1", kind: "tool.completed", tone: "tool" }),
+      makeActivity({
+        id: "tool-1",
+        turnId: "turn-1",
+        kind: "tool.completed",
+        tone: "tool",
+      }),
     ];
 
     expect(hasToolActivityForTurn(activities, undefined)).toBe(false);
@@ -1399,12 +1514,26 @@ describe("hasToolActivityForTurn", () => {
 
   it("returns true only for matching tool activity in the target turn", () => {
     const activities: OrchestrationThreadActivity[] = [
-      makeActivity({ id: "tool-1", turnId: "turn-1", kind: "tool.completed", tone: "tool" }),
-      makeActivity({ id: "info-1", turnId: "turn-2", kind: "turn.completed", tone: "info" }),
+      makeActivity({
+        id: "tool-1",
+        turnId: "turn-1",
+        kind: "tool.completed",
+        tone: "tool",
+      }),
+      makeActivity({
+        id: "info-1",
+        turnId: "turn-2",
+        kind: "turn.completed",
+        tone: "info",
+      }),
     ];
 
-    expect(hasToolActivityForTurn(activities, TurnId.make("turn-1"))).toBe(true);
-    expect(hasToolActivityForTurn(activities, TurnId.make("turn-2"))).toBe(false);
+    expect(hasToolActivityForTurn(activities, TurnId.make("turn-1"))).toBe(
+      true,
+    );
+    expect(hasToolActivityForTurn(activities, TurnId.make("turn-2"))).toBe(
+      false,
+    );
   });
 });
 

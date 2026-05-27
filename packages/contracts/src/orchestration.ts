@@ -121,7 +121,7 @@ export const RuntimeMode = Schema.Literals([
 ]);
 export type RuntimeMode = typeof RuntimeMode.Type;
 export const DEFAULT_RUNTIME_MODE: RuntimeMode = "full-access";
-export const ProviderInteractionMode = Schema.Literals(["default", "plan"]);
+export const ProviderInteractionMode = Schema.Literals(["default", "plan", "test"]);
 export type ProviderInteractionMode = typeof ProviderInteractionMode.Type;
 export const DEFAULT_PROVIDER_INTERACTION_MODE: ProviderInteractionMode = "default";
 export const ProviderRequestKind = Schema.Literals(["command", "file-read", "file-change"]);
@@ -197,6 +197,15 @@ export const ProjectScript = Schema.Struct({
 });
 export type ProjectScript = typeof ProjectScript.Type;
 
+export const ProjectTestEnvironment = Schema.Struct({
+  id: TrimmedNonEmptyString,
+  name: TrimmedNonEmptyString,
+  kind: Schema.Literals(["local", "remote"]),
+  baseUrl: TrimmedNonEmptyString,
+  isDefault: Schema.Boolean,
+});
+export type ProjectTestEnvironment = typeof ProjectTestEnvironment.Type;
+
 export const OrchestrationProject = Schema.Struct({
   id: ProjectId,
   title: TrimmedNonEmptyString,
@@ -204,6 +213,7 @@ export const OrchestrationProject = Schema.Struct({
   repositoryIdentity: Schema.optional(Schema.NullOr(RepositoryIdentity)),
   defaultModelSelection: Schema.NullOr(ModelSelection),
   scripts: Schema.Array(ProjectScript),
+  testEnvironments: Schema.optionalKey(Schema.Array(ProjectTestEnvironment)),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
   deletedAt: Schema.NullOr(IsoDateTime),
@@ -371,6 +381,7 @@ export const OrchestrationProjectShell = Schema.Struct({
   repositoryIdentity: Schema.optional(Schema.NullOr(RepositoryIdentity)),
   defaultModelSelection: Schema.NullOr(ModelSelection),
   scripts: Schema.Array(ProjectScript),
+  testEnvironments: Schema.optionalKey(Schema.Array(ProjectTestEnvironment)),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
 });
@@ -459,6 +470,7 @@ export const ProjectCreateCommand = Schema.Struct({
   workspaceRoot: TrimmedNonEmptyString,
   createWorkspaceRootIfMissing: Schema.optional(Schema.Boolean),
   defaultModelSelection: Schema.optional(Schema.NullOr(ModelSelection)),
+  testEnvironments: Schema.optional(Schema.Array(ProjectTestEnvironment)),
   createdAt: IsoDateTime,
 });
 
@@ -470,6 +482,7 @@ const ProjectMetaUpdateCommand = Schema.Struct({
   workspaceRoot: Schema.optional(TrimmedNonEmptyString),
   defaultModelSelection: Schema.optional(Schema.NullOr(ModelSelection)),
   scripts: Schema.optional(Schema.Array(ProjectScript)),
+  testEnvironments: Schema.optional(Schema.Array(ProjectTestEnvironment)),
 });
 
 const ProjectDeleteCommand = Schema.Struct({
@@ -805,6 +818,7 @@ export const ProjectCreatedPayload = Schema.Struct({
   repositoryIdentity: Schema.optional(Schema.NullOr(RepositoryIdentity)),
   defaultModelSelection: Schema.NullOr(ModelSelection),
   scripts: Schema.Array(ProjectScript),
+  testEnvironments: Schema.optionalKey(Schema.Array(ProjectTestEnvironment)),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
 });
@@ -816,6 +830,7 @@ export const ProjectMetaUpdatedPayload = Schema.Struct({
   repositoryIdentity: Schema.optional(Schema.NullOr(RepositoryIdentity)),
   defaultModelSelection: Schema.optional(Schema.NullOr(ModelSelection)),
   scripts: Schema.optional(Schema.Array(ProjectScript)),
+  testEnvironments: Schema.optional(Schema.Array(ProjectTestEnvironment)),
   updatedAt: IsoDateTime,
 });
 

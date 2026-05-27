@@ -10,6 +10,7 @@ import {
   serverEnvironmentRouteLayer,
   staticAndDevRouteLayer,
   browserApiCorsLayer,
+  testHarnessArtifactRouteLayer,
 } from "./http.ts";
 import { fixPath } from "./os-jank.ts";
 import { websocketRpcRouteLayer } from "./ws.ts";
@@ -35,7 +36,10 @@ import { ProviderInstanceRegistryHydrationLive } from "./provider/Layers/Provide
 import { TerminalManagerLive } from "./terminal/Layers/Manager.ts";
 import * as GitManager from "./git/GitManager.ts";
 import { KeybindingsLive } from "./keybindings.ts";
-import { ServerRuntimeStartup, ServerRuntimeStartupLive } from "./serverRuntimeStartup.ts";
+import {
+  ServerRuntimeStartup,
+  ServerRuntimeStartupLive,
+} from "./serverRuntimeStartup.ts";
 import { OrchestrationReactorLive } from "./orchestration/Layers/OrchestrationReactor.ts";
 import { RuntimeReceiptBusLive } from "./orchestration/Layers/RuntimeReceiptBus.ts";
 import { ProviderRuntimeIngestionLive } from "./orchestration/Layers/ProviderRuntimeIngestion.ts";
@@ -89,15 +93,22 @@ import {
   orchestrationSnapshotRouteLayer,
 } from "./orchestration/http.ts";
 import * as NetService from "@t3tools/shared/Net";
-import { disableTailscaleServe, ensureTailscaleServe } from "@t3tools/tailscale";
+import {
+  disableTailscaleServe,
+  ensureTailscaleServe,
+} from "@t3tools/tailscale";
 
 const PtyAdapterLive = Layer.unwrap(
   Effect.gen(function* () {
     if (typeof Bun !== "undefined") {
-      const BunPTY = yield* Effect.promise(() => import("./terminal/Layers/BunPTY.ts"));
+      const BunPTY = yield* Effect.promise(
+        () => import("./terminal/Layers/BunPTY.ts"),
+      );
       return BunPTY.layer;
     } else {
-      const NodePTY = yield* Effect.promise(() => import("./terminal/Layers/NodePTY.ts"));
+      const NodePTY = yield* Effect.promise(
+        () => import("./terminal/Layers/NodePTY.ts"),
+      );
       return NodePTY.layer;
     }
   }),
@@ -130,10 +141,14 @@ const HttpServerLive = Layer.unwrap(
 const PlatformServicesLive = Layer.unwrap(
   Effect.gen(function* () {
     if (typeof Bun !== "undefined") {
-      const { layer } = yield* Effect.promise(() => import("@effect/platform-bun/BunServices"));
+      const { layer } = yield* Effect.promise(
+        () => import("@effect/platform-bun/BunServices"),
+      );
       return layer;
     } else {
-      const { layer } = yield* Effect.promise(() => import("@effect/platform-node/NodeServices"));
+      const { layer } = yield* Effect.promise(
+        () => import("@effect/platform-node/NodeServices"),
+      );
       return layer;
     }
   }),
@@ -163,19 +178,27 @@ const ProviderLayerLive = ProviderServiceLive.pipe(
   Layer.provideMerge(ProviderSessionDirectoryLayerLive),
 );
 
-const PersistenceLayerLive = Layer.empty.pipe(Layer.provideMerge(SqlitePersistenceLayerLive));
+const PersistenceLayerLive = Layer.empty.pipe(
+  Layer.provideMerge(SqlitePersistenceLayerLive),
+);
 
 const VcsDriverRegistryLayerLive = VcsDriverRegistry.layer.pipe(
   Layer.provide(VcsProjectConfig.layer),
 );
 
-const SourceControlProviderRegistryLayerLive = SourceControlProviderRegistry.layer.pipe(
-  Layer.provide(
-    Layer.mergeAll(AzureDevOpsCli.layer, BitbucketApi.layer, GitHubCli.layer, GitLabCli.layer),
-  ),
-  Layer.provideMerge(GitVcsDriver.layer),
-  Layer.provideMerge(VcsDriverRegistryLayerLive),
-);
+const SourceControlProviderRegistryLayerLive =
+  SourceControlProviderRegistry.layer.pipe(
+    Layer.provide(
+      Layer.mergeAll(
+        AzureDevOpsCli.layer,
+        BitbucketApi.layer,
+        GitHubCli.layer,
+        GitLabCli.layer,
+      ),
+    ),
+    Layer.provideMerge(GitVcsDriver.layer),
+    Layer.provideMerge(VcsDriverRegistryLayerLive),
+  );
 
 const GitManagerLayerLive = GitManager.layer.pipe(
   Layer.provideMerge(ProjectSetupScriptRunnerLive),
@@ -194,26 +217,37 @@ const GitWorkflowLayerLive = GitWorkflowService.layer.pipe(
   Layer.provideMerge(GitLayerLive),
 );
 
-const SourceControlRepositoryServiceLayerLive = SourceControlRepositoryService.layer.pipe(
-  Layer.provideMerge(GitVcsDriver.layer),
-  Layer.provideMerge(SourceControlProviderRegistryLayerLive),
-);
+const SourceControlRepositoryServiceLayerLive =
+  SourceControlRepositoryService.layer.pipe(
+    Layer.provideMerge(GitVcsDriver.layer),
+    Layer.provideMerge(SourceControlProviderRegistryLayerLive),
+  );
 
 const VcsLayerLive = Layer.empty.pipe(
   Layer.provideMerge(VcsProjectConfig.layer),
   Layer.provideMerge(VcsDriverRegistryLayerLive),
-  Layer.provideMerge(VcsProvisioningService.layer.pipe(Layer.provide(VcsDriverRegistryLayerLive))),
+  Layer.provideMerge(
+    VcsProvisioningService.layer.pipe(
+      Layer.provide(VcsDriverRegistryLayerLive),
+    ),
+  ),
   Layer.provideMerge(GitWorkflowLayerLive),
   Layer.provideMerge(SourceControlRepositoryServiceLayerLive),
-  Layer.provideMerge(VcsStatusBroadcaster.layer.pipe(Layer.provide(GitWorkflowLayerLive))),
+  Layer.provideMerge(
+    VcsStatusBroadcaster.layer.pipe(Layer.provide(GitWorkflowLayerLive)),
+  ),
 );
 
 const CheckpointingLayerLive = Layer.empty.pipe(
   Layer.provideMerge(CheckpointDiffQueryLive),
-  Layer.provideMerge(CheckpointStoreLive.pipe(Layer.provide(VcsDriverRegistryLayerLive))),
+  Layer.provideMerge(
+    CheckpointStoreLive.pipe(Layer.provide(VcsDriverRegistryLayerLive)),
+  ),
 );
 
-const TerminalLayerLive = TerminalManagerLive.pipe(Layer.provide(PtyAdapterLive));
+const TerminalLayerLive = TerminalManagerLive.pipe(
+  Layer.provide(PtyAdapterLive),
+);
 
 const WorkspaceEntriesLayerLive = WorkspaceEntriesLive.pipe(
   Layer.provide(WorkspacePathsLive),
@@ -305,6 +339,7 @@ export const makeRoutesLayer = Layer.mergeAll(
   authSessionRouteLayer,
   authWebSocketTokenRouteLayer,
   attachmentsRouteLayer,
+  testHarnessArtifactRouteLayer,
   orchestrationDispatchRouteLayer,
   orchestrationSnapshotRouteLayer,
   otlpTracesProxyRouteLayer,
@@ -382,7 +417,9 @@ export const makeServerLayer = Layer.unwrap(
             }),
             (configured) =>
               configured
-                ? disableTailscaleServe({ servePort: configured.servePort }).pipe(
+                ? disableTailscaleServe({
+                    servePort: configured.servePort,
+                  }).pipe(
                     Effect.tap(() =>
                       Effect.logInfo("Tailscale Serve disabled", {
                         servePort: configured.servePort,

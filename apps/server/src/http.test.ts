@@ -1,6 +1,12 @@
+// @effect-diagnostics nodeBuiltinImport:off
+import path from "node:path";
 import { describe, expect, it } from "vitest";
 
-import { isLoopbackHostname, resolveDevRedirectUrl } from "./http.ts";
+import {
+  isLoopbackHostname,
+  resolveDevRedirectUrl,
+  resolveTestHarnessArtifactPath,
+} from "./http.ts";
 
 describe("http dev routing", () => {
   it("treats localhost and loopback addresses as local", () => {
@@ -23,5 +29,33 @@ describe("http dev routing", () => {
     expect(resolveDevRedirectUrl(devUrl, requestUrl)).toBe(
       "http://127.0.0.1:5173/pair?token=test-token",
     );
+  });
+});
+
+describe("test harness artifact routing", () => {
+  it("allows artifact files under the state test-harness directory", () => {
+    const stateDir = path.resolve("state");
+    const artifactPath = path.join(
+      stateDir,
+      "test-harness",
+      "projects",
+      "project-1",
+      "runs",
+      "run-1",
+      "trace.zip",
+    );
+
+    expect(resolveTestHarnessArtifactPath({ stateDir, artifactPath })).toBe(
+      artifactPath,
+    );
+  });
+
+  it("rejects files outside the test-harness directory", () => {
+    expect(
+      resolveTestHarnessArtifactPath({
+        stateDir: path.resolve("state"),
+        artifactPath: path.resolve("state", "secrets", "session.json"),
+      }),
+    ).toBeNull();
   });
 });

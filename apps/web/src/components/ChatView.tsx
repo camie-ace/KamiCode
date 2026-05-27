@@ -5,8 +5,9 @@ import {
   type EnvironmentId,
   type MessageId,
   type ModelSelection,
-  type ProjectScript,
   type ProjectId,
+  type ProjectScript,
+  type ProjectTestEnvironment,
   type ProviderApprovalDecision,
   ProviderInstanceId,
   type ServerProvider,
@@ -2091,6 +2092,22 @@ export default function ChatView(props: ChatViewProps) {
     [activeProject, persistProjectScripts],
   );
 
+  const saveProjectTestEnvironments = useCallback(
+    async (testEnvironments: ProjectTestEnvironment[]) => {
+      if (!activeProject) return;
+      const api = readEnvironmentApi(environmentId);
+      if (!api) return;
+
+      await api.orchestration.dispatchCommand({
+        type: "project.meta.update",
+        commandId: newCommandId(),
+        projectId: activeProject.id,
+        testEnvironments,
+      });
+    },
+    [activeProject, environmentId],
+  );
+
   const handleRuntimeModeChange = useCallback(
     (mode: RuntimeMode) => {
       if (mode === runtimeMode) return;
@@ -2129,7 +2146,9 @@ export default function ChatView(props: ChatViewProps) {
     ],
   );
   const toggleInteractionMode = useCallback(() => {
-    handleInteractionModeChange(interactionMode === "plan" ? "default" : "plan");
+    const nextInteractionMode: ProviderInteractionMode =
+      interactionMode === "default" ? "plan" : interactionMode === "plan" ? "test" : "default";
+    handleInteractionModeChange(nextInteractionMode);
   }, [handleInteractionModeChange, interactionMode]);
   const togglePlanSidebar = useCallback(() => {
     setPlanSidebarOpen((open) => {
@@ -3090,7 +3109,7 @@ export default function ChatView(props: ChatViewProps) {
       interactionMode: nextInteractionMode,
     }: {
       text: string;
-      interactionMode: "default" | "plan";
+      interactionMode: ProviderInteractionMode;
     }) => {
       const api = readEnvironmentApi(environmentId);
       if (
@@ -3531,10 +3550,14 @@ export default function ChatView(props: ChatViewProps) {
           diffToggleShortcutLabel={diffPanelShortcutLabel}
           gitCwd={gitCwd}
           diffOpen={diffOpen}
+          activeProjectTestEnvironments={
+            activeProject ? (activeProject.testEnvironments ?? []) : undefined
+          }
           onRunProjectScript={runProjectScript}
           onAddProjectScript={saveProjectScript}
           onUpdateProjectScript={updateProjectScript}
           onDeleteProjectScript={deleteProjectScript}
+          onUpdateProjectTestEnvironments={saveProjectTestEnvironments}
           onToggleTerminal={toggleTerminalVisibility}
           onToggleDiff={onToggleDiff}
         />

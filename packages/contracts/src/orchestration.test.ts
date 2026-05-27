@@ -170,6 +170,34 @@ it.effect("decodes historical project.created payloads with a default provider",
       updatedAt: "2026-01-01T00:00:00.000Z",
     });
     assert.strictEqual(parsed.defaultModelSelection?.instanceId, "codex");
+    assert.deepStrictEqual(parsed.testEnvironments ?? [], []);
+  }),
+);
+
+it.effect("decodes project test environments", () =>
+  Effect.gen(function* () {
+    const parsed = yield* decodeProjectMetaUpdatedPayload({
+      projectId: "project-1",
+      testEnvironments: [
+        {
+          id: "local",
+          name: "Local dev",
+          kind: "local",
+          baseUrl: "http://localhost:3000",
+          isDefault: true,
+        },
+      ],
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    });
+    assert.deepStrictEqual(parsed.testEnvironments, [
+      {
+        id: "local",
+        name: "Local dev",
+        kind: "local",
+        baseUrl: "http://localhost:3000",
+        isDefault: true,
+      },
+    ]);
   }),
 );
 
@@ -245,6 +273,25 @@ it.effect("preserves explicit provider and runtime mode in thread.turn.start", (
     assert.strictEqual(parsed.modelSelection?.instanceId, "codex");
     assert.strictEqual(parsed.runtimeMode, "full-access");
     assert.strictEqual(parsed.interactionMode, DEFAULT_PROVIDER_INTERACTION_MODE);
+  }),
+);
+
+it.effect("accepts test interaction mode in thread.turn.start", () =>
+  Effect.gen(function* () {
+    const parsed = yield* decodeThreadTurnStartCommand({
+      type: "thread.turn.start",
+      commandId: "cmd-turn-test",
+      threadId: "thread-1",
+      message: {
+        messageId: "msg-test",
+        role: "user",
+        text: "test the last feature",
+        attachments: [],
+      },
+      interactionMode: "test",
+      createdAt: "2026-01-01T00:00:00.000Z",
+    });
+    assert.strictEqual(parsed.interactionMode, "test");
   }),
 );
 
