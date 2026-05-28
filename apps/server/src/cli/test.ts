@@ -57,6 +57,8 @@ interface BrowserCommandFlags {
   readonly storageState: Option.Option<string>;
   readonly projectId: Option.Option<string>;
   readonly environmentId: Option.Option<string>;
+  readonly auth: Option.Option<string>;
+  readonly authCredential: Option.Option<string>;
   readonly timeoutMs: number;
   readonly lingerMs: number;
   readonly viewportWidth: number;
@@ -134,6 +136,18 @@ const runBrowserCommand = (flags: BrowserCommandFlags) =>
     const actions = Option.isSome(flags.actions)
       ? yield* readHarnessActions(flags.actions.value, cwd)
       : undefined;
+    const auth =
+      Option.isSome(flags.auth) && flags.auth.value === "kamicode-pairing"
+        ? {
+            type: "kamicode-pairing" as const,
+            credential: Option.getOrUndefined(flags.authCredential) ?? "",
+          }
+        : undefined;
+    if (Option.isSome(flags.auth) && !auth?.credential) {
+      return yield* new TestCommandError({
+        message: "--auth-credential is required when --auth kamicode-pairing is used.",
+      });
+    }
     const result = yield* Effect.tryPromise({
       try: () =>
         runBrowserHarness({
@@ -151,9 +165,7 @@ const runBrowserCommand = (flags: BrowserCommandFlags) =>
           ...(Option.isSome(flags.goal) ? { goal: flags.goal.value } : {}),
           ...(Option.isSome(flags.script) ? { scriptPath: flags.script.value } : {}),
           ...(actions ? { actions } : {}),
-          ...(Option.isSome(flags.artifactsDir)
-            ? { artifactsDir: flags.artifactsDir.value }
-            : {}),
+          ...(Option.isSome(flags.artifactsDir) ? { artifactsDir: flags.artifactsDir.value } : {}),
           ...(Option.isSome(flags.storageState)
             ? { storageStatePath: flags.storageState.value }
             : {}),
@@ -161,6 +173,7 @@ const runBrowserCommand = (flags: BrowserCommandFlags) =>
           ...(Option.isSome(flags.environmentId)
             ? { environmentId: flags.environmentId.value }
             : {}),
+          ...(auth ? { auth } : {}),
         }),
       catch: (cause) => new TestCommandError({ message: errorMessage(cause), cause }),
     });
@@ -210,6 +223,14 @@ const browserCommand = Command.make("browser", {
   ),
   environmentId: Flag.string("environment-id").pipe(
     Flag.withDescription("Project test environment id. Defaults to default."),
+    Flag.optional,
+  ),
+  auth: Flag.choice("auth", ["kamicode-pairing"]).pipe(
+    Flag.withDescription("Optional auth flow to run before testing, for example kamicode-pairing."),
+    Flag.optional,
+  ),
+  authCredential: Flag.string("auth-credential").pipe(
+    Flag.withDescription("Credential for the selected auth flow. Avoid committing or logging it."),
     Flag.optional,
   ),
   timeoutMs: Flag.integer("timeout-ms").pipe(

@@ -23,6 +23,7 @@ import { createModelSelection } from "@t3tools/shared/model";
 import { ServerConfig } from "../../config.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { ProviderSessionDirectory } from "../Services/ProviderSessionDirectory.ts";
+import { applyProjectMemoryPromptPrefix, readProjectMemory } from "../ProjectMemory.ts";
 import type { OpenCodeAdapterShape } from "../Services/OpenCodeAdapter.ts";
 import {
   OpenCodeRuntime,
@@ -437,8 +438,30 @@ it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
         },
         agent: "github-copilot",
         variant: "high",
-        parts: [{ type: "text", text: "Fix it" }],
+        parts: [
+          {
+            type: "text",
+            text: applyProjectMemoryPromptPrefix({
+              prompt: "Fix it",
+              projectMemory: readProjectMemory(process.cwd()),
+            }),
+          },
+        ],
       });
+
+      yield* adapter.sendTurn({
+        threadId: asThreadId("thread-custom-instance"),
+        input: "Fix it again",
+      });
+
+      assert.deepEqual(
+        (
+          runtimeMock.state.promptCalls.at(-1) as {
+            readonly parts?: ReadonlyArray<unknown>;
+          }
+        ).parts,
+        [{ type: "text", text: "Fix it again" }],
+      );
     }).pipe(Effect.provide(adapterLayer));
   });
 
@@ -479,7 +502,15 @@ it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
           providerID: "anthropic",
           modelID: "claude-sonnet-4-5",
         },
-        parts: [{ type: "text", text: "Fix it" }],
+        parts: [
+          {
+            type: "text",
+            text: applyProjectMemoryPromptPrefix({
+              prompt: "Fix it",
+              projectMemory: readProjectMemory(process.cwd()),
+            }),
+          },
+        ],
       });
     }).pipe(Effect.provide(adapterLayer));
   });

@@ -25,12 +25,14 @@ import { CodexSettings, ProviderDriverKind, type ServerProvider } from "@t3tools
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
+import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import { HttpClient } from "effect/unstable/http";
 import { ChildProcessSpawner } from "effect/unstable/process";
 
+import { ServerAuth } from "../../auth/Services/ServerAuth.ts";
 import { makeCodexTextGeneration } from "../../textGeneration/CodexTextGeneration.ts";
 import { ServerConfig } from "../../config.ts";
 import { ProviderDriverError } from "../Errors.ts";
@@ -110,6 +112,7 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv> = {
       const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
       const httpClient = yield* HttpClient.HttpClient;
       const eventLoggers = yield* ProviderEventLoggers;
+      const serverAuth = yield* Effect.serviceOption(ServerAuth);
       const processEnv = mergeProviderInstanceEnvironment(environment);
       const homeLayout = yield* resolveCodexHomeLayout(config);
       const continuationIdentity = codexContinuationIdentity(homeLayout);
@@ -149,6 +152,20 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv> = {
       const adapter = yield* makeCodexAdapter(effectiveConfig, {
         instanceId,
         environment: processEnv,
+        ...(Option.isSome(serverAuth)
+          ? {
+              issueTestHarnessPairingCredential: () =>
+                serverAuth.value
+                  .issuePairingCredential({
+                    role: "client",
+                    label: "KamiCode test harness",
+                  })
+                  .pipe(
+                    Effect.map((issued) => issued.credential),
+                    Effect.mapError((cause) => cause.message),
+                  ),
+            }
+          : {}),
         ...(eventLoggers.native ? { nativeEventLogger: eventLoggers.native } : {}),
       });
       const textGeneration = yield* makeCodexTextGeneration(effectiveConfig, processEnv);

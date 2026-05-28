@@ -73,6 +73,7 @@ import {
   extractTodosAsPlan,
 } from "../acp/CursorAcpExtension.ts";
 import { type CursorAdapterShape } from "../Services/CursorAdapter.ts";
+import { applyProjectMemoryPromptPrefix, readProjectMemory } from "../ProjectMemory.ts";
 import { applyTestModePromptPrefix } from "../TestModeInstructions.ts";
 import { resolveCursorAcpBaseModelId } from "./CursorProvider.ts";
 import { type EventNdjsonLogger, makeEventNdjsonLogger } from "./EventNdjsonLogger.ts";
@@ -132,6 +133,8 @@ interface CursorSessionContext {
   readonly turns: Array<{ id: TurnId; items: Array<unknown> }>;
   lastPlanFingerprint: string | undefined;
   activeTurnId: TurnId | undefined;
+  readonly projectMemoryAtSessionStart: string;
+  projectMemoryInjected: boolean;
   stopped: boolean;
 }
 
@@ -723,6 +726,8 @@ export function makeCursorAdapter(
             turns: [],
             lastPlanFingerprint: undefined,
             activeTurnId: undefined,
+            projectMemoryAtSessionStart: readProjectMemory(cwd) ?? "",
+            projectMemoryInjected: false,
             stopped: false,
           };
 
@@ -883,10 +888,17 @@ export function makeCursorAdapter(
         });
 
         const promptParts: Array<EffectAcpSchema.ContentBlock> = [];
-        const promptText = applyTestModePromptPrefix({
+        const prompt = applyTestModePromptPrefix({
           interactionMode: input.interactionMode,
           prompt: input.input?.trim() ?? "",
         });
+        const injectProjectMemory = !ctx.projectMemoryInjected;
+        const promptText = injectProjectMemory
+          ? applyProjectMemoryPromptPrefix({
+              projectMemory: ctx.projectMemoryAtSessionStart,
+              prompt,
+            })
+          : prompt;
         if (promptText) {
           promptParts.push({ type: "text", text: promptText });
         }
@@ -939,6 +951,9 @@ export function makeCursorAdapter(
               mapAcpToAdapterError(PROVIDER, input.threadId, "session/prompt", error),
             ),
           );
+        if (injectProjectMemory) {
+          ctx.projectMemoryInjected = true;
+        }
 
         ctx.turns.push({ id: turnId, items: [{ prompt: promptParts, result }] });
         ctx.session = {

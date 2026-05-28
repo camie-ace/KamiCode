@@ -233,9 +233,7 @@ const ComposerFooterModeControls = memo(function ComposerFooterModeControls(prop
             title={`${interactionModeOption.description} Click to cycle modes.`}
           >
             <BotIcon />
-            <span className="sr-only sm:not-sr-only">
-              {interactionModeOption.label}
-            </span>
+            <span className="sr-only sm:not-sr-only">{interactionModeOption.label}</span>
           </Button>
 
           <Separator orientation="vertical" className="mx-0.5 hidden h-4 sm:block" />

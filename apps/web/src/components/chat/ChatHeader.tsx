@@ -3,6 +3,7 @@ import {
   type EditorId,
   type ProjectTestEnvironment,
   type ProjectScript,
+  type ProjectId,
   type ResolvedKeybindingsConfig,
   type ThreadId,
 } from "@t3tools/contracts";
@@ -15,6 +16,7 @@ import { Badge } from "../ui/badge";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import ProjectScriptsControl, { type NewProjectScriptInput } from "../ProjectScriptsControl";
 import ProjectTestEnvironmentControl from "../ProjectTestEnvironmentControl";
+import TestHarnessRunsControl from "../TestHarnessRunsControl";
 import { Toggle } from "../ui/toggle";
 import { SidebarTrigger } from "../ui/sidebar";
 import { OpenInPicker } from "./OpenInPicker";
@@ -25,7 +27,9 @@ interface ChatHeaderProps {
   activeThreadId: ThreadId;
   draftId?: DraftId;
   activeThreadTitle: string;
+  activeProjectId: ProjectId | undefined;
   activeProjectName: string | undefined;
+  activeProjectCwd: string | undefined;
   isGitRepo: boolean;
   openInCwd: string | null;
   activeProjectScripts: ProjectScript[] | undefined;
@@ -65,7 +69,9 @@ export const ChatHeader = memo(function ChatHeader({
   activeThreadId,
   draftId,
   activeThreadTitle,
+  activeProjectId,
   activeProjectName,
+  activeProjectCwd,
   isGitRepo,
   openInCwd,
   activeProjectScripts,
@@ -132,6 +138,9 @@ export const ChatHeader = memo(function ChatHeader({
             testEnvironments={activeProjectTestEnvironments}
             onUpdateTestEnvironments={onUpdateProjectTestEnvironments}
           />
+        )}
+        {activeProjectName && (
+          <TestHarnessRunsControl projectId={activeProjectId} projectCwd={activeProjectCwd} />
         )}
         {showOpenInPicker && (
           <OpenInPicker

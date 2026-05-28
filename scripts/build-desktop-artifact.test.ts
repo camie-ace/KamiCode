@@ -5,6 +5,7 @@ import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 
 import {
+  createDesktopBuildConfig,
   resolveDesktopRuntimeDependencies,
   resolveBuildOptions,
   resolveDesktopBuildIconAssets,
@@ -39,6 +40,24 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
       windowsIconIco: BRAND_ASSET_PATHS.nightlyWindowsIconIco,
     });
   });
+
+  it.effect("keeps Windows executable resource editing enabled for unsigned builds", () =>
+    Effect.gen(function* () {
+      const buildConfig = yield* createDesktopBuildConfig(
+        "win",
+        "nsis",
+        "0.0.17",
+        false,
+        false,
+        undefined,
+      );
+      const winConfig = buildConfig.win as Record<string, unknown>;
+
+      assert.deepStrictEqual(winConfig.target, ["nsis"]);
+      assert.equal(winConfig.icon, "icon.ico");
+      assert.equal("signAndEditExecutable" in winConfig, false);
+    }),
+  );
 
   it("omits bundled workspace packages from staged desktop dependencies", () => {
     assert.deepStrictEqual(

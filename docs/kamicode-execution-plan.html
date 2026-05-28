@@ -26,7 +26,13 @@
         background: var(--bg);
         color: var(--text);
         font-family:
-          Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+          Inter,
+          ui-sans-serif,
+          system-ui,
+          -apple-system,
+          BlinkMacSystemFont,
+          "Segoe UI",
+          sans-serif;
         line-height: 1.55;
       }
 
@@ -138,8 +144,9 @@
         <h1>KamiCode Incremental Execution Plan</h1>
         <p class="lede">
           A concrete, testable rollout plan for turning the current T3 Code fork into KamiCode:
-          desktop clients run local agents, web/mobile runs VPS agents, GitHub remains the source
-          of truth, and workspaces can contain one or many repositories.
+          desktop clients run local agents, web/mobile runs VPS agents, GitHub remains the source of
+          truth, shared threads can be handed off to team/VPS environments, and workspaces can
+          contain one or many repositories.
         </p>
       </header>
 
@@ -151,6 +158,10 @@
           <li>After each step: run typecheck, relevant tests, and one manual acceptance check.</li>
           <li>Desktop mode always means local agent execution.</li>
           <li>Web/mobile mode always means VPS agent execution.</li>
+          <li>
+            Shared threads are portable handoff packages, not live migration of a running Codex or
+            Claude Code process.
+          </li>
           <li>Workspaces may contain one or many GitHub repositories.</li>
         </ul>
       </section>
@@ -175,6 +186,13 @@
             <p>Always runs agents on the VPS against VPS-managed clones/worktrees.</p>
           </div>
           <div>
+            <h3>Shared Threads</h3>
+            <p>
+              A shared thread syncs conversation state, repo delta, untracked files, and project
+              memory so a teammate or web/mobile VPS agent can continue it.
+            </p>
+          </div>
+          <div>
             <h3>Access</h3>
             <p>GitHub OAuth and GitHub App permissions decide user and repo access.</p>
           </div>
@@ -190,8 +208,8 @@
         <h2>Rebrand Visible App Text</h2>
         <p><strong>Change:</strong> Rename visible product text from T3 Code to KamiCode.</p>
         <p>
-          <strong>Do not change:</strong> package names, internal module names, database schemas,
-          or behavior.
+          <strong>Do not change:</strong> package names, internal module names, database schemas, or
+          behavior.
         </p>
         <h3>Test</h3>
         <ul>
@@ -240,8 +258,8 @@
         <span class="step-number">Step 4</span>
         <h2>Create Workspace Repository Service</h2>
         <p>
-          <strong>Change:</strong> Add server-side service for creating, listing, reading,
-          updating, and archiving workspaces.
+          <strong>Change:</strong> Add server-side service for creating, listing, reading, updating,
+          and archiving workspaces.
         </p>
         <h3>Test</h3>
         <ul>
@@ -300,9 +318,7 @@
       <section class="section step">
         <span class="step-number">Step 8</span>
         <h2>GitHub App Installation</h2>
-        <p>
-          <strong>Change:</strong> Add GitHub App installation support for the company org.
-        </p>
+        <p><strong>Change:</strong> Add GitHub App installation support for the company org.</p>
         <h3>Test</h3>
         <ul>
           <li>Admin can see GitHub App installation status.</li>
@@ -317,13 +333,15 @@
         <h2>GitHub-Based Workspace Access</h2>
         <p><strong>Change:</strong> Compute workspace access from GitHub repo permissions.</p>
         <p>
-          <strong>Rule:</strong> A user can see a workspace if they can access at least one repo
-          in it.
+          <strong>Rule:</strong> A user can see a workspace if they can access at least one repo in
+          it.
         </p>
         <h3>Test</h3>
         <ul>
           <li>User with access to all Hermes repos sees all repos.</li>
-          <li>User with access to only one Hermes repo sees Hermes but only that repo as usable.</li>
+          <li>
+            User with access to only one Hermes repo sees Hermes but only that repo as usable.
+          </li>
           <li>User with access to no Hermes repos does not see Hermes.</li>
           <li>Server rejects direct RPC access to unauthorized repos.</li>
         </ul>
@@ -333,7 +351,9 @@
         <span class="step-number">Step 10</span>
         <h2>Desktop Local Workspace Clone</h2>
         <p><strong>Change:</strong> Add “Clone Workspace” flow to desktop.</p>
-        <p><strong>Behavior:</strong> Desktop clones authorized repos into a local workspace folder.</p>
+        <p>
+          <strong>Behavior:</strong> Desktop clones authorized repos into a local workspace folder.
+        </p>
         <h3>Test</h3>
         <ul>
           <li>User selects local base directory.</li>
@@ -346,7 +366,10 @@
       <section class="section step">
         <span class="step-number">Step 11</span>
         <h2>Enforce Desktop Local Agent Execution</h2>
-        <p><strong>Change:</strong> Ensure desktop workspace threads use local Codex/Claude Code only.</p>
+        <p>
+          <strong>Change:</strong> Ensure desktop workspace threads use local Codex/Claude Code
+          only.
+        </p>
         <h3>Test</h3>
         <ul>
           <li>Start a desktop thread and confirm provider process starts on the employee PC.</li>
@@ -366,12 +389,44 @@
           <li>VPS clones Hermes repos into managed storage.</li>
           <li>Web thread runs commands on VPS paths.</li>
           <li>Desktop thread runs commands on local paths.</li>
-          <li>Same workspace can be opened from desktop and web with different execution locations.</li>
+          <li>
+            Same workspace can be opened from desktop and web with different execution locations.
+          </li>
         </ul>
       </section>
 
       <section class="section step">
         <span class="step-number">Step 13</span>
+        <h2>Shared Thread Handoff</h2>
+        <p>
+          <strong>Change:</strong> Add a thread-level <code>Share thread</code> action that creates
+          a portable handoff package for VPS/team continuation.
+        </p>
+        <p>
+          <strong>Behavior:</strong> Local provider processes are not migrated. KamiCode persists
+          enough canonical state for a new provider runtime on the VPS to continue the same thread.
+        </p>
+        <h3>Captured State</h3>
+        <ul>
+          <li>Thread metadata, model/provider settings, transcript, and turn history.</li>
+          <li>Workspace/repo identity, branch, base commit, staged state, and tracked changes.</li>
+          <li>Untracked file bundle with checksums and explicit ignored-file exclusions.</li>
+          <li>CAMI project memory snapshot with source thread, turn id, author, and timestamp.</li>
+          <li>Source environment metadata so the receiver knows the handoff origin.</li>
+        </ul>
+        <h3>Test</h3>
+        <ul>
+          <li>Right-clicking a thread exposes <code>Share thread</code>.</li>
+          <li>Sharing uploads transcript, repo patch, untracked files, and project memory.</li>
+          <li>VPS applies the package to a managed clone/worktree and verifies checksums.</li>
+          <li>A different user can continue the shared thread from web/mobile on the VPS.</li>
+          <li>If the source PC goes offline after sync, the shared VPS thread remains usable.</li>
+          <li>Ignored files and likely secrets are excluded unless explicitly approved.</li>
+        </ul>
+      </section>
+
+      <section class="section step">
+        <span class="step-number">Step 14</span>
         <h2>Mobile-First Web Thread UI</h2>
         <p><strong>Change:</strong> Make web/mobile usable for remote VPS work.</p>
         <p><strong>Scope:</strong> threads, approvals, diffs, status, quick replies.</p>
@@ -385,7 +440,7 @@
       </section>
 
       <section class="section step">
-        <span class="step-number">Step 14</span>
+        <span class="step-number">Step 15</span>
         <h2>Shared Provider Credential Bundle Storage</h2>
         <p><strong>Change:</strong> Add admin-managed shared provider credential bundles.</p>
         <p><strong>Rule:</strong> Browser clients never receive raw provider credentials.</p>
@@ -399,7 +454,7 @@
       </section>
 
       <section class="section step">
-        <span class="step-number">Step 15</span>
+        <span class="step-number">Step 16</span>
         <h2>Trusted Desktop Device Registration</h2>
         <p><strong>Change:</strong> Desktop registers as a trusted device with a device key.</p>
         <h3>Test</h3>
@@ -412,7 +467,7 @@
       </section>
 
       <section class="section step">
-        <span class="step-number">Step 16</span>
+        <span class="step-number">Step 17</span>
         <h2>Desktop Credential Sync To OS Vault</h2>
         <p>
           <strong>Change:</strong> Trusted desktop can receive encrypted shared provider credentials
@@ -428,7 +483,7 @@
       </section>
 
       <section class="section step">
-        <span class="step-number">Step 17</span>
+        <span class="step-number">Step 18</span>
         <h2>Offboarding Flow</h2>
         <p><strong>Change:</strong> Admin can remove an employee.</p>
         <p>
@@ -440,12 +495,14 @@
           <li>Removed employee cannot log into web.</li>
           <li>Removed employee desktop cannot sync workspaces after reconnect.</li>
           <li>Removed employee desktop cannot refresh shared credentials.</li>
-          <li>Admin sees warning that offline synced credentials require provider credential rotation.</li>
+          <li>
+            Admin sees warning that offline synced credentials require provider credential rotation.
+          </li>
         </ul>
       </section>
 
       <section class="section step">
-        <span class="step-number">Step 18</span>
+        <span class="step-number">Step 19</span>
         <h2>Action Audit Log</h2>
         <p><strong>Change:</strong> Add audit log for important activity.</p>
         <p>
@@ -464,8 +521,8 @@
       <section class="section note">
         <h2>First Concrete Task</h2>
         <p>
-          Start with <strong>Step 1: Rebrand Visible App Text</strong>. It is small, reversible,
-          and proves the fork can build and run before touching auth, GitHub, workspaces, or
+          Start with <strong>Step 1: Rebrand Visible App Text</strong>. It is small, reversible, and
+          proves the fork can build and run before touching auth, GitHub, workspaces, or
           credentials.
         </p>
       </section>

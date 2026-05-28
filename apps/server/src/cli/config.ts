@@ -112,6 +112,18 @@ const EnvServerConfig = Config.all({
   host: Config.string("T3CODE_HOST").pipe(Config.option, Config.map(Option.getOrUndefined)),
   t3Home: Config.string("T3CODE_HOME").pipe(Config.option, Config.map(Option.getOrUndefined)),
   devUrl: Config.url("VITE_DEV_SERVER_URL").pipe(Config.option, Config.map(Option.getOrUndefined)),
+  githubOAuthClientId: Config.string("T3CODE_GITHUB_OAUTH_CLIENT_ID").pipe(
+    Config.option,
+    Config.map(Option.getOrUndefined),
+  ),
+  githubOAuthClientSecret: Config.string("T3CODE_GITHUB_OAUTH_CLIENT_SECRET").pipe(
+    Config.option,
+    Config.map(Option.getOrUndefined),
+  ),
+  githubOAuthCallbackUrl: Config.url("T3CODE_GITHUB_OAUTH_CALLBACK_URL").pipe(
+    Config.option,
+    Config.map(Option.getOrUndefined),
+  ),
   noBrowser: Config.boolean("T3CODE_NO_BROWSER").pipe(
     Config.option,
     Config.map(Option.getOrUndefined),
@@ -367,6 +379,24 @@ export const resolveServerConfig = (
       host,
       staticDir,
       devUrl,
+      githubOAuthClientId: Option.getOrUndefined(
+        resolveOptionPrecedence(
+          Option.fromUndefinedOr(env.githubOAuthClientId),
+          Option.fromUndefinedOr(bootstrap?.githubOAuthClientId),
+        ),
+      ),
+      githubOAuthClientSecret: Option.getOrUndefined(
+        resolveOptionPrecedence(
+          Option.fromUndefinedOr(env.githubOAuthClientSecret),
+          Option.fromUndefinedOr(bootstrap?.githubOAuthClientSecret),
+        ),
+      ),
+      githubOAuthCallbackUrl: Option.getOrUndefined(
+        resolveOptionPrecedence(
+          Option.fromUndefinedOr(env.githubOAuthCallbackUrl),
+          Option.fromUndefinedOr(bootstrap?.githubOAuthCallbackUrl),
+        ),
+      ),
       noBrowser,
       startupPresentation,
       desktopBootstrapToken,

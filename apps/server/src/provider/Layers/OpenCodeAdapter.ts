@@ -35,6 +35,7 @@ import {
   ProviderAdapterValidationError,
 } from "../Errors.ts";
 import { type OpenCodeAdapterShape } from "../Services/OpenCodeAdapter.ts";
+import { applyProjectMemoryPromptPrefix, readProjectMemory } from "../ProjectMemory.ts";
 import {
   buildOpenCodePermissionRules,
   OpenCodeRuntime,
@@ -81,6 +82,8 @@ interface OpenCodeSessionContext {
   activeTurnId: TurnId | undefined;
   activeAgent: string | undefined;
   activeVariant: string | undefined;
+  readonly projectMemoryAtSessionStart: string;
+  projectMemoryInjected: boolean;
   /**
    * One-shot guard flipped by `stopOpenCodeContext` / `emitUnexpectedExit`.
    * The session lifecycle is owned by `sessionScope`; this Ref exists only
@@ -1116,6 +1119,8 @@ export function makeOpenCodeAdapter(
           activeTurnId: undefined,
           activeAgent: undefined,
           activeVariant: undefined,
+          projectMemoryAtSessionStart: readProjectMemory(directory) ?? "",
+          projectMemoryInjected: false,
           stopped: yield* Ref.make(false),
           sessionScope: started.sessionScope,
         };
@@ -1165,10 +1170,17 @@ export function makeOpenCodeAdapter(
         });
       }
 
-      const text = applyTestModePromptPrefix({
+      const prompt = applyTestModePromptPrefix({
         interactionMode: input.interactionMode,
         prompt: input.input?.trim() ?? "",
       });
+      const injectProjectMemory = !context.projectMemoryInjected;
+      const text = injectProjectMemory
+        ? applyProjectMemoryPromptPrefix({
+            projectMemory: context.projectMemoryAtSessionStart,
+            prompt,
+          })
+        : prompt;
       const fileParts = toOpenCodeFileParts({
         attachments: input.attachments,
         resolveAttachmentPath: (attachment) =>
@@ -1251,6 +1263,9 @@ export function makeOpenCodeAdapter(
           }),
         ),
       );
+      if (injectProjectMemory) {
+        context.projectMemoryInjected = true;
+      }
 
       return {
         threadId: input.threadId,

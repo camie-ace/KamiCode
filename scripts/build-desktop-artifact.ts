@@ -559,7 +559,7 @@ export function resolveDesktopProductName(version: string): string {
     : (desktopPackageJson.productName ?? "KamiCode");
 }
 
-const createBuildConfig = Effect.fn("createBuildConfig")(function* (
+export const createDesktopBuildConfig = Effect.fn("createDesktopBuildConfig")(function* (
   platform: typeof BuildPlatform.Type,
   target: string,
   version: string,
@@ -618,8 +618,6 @@ const createBuildConfig = Effect.fn("createBuildConfig")(function* (
     };
     if (signed) {
       winConfig.azureSignOptions = yield* AzureTrustedSigningOptionsConfig;
-    } else {
-      winConfig.signAndEditExecutable = false;
     }
     buildConfig.win = winConfig;
   }
@@ -787,7 +785,7 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
     description: "KamiCode desktop build",
     author: "Kagura AI",
     main: "apps/desktop/dist-electron/main.cjs",
-    build: yield* createBuildConfig(
+    build: yield* createDesktopBuildConfig(
       options.platform,
       options.target,
       appVersion,

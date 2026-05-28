@@ -96,6 +96,52 @@ const withHarness = <A, E, R>(
   }).pipe(Effect.scoped, Effect.provide(NodeServices.layer));
 
 describe("DesktopBackendConfiguration", () => {
+  it.effect("passes GitHub OAuth settings through the backend bootstrap payload", () =>
+    withHarness(
+      Effect.gen(function* () {
+        const previousClientId = process.env.T3CODE_GITHUB_OAUTH_CLIENT_ID;
+        const previousClientSecret = process.env.T3CODE_GITHUB_OAUTH_CLIENT_SECRET;
+        const previousCallbackUrl = process.env.T3CODE_GITHUB_OAUTH_CALLBACK_URL;
+
+        try {
+          process.env.T3CODE_GITHUB_OAUTH_CLIENT_ID = "desktop-client-id";
+          process.env.T3CODE_GITHUB_OAUTH_CLIENT_SECRET = "desktop-client-secret";
+          process.env.T3CODE_GITHUB_OAUTH_CALLBACK_URL =
+            "http://127.0.0.1:4888/api/user/auth/github/callback";
+
+          const configuration = yield* DesktopBackendConfiguration.DesktopBackendConfiguration;
+          const config = yield* configuration.resolve;
+
+          assert.equal(config.bootstrap.githubOAuthClientId, "desktop-client-id");
+          assert.equal(config.bootstrap.githubOAuthClientSecret, "desktop-client-secret");
+          assert.deepEqual(
+            config.bootstrap.githubOAuthCallbackUrl,
+            new URL("http://127.0.0.1:4888/api/user/auth/github/callback"),
+          );
+          assert.isUndefined(config.env.T3CODE_GITHUB_OAUTH_CLIENT_ID);
+          assert.isUndefined(config.env.T3CODE_GITHUB_OAUTH_CLIENT_SECRET);
+          assert.isUndefined(config.env.T3CODE_GITHUB_OAUTH_CALLBACK_URL);
+        } finally {
+          if (previousClientId === undefined) {
+            delete process.env.T3CODE_GITHUB_OAUTH_CLIENT_ID;
+          } else {
+            process.env.T3CODE_GITHUB_OAUTH_CLIENT_ID = previousClientId;
+          }
+          if (previousClientSecret === undefined) {
+            delete process.env.T3CODE_GITHUB_OAUTH_CLIENT_SECRET;
+          } else {
+            process.env.T3CODE_GITHUB_OAUTH_CLIENT_SECRET = previousClientSecret;
+          }
+          if (previousCallbackUrl === undefined) {
+            delete process.env.T3CODE_GITHUB_OAUTH_CALLBACK_URL;
+          } else {
+            process.env.T3CODE_GITHUB_OAUTH_CALLBACK_URL = previousCallbackUrl;
+          }
+        }
+      }),
+    ),
+  );
+
   it.effect("resolves backend start config with a stable scoped bootstrap token", () =>
     withHarness(
       Effect.gen(function* () {

@@ -79,12 +79,31 @@ function resolveDesktopDevServerUrl(
 
 function getIconOption(
   iconPaths: DesktopAssets.DesktopIconPaths,
-): { icon: string } | Record<string, never> {
-  if (process.platform === "darwin") return {}; // macOS uses .icns from app bundle
-  const ext = process.platform === "win32" ? "ico" : "png";
+  platform: NodeJS.Platform,
+): Pick<Electron.BrowserWindowConstructorOptions, "icon"> {
+  if (platform === "darwin") return {}; // macOS uses .icns from app bundle
+  const ext = platform === "win32" ? "ico" : "png";
   return Option.match(iconPaths[ext], {
     onNone: () => ({}),
     onSome: (icon) => ({ icon }),
+  });
+}
+
+function syncWindowIcon(
+  window: Electron.BrowserWindow,
+  iconOption: Pick<Electron.BrowserWindowConstructorOptions, "icon">,
+): Effect.Effect<void> {
+  const icon = iconOption.icon;
+  if (!icon) {
+    return Effect.void;
+  }
+
+  return Effect.sync(() => {
+    if (window.isDestroyed()) {
+      return;
+    }
+
+    window.setIcon(icon);
   });
 }
 
@@ -160,7 +179,7 @@ const make = Effect.gen(function* () {
     backendHttpUrl: URL,
   ): Effect.fn.Return<Electron.BrowserWindow, DesktopWindowError> {
     const iconPaths = yield* assets.iconPaths;
-    const iconOption = getIconOption(iconPaths);
+    const iconOption = getIconOption(iconPaths, environment.platform);
     const shouldUseDarkColors = yield* electronTheme.shouldUseDarkColors;
     const window = yield* electronWindow.create({
       width: 1100,
@@ -180,6 +199,7 @@ const make = Effect.gen(function* () {
         sandbox: true,
       },
     });
+    yield* syncWindowIcon(window, iconOption);
 
     window.webContents.on("context-menu", (event, params) => {
       event.preventDefault();

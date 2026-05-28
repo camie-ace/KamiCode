@@ -3,7 +3,7 @@ import * as Schema from "effect/Schema";
 import * as SchemaIssue from "effect/SchemaIssue";
 import * as EffectCodexSchema from "effect-codex-app-server/schema";
 
-import type { BrowserHarnessRunInput } from "./browserHarness.ts";
+import type { BrowserHarnessKamiCodeAuth, BrowserHarnessRunInput } from "./browserHarness.ts";
 import {
   createPlaywrightEvidenceRunner,
   type BrowserHarnessRunner,
@@ -15,6 +15,7 @@ export type { BrowserHarnessRunner } from "./evidenceRunner.ts";
 
 export const KAMI_TEST_HARNESS_TOOL_NAMESPACE = "kamicode";
 export const KAMI_TEST_HARNESS_TOOL_NAME = "kami_test_harness";
+const DEFAULT_KAMICODE_PAIRING_TIMEOUT_MS = 60_000;
 
 const NavigateActionSchema = Schema.Struct({
   type: Schema.Literal("navigate"),
@@ -70,6 +71,11 @@ const DoneActionSchema = Schema.Struct({
   result: Schema.Literals(["pass", "fail", "blocked"]),
 });
 
+const KamiCodeAuthSchema = Schema.Struct({
+  type: Schema.Literal("kamicode-pairing"),
+  required: Schema.optionalKey(Schema.Boolean),
+});
+
 const TestHarnessActionSchema = Schema.Union([
   NavigateActionSchema,
   ClickActionSchema,
@@ -91,6 +97,7 @@ export const BrowserHarnessDynamicToolArgumentsSchema = Schema.Struct({
   headless: Schema.optionalKey(Schema.Boolean),
   timeoutMs: Schema.optionalKey(Schema.Number),
   lingerMs: Schema.optionalKey(Schema.Number),
+  auth: Schema.optionalKey(KamiCodeAuthSchema),
 });
 
 export type BrowserHarnessDynamicToolArguments =
@@ -102,9 +109,15 @@ export interface RunBrowserHarnessDynamicToolInput {
   readonly stateDir?: string | undefined;
   readonly runHarness?: BrowserHarnessRunner | undefined;
   readonly runner?: EvidenceRunner<BrowserHarnessRunInput> | undefined;
+  readonly issueKamiCodePairingCredential?: (() => Effect.Effect<string, string>) | undefined;
 }
 
+type BrowserHarnessDynamicToolAuthArguments = NonNullable<
+  BrowserHarnessDynamicToolArguments["auth"]
+>;
+
 const formatSchemaIssue = SchemaIssue.makeFormatterDefault();
+const KAMICODE_DEV_WEB_PORT = "5733";
 
 const actionInputSchema = {
   oneOf: [
@@ -241,11 +254,24 @@ export const KAMI_TEST_HARNESS_DYNAMIC_TOOL_SPEC = {
       },
       timeoutMs: {
         type: "number",
-        description: "Optional per-action timeout in milliseconds.",
+        description:
+          "Optional per-action timeout in milliseconds. KamiCode pairing auth defaults to 60000ms when omitted.",
       },
       lingerMs: {
         type: "number",
-        description: "Optional delay before closing the browser, useful when the user needs to see final state.",
+        description:
+          "Optional delay before closing the browser, useful when the user needs to see final state.",
+      },
+      auth: {
+        type: "object",
+        additionalProperties: false,
+        required: ["type"],
+        properties: {
+          type: { const: "kamicode-pairing" },
+          required: { type: "boolean" },
+        },
+        description:
+          "Request a short-lived KamiCode pairing credential from the server runtime. Use on the first call when testing KamiCode itself or any desktop-managed KamiCode URL that may open /pair.",
       },
     },
   },
@@ -253,6 +279,39 @@ export const KAMI_TEST_HARNESS_DYNAMIC_TOOL_SPEC = {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function normalizeUrl(value: string): URL | null {
+  try {
+    return new URL(value);
+  } catch {
+    return null;
+  }
+}
+
+function isLoopbackHostname(value: string): boolean {
+  const normalized = value.toLowerCase();
+  return normalized === "localhost" || normalized === "127.0.0.1" || normalized === "::1";
+}
+
+export function shouldAutoUseKamiCodePairingAuth(input: {
+  readonly url: string;
+  readonly auth?: BrowserHarnessDynamicToolAuthArguments | undefined;
+  readonly canIssuePairingCredential: boolean;
+}): boolean {
+  if (input.auth || !input.canIssuePairingCredential) {
+    return false;
+  }
+
+  const url = normalizeUrl(input.url);
+  if (!url || (url.protocol !== "http:" && url.protocol !== "https:")) {
+    return false;
+  }
+
+  const pathname = url.pathname.replace(/\/+$/u, "");
+  return (
+    (isLoopbackHostname(url.hostname) && url.port === KAMICODE_DEV_WEB_PORT) || pathname === "/pair"
+  );
 }
 
 function inputTextResponse(input: {
@@ -329,6 +388,50 @@ export function formatBrowserHarnessDynamicToolError(input: {
   });
 }
 
+function resolveKamiCodePairingAuth(input: {
+  readonly auth?: BrowserHarnessDynamicToolAuthArguments | undefined;
+  readonly issueKamiCodePairingCredential?: (() => Effect.Effect<string, string>) | undefined;
+}): Effect.Effect<BrowserHarnessKamiCodeAuth | undefined, string> {
+  if (!input.auth) {
+    return Effect.void.pipe(Effect.as(undefined));
+  }
+
+  const issueCredential = input.issueKamiCodePairingCredential;
+  if (!issueCredential) {
+    return Effect.fail(
+      "KamiCode pairing auth was requested, but this runtime cannot issue a harness credential.",
+    );
+  }
+
+  return issueCredential().pipe(
+    Effect.map(
+      (credential) =>
+        ({
+          type: "kamicode-pairing",
+          credential,
+          required: input.auth?.required ?? true,
+        }) satisfies BrowserHarnessKamiCodeAuth,
+    ),
+  );
+}
+
+function validateHarnessUrl(url: string): string | null {
+  const normalized = url.trim();
+  if (!normalized) {
+    return "Missing test URL. Configure a project test URL or include the target URL in the Test mode request.";
+  }
+
+  const parsed = normalizeUrl(normalized);
+  if (
+    !parsed ||
+    (parsed.protocol !== "http:" && parsed.protocol !== "https:" && parsed.protocol !== "data:")
+  ) {
+    return `Invalid test URL '${url}'. Use an absolute URL such as http://localhost:3000.`;
+  }
+
+  return null;
+}
+
 export function runBrowserHarnessDynamicTool(
   input: RunBrowserHarnessDynamicToolInput,
 ): Effect.Effect<EffectCodexSchema.DynamicToolCallResponse, never> {
@@ -345,26 +448,51 @@ export function runBrowserHarnessDynamicTool(
           }),
         ),
       onSuccess: (args) => {
-        const harnessInput: BrowserHarnessRunInput = {
-          url: args.url,
-          cwd: input.cwd,
-          actions: args.actions,
-          ...(input.stateDir ? { stateDir: input.stateDir } : {}),
-          ...(args.goal ? { goal: args.goal } : {}),
-          ...(args.projectId ? { projectId: args.projectId } : {}),
-          ...(args.environmentId ? { environmentId: args.environmentId } : {}),
-          ...(args.headless !== undefined ? { headless: args.headless } : {}),
-          ...(args.timeoutMs !== undefined ? { timeoutMs: args.timeoutMs } : {}),
-          ...(args.lingerMs !== undefined ? { lingerMs: args.lingerMs } : {}),
-        };
+        return Effect.gen(function* () {
+          const urlError = validateHarnessUrl(args.url);
+          if (urlError) {
+            return formatBrowserHarnessDynamicToolError({ message: urlError });
+          }
 
-        return Effect.tryPromise({
-          try: () => runner.run(harnessInput),
-          catch: errorMessage,
+          const requestedAuth =
+            args.auth ??
+            (shouldAutoUseKamiCodePairingAuth({
+              url: args.url,
+              auth: args.auth,
+              canIssuePairingCredential: Boolean(input.issueKamiCodePairingCredential),
+            })
+              ? ({ type: "kamicode-pairing" } satisfies BrowserHarnessDynamicToolAuthArguments)
+              : undefined);
+          const auth = yield* resolveKamiCodePairingAuth({
+            auth: requestedAuth,
+            issueKamiCodePairingCredential: input.issueKamiCodePairingCredential,
+          });
+          const harnessInput: BrowserHarnessRunInput = {
+            url: args.url,
+            cwd: input.cwd,
+            actions: args.actions,
+            ...(input.stateDir ? { stateDir: input.stateDir } : {}),
+            ...(args.goal ? { goal: args.goal } : {}),
+            ...(args.projectId ? { projectId: args.projectId } : {}),
+            ...(args.environmentId ? { environmentId: args.environmentId } : {}),
+            ...(args.headless !== undefined ? { headless: args.headless } : {}),
+            ...(args.timeoutMs !== undefined
+              ? { timeoutMs: args.timeoutMs }
+              : auth?.type === "kamicode-pairing"
+                ? { timeoutMs: DEFAULT_KAMICODE_PAIRING_TIMEOUT_MS }
+                : {}),
+            ...(args.lingerMs !== undefined ? { lingerMs: args.lingerMs } : {}),
+            ...(auth ? { auth } : {}),
+          };
+
+          return yield* Effect.tryPromise({
+            try: () => runner.run(harnessInput),
+            catch: errorMessage,
+          }).pipe(Effect.map(formatEvidenceDynamicToolResult));
         }).pipe(
           Effect.match({
             onFailure: (message) => formatBrowserHarnessDynamicToolError({ message }),
-            onSuccess: formatEvidenceDynamicToolResult,
+            onSuccess: (response) => response,
           }),
         );
       },

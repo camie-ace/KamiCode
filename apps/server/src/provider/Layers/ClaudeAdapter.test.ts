@@ -36,6 +36,7 @@ import { attachmentRelativePath } from "../../attachmentStore.ts";
 import { ServerConfig } from "../../config.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { ProviderAdapterValidationError } from "../Errors.ts";
+import { applyProjectMemoryPromptPrefix } from "../ProjectMemory.ts";
 import type { ClaudeAdapterShape } from "../Services/ClaudeAdapter.ts";
 import { makeClaudeAdapter, type ClaudeAdapterLiveOptions } from "./ClaudeAdapter.ts";
 const decodeClaudeSettings = Schema.decodeSync(ClaudeSettings);
@@ -338,6 +339,28 @@ describe("ClaudeAdapterLive", () => {
     );
   });
 
+  it.effect("registers the KamiCode test harness MCP server for Claude sessions", () => {
+    const harness = makeHarness();
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+      yield* adapter.startSession({
+        threadId: THREAD_ID,
+        provider: ProviderDriverKind.make("claudeAgent"),
+        runtimeMode: "approval-required",
+      });
+
+      const createInput = harness.getLastCreateQueryInput();
+      const kamicodeMcpServer = createInput?.options.mcpServers?.kamicode;
+      assert.equal(kamicodeMcpServer?.type, "sdk");
+      if (kamicodeMcpServer?.type === "sdk") {
+        assert.equal(kamicodeMcpServer.name, "kamicode");
+      }
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
   it.effect("uses bypass permissions for full-access claude sessions", () => {
     const harness = makeHarness();
     return Effect.gen(function* () {
@@ -618,7 +641,13 @@ describe("ClaudeAdapterLive", () => {
       const createInput = harness.getLastCreateQueryInput();
       assert.equal(createInput?.options.effort, "high");
       const promptText = yield* Effect.promise(() => readFirstPromptText(createInput));
-      assert.equal(promptText, "Ultrathink:\nInvestigate the edge cases");
+      assert.equal(
+        promptText,
+        applyProjectMemoryPromptPrefix({
+          prompt: "Ultrathink:\nInvestigate the edge cases",
+          projectMemory: undefined,
+        }),
+      );
     }).pipe(
       Effect.provideService(Random.Random, makeDeterministicRandomService()),
       Effect.provide(harness.layer),
@@ -673,7 +702,10 @@ describe("ClaudeAdapterLive", () => {
       assert.deepEqual(promptMessage?.message.content, [
         {
           type: "text",
-          text: "What's in this image?",
+          text: applyProjectMemoryPromptPrefix({
+            prompt: "What's in this image?",
+            projectMemory: undefined,
+          }),
         },
         {
           type: "image",
@@ -2531,6 +2563,53 @@ describe("ClaudeAdapterLive", () => {
       });
 
       const permissionResult = yield* Effect.promise(() => permissionPromise);
+      assert.equal((permissionResult as PermissionResult).behavior, "allow");
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
+  it.effect("allows the KamiCode test harness tool without approval during test mode turns", () => {
+    const harness = makeHarness();
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+
+      const session = yield* adapter.startSession({
+        threadId: THREAD_ID,
+        provider: ProviderDriverKind.make("claudeAgent"),
+        runtimeMode: "approval-required",
+      });
+
+      yield* Stream.take(adapter.streamEvents, 3).pipe(Stream.runDrain);
+      yield* adapter.sendTurn({
+        threadId: session.threadId,
+        input: "test the app",
+        attachments: [],
+        interactionMode: "test",
+      });
+
+      const createInput = harness.getLastCreateQueryInput();
+      const canUseTool = createInput?.options.canUseTool;
+      assert.equal(typeof canUseTool, "function");
+      if (!canUseTool) {
+        return;
+      }
+
+      const permissionResult = yield* Effect.promise(() =>
+        canUseTool(
+          "mcp__kamicode__kami_test_harness",
+          {
+            url: "http://127.0.0.1:5733",
+            actions: [{ type: "screenshot", label: "app" }],
+          },
+          {
+            signal: new AbortController().signal,
+            toolUseID: "tool-harness-1",
+          },
+        ),
+      );
+
       assert.equal((permissionResult as PermissionResult).behavior, "allow");
     }).pipe(
       Effect.provideService(Random.Random, makeDeterministicRandomService()),

@@ -876,68 +876,64 @@ describe("ProviderCommandReactor", () => {
     });
   });
 
-  it(
-    "forwards project test context with test interaction mode",
-    async () => {
-      const harness = await createHarness({
-        testEnvironments: [
-          {
-            id: "default-local",
-            name: "Local dev",
-            kind: "local",
-            baseUrl: "http://localhost:5173",
-            isDefault: true,
-          },
-        ],
-      });
-      const now = "2026-01-01T00:00:00.000Z";
+  it("forwards project test context with test interaction mode", async () => {
+    const harness = await createHarness({
+      testEnvironments: [
+        {
+          id: "default-local",
+          name: "Local dev",
+          kind: "local",
+          baseUrl: "http://localhost:5173",
+          isDefault: true,
+        },
+      ],
+    });
+    const now = "2026-01-01T00:00:00.000Z";
 
-      await Effect.runPromise(
-        harness.engine.dispatch({
-          type: "thread.interaction-mode.set",
-          commandId: CommandId.make("cmd-interaction-mode-set-test"),
-          threadId: ThreadId.make("thread-1"),
-          interactionMode: "test",
-          createdAt: now,
-        }),
-      );
-      await waitFor(async () => {
-        const readModel = await harness.readModel();
-        const thread = readModel.threads.find((entry) => entry.id === ThreadId.make("thread-1"));
-        return thread?.interactionMode === "test";
-      });
-
-      await Effect.runPromise(
-        harness.engine.dispatch({
-          type: "thread.turn.start",
-          commandId: CommandId.make("cmd-turn-start-test"),
-          threadId: ThreadId.make("thread-1"),
-          message: {
-            messageId: asMessageId("user-message-test"),
-            role: "user",
-            text: "test the upload flow",
-            attachments: [],
-          },
-          interactionMode: "test",
-          runtimeMode: "approval-required",
-          createdAt: now,
-        }),
-      );
-
-      await waitFor(() => harness.sendTurn.mock.calls.length === 1);
-      const sendTurnInput = harness.sendTurn.mock.calls[0]?.[0] as
-        | { input?: string; interactionMode?: string }
-        | undefined;
-      expect(sendTurnInput).toMatchObject({
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.interaction-mode.set",
+        commandId: CommandId.make("cmd-interaction-mode-set-test"),
+        threadId: ThreadId.make("thread-1"),
         interactionMode: "test",
-      });
-      expect(sendTurnInput?.input).toContain("Project: Provider Project");
-      expect(sendTurnInput?.input).toContain("Workspace root: /tmp/provider-project");
-      expect(sendTurnInput?.input).toContain("Default test URL: http://localhost:5173");
-      expect(sendTurnInput?.input).toContain("test the upload flow");
-    },
-    10_000,
-  );
+        createdAt: now,
+      }),
+    );
+    await waitFor(async () => {
+      const readModel = await harness.readModel();
+      const thread = readModel.threads.find((entry) => entry.id === ThreadId.make("thread-1"));
+      return thread?.interactionMode === "test";
+    });
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.make("cmd-turn-start-test"),
+        threadId: ThreadId.make("thread-1"),
+        message: {
+          messageId: asMessageId("user-message-test"),
+          role: "user",
+          text: "test the upload flow",
+          attachments: [],
+        },
+        interactionMode: "test",
+        runtimeMode: "approval-required",
+        createdAt: now,
+      }),
+    );
+
+    await waitFor(() => harness.sendTurn.mock.calls.length === 1);
+    const sendTurnInput = harness.sendTurn.mock.calls[0]?.[0] as
+      | { input?: string; interactionMode?: string }
+      | undefined;
+    expect(sendTurnInput).toMatchObject({
+      interactionMode: "test",
+    });
+    expect(sendTurnInput?.input).toContain("Project: Provider Project");
+    expect(sendTurnInput?.input).toContain("Workspace root: /tmp/provider-project");
+    expect(sendTurnInput?.input).toContain("Default test URL: http://localhost:5173");
+    expect(sendTurnInput?.input).toContain("test the upload flow");
+  }, 10_000);
 
   it("preserves the active session model when in-session model switching is unsupported", async () => {
     const harness = await createHarness({ sessionModelSwitch: "unsupported" });

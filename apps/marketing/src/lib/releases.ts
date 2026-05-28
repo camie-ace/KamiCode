@@ -1,9 +1,11 @@
-const REPO = "pingdotgg/t3code";
+const REPO = "camie-ace/KamiCode";
 
-export const RELEASES_URL = `https://github.com/${REPO}/releases`;
+export const REPOSITORY_URL = `https://github.com/${REPO}`;
+export const RELEASES_URL = `${REPOSITORY_URL}/releases`;
+export const LATEST_WINDOWS_DOWNLOAD_URL = `${RELEASES_URL}/latest/download/KamiCode-Setup-x64.exe`;
 
 const API_URL = `https://api.github.com/repos/${REPO}/releases/latest`;
-const CACHE_KEY = "t3code-latest-release";
+const CACHE_KEY = "kamicode-latest-release";
 
 export interface ReleaseAsset {
   name: string;

@@ -13,12 +13,12 @@ import {
   CODEX_TEST_MODE_DEVELOPER_INSTRUCTIONS,
 } from "../CodexDeveloperInstructions.ts";
 import {
-  appendProjectMemoryInstructions,
   buildTurnStartParams,
   buildThreadStartParams,
   isRecoverableThreadResumeError,
   openCodexThread,
 } from "./CodexSessionRuntime.ts";
+import { appendProjectMemoryInstructions } from "../ProjectMemory.ts";
 import {
   KAMI_TEST_HARNESS_DYNAMIC_TOOL_SPEC,
   KAMI_TEST_HARNESS_TOOL_NAME,
@@ -193,11 +193,26 @@ describe("buildTurnStartParams", () => {
       }),
     );
 
-    const developerInstructions =
-      params.collaborationMode?.settings?.developer_instructions ?? "";
+    const developerInstructions = params.collaborationMode?.settings?.developer_instructions ?? "";
     assert.match(developerInstructions, /<project_memory_policy>/);
     assert.match(developerInstructions, /<project_memory path="\.camie\/project-memory\.md">/);
     assert.match(developerInstructions, /Product is KAMI\./);
+  });
+
+  it("can inject project memory policy even when memory is currently empty", () => {
+    const params = Effect.runSync(
+      buildTurnStartParams({
+        threadId: "provider-thread-1",
+        runtimeMode: "approval-required",
+        prompt: "Review",
+        projectMemory: "",
+      }),
+    );
+
+    const developerInstructions = params.collaborationMode?.settings?.developer_instructions ?? "";
+    assert.equal(params.collaborationMode?.mode, "default");
+    assert.match(developerInstructions, /<project_memory_policy>/);
+    assert.doesNotMatch(developerInstructions, /<project_memory path=/);
   });
 
   it("omits collaboration mode when interaction mode is absent", () => {

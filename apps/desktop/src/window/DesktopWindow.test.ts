@@ -53,6 +53,7 @@ function makeFakeBrowserWindow() {
     once: vi.fn(),
     restore: vi.fn(),
     setBackgroundColor: vi.fn(),
+    setIcon: vi.fn(),
     setTitle: vi.fn(),
     setTitleBarOverlay: vi.fn(),
     show: vi.fn(),
@@ -63,17 +64,26 @@ function makeFakeBrowserWindow() {
     window: window as unknown as Electron.BrowserWindow,
     loadURL: window.loadURL,
     openDevTools: webContents.openDevTools,
+    setIcon: window.setIcon,
   };
 }
 
-const desktopAssetsLayer = Layer.succeed(DesktopAssets.DesktopAssets, {
-  iconPaths: Effect.succeed({
-    ico: Option.none<string>(),
-    icns: Option.none<string>(),
-    png: Option.none<string>(),
-  }),
-  resolveResourcePath: () => Effect.succeed(Option.none<string>()),
-} satisfies DesktopAssets.DesktopAssetsShape);
+const emptyIconPaths = {
+  ico: Option.none<string>(),
+  icns: Option.none<string>(),
+  png: Option.none<string>(),
+} satisfies DesktopAssets.DesktopIconPaths;
+
+function makeDesktopAssetsLayer(iconPaths: DesktopAssets.DesktopIconPaths = emptyIconPaths) {
+  return Layer.succeed(DesktopAssets.DesktopAssets, {
+    iconPaths: Effect.succeed({
+      ico: iconPaths.ico,
+      icns: iconPaths.icns,
+      png: iconPaths.png,
+    }),
+    resolveResourcePath: () => Effect.succeed(Option.none<string>()),
+  } satisfies DesktopAssets.DesktopAssetsShape);
+}
 
 const desktopServerExposureLayer = Layer.succeed(DesktopServerExposure.DesktopServerExposure, {
   getState: Effect.die("unexpected getState"),
@@ -107,25 +117,36 @@ const electronThemeLayer = Layer.succeed(ElectronTheme.ElectronTheme, {
   onUpdated: () => Effect.void,
 } satisfies ElectronTheme.ElectronThemeShape);
 
-const desktopEnvironmentLayer = DesktopEnvironment.layer(environmentInput).pipe(
-  Layer.provide(
-    Layer.mergeAll(
-      NodeServices.layer,
-      DesktopConfig.layerTest({
-        T3CODE_PORT: "3773",
-        VITE_DEV_SERVER_URL: "http://127.0.0.1:5733",
-      }),
-    ),
-  ),
-);
-
 function makeTestLayer(input: {
   readonly window: Electron.BrowserWindow;
   readonly createCount: Ref.Ref<number>;
   readonly mainWindow: Ref.Ref<Option.Option<Electron.BrowserWindow>>;
+  readonly createOptions?: Ref.Ref<Option.Option<Electron.BrowserWindowConstructorOptions>>;
+  readonly environmentInput?: DesktopEnvironment.MakeDesktopEnvironmentInput;
+  readonly iconPaths?: DesktopAssets.DesktopIconPaths;
 }) {
+  const desktopEnvironmentLayer = DesktopEnvironment.layer(
+    input.environmentInput ?? environmentInput,
+  ).pipe(
+    Layer.provide(
+      Layer.mergeAll(
+        NodeServices.layer,
+        DesktopConfig.layerTest({
+          T3CODE_PORT: "3773",
+          VITE_DEV_SERVER_URL: "http://127.0.0.1:5733",
+        }),
+      ),
+    ),
+  );
   const electronWindowLayer = Layer.succeed(ElectronWindow.ElectronWindow, {
-    create: () => Ref.update(input.createCount, (count) => count + 1).pipe(Effect.as(input.window)),
+    create: (options) =>
+      Effect.gen(function* () {
+        yield* Ref.update(input.createCount, (count) => count + 1);
+        if (input.createOptions) {
+          yield* Ref.set(input.createOptions, Option.some(options));
+        }
+        return input.window;
+      }),
     main: Ref.get(input.mainWindow),
     currentMainOrFirst: Ref.get(input.mainWindow),
     focusedMainOrFirst: Ref.get(input.mainWindow),
@@ -140,7 +161,7 @@ function makeTestLayer(input: {
   return DesktopWindow.layer.pipe(
     Layer.provide(
       Layer.mergeAll(
-        desktopAssetsLayer,
+        makeDesktopAssetsLayer(input.iconPaths),
         desktopEnvironmentLayer,
         desktopServerExposureLayer,
         DesktopState.layer,
@@ -174,6 +195,43 @@ describe("DesktopWindow", () => {
         assert.equal(yield* Ref.get(createCount), 1);
         assert.deepEqual(fakeWindow.loadURL.mock.calls[0], ["http://127.0.0.1:5733/"]);
         assert.equal(fakeWindow.openDevTools.mock.calls.length, 1);
+      }).pipe(Effect.provide(layer));
+    }),
+  );
+
+  it.effect("applies the Windows window icon from desktop resources", () =>
+    Effect.gen(function* () {
+      const fakeWindow = makeFakeBrowserWindow();
+      const createCount = yield* Ref.make(0);
+      const createOptions = yield* Ref.make<
+        Option.Option<Electron.BrowserWindowConstructorOptions>
+      >(Option.none());
+      const mainWindow = yield* Ref.make<Option.Option<Electron.BrowserWindow>>(Option.none());
+      const iconPath = "/repo/apps/desktop/resources/icon.ico";
+      const layer = makeTestLayer({
+        window: fakeWindow.window,
+        createCount,
+        createOptions,
+        mainWindow,
+        environmentInput: {
+          ...environmentInput,
+          platform: "win32",
+        },
+        iconPaths: {
+          ico: Option.some(iconPath),
+          icns: Option.none(),
+          png: Option.none(),
+        },
+      });
+
+      yield* Effect.gen(function* () {
+        const desktopWindow = yield* DesktopWindow.DesktopWindow;
+        yield* desktopWindow.handleBackendReady;
+
+        const options = yield* Ref.get(createOptions);
+        assert.equal(Option.isSome(options), true);
+        assert.equal(Option.isSome(options) ? options.value.icon : undefined, iconPath);
+        assert.deepEqual(fakeWindow.setIcon.mock.calls[0], [iconPath]);
       }).pipe(Effect.provide(layer));
     }),
   );

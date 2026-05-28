@@ -1,10 +1,12 @@
 import type { AuthSessionState } from "@t3tools/contracts";
+import { GithubIcon, Loader2Icon } from "lucide-react";
 import React, { startTransition, useEffect, useRef, useState, useCallback } from "react";
 
 import { APP_DISPLAY_NAME } from "../../branding";
 import { addSavedEnvironment } from "../../environments/runtime";
 import {
   peekPairingTokenFromUrl,
+  startGitHubUserLogin,
   stripPairingTokenFromUrl,
   submitServerAuthCredential,
 } from "../../environments/primary";
@@ -276,6 +278,62 @@ export function HostedPairingRouteSurface() {
               Open app
             </Button>
           ) : null}
+        </div>
+      </section>
+    </div>
+  );
+}
+
+export function GitHubLoginSurface({ errorMessage }: { errorMessage?: string }) {
+  const [isStarting, setIsStarting] = useState(false);
+
+  const handleStart = useCallback(() => {
+    setIsStarting(true);
+    startGitHubUserLogin();
+  }, []);
+
+  return (
+    <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-background px-4 py-10 text-foreground sm:px-6">
+      <div className="pointer-events-none absolute inset-0 opacity-80">
+        <div className="absolute inset-x-0 top-0 h-44 bg-[radial-gradient(44rem_16rem_at_top,color-mix(in_srgb,var(--color-emerald-500)_14%,transparent),transparent)]" />
+        <div className="absolute inset-y-0 left-0 w-72 bg-[radial-gradient(28rem_18rem_at_left,color-mix(in_srgb,var(--color-sky-500)_10%,transparent),transparent)]" />
+        <div className="absolute inset-0 bg-[linear-gradient(145deg,color-mix(in_srgb,var(--background)_90%,var(--color-black))_0%,var(--background)_55%)]" />
+      </div>
+
+      <section className="relative w-full max-w-xl rounded-2xl border border-border/80 bg-card/90 p-6 shadow-2xl shadow-black/20 backdrop-blur-md sm:p-8">
+        <p className="text-[11px] font-semibold tracking-[0.18em] text-muted-foreground uppercase">
+          {APP_DISPLAY_NAME}
+        </p>
+        <h1 className="mt-3 text-2xl font-semibold tracking-tight sm:text-3xl">
+          Sign in to KamiCode
+        </h1>
+        <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
+          Continue with GitHub to access this workspace.
+        </p>
+
+        {errorMessage ? (
+          <div className="mt-5 rounded-lg border border-destructive/30 bg-destructive/6 px-3 py-2 text-sm text-destructive">
+            {errorMessage}
+          </div>
+        ) : null}
+
+        <div className="mt-6 flex flex-wrap gap-2">
+          <Button disabled={isStarting} size="sm" onClick={handleStart}>
+            {isStarting ? (
+              <Loader2Icon className="size-4 animate-spin" />
+            ) : (
+              <GithubIcon className="size-4" />
+            )}
+            Continue with GitHub
+          </Button>
+          <Button
+            disabled={isStarting}
+            onClick={() => window.location.reload()}
+            size="sm"
+            variant="outline"
+          >
+            Reload app
+          </Button>
         </div>
       </section>
     </div>

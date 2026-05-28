@@ -13,6 +13,8 @@ The immediate product goal is:
 
 This plan intentionally leaves the paid T3 cloud tunnel fabric out of scope. It defines the OSS foundation that T3 Tunnel should later plug into.
 
+This plan also does not solve "my PC is dead" continuity. LAN, Tailscale, MagicDNS, manual HTTPS, and tunnels are reachability paths to a running backend. If the source machine is off, those endpoints are unavailable. Dead-PC continuity belongs to shared thread handoff and VPS-managed execution; see `21-shared-thread-handoff-and-shared-environments.md`.
+
 ## Current State
 
 Already present or in progress:

@@ -42,10 +42,31 @@ const DESKTOP_BACKEND_ENV_NAMES = [
   "T3CODE_DESKTOP_HTTPS_ENDPOINTS",
   "T3CODE_TAILSCALE_SERVE",
   "T3CODE_TAILSCALE_SERVE_PORT",
+  "T3CODE_GITHUB_OAUTH_CLIENT_ID",
+  "T3CODE_GITHUB_OAUTH_CLIENT_SECRET",
+  "T3CODE_GITHUB_OAUTH_CALLBACK_URL",
 ] as const;
 
 const backendChildEnvPatch = (): Record<string, string | undefined> =>
   Object.fromEntries(DESKTOP_BACKEND_ENV_NAMES.map((name) => [name, undefined]));
+
+function readOptionalEnv(name: string): string | undefined {
+  const trimmed = process.env[name]?.trim();
+  return trimmed && trimmed.length > 0 ? trimmed : undefined;
+}
+
+function readOptionalEnvUrl(name: string): URL | undefined {
+  const value = readOptionalEnv(name);
+  if (!value) {
+    return undefined;
+  }
+
+  try {
+    return new URL(value);
+  } catch {
+    return undefined;
+  }
+}
 
 const { logWarning: logBackendConfigurationWarning } = DesktopObservability.makeComponentLogger(
   "desktop-backend-configuration",
@@ -109,6 +130,9 @@ const resolveBackendStartConfig = Effect.fn("desktop.backendConfiguration.resolv
     const environment = yield* DesktopEnvironment.DesktopEnvironment;
     const serverExposure = yield* DesktopServerExposure.DesktopServerExposure;
     const backendExposure = yield* serverExposure.backendConfig;
+    const githubOAuthClientId = readOptionalEnv("T3CODE_GITHUB_OAUTH_CLIENT_ID");
+    const githubOAuthClientSecret = readOptionalEnv("T3CODE_GITHUB_OAUTH_CLIENT_SECRET");
+    const githubOAuthCallbackUrl = readOptionalEnvUrl("T3CODE_GITHUB_OAUTH_CALLBACK_URL");
 
     return {
       executablePath: process.execPath,
@@ -127,6 +151,9 @@ const resolveBackendStartConfig = Effect.fn("desktop.backendConfiguration.resolv
         desktopBootstrapToken: input.bootstrapToken,
         tailscaleServeEnabled: backendExposure.tailscaleServeEnabled,
         tailscaleServePort: backendExposure.tailscaleServePort,
+        ...(githubOAuthClientId ? { githubOAuthClientId } : {}),
+        ...(githubOAuthClientSecret ? { githubOAuthClientSecret } : {}),
+        ...(githubOAuthCallbackUrl ? { githubOAuthCallbackUrl } : {}),
         ...Option.match(input.observabilitySettings.otlpTracesUrl, {
           onNone: () => ({}),
           onSome: (otlpTracesUrl) => ({ otlpTracesUrl }),

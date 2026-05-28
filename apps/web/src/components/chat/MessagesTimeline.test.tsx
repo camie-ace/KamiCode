@@ -96,13 +96,9 @@ function buildProps() {
   };
 }
 
-function buildLongUserMessageText(
-  tail = "deep hidden detail only after expand",
-) {
+function buildLongUserMessageText(tail = "deep hidden detail only after expand") {
   return Array.from({ length: 9 }, (_, index) =>
-    index === 8
-      ? tail
-      : `Line ${index + 1}: ${"verbose prompt content ".repeat(8).trim()}`,
+    index === 8 ? tail : `Line ${index + 1}: ${"verbose prompt content ".repeat(8).trim()}`,
   ).join("\n");
 }
 
@@ -231,9 +227,7 @@ describe("MessagesTimeline", () => {
               createdAt: "2026-03-17T19:12:28.000Z",
               label: "Updated files",
               tone: "tool",
-              changedFiles: [
-                "C:/Users/mike/dev-stuff/t3code/apps/web/src/session-logic.ts",
-              ],
+              changedFiles: ["C:/Users/mike/dev-stuff/t3code/apps/web/src/session-logic.ts"],
             },
           },
         ]}
@@ -242,9 +236,7 @@ describe("MessagesTimeline", () => {
     );
 
     expect(markup).toContain("t3code/apps/web/src/session-logic.ts");
-    expect(markup).not.toContain(
-      "C:/Users/mike/dev-stuff/t3code/apps/web/src/session-logic.ts",
-    );
+    expect(markup).not.toContain("C:/Users/mike/dev-stuff/t3code/apps/web/src/session-logic.ts");
   });
 
   it("renders test harness evidence artifacts inline instead of raw paths", async () => {
@@ -277,7 +269,7 @@ describe("MessagesTimeline", () => {
                 goal: "Validate chat UI",
                 finalUrl: "http://127.0.0.1:5733/pair",
                 title: "KamiCode (Dev)",
-                outputSummary: "Pairing screen was visible.",
+                evidenceSummary: `Pairing screen was visible; trace recorded at ${tracePath}.`,
                 tracePath,
                 markdownPath: summaryPath,
                 screenshots: [{ label: "final", path: screenshotPath }],
@@ -292,7 +284,8 @@ describe("MessagesTimeline", () => {
     );
 
     expect(markup).toContain("Evidence run");
-    expect(markup).toContain("Pairing screen was visible.");
+    expect(markup).toContain("Pairing screen was visible;");
+    expect(markup).toContain("trace recorded.");
     expect(markup).toContain("Screenshots");
     expect(markup).toContain(encodeURIComponent(screenshotPath));
     expect(markup).toContain(encodeURIComponent(tracePath));

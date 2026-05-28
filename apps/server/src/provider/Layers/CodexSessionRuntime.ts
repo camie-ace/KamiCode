@@ -1,7 +1,3 @@
-// @effect-diagnostics nodeBuiltinImport:off
-import * as fs from "node:fs";
-import * as path from "node:path";
-
 import {
   ApprovalRequestId,
   DEFAULT_MODEL,
@@ -46,6 +42,7 @@ import {
   CODEX_PLAN_MODE_DEVELOPER_INSTRUCTIONS,
   CODEX_TEST_MODE_DEVELOPER_INSTRUCTIONS,
 } from "../CodexDeveloperInstructions.ts";
+import { appendProjectMemoryInstructions, readProjectMemory } from "../ProjectMemory.ts";
 import {
   KAMI_TEST_HARNESS_DYNAMIC_TOOL_SPEC,
   isKamiTestHarnessDynamicToolCall,
@@ -74,11 +71,6 @@ const RECOVERABLE_THREAD_RESUME_ERROR_SNIPPETS = [
   "unknown thread",
   "does not exist",
 ];
-const PROJECT_MEMORY_DIRECTORY = ".camie";
-const PROJECT_MEMORY_FILENAME = "project-memory.md";
-const PROJECT_MEMORY_FILE = path.join(PROJECT_MEMORY_DIRECTORY, PROJECT_MEMORY_FILENAME);
-const PROJECT_MEMORY_MAX_CHARS = 40_000;
-
 export const CodexResumeCursorSchema = Schema.Struct({
   threadId: Schema.String,
 });
@@ -124,6 +116,7 @@ export interface CodexSessionRuntimeOptions {
   readonly model?: string;
   readonly serviceTier?: CodexServiceTier | undefined;
   readonly resumeCursor?: CodexResumeCursor;
+  readonly issueTestHarnessPairingCredential?: (() => Effect.Effect<string, string>) | undefined;
 }
 
 export interface CodexSessionRuntimeSendTurnInput {
@@ -340,67 +333,6 @@ function runtimeModeToTurnSandboxPolicy(
   }
 }
 
-function findProjectMemoryPath(cwd: string): string | undefined {
-  let current = path.resolve(cwd);
-
-  while (true) {
-    const candidate = path.join(current, PROJECT_MEMORY_FILE);
-    if (fs.existsSync(candidate)) {
-      return candidate;
-    }
-
-    const parent = path.dirname(current);
-    if (parent === current) {
-      return undefined;
-    }
-    current = parent;
-  }
-}
-
-function readProjectMemory(cwd: string): string | undefined {
-  const memoryPath = findProjectMemoryPath(cwd);
-  if (!memoryPath) {
-    return undefined;
-  }
-
-  try {
-    const stat = fs.statSync(memoryPath);
-    if (!stat.isFile()) {
-      return undefined;
-    }
-
-    const memory = fs.readFileSync(memoryPath, "utf8").trim();
-    if (!memory) {
-      return undefined;
-    }
-
-    if (memory.length <= PROJECT_MEMORY_MAX_CHARS) {
-      return memory;
-    }
-
-    return `${memory.slice(0, PROJECT_MEMORY_MAX_CHARS)}\n\n[Project memory truncated by T3 Code before injection.]`;
-  } catch {
-    return undefined;
-  }
-}
-
-export function appendProjectMemoryInstructions(
-  developerInstructions: string,
-  projectMemory: string | undefined,
-): string {
-  const policy = `<project_memory_policy>
-At the beginning of each turn, T3 Code injects .camie/project-memory.md here when it exists.
-Treat the injected project memory as durable repo-specific context before answering.
-Before finalizing a turn, update .camie/project-memory.md when you learned durable repo-specific facts, decisions, paths, commands, constraints, or user preferences worth preserving.
-</project_memory_policy>`;
-
-  if (!projectMemory?.trim()) {
-    return `${developerInstructions}\n\n${policy}`;
-  }
-
-  return `${developerInstructions}\n\n${policy}\n\n<project_memory path=".camie/project-memory.md">\n${projectMemory.trim()}\n</project_memory>`;
-}
-
 function buildCodexCollaborationMode(input: {
   readonly interactionMode?: ProviderInteractionMode;
   readonly model?: string;
@@ -465,7 +397,7 @@ export function buildTurnStartParams(input: {
     ...(input.interactionMode ? { interactionMode: input.interactionMode } : {}),
     ...(input.model ? { model: input.model } : {}),
     ...(input.effort ? { effort: input.effort } : {}),
-    ...(input.projectMemory ? { projectMemory: input.projectMemory } : {}),
+    ...(input.projectMemory !== undefined ? { projectMemory: input.projectMemory } : {}),
   });
 
   return decodeCodexTurnStartParamsWithCollaborationMode({
@@ -532,17 +464,22 @@ interface CodexThreadOpenClient {
 function requestCodexThreadStart(
   client: CodexThreadOpenClient,
   payload: CodexThreadStartParamsWithDynamicTools,
-): Effect.Effect<CodexRpc.ClientRequestResponsesByMethod["thread/start"], CodexErrors.CodexAppServerError> {
+): Effect.Effect<
+  CodexRpc.ClientRequestResponsesByMethod["thread/start"],
+  CodexErrors.CodexAppServerError
+> {
   if (client.raw) {
-    return client.raw.request("thread/start", payload).pipe(
-      Effect.flatMap((rawResponse) =>
-        decodeV2ThreadStartResponse(rawResponse).pipe(
-          Effect.mapError((error) =>
-            toProtocolParseError("Invalid thread/start response payload", error),
+    return client.raw
+      .request("thread/start", payload)
+      .pipe(
+        Effect.flatMap((rawResponse) =>
+          decodeV2ThreadStartResponse(rawResponse).pipe(
+            Effect.mapError((error) =>
+              toProtocolParseError("Invalid thread/start response payload", error),
+            ),
           ),
         ),
-      ),
-    );
+      );
   }
 
   return client.request("thread/start", payload);
@@ -827,6 +764,8 @@ export const makeCodexSessionRuntime = (
     const pendingUserInputsRef = yield* Ref.make(new Map<ApprovalRequestId, PendingUserInput>());
     const collabReceiverTurnsRef = yield* Ref.make(new Map<string, TurnId>());
     const closedRef = yield* Ref.make(false);
+    const projectMemoryAtSessionStart = readProjectMemory(options.cwd) ?? "";
+    const projectMemoryInjectedRef = yield* Ref.make(false);
 
     // `~` is not shell-expanded when env vars are set via
     // `child_process.spawn`; `expandHomePath` lets a configured
@@ -1241,6 +1180,9 @@ export const makeCodexSessionRuntime = (
           rawArguments: payload.arguments,
           cwd: options.cwd,
           ...(options.stateDir ? { stateDir: options.stateDir } : {}),
+          ...(options.issueTestHarnessPairingCredential
+            ? { issueKamiCodePairingCredential: options.issueTestHarnessPairingCredential }
+            : {}),
         });
 
         yield* emitEvent({
@@ -1413,7 +1355,7 @@ export const makeCodexSessionRuntime = (
           const normalizedModel = normalizeCodexModelSlug(
             input.model ?? (yield* Ref.get(sessionRef)).model,
           );
-          const projectMemory = readProjectMemory(options.cwd);
+          const shouldInjectProjectMemory = !(yield* Ref.get(projectMemoryInjectedRef));
           const params = yield* buildTurnStartParams({
             threadId: providerThreadId,
             runtimeMode: options.runtimeMode,
@@ -1423,7 +1365,7 @@ export const makeCodexSessionRuntime = (
             ...(input.serviceTier ? { serviceTier: input.serviceTier } : {}),
             ...(input.effort ? { effort: input.effort } : {}),
             ...(input.interactionMode ? { interactionMode: input.interactionMode } : {}),
-            ...(projectMemory ? { projectMemory } : {}),
+            ...(shouldInjectProjectMemory ? { projectMemory: projectMemoryAtSessionStart } : {}),
           });
           const rawResponse = yield* client.raw.request("turn/start", params);
           const response = yield* decodeV2TurnStartResponse(rawResponse).pipe(
@@ -1431,6 +1373,9 @@ export const makeCodexSessionRuntime = (
               toProtocolParseError("Invalid turn/start response payload", error),
             ),
           );
+          if (shouldInjectProjectMemory) {
+            yield* Ref.set(projectMemoryInjectedRef, true);
+          }
           const turnId = TurnId.make(response.turn.id);
           yield* updateSession(sessionRef, {
             status: "running",

@@ -11,6 +11,9 @@ export const DesktopBackendBootstrap = Schema.Struct({
   desktopBootstrapToken: Schema.String,
   tailscaleServeEnabled: Schema.Boolean,
   tailscaleServePort: PortSchema,
+  githubOAuthClientId: Schema.optional(Schema.String),
+  githubOAuthClientSecret: Schema.optional(Schema.String),
+  githubOAuthCallbackUrl: Schema.optional(Schema.URLFromString),
   otlpTracesUrl: Schema.optional(Schema.String),
   otlpMetricsUrl: Schema.optional(Schema.String),
 });

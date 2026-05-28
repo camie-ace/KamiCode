@@ -7,6 +7,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   rmSync,
   statSync,
@@ -18,51 +19,33 @@ import { fileURLToPath } from "node:url";
 
 const isDevelopment = Boolean(process.env.VITE_DEV_SERVER_URL);
 const APP_DISPLAY_NAME = isDevelopment ? "KamiCode (Dev)" : "KamiCode (Alpha)";
-const APP_BUNDLE_ID = isDevelopment
-  ? "ai.kagura.kamicode.dev"
-  : "ai.kagura.kamicode";
-const LAUNCHER_VERSION = 2;
+const APP_BUNDLE_ID = isDevelopment ? "ai.kagura.kamicode.dev" : "ai.kagura.kamicode";
+const LAUNCHER_VERSION = 3;
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 export const desktopDir = resolve(__dirname, "..");
 const repoRoot = resolve(desktopDir, "..", "..");
 const defaultIconPath = join(desktopDir, "resources", "icon.icns");
-const developmentMacIconPngPath = join(
-  repoRoot,
-  "assets",
-  "dev",
-  "blueprint-macos-1024.png",
-);
+const windowsIconPath = join(desktopDir, "resources", "icon.ico");
+const developmentMacIconPngPath = join(repoRoot, "assets", "dev", "blueprint-macos-1024.png");
 
 function setPlistString(plistPath, key, value) {
-  const replaceResult = spawnSync(
-    "plutil",
-    ["-replace", key, "-string", value, plistPath],
-    {
-      encoding: "utf8",
-    },
-  );
+  const replaceResult = spawnSync("plutil", ["-replace", key, "-string", value, plistPath], {
+    encoding: "utf8",
+  });
   if (replaceResult.status === 0) {
     return;
   }
 
-  const insertResult = spawnSync(
-    "plutil",
-    ["-insert", key, "-string", value, plistPath],
-    {
-      encoding: "utf8",
-    },
-  );
+  const insertResult = spawnSync("plutil", ["-insert", key, "-string", value, plistPath], {
+    encoding: "utf8",
+  });
   if (insertResult.status === 0) {
     return;
   }
 
-  const details = [replaceResult.stderr, insertResult.stderr]
-    .filter(Boolean)
-    .join("\n");
-  throw new Error(
-    `Failed to update plist key "${key}" at ${plistPath}: ${details}`.trim(),
-  );
+  const details = [replaceResult.stderr, insertResult.stderr].filter(Boolean).join("\n");
+  throw new Error(`Failed to update plist key "${key}" at ${plistPath}: ${details}`.trim());
 }
 
 function runChecked(command, args) {
@@ -72,9 +55,7 @@ function runChecked(command, args) {
   }
 
   const details = [result.stdout, result.stderr].filter(Boolean).join("\n");
-  throw new Error(
-    `Failed to run ${command} ${args.join(" ")}: ${details}`.trim(),
-  );
+  throw new Error(`Failed to run ${command} ${args.join(" ")}: ${details}`.trim());
 }
 
 function ensureDevelopmentIconIcns(runtimeDir) {
@@ -86,10 +67,7 @@ function ensureDevelopmentIconIcns(runtimeDir) {
   }
 
   const sourceMtimeMs = statSync(developmentMacIconPngPath).mtimeMs;
-  if (
-    existsSync(generatedIconPath) &&
-    statSync(generatedIconPath).mtimeMs >= sourceMtimeMs
-  ) {
+  if (existsSync(generatedIconPath) && statSync(generatedIconPath).mtimeMs >= sourceMtimeMs) {
     return generatedIconPath;
   }
 
@@ -152,19 +130,127 @@ function readJson(path) {
   }
 }
 
+function resolveRceditPath() {
+  if (process.env.RCEDIT_PATH && existsSync(process.env.RCEDIT_PATH)) {
+    return process.env.RCEDIT_PATH;
+  }
+
+  const localAppData = process.env.LOCALAPPDATA;
+  if (!localAppData) {
+    return null;
+  }
+
+  const winCodeSignCacheDir = join(localAppData, "electron-builder", "Cache", "winCodeSign");
+  if (!existsSync(winCodeSignCacheDir)) {
+    return null;
+  }
+
+  const stack = [winCodeSignCacheDir];
+  while (stack.length > 0) {
+    const current = stack.pop();
+    if (!current) continue;
+
+    let entries;
+    try {
+      entries = readdirSync(current, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+
+    for (const entry of entries) {
+      const entryPath = join(current, entry.name);
+      if (entry.isDirectory()) {
+        stack.push(entryPath);
+      } else if (entry.name === "rcedit-x64.exe" || entry.name === "rcedit-ia32.exe") {
+        return entryPath;
+      }
+    }
+  }
+
+  return null;
+}
+
+function patchWindowsExecutable(executablePath, iconPath) {
+  const rceditPath = resolveRceditPath();
+  if (!rceditPath) {
+    console.warn(
+      "[desktop-launcher] rcedit was not found; falling back to the unbranded Electron executable.",
+    );
+    return false;
+  }
+
+  runChecked(rceditPath, [
+    executablePath,
+    "--set-icon",
+    iconPath,
+    "--set-version-string",
+    "FileDescription",
+    APP_DISPLAY_NAME,
+    "--set-version-string",
+    "ProductName",
+    APP_DISPLAY_NAME,
+    "--set-version-string",
+    "InternalName",
+    APP_DISPLAY_NAME,
+    "--set-version-string",
+    "OriginalFilename",
+    `${APP_DISPLAY_NAME}.exe`,
+    "--set-version-string",
+    "CompanyName",
+    "Kagura AI",
+  ]);
+  return true;
+}
+
+function buildWindowsLauncher(electronBinaryPath) {
+  if (!existsSync(windowsIconPath)) {
+    return electronBinaryPath;
+  }
+
+  const sourceDistDir = dirname(electronBinaryPath);
+  const runtimeDir = join(desktopDir, ".electron-runtime", "win32");
+  const targetDistDir = join(runtimeDir, APP_BUNDLE_ID);
+  const targetBinaryPath = join(targetDistDir, `${APP_DISPLAY_NAME}.exe`);
+  const metadataPath = join(runtimeDir, `${APP_BUNDLE_ID}.json`);
+
+  mkdirSync(runtimeDir, { recursive: true });
+
+  const expectedMetadata = {
+    launcherVersion: LAUNCHER_VERSION,
+    appBundleId: APP_BUNDLE_ID,
+    appDisplayName: APP_DISPLAY_NAME,
+    sourceDistDir,
+    sourceElectronMtimeMs: statSync(electronBinaryPath).mtimeMs,
+    iconMtimeMs: statSync(windowsIconPath).mtimeMs,
+  };
+
+  const currentMetadata = readJson(metadataPath);
+  if (
+    existsSync(targetBinaryPath) &&
+    currentMetadata &&
+    JSON.stringify(currentMetadata) === JSON.stringify(expectedMetadata)
+  ) {
+    return targetBinaryPath;
+  }
+
+  rmSync(targetDistDir, { recursive: true, force: true });
+  cpSync(sourceDistDir, targetDistDir, { recursive: true });
+  copyFileSync(join(targetDistDir, "electron.exe"), targetBinaryPath);
+
+  if (!patchWindowsExecutable(targetBinaryPath, windowsIconPath)) {
+    return electronBinaryPath;
+  }
+
+  writeFileSync(metadataPath, `${JSON.stringify(expectedMetadata, null, 2)}\n`);
+  return targetBinaryPath;
+}
+
 function buildMacLauncher(electronBinaryPath) {
   const sourceAppBundlePath = resolve(electronBinaryPath, "../../..");
   const runtimeDir = join(desktopDir, ".electron-runtime");
   const targetAppBundlePath = join(runtimeDir, `${APP_DISPLAY_NAME}.app`);
-  const targetBinaryPath = join(
-    targetAppBundlePath,
-    "Contents",
-    "MacOS",
-    "Electron",
-  );
-  const iconPath = isDevelopment
-    ? ensureDevelopmentIconIcns(runtimeDir)
-    : defaultIconPath;
+  const targetBinaryPath = join(targetAppBundlePath, "Contents", "MacOS", "Electron");
+  const iconPath = isDevelopment ? ensureDevelopmentIconIcns(runtimeDir) : defaultIconPath;
   const metadataPath = join(runtimeDir, "metadata.json");
 
   mkdirSync(runtimeDir, { recursive: true });
@@ -196,6 +282,10 @@ function buildMacLauncher(electronBinaryPath) {
 export function resolveElectronPath() {
   const require = createRequire(import.meta.url);
   const electronBinaryPath = require("electron");
+
+  if (process.platform === "win32") {
+    return buildWindowsLauncher(electronBinaryPath);
+  }
 
   if (process.platform !== "darwin") {
     return electronBinaryPath;

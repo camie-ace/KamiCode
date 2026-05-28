@@ -3535,7 +3535,9 @@ export default function ChatView(props: ChatViewProps) {
           activeThreadId={activeThread.id}
           {...(routeKind === "draft" && draftId ? { draftId } : {})}
           activeThreadTitle={activeThread.title}
+          activeProjectId={activeProject?.id}
           activeProjectName={activeProject?.name}
+          activeProjectCwd={activeProject?.cwd}
           isGitRepo={isGitRepo}
           openInCwd={gitCwd}
           activeProjectScripts={activeProject?.scripts}

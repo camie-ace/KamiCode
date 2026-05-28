@@ -13,6 +13,7 @@ import { QueryClient, useQueryClient } from "@tanstack/react-query";
 import { APP_DISPLAY_NAME } from "../branding";
 import { AppSidebarLayout } from "../components/AppSidebarLayout";
 import { CommandPalette } from "../components/CommandPalette";
+import { GitHubLoginSurface } from "../components/auth/PairingRouteSurface";
 import { SshPasswordPromptDialog } from "../components/desktop/SshPasswordPromptDialog";
 import { ProviderUpdateLaunchNotification } from "../components/ProviderUpdateLaunchNotification";
 import {
@@ -59,6 +60,7 @@ import {
   ensurePrimaryEnvironmentReady,
   getPrimaryKnownEnvironment,
   resolveInitialServerAuthGateState,
+  resolveInitialUserAuthGateState,
   updatePrimaryEnvironmentDescriptor,
 } from "../environments/primary";
 import { hasHostedPairingRequest, isHostedStaticApp } from "../hostedPairing";
@@ -72,6 +74,9 @@ export const Route = createRootRouteWithContext<{
         authGateState: {
           status: "hosted-pairing",
         } as const,
+        userAuthGateState: {
+          status: "disabled",
+        } as const,
       };
     }
 
@@ -81,6 +86,9 @@ export const Route = createRootRouteWithContext<{
         authGateState: {
           status: "hosted-static",
         } as const,
+        userAuthGateState: {
+          status: "disabled",
+        } as const,
       };
     }
 
@@ -88,8 +96,13 @@ export const Route = createRootRouteWithContext<{
       ensurePrimaryEnvironmentReady(),
       resolveInitialServerAuthGateState(),
     ]);
+    const userAuthGateState =
+      authGateState.status === "authenticated"
+        ? await resolveInitialUserAuthGateState()
+        : ({ status: "disabled" } as const);
     return {
       authGateState,
+      userAuthGateState,
     };
   },
   component: RootRouteView,
@@ -101,7 +114,7 @@ export const Route = createRootRouteWithContext<{
 
 function RootRouteView() {
   const pathname = useLocation({ select: (location) => location.pathname });
-  const { authGateState } = Route.useRouteContext();
+  const { authGateState, userAuthGateState } = Route.useRouteContext();
   const primaryEnvironmentAuthenticated = authGateState.status === "authenticated";
 
   useEffect(() => {
@@ -119,6 +132,16 @@ function RootRouteView() {
 
   if (authGateState.status !== "authenticated" && authGateState.status !== "hosted-static") {
     return <Outlet />;
+  }
+
+  if (primaryEnvironmentAuthenticated && userAuthGateState.status === "requires-login") {
+    return (
+      <GitHubLoginSurface
+        {...(userAuthGateState.errorMessage
+          ? { errorMessage: userAuthGateState.errorMessage }
+          : {})}
+      />
+    );
   }
 
   const appShell = (
@@ -178,7 +201,8 @@ function HostedStaticEnvironmentBootstrap() {
 }
 
 function RootRouteErrorView({ error, reset }: ErrorComponentProps) {
-  const message = errorMessage(error);
+  const message = rootRouteErrorMessage(error);
+  const hint = rootRouteErrorHint(error);
   const details = errorDetails(error);
 
   return (
@@ -196,6 +220,7 @@ function RootRouteErrorView({ error, reset }: ErrorComponentProps) {
           Something went wrong.
         </h1>
         <p className="mt-2 text-sm leading-relaxed text-muted-foreground">{message}</p>
+        {hint ? <p className="mt-2 text-sm leading-relaxed text-muted-foreground">{hint}</p> : null}
 
         <div className="mt-5 flex flex-wrap gap-2">
           <Button size="sm" onClick={() => reset()}>
@@ -203,6 +228,15 @@ function RootRouteErrorView({ error, reset }: ErrorComponentProps) {
           </Button>
           <Button size="sm" variant="outline" onClick={() => window.location.reload()}>
             Reload app
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => {
+              window.location.href = "/pair";
+            }}
+          >
+            Open pairing
           </Button>
         </div>
 
@@ -230,6 +264,32 @@ function errorMessage(error: unknown): string {
   }
 
   return "An unexpected router error occurred.";
+}
+
+export function isLikelyBackendFetchFailure(error: unknown): boolean {
+  const message = errorMessage(error).toLowerCase();
+  return (
+    message.includes("failed to fetch") ||
+    message.includes("networkerror") ||
+    message.includes("connection refused") ||
+    message.includes("econnrefused")
+  );
+}
+
+export function rootRouteErrorMessage(error: unknown): string {
+  if (isLikelyBackendFetchFailure(error)) {
+    return "KamiCode could not reach its local backend.";
+  }
+
+  return errorMessage(error);
+}
+
+export function rootRouteErrorHint(error: unknown): string | null {
+  if (isLikelyBackendFetchFailure(error)) {
+    return "This usually means the desktop/server process is not running, restarted mid-load, or the browser is pointed at a stale dev URL. Restart KamiCode or run the local dev server, then reload.";
+  }
+
+  return null;
 }
 
 function errorDetails(error: unknown): string {

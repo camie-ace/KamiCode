@@ -32,4 +32,13 @@ export {
   __resetServerAuthBootstrapForTests,
 } from "./auth";
 
+export {
+  fetchUserAuthSessionState,
+  logoutGitHubUser,
+  resolveInitialUserAuthGateState,
+  startGitHubUserLogin,
+  type UserAuthGateState,
+  __resetUserAuthBootstrapForTests,
+} from "./userAuth";
+
 export { resolvePrimaryEnvironmentHttpUrl, isLoopbackHostname } from "./target";

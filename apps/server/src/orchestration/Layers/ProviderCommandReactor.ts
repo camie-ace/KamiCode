@@ -116,6 +116,11 @@ export function buildTestModeTurnInput(input: {
       ? `- Default test URL: ${defaultTestEnvironment.baseUrl}`
       : "- Default test URL: not configured",
   );
+  if (!defaultTestEnvironment) {
+    lines.push(
+      "- Missing URL behavior: ask the user for the target URL before running the harness.",
+    );
+  }
   lines.push("");
   lines.push("User test request:");
   lines.push(

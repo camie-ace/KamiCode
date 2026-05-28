@@ -73,13 +73,13 @@
         display: flex;
         align-items: center;
         justify-content: center;
-        width: 96px;
-        height: 96px;
+        width: min(384px, 90vmin);
+        height: min(384px, 90vmin);
       }
 
       #boot-shell-logo {
-        width: 64px;
-        height: 64px;
+        width: min(256px, 80vmin);
+        height: min(256px, 80vmin);
         object-fit: contain;
       }
     </style>
@@ -95,7 +95,7 @@
     <div id="root">
       <div id="boot-shell">
         <div id="boot-shell-card" aria-label="KamiCode splash screen">
-          <img id="boot-shell-logo" src="/apple-touch-icon.png" alt="KamiCode" />
+          <img id="boot-shell-logo" src="/kamicode-logo.svg?v=transparent-mark-v3" alt="KamiCode" />
         </div>
       </div>
     </div>

@@ -8,7 +8,9 @@
  */
 import {
   type CanUseTool,
+  createSdkMcpServer,
   query,
+  tool,
   type Options as ClaudeQueryOptions,
   type PermissionMode,
   type PermissionResult,
@@ -51,6 +53,7 @@ import {
   getProviderOptionDescriptors,
   resolvePromptInjectedEffort,
 } from "@t3tools/shared/model";
+import { z } from "zod";
 import * as Cause from "effect/Cause";
 import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
@@ -67,6 +70,11 @@ import * as Stream from "effect/Stream";
 
 import { resolveAttachmentPath } from "../../attachmentStore.ts";
 import { ServerConfig } from "../../config.ts";
+import {
+  KAMI_TEST_HARNESS_TOOL_NAME,
+  KAMI_TEST_HARNESS_TOOL_NAMESPACE,
+  runBrowserHarnessDynamicTool,
+} from "../../testing/browserHarnessDynamicTool.ts";
 import { makeClaudeEnvironment } from "../Drivers/ClaudeHome.ts";
 import {
   getClaudeModelCapabilities,
@@ -83,6 +91,7 @@ import {
   type ProviderAdapterError,
 } from "../Errors.ts";
 import { type ClaudeAdapterShape } from "../Services/ClaudeAdapter.ts";
+import { applyProjectMemoryPromptPrefix, readProjectMemory } from "../ProjectMemory.ts";
 import { applyTestModePromptPrefix } from "../TestModeInstructions.ts";
 import { type EventNdjsonLogger, makeEventNdjsonLogger } from "./EventNdjsonLogger.ts";
 const encodeUnknownJsonStringExit = Schema.encodeUnknownExit(Schema.UnknownFromJsonString);
@@ -166,6 +175,7 @@ interface ClaudeSessionContext {
   streamFiber: Fiber.Fiber<void, Error> | undefined;
   readonly startedAt: string;
   readonly basePermissionMode: PermissionMode | undefined;
+  activeInteractionMode: ProviderSendTurnInput["interactionMode"] | undefined;
   currentApiModelId: string | undefined;
   resumeSessionId: string | undefined;
   readonly pendingApprovals: Map<ApprovalRequestId, PendingApproval>;
@@ -180,6 +190,8 @@ interface ClaudeSessionContext {
   lastKnownTokenUsage: ThreadTokenUsageSnapshot | undefined;
   lastAssistantUuid: string | undefined;
   lastThreadStartedId: string | undefined;
+  readonly projectMemoryAtSessionStart: string;
+  projectMemoryInjected: boolean;
   stopped: boolean;
 }
 
@@ -200,6 +212,7 @@ export interface ClaudeAdapterLiveOptions {
   }) => ClaudeQueryRuntime;
   readonly nativeEventLogPath?: string;
   readonly nativeEventLogger?: EventNdjsonLogger;
+  readonly issueTestHarnessPairingCredential?: (() => Effect.Effect<string, string>) | undefined;
 }
 
 function isUuid(value: string): boolean {
@@ -435,6 +448,9 @@ function readClaudeResumeState(resumeCursor: unknown): ClaudeResumeState | undef
 
 function classifyToolItemType(toolName: string): CanonicalItemType {
   const normalized = toolName.toLowerCase();
+  if (isKamiTestHarnessToolName(toolName)) {
+    return "dynamic_tool_call";
+  }
   if (normalized.includes("agent")) {
     return "collab_agent_tool_call";
   }
@@ -533,6 +549,12 @@ function extractPlanStepsFromTodoInput(input: Record<string, unknown>): PlanStep
 }
 
 function summarizeToolRequest(toolName: string, input: Record<string, unknown>): string {
+  if (isKamiTestHarnessToolName(toolName)) {
+    const goal = typeof input.goal === "string" ? input.goal.trim() : "";
+    const url = typeof input.url === "string" ? input.url.trim() : "";
+    return `Evidence run${goal ? `: ${goal}` : ""}${url ? ` (${url})` : ""}`;
+  }
+
   const commandValue = input.command ?? input.cmd;
   const command = typeof commandValue === "string" ? commandValue : undefined;
   if (command && command.trim().length > 0) {
@@ -560,7 +582,11 @@ function summarizeToolRequest(toolName: string, input: Record<string, unknown>):
   return `${toolName}: ${serialized.slice(0, 397)}...`;
 }
 
-function titleForTool(itemType: CanonicalItemType): string {
+function titleForTool(itemType: CanonicalItemType, toolName?: string): string {
+  if (toolName && isKamiTestHarnessToolName(toolName)) {
+    return "Evidence run";
+  }
+
   switch (itemType) {
     case "command_execution":
       return "Command run";
@@ -593,9 +619,123 @@ const CLAUDE_SETTING_SOURCES = [
   "local",
 ] as const satisfies ReadonlyArray<SettingSource>;
 
+const ClaudeTestHarnessActionSchema = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("navigate"), url: z.string() }),
+  z.object({
+    type: z.literal("click"),
+    selector: z.string().optional(),
+    text: z.string().optional(),
+  }),
+  z.object({ type: z.literal("type"), selector: z.string().optional(), text: z.string() }),
+  z.object({ type: z.literal("select"), selector: z.string().optional(), value: z.string() }),
+  z.object({ type: z.literal("wait"), ms: z.number().optional(), text: z.string().optional() }),
+  z.object({
+    type: z.literal("assert"),
+    description: z.string(),
+    selector: z.string().optional(),
+    text: z.string().optional(),
+    urlIncludes: z.string().optional(),
+    titleIncludes: z.string().optional(),
+  }),
+  z.object({ type: z.literal("screenshot"), label: z.string().optional() }),
+  z.object({ type: z.literal("scroll"), direction: z.enum(["up", "down"]) }),
+  z.object({
+    type: z.literal("done"),
+    summary: z.string(),
+    result: z.enum(["pass", "fail", "blocked"]),
+  }),
+]);
+
+const ClaudeTestHarnessToolInputSchema = {
+  url: z.string().describe("Absolute URL to open in the visible browser."),
+  goal: z.string().optional().describe("Short natural-language goal for this evidence run."),
+  actions: z
+    .array(ClaudeTestHarnessActionSchema)
+    .min(1)
+    .describe(
+      "Browser actions to perform. Use small batches so observations can guide next steps.",
+    ),
+  projectId: z.string().optional(),
+  environmentId: z.string().optional(),
+  headless: z.boolean().optional().describe("Use false or omit for visible browser testing."),
+  timeoutMs: z.number().optional(),
+  lingerMs: z.number().optional(),
+  auth: z
+    .object({
+      type: z.literal("kamicode-pairing"),
+      required: z.boolean().optional(),
+    })
+    .optional()
+    .describe("Request short-lived KamiCode pairing auth when testing KamiCode itself."),
+};
+
+type ClaudeTestHarnessRunEffect = <A>(effect: Effect.Effect<A, never>) => Promise<A>;
+
+function dynamicToolResponseToClaudeToolText(response: {
+  readonly contentItems: ReadonlyArray<Record<string, unknown>>;
+}): string {
+  return response.contentItems
+    .map((item) =>
+      item.type === "inputText" && typeof item.text === "string" ? item.text : JSON.stringify(item),
+    )
+    .join("\n");
+}
+
+function createClaudeTestHarnessMcpServer(input: {
+  readonly cwd: string;
+  readonly stateDir: string;
+  readonly runEffect: ClaudeTestHarnessRunEffect;
+  readonly issueTestHarnessPairingCredential?: (() => Effect.Effect<string, string>) | undefined;
+}): NonNullable<ClaudeQueryOptions["mcpServers"]>[string] {
+  return createSdkMcpServer({
+    name: KAMI_TEST_HARNESS_TOOL_NAMESPACE,
+    version: "0.1.0",
+    tools: [
+      tool(
+        KAMI_TEST_HARNESS_TOOL_NAME,
+        "Run KamiCode's visible Playwright evidence harness and return screenshots, trace, console/network summaries, timings, and final browser state.",
+        ClaudeTestHarnessToolInputSchema,
+        async (args) => {
+          const response = await input.runEffect(
+            runBrowserHarnessDynamicTool({
+              rawArguments: args,
+              cwd: input.cwd,
+              stateDir: input.stateDir,
+              ...(input.issueTestHarnessPairingCredential
+                ? { issueKamiCodePairingCredential: input.issueTestHarnessPairingCredential }
+                : {}),
+            }),
+          );
+
+          return {
+            isError: !response.success,
+            content: [
+              {
+                type: "text",
+                text: dynamicToolResponseToClaudeToolText(response),
+              },
+            ],
+          };
+        },
+      ),
+    ],
+  });
+}
+
+function isKamiTestHarnessToolName(toolName: string): boolean {
+  const normalized = toolName.toLowerCase().replace(/[.:/\\-]+/g, "__");
+  return (
+    normalized === KAMI_TEST_HARNESS_TOOL_NAME ||
+    normalized.endsWith(`__${KAMI_TEST_HARNESS_TOOL_NAME}`) ||
+    normalized.includes(`${KAMI_TEST_HARNESS_TOOL_NAMESPACE}__${KAMI_TEST_HARNESS_TOOL_NAME}`)
+  );
+}
+
 function buildPromptText(
   input: ProviderSendTurnInput,
   boundInstanceId: ProviderInstanceId,
+  projectMemory: string | undefined,
+  injectProjectMemory: boolean,
 ): string {
   const rawEffort =
     input.modelSelection?.instanceId === boundInstanceId
@@ -606,10 +746,11 @@ function buildPromptText(
   const caps = getClaudeModelCapabilities(claudeModel);
 
   const promptEffort = resolvePromptInjectedEffort(caps, rawEffort);
-  return applyTestModePromptPrefix({
+  const prompt = applyTestModePromptPrefix({
     interactionMode: input.interactionMode,
     prompt: applyClaudePromptEffortPrefix(input.input?.trim() ?? "", promptEffort),
   });
+  return injectProjectMemory ? applyProjectMemoryPromptPrefix({ prompt, projectMemory }) : prompt;
 }
 
 function buildUserMessage(input: {
@@ -646,9 +787,16 @@ const buildUserMessageEffect = Effect.fn("buildUserMessageEffect")(function* (
     readonly fileSystem: FileSystem.FileSystem;
     readonly attachmentsDir: string;
     readonly boundInstanceId: ProviderInstanceId;
+    readonly projectMemory: string | undefined;
+    readonly injectProjectMemory: boolean;
   },
 ) {
-  const text = buildPromptText(input, dependencies.boundInstanceId);
+  const text = buildPromptText(
+    input,
+    dependencies.boundInstanceId,
+    dependencies.projectMemory,
+    dependencies.injectProjectMemory,
+  );
   const sdkContent: Array<Record<string, unknown>> = [];
 
   if (text.length > 0) {
@@ -1791,7 +1939,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         itemId,
         itemType,
         toolName,
-        title: titleForTool(itemType),
+        title: titleForTool(itemType, toolName),
         detail,
         input: toolInput,
         partialInputJson: "",
@@ -2754,6 +2902,13 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
           } satisfies PermissionResult;
         }
 
+        if (isKamiTestHarnessToolName(toolName) && context.activeInteractionMode === "test") {
+          return {
+            behavior: "allow",
+            updatedInput: toolInput,
+          } satisfies PermissionResult;
+        }
+
         const runtimeMode = input.runtimeMode ?? "full-access";
         if (runtimeMode === "full-access") {
           return {
@@ -2901,6 +3056,14 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         ...(typeof thinking === "boolean" ? { alwaysThinkingEnabled: thinking } : {}),
         ...(fastMode ? { fastMode: true } : {}),
       };
+      const testHarnessMcpServer = createClaudeTestHarnessMcpServer({
+        cwd: input.cwd ?? serverConfig.cwd,
+        stateDir: serverConfig.stateDir,
+        runEffect: runPromise,
+        ...(options?.issueTestHarnessPairingCredential
+          ? { issueTestHarnessPairingCredential: options.issueTestHarnessPairingCredential }
+          : {}),
+      });
       const queryOptions: ClaudeQueryOptions = {
         ...(input.cwd ? { cwd: input.cwd } : {}),
         ...(apiModelId ? { model: apiModelId } : {}),
@@ -2923,6 +3086,9 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         ...(newSessionId ? { sessionId: newSessionId } : {}),
         includePartialMessages: true,
         canUseTool,
+        mcpServers: {
+          [KAMI_TEST_HARNESS_TOOL_NAMESPACE]: testHarnessMcpServer,
+        },
         env: claudeEnvironment,
         ...(input.cwd ? { additionalDirectories: [input.cwd] } : {}),
         ...(Object.keys(extraArgs).length > 0 ? { extraArgs } : {}),
@@ -2951,6 +3117,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         "claude.query.settings_json": encodeJsonStringForDiagnostics(settings) ?? "",
         "claude.query.extra_args_json": encodeJsonStringForDiagnostics(extraArgs) ?? "",
         "claude.query.path_to_executable": claudeBinaryPath,
+        "claude.query.kamicode_harness_mcp": true,
       });
 
       const queryRuntime = yield* Effect.try({
@@ -2994,6 +3161,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         streamFiber: undefined,
         startedAt,
         basePermissionMode: permissionMode,
+        activeInteractionMode: undefined,
         currentApiModelId: apiModelId,
         resumeSessionId: sessionId,
         pendingApprovals,
@@ -3005,6 +3173,8 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         lastKnownTokenUsage: undefined,
         lastAssistantUuid: resumeState?.resumeSessionAt,
         lastThreadStartedId: undefined,
+        projectMemoryAtSessionStart: readProjectMemory(input.cwd) ?? "",
+        projectMemoryInjected: false,
         stopped: false,
       };
       yield* Ref.set(contextRef, context);
@@ -3086,6 +3256,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       input.modelSelection !== undefined && input.modelSelection.instanceId === boundInstanceId
         ? input.modelSelection
         : undefined;
+    context.activeInteractionMode = input.interactionMode;
 
     if (context.turnState) {
       // Auto-close a stale synthetic turn (from background agent responses
@@ -3156,16 +3327,22 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       providerRefs: {},
     });
 
+    const injectProjectMemory = !context.projectMemoryInjected;
     const message = yield* buildUserMessageEffect(input, {
       fileSystem,
       attachmentsDir: serverConfig.attachmentsDir,
       boundInstanceId,
+      projectMemory: context.projectMemoryAtSessionStart,
+      injectProjectMemory,
     });
 
     yield* Queue.offer(context.promptQueue, {
       type: "message",
       message,
     }).pipe(Effect.mapError((cause) => toRequestError(input.threadId, "turn/start", cause)));
+    if (injectProjectMemory) {
+      context.projectMemoryInjected = true;
+    }
 
     return {
       threadId: context.session.threadId,

@@ -8,6 +8,12 @@ import { pathToFileURL } from "node:url";
 export type BrowserHarnessBrowser = "chromium" | "firefox" | "webkit";
 export type BrowserHarnessStatus = "passed" | "failed" | "blocked" | "error";
 
+export interface BrowserHarnessKamiCodeAuth {
+  readonly type: "kamicode-pairing";
+  readonly credential: string;
+  readonly required?: boolean | undefined;
+}
+
 export type TestHarnessAction =
   | { readonly type: "navigate"; readonly url: string }
   | { readonly type: "click"; readonly selector?: string; readonly text?: string }
@@ -24,7 +30,11 @@ export type TestHarnessAction =
     }
   | { readonly type: "screenshot"; readonly label?: string }
   | { readonly type: "scroll"; readonly direction: "up" | "down" }
-  | { readonly type: "done"; readonly summary: string; readonly result: "pass" | "fail" | "blocked" };
+  | {
+      readonly type: "done";
+      readonly summary: string;
+      readonly result: "pass" | "fail" | "blocked";
+    };
 
 export interface TestHarnessObservation {
   readonly runId: string;
@@ -59,6 +69,7 @@ export interface BrowserHarnessRunInput {
   readonly timeoutMs?: number | undefined;
   readonly lingerMs?: number | undefined;
   readonly viewport?: { readonly width: number; readonly height: number } | undefined;
+  readonly auth?: BrowserHarnessKamiCodeAuth | undefined;
 }
 
 export interface BrowserHarnessStep {
@@ -188,10 +199,7 @@ interface PlaywrightLocator {
 }
 
 interface PlaywrightPage {
-  goto(
-    url: string,
-    options: { waitUntil: "domcontentloaded"; timeout: number },
-  ): Promise<unknown>;
+  goto(url: string, options: { waitUntil: "domcontentloaded"; timeout: number }): Promise<unknown>;
   waitForLoadState(state: "networkidle", options: { timeout: number }): Promise<unknown>;
   waitForTimeout(ms: number): Promise<void>;
   screenshot(options: { path: string; fullPage: boolean }): Promise<unknown>;
@@ -291,10 +299,15 @@ function resolveFromCwd(cwd: string, maybeRelativePath: string): string {
     : path.resolve(cwd, maybeRelativePath);
 }
 
-export function resolveBrowserHarnessRunPaths(input: BrowserHarnessRunInput): BrowserHarnessRunPaths {
+export function resolveBrowserHarnessRunPaths(
+  input: BrowserHarnessRunInput,
+): BrowserHarnessRunPaths {
   const cwd = path.resolve(input.cwd ?? process.cwd());
   const runId = createBrowserHarnessRunId();
-  const stateRoot = resolveFromCwd(cwd, normalizeOptionalText(input.stateDir) ?? FALLBACK_STATE_ROOT);
+  const stateRoot = resolveFromCwd(
+    cwd,
+    normalizeOptionalText(input.stateDir) ?? FALLBACK_STATE_ROOT,
+  );
   const projectKey = createBrowserHarnessProjectKey({ cwd, projectId: input.projectId });
   const environmentId = sanitizeBrowserHarnessSegment(
     normalizeOptionalText(input.environmentId) ?? DEFAULT_ENVIRONMENT_ID,
@@ -363,6 +376,77 @@ async function loadBrowserHarnessScript(scriptPath: string): Promise<BrowserHarn
 async function writeJson(pathname: string, value: unknown): Promise<void> {
   await Fs.mkdir(path.dirname(pathname), { recursive: true });
   await Fs.writeFile(pathname, `${JSON.stringify(value, null, 2)}\n`, "utf8");
+}
+
+function isKamiCodePairingUrl(value: string): boolean {
+  try {
+    return new URL(value).pathname.replace(/\/+$/g, "") === "/pair";
+  } catch {
+    return false;
+  }
+}
+
+function buildKamiCodePairingUrl(input: {
+  readonly targetUrl: string;
+  readonly credential: string;
+}): string {
+  const url = new URL("/pair", input.targetUrl);
+  // Force a full document navigation even when the browser already sits on /pair.
+  url.searchParams.set("__kamiHarnessAuth", "1");
+  url.hash = new URLSearchParams([["token", input.credential]]).toString();
+  return url.toString();
+}
+
+async function waitForKamiCodePairingToComplete(input: {
+  readonly page: PlaywrightPage;
+  readonly timeoutMs: number;
+}): Promise<void> {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < input.timeoutMs) {
+    if (!isKamiCodePairingUrl(input.page.url())) {
+      return;
+    }
+    await input.page.waitForTimeout(100);
+  }
+}
+
+async function waitForKamiCodePairingUrl(input: {
+  readonly page: PlaywrightPage;
+  readonly timeoutMs: number;
+}): Promise<boolean> {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < input.timeoutMs) {
+    if (isKamiCodePairingUrl(input.page.url())) {
+      return true;
+    }
+    await input.page.waitForTimeout(100);
+  }
+  return isKamiCodePairingUrl(input.page.url());
+}
+
+async function authenticateKamiCodeBrowser(input: {
+  readonly page: PlaywrightPage;
+  readonly targetUrl: string;
+  readonly auth: BrowserHarnessKamiCodeAuth;
+  readonly timeoutMs: number;
+}): Promise<void> {
+  const pairingUrl = buildKamiCodePairingUrl({
+    targetUrl: input.targetUrl,
+    credential: input.auth.credential,
+  });
+  await input.page.goto(pairingUrl, {
+    waitUntil: "domcontentloaded",
+    timeout: input.timeoutMs,
+  });
+  await input.page.waitForLoadState("networkidle", { timeout: 5_000 }).catch(() => {});
+  await waitForKamiCodePairingToComplete({
+    page: input.page,
+    timeoutMs: Math.min(input.timeoutMs, 10_000),
+  });
+
+  if (input.auth.required !== false && isKamiCodePairingUrl(input.page.url())) {
+    throw new Error("KamiCode pairing auth did not complete before the harness timeout.");
+  }
 }
 
 function truncateText(value: string, maxLength: number): string {
@@ -489,10 +573,13 @@ async function executeAssertAction(input: {
   }
 }
 
-async function readVisibleTextSample(page: PlaywrightPage): Promise<ReadonlyArray<string>> {
+async function readVisibleTextSample(
+  page: PlaywrightPage,
+  timeoutMs = 1_500,
+): Promise<ReadonlyArray<string>> {
   const bodyText = await page
     .locator("body")
-    .innerText({ timeout: 1_500 })
+    .innerText({ timeout: timeoutMs })
     .catch(() => "");
   return bodyText
     .split(/\r?\n/g)
@@ -500,6 +587,20 @@ async function readVisibleTextSample(page: PlaywrightPage): Promise<ReadonlyArra
     .filter((line) => line.length > 0)
     .slice(0, 25)
     .map((line) => truncateText(line, 180));
+}
+
+async function waitForVisibleTextSample(input: {
+  readonly page: PlaywrightPage;
+  readonly timeoutMs: number;
+}): Promise<void> {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < input.timeoutMs) {
+    const sample = await readVisibleTextSample(input.page, 250);
+    if (sample.length > 0) {
+      return;
+    }
+    await input.page.waitForTimeout(100);
+  }
 }
 
 function buildDomSummary(input: {
@@ -593,7 +694,9 @@ export function formatBrowserHarnessMarkdown(result: BrowserHarnessRunResult): s
     `- Console: ${result.consolePath}`,
     `- Network: ${result.networkPath}`,
     `- Storage state: ${result.storageStatePath}`,
-    ...result.screenshots.map((screenshot) => `- Screenshot (${screenshot.label}): ${screenshot.path}`),
+    ...result.screenshots.map(
+      (screenshot) => `- Screenshot (${screenshot.label}): ${screenshot.path}`,
+    ),
     "",
     "## Steps",
     "",
@@ -630,12 +733,7 @@ export function formatBrowserHarnessMarkdown(result: BrowserHarnessRunResult): s
     lines.push("", "## Page Errors", "", ...result.pageErrors.map((entry) => `- ${entry}`));
   }
   if (result.failedRequests.length > 0) {
-    lines.push(
-      "",
-      "## Failed Requests",
-      "",
-      ...result.failedRequests.map((entry) => `- ${entry}`),
-    );
+    lines.push("", "## Failed Requests", "", ...result.failedRequests.map((entry) => `- ${entry}`));
   }
   if (result.consoleMessages.length > 0) {
     lines.push(
@@ -664,7 +762,9 @@ export function formatBrowserHarnessCliOutput(result: BrowserHarnessRunResult): 
   ].join("\n");
 }
 
-export async function runBrowserHarness(input: BrowserHarnessRunInput): Promise<BrowserHarnessRunResult> {
+export async function runBrowserHarness(
+  input: BrowserHarnessRunInput,
+): Promise<BrowserHarnessRunResult> {
   const startedAtDate = new Date();
   const startedAt = startedAtDate.toISOString();
   const paths = resolveBrowserHarnessRunPaths(input);
@@ -716,6 +816,7 @@ export async function runBrowserHarness(input: BrowserHarnessRunInput): Promise<
       throw new Error("Cannot observe page before it is available.");
     }
 
+    await waitForVisibleTextSample({ page, timeoutMs: Math.min(timeoutMs, 5_000) });
     const screenshotPath = await screenshot(input.screenshotLabel).catch(() => undefined);
     const observedTitle = await page.title().catch(() => null);
     const observedUrl = page.url();
@@ -801,7 +902,9 @@ export async function runBrowserHarness(input: BrowserHarnessRunInput): Promise<
       pageErrors.push(errorMessage(pageError));
     });
     page.on("requestfailed", (request) => {
-      failedRequests.push(`${request.method()} ${request.url()} ${request.failure()?.errorText ?? ""}`.trim());
+      failedRequests.push(
+        `${request.method()} ${request.url()} ${request.failure()?.errorText ?? ""}`.trim(),
+      );
     });
 
     const openStartedAt = new Date();
@@ -809,6 +912,37 @@ export async function runBrowserHarness(input: BrowserHarnessRunInput): Promise<
       await page?.goto(input.url, { waitUntil: "domcontentloaded", timeout: timeoutMs });
       await page?.waitForLoadState("networkidle", { timeout: 5_000 }).catch(() => {});
     });
+    const shouldAuthenticateKamiCode =
+      input.auth?.type === "kamicode-pairing" &&
+      page &&
+      (isKamiCodePairingUrl(page.url()) ||
+        (await waitForKamiCodePairingUrl({
+          page,
+          timeoutMs: Math.min(timeoutMs, 5_000),
+        })));
+    if (shouldAuthenticateKamiCode) {
+      const auth = input.auth;
+      await step("Authenticate KamiCode browser", async () => {
+        await authenticateKamiCodeBrowser({
+          page: page!,
+          targetUrl: input.url,
+          auth,
+          timeoutMs,
+        });
+      });
+      await step("Reopen target URL after auth", async () => {
+        await page?.goto(input.url, { waitUntil: "domcontentloaded", timeout: timeoutMs });
+        await page?.waitForLoadState("networkidle", { timeout: 5_000 }).catch(() => {});
+      });
+    }
+    if (
+      input.auth?.type === "kamicode-pairing" &&
+      input.auth.required !== false &&
+      page &&
+      isKamiCodePairingUrl(page.url())
+    ) {
+      throw new Error("KamiCode auth was requested but the browser still landed on /pair.");
+    }
     await observePage({
       stepId: "open-target-url",
       screenshotLabel: "initial",
@@ -833,7 +967,8 @@ export async function runBrowserHarness(input: BrowserHarnessRunInput): Promise<
       }
       await observePage({
         stepId: actionStepId(index, action),
-        screenshotLabel: action.type === "screenshot" ? (action.label ?? "screenshot") : action.type,
+        screenshotLabel:
+          action.type === "screenshot" ? (action.label ?? "screenshot") : action.type,
         actionStartedAt: started,
         actionEndedAt: ended,
       });
@@ -907,7 +1042,7 @@ export async function runBrowserHarness(input: BrowserHarnessRunInput): Promise<
   };
   const consoleErrors = collectConsoleErrors({ consoleMessages, pageErrors });
   const evidenceSummary = [
-    `${observations.length} observation(s), ${screenshots.length} screenshot(s), trace recorded at ${paths.tracePath}.`,
+    `${observations.length} observation(s), ${screenshots.length} screenshot(s), trace recorded.`,
     `${consoleErrors.length} console/page error(s), ${failedRequests.length} failed network request(s).`,
     finalUrl ? `Final URL: ${finalUrl}.` : "Final URL unknown.",
   ].join(" ");

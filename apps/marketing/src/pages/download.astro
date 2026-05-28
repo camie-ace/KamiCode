@@ -1,6 +1,6 @@
 ---
 import Layout from "../layouts/Layout.astro";
-import { RELEASES_URL } from "../lib/releases";
+import { LATEST_WINDOWS_DOWNLOAD_URL, RELEASES_URL } from "../lib/releases";
 ---
 
 <Layout title="Download - KamiCode" description="Download KamiCode for macOS, Windows, or Linux.">
@@ -37,7 +37,7 @@ import { RELEASES_URL } from "../lib/releases";
         <h2 class="platform-name">Windows</h2>
       </div>
       <div class="download-cards">
-        <a class="download-card" data-asset="x64.exe" href={RELEASES_URL}>
+        <a class="download-card" data-asset="x64.exe" href={LATEST_WINDOWS_DOWNLOAD_URL}>
           <span class="card-arch">Windows 10, 11</span>
           <span class="card-format">.exe</span>
         </a>
@@ -61,7 +61,7 @@ import { RELEASES_URL } from "../lib/releases";
 
   <p class="releases-link">
     Looking for older versions? Check the
-    <a href="https://github.com/pingdotgg/t3code/releases" target="_blank" rel="noopener noreferrer">
+    <a href={RELEASES_URL} target="_blank" rel="noopener noreferrer">
       GitHub releases page<span aria-hidden="true"> &#8599;</span>
     </a>
   </p>
@@ -69,7 +69,11 @@ import { RELEASES_URL } from "../lib/releases";
 </Layout>
 
 <script>
-  import { fetchLatestRelease, RELEASES_URL } from "../lib/releases";
+  import { fetchLatestRelease, LATEST_WINDOWS_DOWNLOAD_URL, RELEASES_URL } from "../lib/releases";
+
+  function fallbackCardUrl(suffix: string | undefined): string {
+    return suffix === "x64.exe" ? LATEST_WINDOWS_DOWNLOAD_URL : RELEASES_URL;
+  }
 
   async function init() {
     const versionLabel = document.getElementById("version-label");
@@ -96,7 +100,7 @@ import { RELEASES_URL } from "../lib/releases";
         if (match) {
           card.href = match.browser_download_url;
         } else {
-          card.href = RELEASES_URL;
+          card.href = fallbackCardUrl(suffix);
         }
       });
     } catch {
@@ -104,7 +108,7 @@ import { RELEASES_URL } from "../lib/releases";
         versionLabel.textContent = "Could not load release info.";
       }
       cards.forEach((card) => {
-        card.href = RELEASES_URL;
+        card.href = fallbackCardUrl(card.dataset.asset);
       });
     }
   }

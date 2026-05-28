@@ -1,4 +1,6 @@
+// @effect-diagnostics nodeBuiltinImport:off
 import NodeOS from "node:os";
+import * as NodeFS from "node:fs";
 
 import { assert, expect, it } from "@effect/vitest";
 import * as ConfigProvider from "effect/ConfigProvider";
@@ -46,13 +48,27 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
     otlpExportIntervalMs: 10_000,
     otlpServiceName: "t3-server",
   } as const;
+  const defaultUserAuthConfig = {
+    githubOAuthClientId: undefined,
+    githubOAuthClientSecret: undefined,
+    githubOAuthCallbackUrl: undefined,
+  } as const;
 
   const openBootstrapFd = Effect.fn(function* (payload: DesktopBackendBootstrapValue) {
     const fs = yield* FileSystem.FileSystem;
     const filePath = yield* fs.makeTempFileScoped({ prefix: "t3-bootstrap-", suffix: ".ndjson" });
     const encoded = yield* encodeDesktopBootstrap(payload);
     yield* fs.writeFileString(filePath, `${encoded}\n`);
-    const { fd } = yield* fs.open(filePath, { flag: "r" });
+    const fd = NodeFS.openSync(filePath, "r");
+    yield* Effect.addFinalizer(() =>
+      Effect.sync(() => {
+        try {
+          NodeFS.closeSync(fd);
+        } catch {
+          // readBootstrapEnvelope owns and closes the fd during successful reads.
+        }
+      }),
+    );
     return fd;
   });
 
@@ -111,6 +127,7 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
         host: "0.0.0.0",
         staticDir: undefined,
         devUrl: new URL("http://127.0.0.1:5173"),
+        ...defaultUserAuthConfig,
         noBrowser: true,
         startupPresentation: "browser",
         desktopBootstrapToken: undefined,
@@ -177,6 +194,7 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
         host: "127.0.0.1",
         staticDir: undefined,
         devUrl: new URL("http://127.0.0.1:4173"),
+        ...defaultUserAuthConfig,
         noBrowser: true,
         startupPresentation: "browser",
         desktopBootstrapToken: undefined,
@@ -246,6 +264,7 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
         host: "127.0.0.1",
         staticDir: undefined,
         devUrl: new URL("http://127.0.0.1:4173"),
+        ...defaultUserAuthConfig,
         noBrowser: false,
         startupPresentation: "browser",
         desktopBootstrapToken: "desktop-bootstrap-token",
@@ -259,8 +278,8 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
 
   it.effect("uses bootstrap envelope values as fallbacks when flags and env are absent", () =>
     Effect.gen(function* () {
-      const { join } = yield* Path.Path;
-      const baseDir = "/tmp/t3-bootstrap-home";
+      const path = yield* Path.Path;
+      const baseDir = path.resolve("/tmp/t3-bootstrap-home");
       const fd = yield* openBootstrapFd(
         makeDesktopBootstrap({
           port: 4888,
@@ -270,6 +289,9 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
           desktopBootstrapToken: "desktop-token",
           tailscaleServeEnabled: false,
           tailscaleServePort: 443,
+          githubOAuthClientId: "bootstrap-client-id",
+          githubOAuthClientSecret: "bootstrap-client-secret",
+          githubOAuthCallbackUrl: new URL("http://127.0.0.1:4888/api/user/auth/github/callback"),
           otlpTracesUrl: "http://localhost:4318/v1/traces",
           otlpMetricsUrl: "http://localhost:4318/v1/metrics",
         }),
@@ -320,6 +342,9 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
         host: "127.0.0.2",
         staticDir: resolved.staticDir,
         devUrl: undefined,
+        githubOAuthClientId: "bootstrap-client-id",
+        githubOAuthClientSecret: "bootstrap-client-secret",
+        githubOAuthCallbackUrl: new URL("http://127.0.0.1:4888/api/user/auth/github/callback"),
         noBrowser: true,
         startupPresentation: "browser",
         desktopBootstrapToken: "desktop-token",
@@ -328,7 +353,7 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
         tailscaleServeEnabled: false,
         tailscaleServePort: 443,
       });
-      assert.equal(join(baseDir, "userdata"), resolved.stateDir);
+      assert.equal(path.join(baseDir, "userdata"), resolved.stateDir);
     }),
   );
 
@@ -445,6 +470,7 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
         host: "127.0.0.1",
         staticDir: undefined,
         devUrl: new URL("http://127.0.0.1:4173"),
+        ...defaultUserAuthConfig,
         noBrowser: true,
         startupPresentation: "browser",
         desktopBootstrapToken: "desktop-token",
@@ -514,6 +540,7 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
         host: "127.0.0.1",
         staticDir: resolved.staticDir,
         devUrl: undefined,
+        ...defaultUserAuthConfig,
         noBrowser: true,
         startupPresentation: "browser",
         desktopBootstrapToken: undefined,
@@ -577,6 +604,7 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
         host: undefined,
         staticDir: resolved.staticDir,
         devUrl: undefined,
+        ...defaultUserAuthConfig,
         noBrowser: true,
         startupPresentation: "headless",
         desktopBootstrapToken: undefined,

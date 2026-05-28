@@ -114,6 +114,8 @@ import * as GitWorkflowService from "./git/GitWorkflowService.ts";
 import * as SourceControlRepositoryService from "./sourceControl/SourceControlRepositoryService.ts";
 import { ServerSecretStoreLive } from "./auth/Layers/ServerSecretStore.ts";
 import { ServerAuthLive } from "./auth/Layers/ServerAuth.ts";
+import { GitHubOAuthClientLive } from "./userAuth/Layers/GitHubOAuthClient.ts";
+import { UserAuthLive } from "./userAuth/Layers/UserAuth.ts";
 import * as ProcessDiagnostics from "./diagnostics/ProcessDiagnostics.ts";
 import * as ProcessResourceMonitor from "./diagnostics/ProcessResourceMonitor.ts";
 import * as TraceDiagnostics from "./diagnostics/TraceDiagnostics.ts";
@@ -213,7 +215,17 @@ const browserOtlpTracingLayer = Layer.mergeAll(
 );
 
 const makeAuthTestLayer = () =>
-  ServerAuthLive.pipe(Layer.provide(SqlitePersistenceMemory), Layer.provide(ServerSecretStoreLive));
+  Layer.mergeAll(
+    ServerAuthLive.pipe(
+      Layer.provide(SqlitePersistenceMemory),
+      Layer.provide(ServerSecretStoreLive),
+    ),
+    UserAuthLive.pipe(
+      Layer.provide(SqlitePersistenceMemory),
+      Layer.provide(ServerSecretStoreLive),
+      Layer.provide(GitHubOAuthClientLive),
+    ),
+  );
 
 const makeBrowserOtlpPayload = (spanName: string) =>
   Effect.gen(function* () {
@@ -972,6 +984,20 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         response.headers.get("location"),
         "http://127.0.0.1:5173/foo/bar?token=test-token",
       );
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("does not redirect unmatched API requests back to the dev URL", () =>
+    Effect.gen(function* () {
+      yield* buildAppUnderTest({
+        config: { devUrl: new URL("http://127.0.0.1:5173") },
+      });
+
+      const url = yield* getHttpServerUrl("/api/missing");
+      const response = yield* Effect.promise(() => fetch(url, { redirect: "manual" }));
+
+      assert.equal(response.status, 404);
+      assert.equal(response.headers.get("location"), null);
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 

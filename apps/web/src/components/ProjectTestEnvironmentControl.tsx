@@ -69,9 +69,7 @@ function readableUrlLabel(baseUrl: string): string {
 
 interface ProjectTestEnvironmentControlProps {
   testEnvironments: ReadonlyArray<ProjectTestEnvironment>;
-  onUpdateTestEnvironments: (
-    testEnvironments: ProjectTestEnvironment[],
-  ) => Promise<void> | void;
+  onUpdateTestEnvironments: (testEnvironments: ProjectTestEnvironment[]) => Promise<void> | void;
 }
 
 export default function ProjectTestEnvironmentControl({

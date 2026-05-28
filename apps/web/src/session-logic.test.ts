@@ -41,9 +41,7 @@ function makeActivity(overrides: {
     tone: overrides.tone ?? "tool",
     payload,
     turnId: overrides.turnId ? TurnId.make(overrides.turnId) : null,
-    ...(overrides.sequence !== undefined
-      ? { sequence: overrides.sequence }
-      : {}),
+    ...(overrides.sequence !== undefined ? { sequence: overrides.sequence } : {}),
   };
 }
 
@@ -619,10 +617,7 @@ describe("deriveWorkLogEntries", () => {
     ];
 
     const entries = deriveWorkLogEntries(activities, undefined);
-    expect(entries.map((entry) => entry.id)).toEqual([
-      "task-progress",
-      "task-complete",
-    ]);
+    expect(entries.map((entry) => entry.id)).toEqual(["task-progress", "task-complete"]);
   });
 
   it("uses payload summary as label for task entries when available", () => {
@@ -712,8 +707,7 @@ describe("deriveWorkLogEntries", () => {
         kind: "tool.updated",
         summary: "Tool call",
         payload: {
-          detail:
-            'ExitPlanMode: {"allowedPrompts":[{"tool":"Bash","prompt":"run tests"}]}',
+          detail: 'ExitPlanMode: {"allowedPrompts":[{"tool":"Bash","prompt":"run tests"}]}',
         },
       }),
       makeActivity({
@@ -794,8 +788,7 @@ describe("deriveWorkLogEntries", () => {
           itemType: "command_execution",
           data: {
             item: {
-              command:
-                "\"C:\\Program Files\\PowerShell\\7\\pwsh.exe\" -Command 'bun run lint'",
+              command: "\"C:\\Program Files\\PowerShell\\7\\pwsh.exe\" -Command 'bun run lint'",
             },
           },
         },
@@ -819,11 +812,7 @@ describe("deriveWorkLogEntries", () => {
           itemType: "command_execution",
           data: {
             item: {
-              command: [
-                "C:\\Program Files\\PowerShell\\7\\pwsh.exe",
-                "-Command",
-                "rg -n foo .",
-              ],
+              command: ["C:\\Program Files\\PowerShell\\7\\pwsh.exe", "-Command", "rg -n foo ."],
             },
           },
         },
@@ -895,8 +884,7 @@ describe("deriveWorkLogEntries", () => {
             item: {
               command: ["bun", "run", "dev"],
               result: {
-                content:
-                  '{ "dev": "vite dev --port 3000" } <exited with exit code 0>',
+                content: '{ "dev": "vite dev --port 3000" } <exited with exit code 0>',
                 exitCode: 0,
               },
             },
@@ -986,19 +974,15 @@ describe("deriveWorkLogEntries", () => {
                   goal: "Validate chat UI is visible",
                   finalUrl: "http://127.0.0.1:5733/pair",
                   title: "KamiCode (Dev)",
-                  evidenceSummary:
-                    "Observed pairing screen instead of chat UI.",
+                  evidenceSummary: "Observed pairing screen instead of chat UI.",
                   outputSummary: "Pairing screen was visible.",
                   artifactPaths: {
-                    trace:
-                      "C:/Users/THIS PC/.t3/dev/test-harness/run-1/trace.zip",
+                    trace: "C:/Users/THIS PC/.t3/dev/test-harness/run-1/trace.zip",
                     screenshots: [
                       "C:/Users/THIS PC/.t3/dev/test-harness/run-1/screenshots/01-start.png",
                     ],
-                    summary:
-                      "C:/Users/THIS PC/.t3/dev/test-harness/run-1/summary.json",
-                    markdown:
-                      "C:/Users/THIS PC/.t3/dev/test-harness/run-1/summary.md",
+                    summary: "C:/Users/THIS PC/.t3/dev/test-harness/run-1/summary.json",
+                    markdown: "C:/Users/THIS PC/.t3/dev/test-harness/run-1/summary.md",
                   },
                   screenshots: [
                     {
@@ -1322,10 +1306,7 @@ describe("deriveWorkLogEntries", () => {
 
     const entries = deriveWorkLogEntries(activities, undefined);
 
-    expect(entries.map((entry) => entry.id)).toEqual([
-      "tool-1-complete",
-      "tool-2-complete",
-    ]);
+    expect(entries.map((entry) => entry.id)).toEqual(["tool-1-complete", "tool-2-complete"]);
   });
 
   it("collapses same-timestamp lifecycle rows even when completed sorts before updated by id", () => {
@@ -1405,11 +1386,7 @@ describe("deriveTimelineEntries", () => {
       ],
     );
 
-    expect(entries.map((entry) => entry.kind)).toEqual([
-      "message",
-      "proposed-plan",
-      "work",
-    ]);
+    expect(entries.map((entry) => entry.kind)).toEqual(["message", "proposed-plan", "work"]);
     expect(entries[1]).toMatchObject({
       kind: "proposed-plan",
       proposedPlan: {
@@ -1528,12 +1505,8 @@ describe("hasToolActivityForTurn", () => {
       }),
     ];
 
-    expect(hasToolActivityForTurn(activities, TurnId.make("turn-1"))).toBe(
-      true,
-    );
-    expect(hasToolActivityForTurn(activities, TurnId.make("turn-2"))).toBe(
-      false,
-    );
+    expect(hasToolActivityForTurn(activities, TurnId.make("turn-1"))).toBe(true);
+    expect(hasToolActivityForTurn(activities, TurnId.make("turn-2"))).toBe(false);
   });
 });
 
