@@ -33,7 +33,6 @@ type ModelPickerItem = {
   driverKind: ProviderDriverKind;
   instanceDisplayName: string;
   instanceAccentColor?: string | undefined;
-  continuationGroupKey?: string | undefined;
 };
 
 const EMPTY_MODEL_JUMP_LABELS = new Map<string, string>();
@@ -61,10 +60,11 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
    * because the user is editing a previously-sent message and can't change
    * which driver served the turn. Multiple instances of the same kind
    * remain selectable (e.g. locked to `codex` still lets the user switch
-   * between the default Codex and a custom Codex Personal).
+   * between the default Codex and a custom Codex Personal). Continuation
+   * groups do not narrow this list: changing auth/profile context within
+   * the same provider is allowed for subsequent turns.
    */
   lockedProvider: ProviderDriverKind | null;
-  lockedContinuationGroupKey?: string | null;
   /**
    * All configured provider instances in display order. Used to render
    * the sidebar (one button per instance) and to resolve display names
@@ -157,13 +157,11 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
     [instanceEntries],
   );
   const matchesLockedProvider = useCallback(
-    (entry: Pick<ProviderInstanceEntry, "driverKind" | "continuationGroupKey">): boolean => {
+    (entry: Pick<ProviderInstanceEntry, "driverKind">): boolean => {
       if (props.lockedProvider === null) return true;
-      if (entry.driverKind !== props.lockedProvider) return false;
-      if (!props.lockedContinuationGroupKey) return true;
-      return entry.continuationGroupKey === props.lockedContinuationGroupKey;
+      return entry.driverKind === props.lockedProvider;
     },
-    [props.lockedContinuationGroupKey, props.lockedProvider],
+    [props.lockedProvider],
   );
 
   const readyInstanceSet = useMemo(() => {
@@ -202,9 +200,6 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
           driverKind: entry.driverKind,
           instanceDisplayName: entry.displayName,
           ...(entry.accentColor ? { instanceAccentColor: entry.accentColor } : {}),
-          ...(entry.continuationGroupKey
-            ? { continuationGroupKey: entry.continuationGroupKey }
-            : {}),
         });
       }
     }

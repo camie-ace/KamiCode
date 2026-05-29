@@ -251,7 +251,6 @@ async function mountPicker(props: {
   activeInstanceId?: ProviderInstanceId;
   model: string;
   lockedProvider: ProviderDriverKind | null;
-  lockedContinuationGroupKey?: string | null;
   providers?: ReadonlyArray<ServerProvider>;
   settings?: UnifiedSettings;
   triggerVariant?: "ghost" | "outline";
@@ -273,7 +272,6 @@ async function mountPicker(props: {
       activeInstanceId={activeInstanceId}
       model={props.model}
       lockedProvider={props.lockedProvider}
-      lockedContinuationGroupKey={props.lockedContinuationGroupKey ?? null}
       instanceEntries={instanceEntries}
       modelOptionsByInstance={modelOptionsByInstance}
       triggerVariant={props.triggerVariant}
@@ -498,7 +496,7 @@ describe("ProviderModelPicker", () => {
     }
   });
 
-  it("keeps an instance sidebar in locked mode when that provider has multiple instances", async () => {
+  it("keeps an instance sidebar in locked mode for all instances of the same provider", async () => {
     const defaultCodexModels: ServerProvider["models"] = [
       {
         slug: "gpt-work",
@@ -551,7 +549,6 @@ describe("ProviderModelPicker", () => {
       activeInstanceId: "codex" as ProviderInstanceId,
       model: "gpt-work",
       lockedProvider: ProviderDriverKind.make("codex"),
-      lockedContinuationGroupKey: "codex:home:/Users/julius/.codex",
       providers,
     });
 
@@ -559,8 +556,7 @@ describe("ProviderModelPicker", () => {
       await page.getByRole("button").click();
 
       await vi.waitFor(() => {
-        expect(getSidebarProviderOrder()).toEqual(["codex", "codex_personal"]);
-        expect(getModelPickerListText()).not.toContain("Codex Isolated");
+        expect(getSidebarProviderOrder()).toEqual(["codex", "codex_personal", "codex_isolated"]);
         expect(
           document.querySelector<HTMLElement>('[data-model-picker-provider="codex_personal"]')
             ?.dataset.providerAccentColor,
@@ -574,6 +570,13 @@ describe("ProviderModelPicker", () => {
       await vi.waitFor(() => {
         expect(getModelPickerListText()).toContain("Codex Personal");
         expect(getVisibleModelNames()).toEqual(["GPT Personal"]);
+      });
+
+      await page.getByRole("button", { name: "Codex Isolated" }).click();
+
+      await vi.waitFor(() => {
+        expect(getModelPickerListText()).toContain("Codex Isolated");
+        expect(getVisibleModelNames()).toEqual(["GPT Isolated"]);
       });
     } finally {
       await mounted.cleanup();

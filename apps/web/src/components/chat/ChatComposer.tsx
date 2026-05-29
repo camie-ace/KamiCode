@@ -633,22 +633,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       explicitSelectedInstanceId,
     ) ?? ProviderDriverKind.make("codex");
   const selectedProvider: ProviderDriverKind = lockedProvider ?? unlockedSelectedProvider;
-  const lockedContinuationGroupKey = useMemo((): string | null => {
-    if (!lockedProvider || !activeThread) return null;
-    const lockedInstanceId =
-      activeThread.session?.providerInstanceId ?? activeThreadModelSelection?.instanceId;
-    if (!lockedInstanceId) return null;
-    return (
-      providerInstanceEntries.find((entry) => entry.instanceId === lockedInstanceId)
-        ?.continuationGroupKey ?? null
-    );
-  }, [
-    activeThread,
-    activeThreadModelSelection?.instanceId,
-    lockedProvider,
-    providerInstanceEntries,
-  ]);
-
   // Resolve which configured instance the composer is currently targeting.
   // Priority:
   //   1. The composer draft's `activeProvider` — the user's unsaved pick
@@ -673,14 +657,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       );
       if (match) {
         // When locked to a specific driver kind, ignore persisted instance
-        // ids from a different kind or continuation group.
+        // ids from a different kind. Same-provider instances remain valid so
+        // users can switch auth/profile context mid-thread.
         if (lockedProvider && match.driverKind !== lockedProvider) continue;
-        if (
-          lockedContinuationGroupKey &&
-          match.continuationGroupKey !== lockedContinuationGroupKey
-        ) {
-          continue;
-        }
         return match.instanceId;
       }
     }
@@ -688,10 +667,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       return ProviderInstanceId.make(explicitSelectedInstanceId);
     }
     const byKind = providerInstanceEntries.find(
-      (entry) =>
-        entry.enabled &&
-        entry.driverKind === selectedProvider &&
-        (!lockedContinuationGroupKey || entry.continuationGroupKey === lockedContinuationGroupKey),
+      (entry) => entry.enabled && entry.driverKind === selectedProvider,
     );
     if (byKind) return byKind.instanceId;
     const anyEnabled = providerInstanceEntries.find((entry) => entry.enabled);
@@ -708,7 +684,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     activeThreadModelSelection?.instanceId,
     composerDraft.activeProvider,
     explicitSelectedInstanceId,
-    lockedContinuationGroupKey,
     lockedProvider,
     providerInstanceEntries,
     selectedProvider,
@@ -2358,7 +2333,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                   activeInstanceId={selectedInstanceId}
                   model={selectedModelForPickerWithCustomFallback}
                   lockedProvider={lockedProvider}
-                  lockedContinuationGroupKey={lockedContinuationGroupKey}
                   instanceEntries={providerInstanceEntries}
                   keybindings={keybindings}
                   modelOptionsByInstance={modelOptionsByInstance}
