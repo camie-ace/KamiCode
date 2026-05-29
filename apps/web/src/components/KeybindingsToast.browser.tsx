@@ -171,6 +171,7 @@ function createMinimalSnapshot(): OrchestrationReadModel {
         updatedAt: NOW_ISO,
         archivedAt: null,
         deletedAt: null,
+        queuedTurns: [],
         messages: [
           {
             id: "msg-1" as MessageId,
@@ -223,6 +224,7 @@ function toShellSnapshot(snapshot: OrchestrationReadModel) {
       branch: thread.branch,
       worktreePath: thread.worktreePath,
       latestTurn: thread.latestTurn,
+      queuedTurnCount: thread.queuedTurns.filter((turn) => turn.status === "queued").length,
       createdAt: thread.createdAt,
       updatedAt: thread.updatedAt,
       archivedAt: thread.archivedAt,

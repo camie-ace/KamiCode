@@ -32,6 +32,7 @@ describe("user auth bootstrap", () => {
   });
 
   afterEach(async () => {
+    vi.useRealTimers();
     const { __resetUserAuthBootstrapForTests } = await import("./environments/primary/userAuth");
     __resetUserAuthBootstrapForTests();
     vi.unstubAllEnvs();
@@ -135,20 +136,87 @@ describe("user auth bootstrap", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
-  it("starts GitHub login against the primary environment", async () => {
+  it("starts GitHub login against the primary environment in a browser tab", async () => {
     const testWindow = installTestBrowser("http://localhost/");
+
+    const { startGitHubUserLogin } = await import("./environments/primary/userAuth");
+
+    await startGitHubUserLogin();
+
+    expect(testWindow.location.href).toBe("http://localhost/api/user/auth/github/start");
+  });
+
+  it("opens desktop GitHub login in the system browser and reloads after handoff completes", async () => {
+    const testWindow = installTestBrowser("http://localhost/");
+    const openExternal = vi.fn<DesktopBridge["openExternal"]>().mockResolvedValue(true);
+    const reload = vi.fn();
+    Object.defineProperty(testWindow.location, "reload", {
+      configurable: true,
+      value: reload,
+    });
     testWindow.desktopBridge = {
       getLocalEnvironmentBootstrap: () => ({
         label: "Local environment",
         httpBaseUrl: "http://localhost:3773",
         wsBaseUrl: "ws://localhost:3773",
       }),
-    } as DesktopBridge;
+      openExternal,
+    } as unknown as DesktopBridge;
+    const user = {
+      userId: "user-1",
+      githubId: "123",
+      githubLogin: "julius",
+      displayName: "Julius",
+      avatarUrl: "https://avatars.githubusercontent.com/u/123",
+    };
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        jsonResponse({
+          authorizationUrl: "https://github.com/login/oauth/authorize?state=desktop",
+          handoffId: "handoff-1",
+        }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({
+          status: "authenticated",
+          sessionState: {
+            enabled: true,
+            authenticated: true,
+            provider: "github",
+            user,
+            expiresAt: "2026-04-05T00:00:00.000Z",
+          },
+        }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+    vi.useFakeTimers();
 
     const { startGitHubUserLogin } = await import("./environments/primary/userAuth");
+    const loginPromise = startGitHubUserLogin();
+    await vi.advanceTimersByTimeAsync(1_000);
+    await loginPromise;
 
-    startGitHubUserLogin();
-
-    expect(testWindow.location.href).toBe("http://localhost:3773/api/user/auth/github/start");
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      "http://localhost:3773/api/user/auth/github/desktop/start",
+      {
+        credentials: "include",
+        method: "POST",
+      },
+    );
+    expect(openExternal).toHaveBeenCalledWith(
+      "https://github.com/login/oauth/authorize?state=desktop",
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "http://localhost:3773/api/user/auth/github/desktop/session?handoffId=handoff-1",
+      {
+        credentials: "include",
+        redirect: "manual",
+      },
+    );
+    expect(reload).toHaveBeenCalled();
+    vi.useRealTimers();
   });
 });

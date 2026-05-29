@@ -2627,7 +2627,10 @@ export default function ChatView(props: ChatViewProps) {
     ],
   );
 
-  const onSend = async (e?: { preventDefault: () => void }) => {
+  const onSend = async (
+    e?: { preventDefault: () => void },
+    options?: { dispatchPolicy?: "immediate" | "queue" },
+  ) => {
     e?.preventDefault();
     const api = readEnvironmentApi(environmentId);
     if (
@@ -2887,6 +2890,7 @@ export default function ChatView(props: ChatViewProps) {
         titleSeed: title,
         runtimeMode,
         interactionMode,
+        dispatchPolicy: options?.dispatchPolicy ?? "immediate",
         ...(bootstrap ? { bootstrap } : {}),
         createdAt: messageCreatedAt,
       });

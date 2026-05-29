@@ -475,7 +475,10 @@ export interface ChatComposerProps {
   scheduleStickToBottom: () => void;
 
   // Callbacks
-  onSend: (e?: { preventDefault: () => void }) => void;
+  onSend: (
+    e?: { preventDefault: () => void },
+    options?: { dispatchPolicy?: "immediate" | "queue" },
+  ) => void;
   onInterrupt: () => void;
   onImplementPlanInNewThread: () => void;
   onRespondToApproval: (
@@ -1626,8 +1629,11 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   ]);
 
   const submitComposer = useCallback(
-    (event?: { preventDefault: () => void }) => {
-      onSend(event);
+    (
+      event?: { preventDefault: () => void },
+      options?: { dispatchPolicy?: "immediate" | "queue" },
+    ) => {
+      onSend(event, options);
       if (shouldBlurMobileComposerOnSubmit()) {
         blurMobileComposerAfterSend();
       }
@@ -1685,6 +1691,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         onSelectComposerItem(selectedItem);
         return true;
       }
+    }
+    if (key === "Enter" && event.shiftKey && phase === "running") {
+      submitComposer(undefined, { dispatchPolicy: "queue" });
+      return true;
     }
     if (key === "Enter" && !event.shiftKey) {
       submitComposer();

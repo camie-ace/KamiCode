@@ -1,0 +1,7 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "buildCommand": "echo 'Using pre-built dist'",
+  "installCommand": "echo 'Skipping install (monorepo workspace)'",
+  "outputDirectory": "dist",
+  "framework": null
+}

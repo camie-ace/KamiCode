@@ -1,0 +1,44 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <title>Kami K Flow Logo</title>
+  <desc>A minimal flowing K mark made from three curved strokes.</desc>
+
+  <rect width="1024" height="1024" rx="180" fill="#0F172A"/>
+
+  <g filter="url(#softGlow)">
+    <path
+      d="M332 610C430 560 516 500 680 370"
+      stroke="url(#kamiStroke)"
+      stroke-width="36"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+    />
+
+    <path
+      d="M458 552C510 498 602 565 694 630"
+      stroke="url(#kamiStroke)"
+      stroke-width="36"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+    />
+
+    <path
+      d="M392 556C468 488 422 402 474 372"
+      stroke="url(#kamiStroke)"
+      stroke-width="34"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+    />
+  </g>
+
+  <defs>
+    <linearGradient id="kamiStroke" x1="332" y1="610" x2="704" y2="360" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#E5E7EB"/>
+      <stop offset="0.45" stop-color="#FFFFFF"/>
+      <stop offset="1" stop-color="#CBD5E1"/>
+    </linearGradient>
+
+    <filter id="softGlow" x="250" y="290" width="520" height="420" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="0" stdDeviation="10" flood-color="#FFFFFF" flood-opacity="0.24"/>
+    </filter>
+  </defs>
+</svg>

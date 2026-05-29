@@ -82,6 +82,8 @@ import { GitHubOAuthClientLive } from "./userAuth/Layers/GitHubOAuthClient.ts";
 import { UserAuthLive } from "./userAuth/Layers/UserAuth.ts";
 import {
   userAuthGitHubCallbackRouteLayer,
+  userAuthGitHubDesktopSessionRouteLayer,
+  userAuthGitHubDesktopStartRouteLayer,
   userAuthGitHubStartRouteLayer,
   userAuthLogoutRouteLayer,
   userAuthSessionRouteLayer,
@@ -324,6 +326,8 @@ export const makeRoutesLayer = Layer.mergeAll(
   authWebSocketTokenRouteLayer,
   userAuthSessionRouteLayer,
   userAuthGitHubStartRouteLayer,
+  userAuthGitHubDesktopStartRouteLayer,
+  userAuthGitHubDesktopSessionRouteLayer,
   userAuthGitHubCallbackRouteLayer,
   userAuthLogoutRouteLayer,
   attachmentsRouteLayer,

@@ -8,6 +8,8 @@ export type UserAuthGateState =
   | { status: "authenticated"; provider: "github"; user: KamiUser };
 
 const DISABLED_USER_AUTH_GATE_STATE = { status: "disabled" } as const;
+const DESKTOP_GITHUB_LOGIN_POLL_INTERVAL_MS = 1_000;
+const DESKTOP_GITHUB_LOGIN_TIMEOUT_MS = 10 * 60_000;
 
 let userAuthBootstrapPromise: Promise<UserAuthGateState> | null = null;
 let resolvedAuthenticatedUserAuthGateState: UserAuthGateState | null = null;
@@ -69,7 +71,94 @@ export async function resolveInitialUserAuthGateState(): Promise<UserAuthGateSta
     });
 }
 
-export function startGitHubUserLogin(): void {
+function waitForDesktopGitHubLoginPoll(delayMs: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, delayMs);
+  });
+}
+
+async function startDesktopGitHubUserLogin(): Promise<boolean> {
+  const bridge = window.desktopBridge;
+  if (!bridge) {
+    return false;
+  }
+
+  const startResponse = await fetch(
+    resolvePrimaryEnvironmentHttpUrl("/api/user/auth/github/desktop/start"),
+    {
+      credentials: "include",
+      method: "POST",
+    },
+  );
+  if (!startResponse.ok) {
+    throw new Error(`Failed to start GitHub login (${startResponse.status}).`);
+  }
+
+  const start = (await startResponse.json()) as {
+    readonly authorizationUrl?: unknown;
+    readonly handoffId?: unknown;
+  };
+  if (typeof start.authorizationUrl !== "string" || typeof start.handoffId !== "string") {
+    throw new Error("GitHub login start response was invalid.");
+  }
+
+  const opened = await bridge.openExternal(start.authorizationUrl);
+  if (!opened) {
+    return false;
+  }
+
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < DESKTOP_GITHUB_LOGIN_TIMEOUT_MS) {
+    await waitForDesktopGitHubLoginPoll(DESKTOP_GITHUB_LOGIN_POLL_INTERVAL_MS);
+    const sessionResponse = await fetch(
+      resolvePrimaryEnvironmentHttpUrl("/api/user/auth/github/desktop/session", {
+        handoffId: start.handoffId,
+      }),
+      {
+        credentials: "include",
+        redirect: "manual",
+      },
+    );
+
+    if (sessionResponse.status === 202) {
+      continue;
+    }
+
+    if (!sessionResponse.ok) {
+      let message = `GitHub login failed (${sessionResponse.status}).`;
+      try {
+        const payload = (await sessionResponse.json()) as { readonly message?: unknown };
+        if (typeof payload.message === "string" && payload.message.trim().length > 0) {
+          message = payload.message;
+        }
+      } catch {
+        // Keep the status-based fallback.
+      }
+      throw new Error(message);
+    }
+
+    const session = (await sessionResponse.json()) as {
+      readonly status?: unknown;
+      readonly sessionState?: UserAuthSessionState;
+    };
+    if (session.status !== "authenticated" || !session.sessionState?.authenticated) {
+      throw new Error("GitHub login completed with an invalid session response.");
+    }
+
+    resolvedAuthenticatedUserAuthGateState = toUserAuthGateState(session.sessionState);
+    userAuthBootstrapPromise = null;
+    return true;
+  }
+
+  throw new Error("Timed out waiting for GitHub login to complete.");
+}
+
+export async function startGitHubUserLogin(): Promise<void> {
+  if (await startDesktopGitHubUserLogin()) {
+    window.location.reload();
+    return;
+  }
+
   window.location.href = resolvePrimaryEnvironmentHttpUrl("/api/user/auth/github/start");
 }
 

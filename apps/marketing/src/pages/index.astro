@@ -37,23 +37,34 @@ const mobileEndorsementRows = [
     </div>
 
     <div class="container hero-inner">
+      <a
+        class="hero-fork-badge"
+        href="https://github.com/pingdotgg/t3code"
+        target="_blank"
+        rel="noopener noreferrer"
+      >
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6" cy="5" r="2.2"/><circle cx="18" cy="5" r="2.2"/><circle cx="12" cy="19" r="2.2"/><path d="M6 7.2v2A3 3 0 009 12.2h6A3 3 0 0018 9.2v-2M12 14v2.8"/></svg>
+        A fork of <strong>T3 Code</strong> · with agentic testing &amp; team collaboration
+      </a>
+
       <img
         class="hero-wordmark"
         src="/kamicode-wordmark.webp"
         alt="KamiCode"
-        width="1200"
-        height="433"
+        width="600"
+        height="388"
         loading="eager"
         decoding="async"
       />
 
       <h1 class="hero-title display">
-        The open-source<br />control plane<br />for coding agents.
+        The dev tool<br />for AI&#8209;native<br />teams.
       </h1>
 
       <p class="hero-sub">
-        Orchestrate Claude Code, Codex, OpenCode and Cursor from one surface.
-        Bring your own subscription. Fork the whole thing.
+        KamiCode orchestrates Claude Code, Codex, OpenCode and Cursor — with
+        <strong>agentic testing</strong> that ships proof, and
+        <strong>team collaboration</strong> on every project.
       </p>
 
       <div class="hero-actions">
@@ -227,6 +238,75 @@ const mobileEndorsementRows = [
     </div>
   </section>
 
+  <!-- ── Agentic Testing ──────────────────────────────────────── -->
+  <section id="testing" class="sec-testing">
+    <div class="container test-inner">
+      <div class="test-copy">
+        <div class="section-head" style="margin-bottom:0">
+          <div class="eyebrow">Agentic Testing</div>
+          <h2>Your agents prove their work.</h2>
+          <p>
+            KamiCode agents don't just claim a task is done — they capture
+            screenshots, screen recordings, and step-by-step traces while they
+            test, then attach the evidence to every change. Review the proof
+            before you merge.
+          </p>
+          <ul class="checklist" style="margin-top:24px">
+            <li><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12l5 5L20 6"/></svg> Screenshots captured at every UI step</li>
+            <li><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12l5 5L20 6"/></svg> Screen recordings of end-to-end flows</li>
+            <li><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12l5 5L20 6"/></svg> Verifiable traces &amp; pass/fail status per check</li>
+            <li><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12l5 5L20 6"/></svg> Evidence attached to the PR automatically</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="test-visual">
+        <div class="tile evidence-card">
+          <div class="evidence-head">
+            <span class="evidence-dot" aria-hidden="true"></span>
+            <span class="evidence-title">tests/checkout.spec.ts</span>
+            <span class="evidence-pass">PASS</span>
+          </div>
+
+          <div class="evidence-frame" aria-hidden="true">
+            <div class="evidence-frame-bar">
+              <span></span><span></span><span></span>
+              <span class="evidence-frame-url">app.local/checkout</span>
+            </div>
+            <div class="evidence-frame-body">
+              <div class="evidence-frame-row"><span class="ef-pill"></span><span class="ef-line"></span></div>
+              <div class="evidence-frame-row"><span class="ef-pill ef-pill--alt"></span><span class="ef-line ef-line--short"></span></div>
+              <div class="evidence-frame-row evidence-frame-row--cta">
+                <span class="ef-btn">Pay $42.00</span>
+              </div>
+              <div class="evidence-frame-play">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5v14l11-7L8 5z"/></svg>
+              </div>
+            </div>
+          </div>
+
+          <div class="evidence-steps">
+            <div class="evidence-step">
+              <span class="evidence-step-num">1</span>
+              <span class="evidence-step-text">Loaded /checkout</span>
+              <span class="evidence-step-tag">screenshot</span>
+            </div>
+            <div class="evidence-step">
+              <span class="evidence-step-num">2</span>
+              <span class="evidence-step-text">Filled card &amp; clicked Pay</span>
+              <span class="evidence-step-tag">video · 00:07</span>
+            </div>
+            <div class="evidence-step">
+              <span class="evidence-step-num">3</span>
+              <span class="evidence-step-text">Verified receipt #A-1042</span>
+              <span class="evidence-step-tag evidence-step-tag--ok">200 OK</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
   <!-- ── Git ──────────────────────────────────────────────────── -->
   <section id="git" class="sec-git">
     <div class="container git-inner">
@@ -284,6 +364,78 @@ const mobileEndorsementRows = [
             <li><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12l5 5L20 6"/></svg> Works with your existing GitHub auth</li>
           </ul>
         </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── Team Collaboration ───────────────────────────────────── -->
+  <section id="team" class="sec-team">
+    <div class="container">
+      <div class="section-head team-head">
+        <div class="eyebrow">Team Collaboration</div>
+        <h2>Built for AI&#8209;native teams.</h2>
+        <p>
+          KamiCode is multiplayer by default. Share live agent threads with
+          teammates, hand off work mid-task, and publish projects so the
+          world can see exactly what your team shipped.
+        </p>
+      </div>
+
+      <div class="team-grid">
+        <div class="tile team-card">
+          <div class="team-card-icon">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="8" r="3.2"/><path d="M3 19.5c.6-3.2 3-5.2 6-5.2s5.4 2 6 5.2"/><circle cx="17" cy="7" r="2.4"/><path d="M15.5 12.5c2.8.1 4.8 1.8 5.3 4.5"/></svg>
+          </div>
+          <div class="team-card-title">Live thread presence</div>
+          <div class="team-card-avatars" aria-hidden="true">
+            <span class="team-avatar team-avatar--a">AA</span>
+            <span class="team-avatar team-avatar--b">JM</span>
+            <span class="team-avatar team-avatar--c">SK</span>
+            <span class="team-avatar team-avatar--more">+4</span>
+          </div>
+          <p>
+            See teammates spectate, branch, or jump in on the same agent
+            thread in real time — no Loom, no screenshare, no Slack thread.
+          </p>
+        </div>
+
+        <div class="tile team-card">
+          <div class="team-card-icon">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12h13"/><path d="M12 6l7 6-7 6"/><path d="M3 4v16"/></svg>
+          </div>
+          <div class="team-card-title">Hand-off &amp; resume</div>
+          <div class="team-card-handoff" aria-hidden="true">
+            <span class="handoff-chip">@aaron</span>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+            <span class="handoff-chip handoff-chip--alt">@jordan</span>
+          </div>
+          <p>
+            Pick up an agent thread someone else started, with full context,
+            evidence and diffs intact. Pass it on when you're done.
+          </p>
+        </div>
+
+        <div class="tile team-card">
+          <div class="team-card-icon">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 010 18M12 3a14 14 0 000 18"/></svg>
+          </div>
+          <div class="team-card-title">Public projects</div>
+          <div class="team-card-public" aria-hidden="true">
+            <span class="public-url">kamicode.dev/<strong>camie</strong>/marketing-site</span>
+            <span class="public-badge">PUBLIC</span>
+          </div>
+          <p>
+            Flip a project public and share a link. Anyone can browse the
+            threads, evidence and PRs your agents shipped — great for open
+            source &amp; portfolios.
+          </p>
+        </div>
+      </div>
+
+      <div class="team-footer">
+        <div class="team-footer-item"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12l5 5L20 6"/></svg> Role-based access &amp; per-project sharing</div>
+        <div class="team-footer-item"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12l5 5L20 6"/></svg> Bring your own GitHub org</div>
+        <div class="team-footer-item"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12l5 5L20 6"/></svg> Self-host the whole thing</div>
       </div>
     </div>
   </section>
@@ -527,16 +679,48 @@ const mobileEndorsementRows = [
     text-align: center;
   }
 
+  .hero-fork-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 14px;
+    margin: 0 auto 28px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.02);
+    color: var(--fg-muted);
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+    letter-spacing: 0.01em;
+    transition: color 0.2s ease, border-color 0.2s ease, background 0.2s ease;
+  }
+
+  .hero-fork-badge strong {
+    color: var(--fg);
+    font-weight: 600;
+  }
+
+  .hero-fork-badge svg {
+    color: var(--accent);
+    flex-shrink: 0;
+  }
+
+  .hero-fork-badge:hover {
+    color: var(--fg);
+    border-color: var(--border-strong);
+    background: rgba(255, 255, 255, 0.04);
+  }
+
   .hero-wordmark {
     display: block;
-    width: min(420px, 82vw);
+    width: min(187px, 40vw);
     height: auto;
-    margin: 0 auto 30px;
+    margin: 0 auto 12px;
   }
 
   .hero-title {
     font-size: clamp(38px, 5.6vw, 76px);
-    margin: 28px auto 22px;
+    margin: 8px auto 22px;
     max-width: 20ch;
     text-wrap: balance;
   }
@@ -548,6 +732,11 @@ const mobileEndorsementRows = [
     margin: 0 auto 36px;
     letter-spacing: -0.005em;
     line-height: 1.55;
+  }
+
+  .hero-sub strong {
+    color: var(--fg);
+    font-weight: 600;
   }
 
   .hero-actions {
@@ -903,6 +1092,214 @@ const mobileEndorsementRows = [
     -webkit-line-clamp: 3;
   }
 
+  /* ── Agentic Testing ──────────────────────────────────── */
+  .sec-testing { background: #09090b; }
+
+  .test-inner {
+    display: grid;
+    grid-template-columns: 1fr 1.05fr;
+    gap: 64px;
+    align-items: center;
+  }
+
+  .evidence-card { padding: 18px; }
+
+  .evidence-head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 14px;
+  }
+
+  .evidence-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 999px;
+    background: var(--ok);
+    box-shadow: 0 0 0 4px color-mix(in srgb, var(--ok) 18%, transparent);
+    flex-shrink: 0;
+  }
+
+  .evidence-title {
+    flex: 1;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--fg-muted);
+  }
+
+  .evidence-pass {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--ok);
+    padding: 2px 8px;
+    border: 1px solid var(--ok);
+    border-radius: 999px;
+    letter-spacing: 0.08em;
+  }
+
+  .evidence-frame {
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    overflow: hidden;
+    background: #0d0d10;
+    margin-bottom: 16px;
+  }
+
+  .evidence-frame-bar {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 12px;
+    background: rgba(255, 255, 255, 0.025);
+    border-bottom: 1px solid var(--border);
+  }
+
+  .evidence-frame-bar > span:not(.evidence-frame-url) {
+    width: 8px;
+    height: 8px;
+    border-radius: 999px;
+    background: #2a2a30;
+  }
+
+  .evidence-frame-url {
+    margin-left: 10px;
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    color: var(--fg-dim);
+  }
+
+  .evidence-frame-body {
+    position: relative;
+    padding: 18px 18px 24px;
+    min-height: 132px;
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.015), transparent);
+  }
+
+  .evidence-frame-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 10px;
+  }
+
+  .evidence-frame-row--cta {
+    justify-content: flex-end;
+    margin-top: 14px;
+    margin-bottom: 0;
+  }
+
+  .ef-pill {
+    width: 80px;
+    height: 10px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.08);
+  }
+
+  .ef-pill--alt {
+    width: 56px;
+    background: rgba(255, 255, 255, 0.05);
+  }
+
+  .ef-line {
+    flex: 1;
+    height: 8px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.04);
+  }
+
+  .ef-line--short {
+    flex: 0 0 60%;
+  }
+
+  .ef-btn {
+    display: inline-flex;
+    align-items: center;
+    padding: 8px 14px;
+    border-radius: 8px;
+    background: var(--accent);
+    color: #0a0a0c;
+    font-size: 11.5px;
+    font-weight: 600;
+    letter-spacing: -0.005em;
+    box-shadow: 0 8px 22px -10px var(--accent-dim);
+  }
+
+  .evidence-frame-play {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 44px;
+    height: 44px;
+    border-radius: 999px;
+    background: rgba(9, 9, 11, 0.78);
+    border: 1px solid var(--border-strong);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+    display: grid;
+    place-items: center;
+    color: var(--fg);
+    box-shadow: 0 12px 28px -10px rgba(0, 0, 0, 0.6);
+  }
+
+  .evidence-frame-play svg {
+    margin-left: 3px;
+  }
+
+  .evidence-steps {
+    display: flex;
+    flex-direction: column;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    overflow: hidden;
+  }
+
+  .evidence-step {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 14px;
+    border-top: 1px solid var(--border);
+    font-size: 12.5px;
+    color: var(--fg-muted);
+  }
+
+  .evidence-step:first-child {
+    border-top: 0;
+  }
+
+  .evidence-step-num {
+    width: 20px;
+    height: 20px;
+    flex-shrink: 0;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.05);
+    color: var(--fg);
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    display: grid;
+    place-items: center;
+  }
+
+  .evidence-step-text {
+    flex: 1;
+    letter-spacing: -0.005em;
+  }
+
+  .evidence-step-tag {
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    color: var(--fg-dim);
+    padding: 2px 8px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+  }
+
+  .evidence-step-tag--ok {
+    color: var(--ok);
+    border-color: color-mix(in srgb, var(--ok) 35%, var(--border));
+  }
+
   /* ── Git ──────────────────────────────────────────────── */
   .git-inner {
     display: grid;
@@ -977,6 +1374,157 @@ const mobileEndorsementRows = [
     background: rgba(0, 0, 0, 0.1);
     padding: 2px 6px; border-radius: 4px;
   }
+
+  /* ── Team Collaboration ───────────────────────────────── */
+  .team-head {
+    text-align: center;
+    margin: 0 auto 56px;
+  }
+  .team-head p { margin: 0 auto; }
+
+  .team-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 16px;
+    margin-bottom: 28px;
+  }
+
+  .team-card {
+    padding: 22px 22px 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+
+  .team-card-icon {
+    width: 36px;
+    height: 36px;
+    border-radius: 10px;
+    background: color-mix(in srgb, var(--accent) 18%, transparent);
+    color: var(--accent);
+    display: grid;
+    place-items: center;
+  }
+
+  .team-card-title {
+    font-size: 17px;
+    font-weight: 500;
+    letter-spacing: -0.015em;
+    color: var(--fg);
+  }
+
+  .team-card p {
+    color: var(--fg-muted);
+    font-size: 13.5px;
+    line-height: 1.5;
+    letter-spacing: -0.003em;
+    margin-top: auto;
+  }
+
+  .team-card-avatars {
+    display: flex;
+    align-items: center;
+  }
+
+  .team-avatar {
+    width: 28px;
+    height: 28px;
+    border-radius: 999px;
+    border: 2px solid var(--bg);
+    background: rgba(255, 255, 255, 0.08);
+    display: grid;
+    place-items: center;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--fg);
+    margin-left: -6px;
+  }
+
+  .team-avatar:first-child { margin-left: 0; }
+  .team-avatar--a { background: oklch(0.68 0.17 250); color: #0a0a0c; }
+  .team-avatar--b { background: oklch(0.72 0.16 150); color: #0a0a0c; }
+  .team-avatar--c { background: oklch(0.76 0.15 75); color: #0a0a0c; }
+  .team-avatar--more {
+    background: rgba(255, 255, 255, 0.06);
+    color: var(--fg-muted);
+  }
+
+  .team-card-handoff {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--fg-dim);
+  }
+
+  .handoff-chip {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--fg);
+    padding: 4px 9px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid var(--border);
+  }
+
+  .handoff-chip--alt {
+    color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 12%, transparent);
+    border-color: color-mix(in srgb, var(--accent) 35%, var(--border));
+  }
+
+  .team-card-public {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+
+  .public-url {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--fg-muted);
+    padding: 5px 10px;
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid var(--border);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 100%;
+  }
+
+  .public-url strong {
+    color: var(--fg);
+    font-weight: 600;
+  }
+
+  .public-badge {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--ok);
+    padding: 2px 8px;
+    border: 1px solid var(--ok);
+    border-radius: 999px;
+    letter-spacing: 0.08em;
+  }
+
+  .team-footer {
+    display: flex;
+    gap: 24px;
+    flex-wrap: wrap;
+    justify-content: center;
+    padding-top: 24px;
+    border-top: 1px dashed var(--border);
+    font-size: 13px;
+    color: var(--fg-muted);
+  }
+  .team-footer-item {
+    display: inline-flex;
+    gap: 8px;
+    align-items: center;
+  }
+  .team-footer-item svg { color: var(--ok); }
 
   /* ── Open source ──────────────────────────────────────── */
   .open-head {
@@ -1110,6 +1658,8 @@ const mobileEndorsementRows = [
     .harness { border-right: 0; border-bottom: 1px solid var(--border); }
     .harness:nth-child(odd) { border-right: 1px solid var(--border); }
     .git-inner { grid-template-columns: 1fr; gap: 40px; }
+    .test-inner { grid-template-columns: 1fr; gap: 40px; }
+    .team-grid { grid-template-columns: 1fr; gap: 12px; }
     .open-grid { grid-template-columns: 1fr; }
   }
 

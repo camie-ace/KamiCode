@@ -1276,6 +1276,7 @@ function applyEnvironmentOrchestrationEvent(
           updatedAt: event.payload.updatedAt,
           archivedAt: null,
           deletedAt: null,
+          queuedTurns: [],
           messages: [],
           proposedPlans: [],
           activities: [],

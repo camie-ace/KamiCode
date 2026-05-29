@@ -5,6 +5,12 @@ import type * as DateTime from "effect/DateTime";
 import type * as Effect from "effect/Effect";
 import type * as HttpServerRequest from "effect/unstable/http/HttpServerRequest";
 
+export const DESKTOP_GITHUB_STATE_PREFIX = "desktop:";
+
+export function isDesktopGitHubLoginState(state: string): boolean {
+  return state.startsWith(DESKTOP_GITHUB_STATE_PREFIX);
+}
+
 export interface AuthenticatedUser {
   readonly sessionId: UserAuthSessionId;
   readonly user: KamiUser;
@@ -35,6 +41,16 @@ export interface UserAuthShape {
     },
     UserAuthError
   >;
+  readonly createDesktopGitHubLogin: (
+    request: HttpServerRequest.HttpServerRequest,
+  ) => Effect.Effect<
+    {
+      readonly authorizationUrl: string;
+      readonly handoffId: string;
+      readonly expiresAt: DateTime.DateTime;
+    },
+    UserAuthError
+  >;
   readonly completeGitHubLogin: (input: {
     readonly request: HttpServerRequest.HttpServerRequest;
     readonly code: string;
@@ -45,6 +61,25 @@ export interface UserAuthShape {
       readonly sessionToken: string;
       readonly sessionExpiresAt: DateTime.DateTime;
     },
+    UserAuthError
+  >;
+  readonly completeDesktopGitHubLogin: (input: {
+    readonly code: string;
+    readonly state: string;
+  }) => Effect.Effect<void, UserAuthError>;
+  readonly failDesktopGitHubLogin: (input: {
+    readonly state: string;
+    readonly message: string;
+  }) => Effect.Effect<void>;
+  readonly consumeDesktopGitHubLogin: (input: { readonly handoffId: string }) => Effect.Effect<
+    | { readonly status: "pending" }
+    | { readonly status: "error"; readonly message: string }
+    | {
+        readonly status: "authenticated";
+        readonly sessionState: UserAuthSessionState;
+        readonly sessionToken: string;
+        readonly sessionExpiresAt: DateTime.DateTime;
+      },
     UserAuthError
   >;
   readonly logout: (

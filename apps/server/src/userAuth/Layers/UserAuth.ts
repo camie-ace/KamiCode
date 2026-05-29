@@ -12,6 +12,7 @@ import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 import * as HttpServerRequest from "effect/unstable/http/HttpServerRequest";
 
@@ -29,6 +30,8 @@ import {
 import { GitHubOAuthClient, GitHubOAuthError } from "../Services/GitHubOAuthClient.ts";
 import {
   type AuthenticatedUser,
+  DESKTOP_GITHUB_STATE_PREFIX,
+  isDesktopGitHubLoginState,
   UserAuth,
   UserAuthError,
   type UserAuthShape,
@@ -49,6 +52,28 @@ const UserSessionClaims = Schema.Struct({
   exp: Schema.Number,
 });
 type UserSessionClaims = typeof UserSessionClaims.Type;
+
+type DesktopGitHubLoginHandoff =
+  | {
+      readonly status: "pending";
+      readonly state: string;
+      readonly redirectUri: string;
+      readonly expiresAt: DateTime.DateTime;
+    }
+  | {
+      readonly status: "error";
+      readonly state: string;
+      readonly message: string;
+      readonly expiresAt: DateTime.DateTime;
+    }
+  | {
+      readonly status: "authenticated";
+      readonly state: string;
+      readonly sessionState: UserAuthSessionState;
+      readonly sessionToken: string;
+      readonly sessionExpiresAt: DateTime.DateTime;
+      readonly expiresAt: DateTime.DateTime;
+    };
 
 const decodeUserSessionClaims = Schema.decodeUnknownEffect(
   Schema.fromJsonString(UserSessionClaims),
@@ -112,6 +137,19 @@ function randomBase64Url(bytes: number): string {
   return Crypto.randomBytes(bytes).toString("base64url");
 }
 
+function parseDesktopGitHubLoginHandoffId(state: string): string | null {
+  if (!isDesktopGitHubLoginState(state)) {
+    return null;
+  }
+
+  const [prefix, handoffId, secret] = state.split(":");
+  if (`${prefix}:` !== DESKTOP_GITHUB_STATE_PREFIX || !handoffId || !secret) {
+    return null;
+  }
+
+  return handoffId;
+}
+
 function resolveRequestUrl(request: HttpServerRequest.HttpServerRequest): Option.Option<URL> {
   return HttpServerRequest.toURL(request);
 }
@@ -121,6 +159,7 @@ export const makeUserAuth = Effect.gen(function* () {
   const secretStore = yield* ServerSecretStore;
   const userAuthRepository = yield* UserAuthRepository;
   const githubOAuthClient = yield* GitHubOAuthClient;
+  const desktopGitHubLoginHandoffs = yield* Ref.make(new Map<string, DesktopGitHubLoginHandoff>());
   const signingSecret = yield* secretStore.getOrCreateRandom(SIGNING_SECRET_NAME, 32).pipe(
     Effect.mapError(
       (cause) =>
@@ -352,24 +391,53 @@ export const makeUserAuth = Effect.gen(function* () {
       };
     });
 
-  const completeGitHubLogin: UserAuthShape["completeGitHubLogin"] = (input) =>
+  const createDesktopGitHubLogin: UserAuthShape["createDesktopGitHubLogin"] = (request) =>
     Effect.gen(function* () {
       const credentials = yield* ensureConfigured();
-      const storedState = input.request.cookies[stateCookieName];
-      if (!storedState || storedState !== input.state) {
-        return yield* new UserAuthError({
-          message: "Invalid GitHub OAuth state.",
-          status: 400,
-        });
-      }
+      const handoffId = randomBase64Url(18);
+      const state = `${DESKTOP_GITHUB_STATE_PREFIX}${handoffId}:${randomBase64Url(32)}`;
+      const issuedAt = yield* DateTime.now;
+      const expiresAt = DateTime.add(issuedAt, {
+        milliseconds: Duration.toMillis(DEFAULT_STATE_TTL),
+      });
+      const redirectUri = yield* resolveCallbackUrl(request);
+      const authorizationUrl = new URL("https://github.com/login/oauth/authorize");
+      authorizationUrl.searchParams.set("client_id", credentials.clientId);
+      authorizationUrl.searchParams.set("redirect_uri", redirectUri);
+      authorizationUrl.searchParams.set("state", state);
+      authorizationUrl.searchParams.set("scope", "read:user");
 
-      const redirectUri = yield* resolveCallbackUrl(input.request);
+      yield* Ref.update(desktopGitHubLoginHandoffs, (handoffs) => {
+        const next = new Map(handoffs);
+        next.set(handoffId, {
+          status: "pending",
+          state,
+          redirectUri,
+          expiresAt,
+        });
+        return next;
+      });
+
+      return {
+        authorizationUrl: authorizationUrl.toString(),
+        handoffId,
+        expiresAt,
+      };
+    });
+
+  const completeGitHubOAuthCode = (input: {
+    readonly clientId: string;
+    readonly clientSecret: string;
+    readonly code: string;
+    readonly redirectUri: string;
+  }) =>
+    Effect.gen(function* () {
       const token = yield* githubOAuthClient
         .exchangeCode({
-          clientId: credentials.clientId,
-          clientSecret: credentials.clientSecret,
+          clientId: input.clientId,
+          clientSecret: input.clientSecret,
           code: input.code,
-          redirectUri,
+          redirectUri: input.redirectUri,
         })
         .pipe(
           Effect.mapError(
@@ -420,6 +488,140 @@ export const makeUserAuth = Effect.gen(function* () {
       };
     });
 
+  const completeGitHubLogin: UserAuthShape["completeGitHubLogin"] = (input) =>
+    Effect.gen(function* () {
+      const credentials = yield* ensureConfigured();
+      const storedState = input.request.cookies[stateCookieName];
+      if (!storedState || storedState !== input.state) {
+        return yield* new UserAuthError({
+          message: "Invalid GitHub OAuth state.",
+          status: 400,
+        });
+      }
+
+      const redirectUri = yield* resolveCallbackUrl(input.request);
+      return yield* completeGitHubOAuthCode({
+        clientId: credentials.clientId,
+        clientSecret: credentials.clientSecret,
+        code: input.code,
+        redirectUri,
+      });
+    });
+
+  const completeDesktopGitHubLogin: UserAuthShape["completeDesktopGitHubLogin"] = (input) =>
+    Effect.gen(function* () {
+      const credentials = yield* ensureConfigured();
+      const handoffId = parseDesktopGitHubLoginHandoffId(input.state);
+      if (!handoffId) {
+        return yield* new UserAuthError({
+          message: "Invalid GitHub OAuth state.",
+          status: 400,
+        });
+      }
+
+      const now = yield* DateTime.now;
+      const handoffs = yield* Ref.get(desktopGitHubLoginHandoffs);
+      const handoff = handoffs.get(handoffId);
+      if (
+        !handoff ||
+        handoff.status !== "pending" ||
+        handoff.state !== input.state ||
+        DateTime.isGreaterThanOrEqualTo(now, handoff.expiresAt)
+      ) {
+        return yield* new UserAuthError({
+          message: "Invalid GitHub OAuth state.",
+          status: 400,
+        });
+      }
+
+      const completed = yield* completeGitHubOAuthCode({
+        clientId: credentials.clientId,
+        clientSecret: credentials.clientSecret,
+        code: input.code,
+        redirectUri: handoff.redirectUri,
+      });
+
+      yield* Ref.update(desktopGitHubLoginHandoffs, (current) => {
+        const next = new Map(current);
+        next.set(handoffId, {
+          status: "authenticated",
+          state: input.state,
+          expiresAt: handoff.expiresAt,
+          ...completed,
+        });
+        return next;
+      });
+    });
+
+  const failDesktopGitHubLogin: UserAuthShape["failDesktopGitHubLogin"] = (input) =>
+    Effect.gen(function* () {
+      const handoffId = parseDesktopGitHubLoginHandoffId(input.state);
+      if (!handoffId) {
+        return;
+      }
+
+      yield* Ref.update(desktopGitHubLoginHandoffs, (current) => {
+        const handoff = current.get(handoffId);
+        if (!handoff || handoff.state !== input.state) {
+          return current;
+        }
+
+        const next = new Map(current);
+        next.set(handoffId, {
+          status: "error",
+          state: input.state,
+          message: input.message,
+          expiresAt: handoff.expiresAt,
+        });
+        return next;
+      });
+    });
+
+  const consumeDesktopGitHubLogin: UserAuthShape["consumeDesktopGitHubLogin"] = (input) =>
+    Effect.gen(function* () {
+      const now = yield* DateTime.now;
+      const handoff = yield* Ref.modify(desktopGitHubLoginHandoffs, (current) => {
+        const next = new Map(current);
+        const value = next.get(input.handoffId);
+        if (!value) {
+          return [null, next] as const;
+        }
+        if (DateTime.isGreaterThanOrEqualTo(now, value.expiresAt)) {
+          next.delete(input.handoffId);
+          return [null, next] as const;
+        }
+        if (value.status === "authenticated" || value.status === "error") {
+          next.delete(input.handoffId);
+        }
+        return [value, next] as const;
+      });
+
+      if (!handoff) {
+        return yield* new UserAuthError({
+          message: "GitHub login handoff expired.",
+          status: 400,
+        });
+      }
+
+      if (handoff.status === "pending") {
+        return { status: "pending" } as const;
+      }
+
+      if (handoff.status === "error") {
+        return {
+          status: "error",
+          message: handoff.message,
+        } as const;
+      }
+
+      return {
+        status: "authenticated",
+        sessionState: handoff.sessionState,
+        sessionToken: handoff.sessionToken,
+        sessionExpiresAt: handoff.sessionExpiresAt,
+      } as const;
+    });
+
   const logout: UserAuthShape["logout"] = (request) =>
     Effect.gen(function* () {
       const token = request.cookies[cookieName];
@@ -448,7 +650,11 @@ export const makeUserAuth = Effect.gen(function* () {
     getSessionState,
     authenticateRequest,
     createGitHubLogin,
+    createDesktopGitHubLogin,
     completeGitHubLogin,
+    completeDesktopGitHubLogin,
+    failDesktopGitHubLogin,
+    consumeDesktopGitHubLogin,
     logout,
   } satisfies UserAuthShape;
 });
