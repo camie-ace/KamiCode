@@ -112,7 +112,7 @@ export const Route = createFileRoute("/settings")({
     }
 
     if (location.pathname === "/settings") {
-      throw redirect({ to: "/settings/general", replace: true });
+      throw redirect({ to: "/settings/profile", replace: true });
     }
   },
   component: SettingsRouteLayout,
