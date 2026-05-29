@@ -32,6 +32,66 @@ const { logInfo: logUpdaterInfo } = DesktopObservability.makeComponentLogger("de
 
 const { logError: logMenuError } = DesktopObservability.makeComponentLogger("desktop-menu");
 
+const showUpdateDownloadDialog = Effect.fn("desktop.menu.showUpdateDownloadDialog")(function* (
+  version: string | null,
+) {
+  const electronDialog = yield* ElectronDialog.ElectronDialog;
+  const result = yield* electronDialog.showMessageBox({
+    type: "info",
+    title: "Update available",
+    message: `KamiCode ${version ?? "update"} is available.`,
+    detail: "Download it now? You can keep using KamiCode while the update downloads.",
+    buttons: ["Later", "Download Update"],
+    defaultId: 1,
+    cancelId: 0,
+    noLink: true,
+  });
+  return result.response === 1;
+});
+
+const showUpdateInstallDialog = Effect.fn("desktop.menu.showUpdateInstallDialog")(function* (
+  version: string | null,
+) {
+  const electronDialog = yield* ElectronDialog.ElectronDialog;
+  const result = yield* electronDialog.showMessageBox({
+    type: "question",
+    title: "Update ready",
+    message: `KamiCode ${version ?? "update"} has been downloaded.`,
+    detail: "Restart KamiCode now to install it? Any running tasks will be interrupted.",
+    buttons: ["Later", "Restart and Install"],
+    defaultId: 1,
+    cancelId: 0,
+    noLink: true,
+  });
+  return result.response === 1;
+});
+
+const showUpdateDownloadFailureDialog = Effect.fn("desktop.menu.showUpdateDownloadFailureDialog")(
+  function* (message: string | null) {
+    const electronDialog = yield* ElectronDialog.ElectronDialog;
+    yield* electronDialog.showMessageBox({
+      type: "warning",
+      title: "Update download failed",
+      message: "Could not download the update.",
+      detail: message ?? "An unknown error occurred. Please try again later.",
+      buttons: ["OK"],
+    });
+  },
+);
+
+const showUpdateInstallFailureDialog = Effect.fn("desktop.menu.showUpdateInstallFailureDialog")(
+  function* (message: string | null) {
+    const electronDialog = yield* ElectronDialog.ElectronDialog;
+    yield* electronDialog.showMessageBox({
+      type: "warning",
+      title: "Update install failed",
+      message: "Could not restart and install the update.",
+      detail: message ?? "An unknown error occurred. Please try again later.",
+      buttons: ["OK"],
+    });
+  },
+);
+
 const dispatchMenuAction = Effect.fn("desktop.menu.dispatchMenuAction")(function* (
   action: string,
 ): Effect.fn.Return<void, DesktopWindow.DesktopWindowError, DesktopWindow.DesktopWindow> {
@@ -54,6 +114,55 @@ const checkForUpdatesFromMenu: Effect.Effect<
       type: "info",
       title: "You're up to date!",
       message: `KamiCode ${updateState.currentVersion} is currently the newest version available.`,
+      buttons: ["OK"],
+    });
+  } else if (updateState.status === "available") {
+    const shouldDownload = yield* showUpdateDownloadDialog(updateState.availableVersion);
+    if (!shouldDownload) return;
+
+    const downloadResult = yield* updates.download;
+    if (!downloadResult.accepted || !downloadResult.completed) {
+      yield* showUpdateDownloadFailureDialog(downloadResult.state.message);
+      return;
+    }
+
+    const downloadedState = downloadResult.state;
+    if (downloadedState.status !== "downloaded") {
+      yield* electronDialog.showMessageBox({
+        type: "info",
+        title: "Update download started",
+        message: "KamiCode is downloading the update.",
+        detail: "Use Help > Check for Updates... again after the download finishes.",
+        buttons: ["OK"],
+      });
+      return;
+    }
+
+    const shouldInstall = yield* showUpdateInstallDialog(
+      downloadedState.downloadedVersion ?? downloadedState.availableVersion,
+    );
+    if (!shouldInstall) return;
+
+    const installResult = yield* updates.install;
+    if (!installResult.accepted) {
+      yield* showUpdateInstallFailureDialog(installResult.state.message);
+    }
+  } else if (updateState.status === "downloaded") {
+    const shouldInstall = yield* showUpdateInstallDialog(
+      updateState.downloadedVersion ?? updateState.availableVersion,
+    );
+    if (!shouldInstall) return;
+
+    const installResult = yield* updates.install;
+    if (!installResult.accepted) {
+      yield* showUpdateInstallFailureDialog(installResult.state.message);
+    }
+  } else if (updateState.status === "downloading") {
+    yield* electronDialog.showMessageBox({
+      type: "info",
+      title: "Update downloading",
+      message: "KamiCode is already downloading an update.",
+      detail: "Use Help > Check for Updates... again after the download finishes.",
       buttons: ["OK"],
     });
   } else if (updateState.status === "error") {
