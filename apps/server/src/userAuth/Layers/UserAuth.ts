@@ -201,7 +201,7 @@ export const makeUserAuth = Effect.gen(function* () {
         );
 
   const resolveCallbackUrl = (request: HttpServerRequest.HttpServerRequest) => {
-    if (config.githubOAuthCallbackUrl) {
+    if (config.githubOAuthCallbackUrl && config.mode !== "desktop") {
       return Effect.succeed(config.githubOAuthCallbackUrl.toString());
     }
 

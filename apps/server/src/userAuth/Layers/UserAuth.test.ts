@@ -25,10 +25,21 @@ const makeServerConfigLayer = (overrides?: Partial<ServerConfigShape>) =>
     }),
   ).pipe(Layer.provide(ServerConfig.layerTest(process.cwd(), { prefix: "t3-user-auth-test-" })));
 
-const makeRequest = (cookies: Record<string, string> = {}) =>
+const makeRequest = (
+  cookies: Record<string, string> = {},
+  input?: {
+    readonly url?: string;
+    readonly host?: string;
+    readonly protocol?: "http" | "https";
+  },
+) =>
   ({
     cookies,
-    headers: {},
+    headers: {
+      ...(input?.host ? { host: input.host } : {}),
+      ...(input?.protocol === "https" ? { "x-forwarded-proto": "https" } : {}),
+    },
+    url: input?.url ?? "/",
   }) as unknown as HttpServerRequest.HttpServerRequest;
 
 const makeGitHubOAuthClientLayer = (overrides?: Partial<GitHubOAuthClientShape>) =>
@@ -99,6 +110,30 @@ it.layer(NodeServices.layer)("UserAuthLive", (it) => {
           githubOAuthCallbackUrl: new URL(
             "https://kamicode.example.com/api/user/auth/github/callback",
           ),
+        }),
+      ),
+    ),
+  );
+
+  it.effect("derives the desktop GitHub callback URL from the request origin", () =>
+    Effect.gen(function* () {
+      const userAuth = yield* UserAuth;
+
+      const login = yield* userAuth.createDesktopGitHubLogin(
+        makeRequest({}, { host: "127.0.0.1:3773", url: "/api/user/auth/github/desktop/start" }),
+      );
+      const url = new URL(login.authorizationUrl);
+
+      expect(url.searchParams.get("redirect_uri")).toBe(
+        "http://127.0.0.1:3773/api/user/auth/github/callback",
+      );
+    }).pipe(
+      Effect.provide(
+        makeUserAuthLayer({
+          mode: "desktop",
+          githubOAuthClientId: "client-id",
+          githubOAuthClientSecret: "client-secret",
+          githubOAuthCallbackUrl: new URL("http://localhost:13773/api/user/auth/github/callback"),
         }),
       ),
     ),
