@@ -14,6 +14,7 @@
 - Auth-gated Test Mode verification must set `authExpectation: "authenticated"` and cannot treat a login/auth page as success. If no saved session, local credentials, seeded user, bypass, or mock auth exists, ask with `request_user_input` question id `test_auth_strategy` using options: `I'll provide sign-in credentials`, `Create permanent user`, and `Create temporary user`.
 - Internal Windows releases are produced by tagging `vX.Y.Z`; `.github/workflows/release.yml` builds the x64 NSIS installer and publishes GitHub Release assets.
 - On Windows, `bun lint` may need `NODE_OPTIONS=--import tsx` because `.oxlintrc.json` loads `oxlint-plugin-t3code/index.ts`; `bun typecheck` also needs Bun's install directory on `PATH` so Turbo can resolve the package manager binary.
+- Package scripts that execute repo TypeScript entrypoints should use `bun <script>.ts`, not `node <script>.ts`; Node cannot load these ESM `.ts` files without an explicit loader. `bun run dev:desktop -- --dry-run` verifies the desktop dev runner path without starting long-lived processes.
 
 ## Phase 6: Shared Projects + Runtime Continuation
 
