@@ -15,6 +15,7 @@
 - Internal Windows releases are produced by tagging `vX.Y.Z`; `.github/workflows/release.yml` builds the x64 NSIS installer and publishes GitHub Release assets.
 - On Windows, `bun lint` may need `NODE_OPTIONS=--import tsx` because `.oxlintrc.json` loads `oxlint-plugin-t3code/index.ts`; `bun typecheck` also needs Bun's install directory on `PATH` so Turbo can resolve the package manager binary.
 - Package scripts that execute repo TypeScript entrypoints should use `bun <script>.ts`, not `node <script>.ts`; Node cannot load these ESM `.ts` files without an explicit loader. `bun run dev:desktop -- --dry-run` verifies the desktop dev runner path without starting long-lived processes.
+- Background turn-completion audio is app-wide in `apps/web/src/components/TurnCompletionSoundCoordinator.tsx`; it should trigger only after the latest turn is completed and the thread session is no longer working, and only when the document is visible but not focused or hidden.
 
 ## Phase 6: Shared Projects + Runtime Continuation
 

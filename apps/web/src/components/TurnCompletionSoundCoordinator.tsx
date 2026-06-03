@@ -3,45 +3,96 @@ import { useEffect, useRef } from "react";
 import { useStore } from "../store";
 import {
   collectNewlyCompletedTurns,
-  getTurnCompletionAlertVolume,
   isApplicationInFocus,
   TURN_COMPLETION_ALERT_DURATION_MS,
-  TURN_COMPLETION_ALERT_INTERVAL_MS,
+  TURN_COMPLETION_ALERT_INITIAL_VOLUME,
+  TURN_COMPLETION_ALERT_MAX_VOLUME,
 } from "../lib/turnCompletionAlert";
 
-function playCompletionChirp(audioContext: AudioContext, volume: number) {
+interface RunningCompletionAlarm {
+  stop: () => void;
+}
+
+function startCompletionAlarm(audioContext: AudioContext): RunningCompletionAlarm {
   const startAt = audioContext.currentTime;
-  const gain = audioContext.createGain();
-  const oscillator = audioContext.createOscillator();
+  const durationSeconds = TURN_COMPLETION_ALERT_DURATION_MS / 1_000;
+  const masterGain = audioContext.createGain();
+  const filter = audioContext.createBiquadFilter();
+  const primary = audioContext.createOscillator();
   const overtone = audioContext.createOscillator();
+  const siren = audioContext.createOscillator();
+  const sirenDepth = audioContext.createGain();
+  const tremolo = audioContext.createOscillator();
+  const tremoloDepth = audioContext.createGain();
 
-  gain.gain.setValueAtTime(0.0001, startAt);
-  gain.gain.exponentialRampToValueAtTime(Math.max(volume, 0.0001), startAt + 0.02);
-  gain.gain.exponentialRampToValueAtTime(0.0001, startAt + 0.32);
+  masterGain.gain.setValueAtTime(0.0001, startAt);
+  masterGain.gain.linearRampToValueAtTime(TURN_COMPLETION_ALERT_INITIAL_VOLUME, startAt + 0.08);
+  masterGain.gain.linearRampToValueAtTime(
+    TURN_COMPLETION_ALERT_MAX_VOLUME,
+    startAt + durationSeconds,
+  );
 
-  oscillator.type = "triangle";
-  oscillator.frequency.setValueAtTime(880, startAt);
-  oscillator.frequency.exponentialRampToValueAtTime(1174.66, startAt + 0.16);
+  filter.type = "bandpass";
+  filter.frequency.setValueAtTime(1_180, startAt);
+  filter.Q.setValueAtTime(7, startAt);
 
-  overtone.type = "sine";
-  overtone.frequency.setValueAtTime(1320, startAt);
-  overtone.frequency.exponentialRampToValueAtTime(1760, startAt + 0.16);
+  primary.type = "sawtooth";
+  primary.frequency.setValueAtTime(740, startAt);
+  overtone.type = "square";
+  overtone.frequency.setValueAtTime(1_110, startAt);
 
-  oscillator.connect(gain);
-  overtone.connect(gain);
-  gain.connect(audioContext.destination);
+  siren.type = "sine";
+  siren.frequency.setValueAtTime(1.8, startAt);
+  sirenDepth.gain.setValueAtTime(310, startAt);
+  siren.connect(sirenDepth);
+  sirenDepth.connect(primary.frequency);
+  sirenDepth.connect(overtone.frequency);
 
-  oscillator.start(startAt);
+  tremolo.type = "square";
+  tremolo.frequency.setValueAtTime(7.5, startAt);
+  tremoloDepth.gain.setValueAtTime(0.16, startAt);
+  tremolo.connect(tremoloDepth);
+  tremoloDepth.connect(masterGain.gain);
+
+  primary.connect(filter);
+  overtone.connect(filter);
+  filter.connect(masterGain);
+  masterGain.connect(audioContext.destination);
+
+  primary.start(startAt);
   overtone.start(startAt);
-  oscillator.stop(startAt + 0.34);
-  overtone.stop(startAt + 0.34);
+  siren.start(startAt);
+  tremolo.start(startAt);
+
+  let stopped = false;
+  const stop = () => {
+    if (stopped) {
+      return;
+    }
+    stopped = true;
+    const stopAt = audioContext.currentTime;
+    masterGain.gain.cancelScheduledValues(stopAt);
+    masterGain.gain.setTargetAtTime(0.0001, stopAt, 0.03);
+    const oscillatorStopAt = stopAt + 0.15;
+    primary.stop(oscillatorStopAt);
+    overtone.stop(oscillatorStopAt);
+    siren.stop(oscillatorStopAt);
+    tremolo.stop(oscillatorStopAt);
+  };
 
   const cleanup = () => {
-    oscillator.disconnect();
+    primary.disconnect();
     overtone.disconnect();
-    gain.disconnect();
+    siren.disconnect();
+    sirenDepth.disconnect();
+    tremolo.disconnect();
+    tremoloDepth.disconnect();
+    filter.disconnect();
+    masterGain.disconnect();
   };
-  oscillator.addEventListener("ended", cleanup, { once: true });
+  primary.addEventListener("ended", cleanup, { once: true });
+
+  return { stop };
 }
 
 export function TurnCompletionSoundCoordinator() {
@@ -88,29 +139,9 @@ export function TurnCompletionSoundCoordinator() {
         return;
       }
 
-      const startedAt = Date.now();
+      let alarm: RunningCompletionAlarm | null = null;
       let timeoutId: number | null = null;
       let disposed = false;
-
-      const tick = async () => {
-        if (disposed || isApplicationInFocus(document)) {
-          stopAlert();
-          return;
-        }
-
-        const audioContext = await ensureAudioReady();
-        if (audioContext) {
-          playCompletionChirp(audioContext, getTurnCompletionAlertVolume(Date.now() - startedAt));
-        }
-
-        const elapsedMs = Date.now() - startedAt;
-        if (elapsedMs >= TURN_COMPLETION_ALERT_DURATION_MS) {
-          stopAlert();
-          return;
-        }
-
-        timeoutId = window.setTimeout(tick, TURN_COMPLETION_ALERT_INTERVAL_MS);
-      };
 
       stopAlertRef.current = () => {
         disposed = true;
@@ -118,9 +149,24 @@ export function TurnCompletionSoundCoordinator() {
           window.clearTimeout(timeoutId);
           timeoutId = null;
         }
+        alarm?.stop();
+        alarm = null;
       };
 
-      void tick();
+      void ensureAudioReady().then((audioContext) => {
+        if (disposed || isApplicationInFocus(document)) {
+          stopAlert();
+          return;
+        }
+        if (!audioContext) {
+          return;
+        }
+
+        alarm = startCompletionAlarm(audioContext);
+        timeoutId = window.setTimeout(() => {
+          stopAlert();
+        }, TURN_COMPLETION_ALERT_DURATION_MS);
+      });
     };
 
     const handleFocusStateChange = () => {

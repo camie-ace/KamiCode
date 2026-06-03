@@ -1,6 +1,7 @@
 import type { EnvironmentId, ThreadId, TurnId } from "@t3tools/contracts";
 
 import type { AppState, EnvironmentState } from "../store";
+import type { ThreadSession } from "../types";
 
 export const TURN_COMPLETION_ALERT_DURATION_MS = 10_000;
 export const TURN_COMPLETION_ALERT_INTERVAL_MS = 1_250;
@@ -20,6 +21,11 @@ type ComparableLatestTurn = {
   readonly completedAt: string | null;
 } | null;
 
+type ComparableThreadSession = Pick<
+  ThreadSession,
+  "status" | "orchestrationStatus" | "activeTurnId"
+> | null;
+
 function getComparableLatestTurn(
   environmentState: EnvironmentState | undefined,
   threadId: ThreadId,
@@ -35,6 +41,21 @@ function getComparableLatestTurn(
   };
 }
 
+function getComparableThreadSession(
+  environmentState: EnvironmentState | undefined,
+  threadId: ThreadId,
+): ComparableThreadSession {
+  const session = environmentState?.threadSessionById[threadId] ?? null;
+  if (!session) {
+    return null;
+  }
+  return {
+    status: session.status,
+    orchestrationStatus: session.orchestrationStatus,
+    activeTurnId: session.activeTurnId,
+  };
+}
+
 function isCompletedLatestTurn(
   turn: ComparableLatestTurn,
 ): turn is NonNullable<ComparableLatestTurn> & {
@@ -42,6 +63,33 @@ function isCompletedLatestTurn(
   readonly completedAt: string;
 } {
   return turn?.state === "completed" && typeof turn.completedAt === "string";
+}
+
+function isThreadSessionWorking(session: ComparableThreadSession): boolean {
+  if (!session) {
+    return false;
+  }
+  return (
+    session.activeTurnId !== undefined ||
+    session.status === "connecting" ||
+    session.status === "running" ||
+    session.orchestrationStatus === "starting" ||
+    session.orchestrationStatus === "running"
+  );
+}
+
+function getSettledCompletedLatestTurn(
+  environmentState: EnvironmentState | undefined,
+  threadId: ThreadId,
+) {
+  const turn = getComparableLatestTurn(environmentState, threadId);
+  if (!isCompletedLatestTurn(turn)) {
+    return null;
+  }
+  if (isThreadSessionWorking(getComparableThreadSession(environmentState, threadId))) {
+    return null;
+  }
+  return turn;
 }
 
 export function collectNewlyCompletedTurns(
@@ -63,13 +111,14 @@ export function collectNewlyCompletedTurns(
         continue;
       }
 
-      const nextTurn = getComparableLatestTurn(nextEnvironmentState, threadId);
-      if (!isCompletedLatestTurn(nextTurn)) {
+      const nextTurn = getSettledCompletedLatestTurn(nextEnvironmentState, threadId);
+      if (!nextTurn) {
         continue;
       }
+      const previousSettledTurn = getSettledCompletedLatestTurn(previousEnvironmentState, threadId);
 
       const didCompleteNewTurn =
-        previousTurn.turnId !== nextTurn.turnId || !isCompletedLatestTurn(previousTurn);
+        previousTurn.turnId !== nextTurn.turnId || previousSettledTurn === null;
       const completedAtChanged =
         previousTurn.turnId === nextTurn.turnId &&
         previousTurn.completedAt !== nextTurn.completedAt;
