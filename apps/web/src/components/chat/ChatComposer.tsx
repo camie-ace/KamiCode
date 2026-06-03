@@ -95,6 +95,7 @@ import {
   XIcon,
 } from "lucide-react";
 import { proposedPlanTitle } from "../../proposedPlan";
+import { isChatQueueShortcut, shortcutLabelForCommand } from "../../keybindings";
 import { getProviderInteractionModeToggle } from "../../providerModels";
 import {
   deriveProviderInstanceEntries,
@@ -322,8 +323,10 @@ const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryActions(
   isConnecting: boolean;
   isEnvironmentUnavailable: boolean;
   hasSendableContent: boolean;
+  queueShortcutLabel: string | null | undefined;
   preserveComposerFocusOnPointerDown?: boolean;
   onPreviousPendingQuestion: () => void;
+  onQueueMessage: () => void;
   onInterrupt: () => void;
   onImplementPlanInNewThread: () => void;
 }) {
@@ -344,8 +347,10 @@ const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryActions(
         isEnvironmentUnavailable={props.isEnvironmentUnavailable}
         isPreparingWorktree={props.isPreparingWorktree}
         hasSendableContent={props.hasSendableContent}
+        queueShortcutLabel={props.queueShortcutLabel}
         preserveComposerFocusOnPointerDown={props.preserveComposerFocusOnPointerDown ?? false}
         onPreviousPendingQuestion={props.onPreviousPendingQuestion}
+        onQueueMessage={props.onQueueMessage}
         onInterrupt={props.onInterrupt}
         onImplementPlanInNewThread={props.onImplementPlanInNewThread}
       />
@@ -1640,6 +1645,16 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     },
     [blurMobileComposerAfterSend, onSend, shouldBlurMobileComposerOnSubmit],
   );
+  const queueShortcutLabel = useMemo(
+    () =>
+      shortcutLabelForCommand(keybindings, "chat.queue", {
+        context: { terminalOpen, terminalFocus: false },
+      }),
+    [keybindings, terminalOpen],
+  );
+  const submitQueuedComposer = useCallback(() => {
+    submitComposer(undefined, { dispatchPolicy: "queue" });
+  }, [submitComposer]);
   const expandMobileComposer = useCallback(() => {
     if (composerBlurFrameRef.current !== null) {
       window.cancelAnimationFrame(composerBlurFrameRef.current);
@@ -1692,8 +1707,14 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         return true;
       }
     }
-    if (key === "Enter" && event.shiftKey && phase === "running") {
-      submitComposer(undefined, { dispatchPolicy: "queue" });
+    if (
+      key === "Enter" &&
+      phase === "running" &&
+      isChatQueueShortcut(event, keybindings, {
+        context: { terminalOpen, terminalFocus: false },
+      })
+    ) {
+      submitQueuedComposer();
       return true;
     }
     if (key === "Enter" && !event.shiftKey) {
@@ -2099,8 +2120,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                       isEnvironmentUnavailable={environmentUnavailable !== null}
                       isPreparingWorktree={false}
                       hasSendableContent={false}
+                      queueShortcutLabel={queueShortcutLabel}
                       preserveComposerFocusOnPointerDown
                       onPreviousPendingQuestion={onPreviousActivePendingUserInputQuestion}
+                      onQueueMessage={submitQueuedComposer}
                       onInterrupt={handleInterruptPrimaryAction}
                       onImplementPlanInNewThread={handleImplementPlanInNewThreadPrimaryAction}
                     />
@@ -2308,8 +2331,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     isEnvironmentUnavailable={environmentUnavailable !== null}
                     isPreparingWorktree={false}
                     hasSendableContent={false}
+                    queueShortcutLabel={queueShortcutLabel}
                     preserveComposerFocusOnPointerDown
                     onPreviousPendingQuestion={onPreviousActivePendingUserInputQuestion}
+                    onQueueMessage={submitQueuedComposer}
                     onInterrupt={handleInterruptPrimaryAction}
                     onImplementPlanInNewThread={handleImplementPlanInNewThreadPrimaryAction}
                   />
@@ -2415,8 +2440,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                   isEnvironmentUnavailable={environmentUnavailable !== null}
                   isPreparingWorktree={isPreparingWorktree}
                   hasSendableContent={composerSendState.hasSendableContent}
+                  queueShortcutLabel={queueShortcutLabel}
                   preserveComposerFocusOnPointerDown={isMobileViewport}
                   onPreviousPendingQuestion={onPreviousActivePendingUserInputQuestion}
+                  onQueueMessage={submitQueuedComposer}
                   onInterrupt={handleInterruptPrimaryAction}
                   onImplementPlanInNewThread={handleImplementPlanInNewThreadPrimaryAction}
                 />

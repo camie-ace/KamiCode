@@ -146,6 +146,32 @@ function syncWindowAppearance(
   });
 }
 
+function isSameUrlOrigin(left: URL, right: URL): boolean {
+  return left.origin === right.origin;
+}
+
+export function isDesktopAppWindowUrl(input: {
+  readonly rawUrl: string;
+  readonly backendHttpUrl: URL;
+  readonly devServerUrl: Option.Option<URL>;
+}): boolean {
+  let url: URL;
+  try {
+    url = new URL(input.rawUrl);
+  } catch {
+    return false;
+  }
+
+  if (isSameUrlOrigin(url, input.backendHttpUrl)) {
+    return true;
+  }
+
+  return Option.match(input.devServerUrl, {
+    onNone: () => false,
+    onSome: (devServerUrl) => isSameUrlOrigin(url, devServerUrl),
+  });
+}
+
 type RevealSubscription = (listener: () => void) => void;
 
 function bindFirstRevealTrigger(
@@ -249,11 +275,46 @@ const make = Effect.gen(function* () {
       void runPromise(electronMenu.popupTemplate({ window, template: menuTemplate }));
     });
 
-    window.webContents.setWindowOpenHandler(({ url }) => {
+    const handleWindowOpen = ({
+      url,
+    }: Electron.HandlerDetails): Electron.WindowOpenHandlerResponse => {
+      if (
+        isDesktopAppWindowUrl({
+          rawUrl: url,
+          backendHttpUrl,
+          devServerUrl: environment.devServerUrl,
+        })
+      ) {
+        return {
+          action: "allow",
+          overrideBrowserWindowOptions: {
+            width: 980,
+            height: 720,
+            minWidth: 640,
+            minHeight: 480,
+            autoHideMenuBar: true,
+            backgroundColor: getInitialWindowBackgroundColor(shouldUseDarkColors),
+            ...iconOption,
+            title: environment.displayName,
+            ...getWindowTitleBarOptions(shouldUseDarkColors),
+            webPreferences: {
+              preload: environment.preloadPath,
+              contextIsolation: true,
+              nodeIntegration: false,
+              sandbox: true,
+            },
+          },
+        };
+      }
+
       if (Option.isSome(ElectronShell.parseSafeExternalUrl(url))) {
         void runPromise(electronShell.openExternal(url));
       }
       return { action: "deny" };
+    };
+    window.webContents.setWindowOpenHandler(handleWindowOpen);
+    window.webContents.on("did-create-window", (childWindow) => {
+      childWindow.webContents.setWindowOpenHandler(handleWindowOpen);
     });
 
     window.on("page-title-updated", (event) => {

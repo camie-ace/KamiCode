@@ -43,6 +43,7 @@ import {
   type BrowserHarnessRunResult,
   type BrowserHarnessScreenshot,
   type BrowserHarnessStatus,
+  type BrowserHarnessVideo,
 } from "./testing/browserHarness.ts";
 
 const PROJECT_FAVICON_CACHE_CONTROL = "public, max-age=3600";
@@ -184,6 +185,7 @@ export interface TestHarnessRunListItem {
   readonly outputSummary?: string | undefined;
   readonly artifactPaths: BrowserHarnessArtifactPaths;
   readonly screenshots: ReadonlyArray<BrowserHarnessScreenshot>;
+  readonly videos: ReadonlyArray<BrowserHarnessVideo>;
   readonly consoleErrors: ReadonlyArray<string>;
   readonly networkFailures: ReadonlyArray<string>;
   readonly startedAt: string;
@@ -272,6 +274,7 @@ async function readTestHarnessRunSummary(
     ...(typeof parsed.doneSummary === "string" ? { outputSummary: parsed.doneSummary } : {}),
     artifactPaths: parsed.artifactPaths,
     screenshots: Array.isArray(parsed.screenshots) ? parsed.screenshots : [],
+    videos: Array.isArray(parsed.videos) ? parsed.videos : [],
     consoleErrors: collectTestHarnessConsoleErrors({
       consoleMessages: Array.isArray(parsed.consoleMessages) ? parsed.consoleMessages : [],
       pageErrors: Array.isArray(parsed.pageErrors) ? parsed.pageErrors : [],

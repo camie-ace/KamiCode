@@ -65,6 +65,7 @@ function makeFakeBrowserWindow() {
     loadURL: window.loadURL,
     openDevTools: webContents.openDevTools,
     setIcon: window.setIcon,
+    setWindowOpenHandler: webContents.setWindowOpenHandler,
   };
 }
 
@@ -122,6 +123,7 @@ function makeTestLayer(input: {
   readonly createCount: Ref.Ref<number>;
   readonly mainWindow: Ref.Ref<Option.Option<Electron.BrowserWindow>>;
   readonly createOptions?: Ref.Ref<Option.Option<Electron.BrowserWindowConstructorOptions>>;
+  readonly openExternal?: ElectronShell.ElectronShellShape["openExternal"];
   readonly environmentInput?: DesktopEnvironment.MakeDesktopEnvironmentInput;
   readonly iconPaths?: DesktopAssets.DesktopIconPaths;
 }) {
@@ -166,7 +168,12 @@ function makeTestLayer(input: {
         desktopServerExposureLayer,
         DesktopState.layer,
         electronMenuLayer,
-        electronShellLayer,
+        input.openExternal
+          ? Layer.succeed(ElectronShell.ElectronShell, {
+              openExternal: input.openExternal,
+              copyText: () => Effect.void,
+            } satisfies ElectronShell.ElectronShellShape)
+          : electronShellLayer,
         electronThemeLayer,
         electronWindowLayer,
       ),
@@ -232,6 +239,73 @@ describe("DesktopWindow", () => {
         assert.equal(Option.isSome(options), true);
         assert.equal(Option.isSome(options) ? options.value.icon : undefined, iconPath);
         assert.deepEqual(fakeWindow.setIcon.mock.calls[0], [iconPath]);
+      }).pipe(Effect.provide(layer));
+    }),
+  );
+
+  it.effect("keeps app-origin target blank URLs inside Electron", () =>
+    Effect.gen(function* () {
+      const fakeWindow = makeFakeBrowserWindow();
+      const createCount = yield* Ref.make(0);
+      const mainWindow = yield* Ref.make<Option.Option<Electron.BrowserWindow>>(Option.none());
+      const openExternal = vi.fn<ElectronShell.ElectronShellShape["openExternal"]>(() =>
+        Effect.succeed(true),
+      );
+      const layer = makeTestLayer({
+        window: fakeWindow.window,
+        createCount,
+        mainWindow,
+        openExternal,
+      });
+
+      yield* Effect.gen(function* () {
+        const desktopWindow = yield* DesktopWindow.DesktopWindow;
+        yield* desktopWindow.handleBackendReady;
+
+        const handler = fakeWindow.setWindowOpenHandler.mock.calls[0]?.[0] as
+          | ((details: { readonly url: string }) => { readonly action: string })
+          | undefined;
+        assert.notEqual(handler, undefined);
+        const result = handler?.({
+          url: "http://127.0.0.1:3773/api/test-harness/artifact?path=screenshot.png",
+        });
+
+        assert.equal(result?.action, "allow");
+        assert.equal(openExternal.mock.calls.length, 0);
+      }).pipe(Effect.provide(layer));
+    }),
+  );
+
+  it.effect("opens external target blank URLs in the system browser", () =>
+    Effect.gen(function* () {
+      const fakeWindow = makeFakeBrowserWindow();
+      const createCount = yield* Ref.make(0);
+      const mainWindow = yield* Ref.make<Option.Option<Electron.BrowserWindow>>(Option.none());
+      const openExternal = vi.fn<ElectronShell.ElectronShellShape["openExternal"]>(() =>
+        Effect.succeed(true),
+      );
+      const layer = makeTestLayer({
+        window: fakeWindow.window,
+        createCount,
+        mainWindow,
+        openExternal,
+      });
+
+      yield* Effect.gen(function* () {
+        const desktopWindow = yield* DesktopWindow.DesktopWindow;
+        yield* desktopWindow.handleBackendReady;
+
+        const handler = fakeWindow.setWindowOpenHandler.mock.calls[0]?.[0] as
+          | ((details: { readonly url: string }) => { readonly action: string })
+          | undefined;
+        assert.notEqual(handler, undefined);
+        const result = handler?.({ url: "https://example.com/docs" });
+
+        assert.equal(result?.action, "deny");
+        assert.deepEqual(
+          openExternal.mock.calls.map(([url]) => url),
+          ["https://example.com/docs"],
+        );
       }).pipe(Effect.provide(layer));
     }),
   );

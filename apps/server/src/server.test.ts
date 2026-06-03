@@ -102,6 +102,11 @@ import {
   ServerEnvironment,
   type ServerEnvironmentShape,
 } from "./environment/Services/ServerEnvironment.ts";
+import {
+  SharedProjects,
+  SharedProjectsError,
+  type SharedProjectsShape,
+} from "./sharedProjects/Services/SharedProjects.ts";
 import { WorkspaceEntriesLive } from "./workspace/Layers/WorkspaceEntries.ts";
 import { WorkspaceFileSystemLive } from "./workspace/Layers/WorkspaceFileSystem.ts";
 import { WorkspacePathsLive } from "./workspace/Layers/WorkspacePaths.ts";
@@ -207,6 +212,34 @@ const makeDefaultOrchestrationThreadShell = (
     ...overrides,
   };
 };
+
+const failSharedProjectsTestOperation = () =>
+  Effect.fail(
+    new SharedProjectsError({
+      message: "Shared projects test mock does not implement this operation.",
+      status: 404,
+    }),
+  );
+
+const makeDefaultSharedProjectsMock = (): SharedProjectsShape => ({
+  listForUser: () => Effect.succeed({ projects: [] }),
+  publishLocalProject: failSharedProjectsTestOperation,
+  getDetail: failSharedProjectsTestOperation,
+  getBootstrapManifest: failSharedProjectsTestOperation,
+  syncContext: failSharedProjectsTestOperation,
+  createInvite: failSharedProjectsTestOperation,
+  claimInvite: failSharedProjectsTestOperation,
+  updateMemberRole: failSharedProjectsTestOperation,
+  removeMember: failSharedProjectsTestOperation,
+  publishThread: failSharedProjectsTestOperation,
+  updateThreadVisibility: failSharedProjectsTestOperation,
+  appendThreadMessage: failSharedProjectsTestOperation,
+  upsertRuntime: failSharedProjectsTestOperation,
+  upsertEnvironment: failSharedProjectsTestOperation,
+  setDefaultEnvironment: failSharedProjectsTestOperation,
+  upsertDeployAssociation: failSharedProjectsTestOperation,
+  syncRemoteRuntime: failSharedProjectsTestOperation,
+});
 
 const browserOtlpTracingLayer = Layer.mergeAll(
   FetchHttpClient.layer,
@@ -349,6 +382,7 @@ const buildAppUnderTest = (options?: {
     serverRuntimeStartup?: Partial<ServerRuntimeStartupShape>;
     serverEnvironment?: Partial<ServerEnvironmentShape>;
     repositoryIdentityResolver?: Partial<RepositoryIdentityResolverShape>;
+    sharedProjects?: Partial<SharedProjectsShape>;
   };
 }) =>
   Effect.gen(function* () {
@@ -732,6 +766,12 @@ const buildAppUnderTest = (options?: {
         Layer.mock(RepositoryIdentityResolver)({
           resolve: () => Effect.succeed(null),
           ...options?.layers?.repositoryIdentityResolver,
+        }),
+      ),
+      Layer.provide(
+        Layer.mock(SharedProjects)({
+          ...makeDefaultSharedProjectsMock(),
+          ...options?.layers?.sharedProjects,
         }),
       ),
       Layer.provideMerge(makeAuthTestLayer()),

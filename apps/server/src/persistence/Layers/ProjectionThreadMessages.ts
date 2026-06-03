@@ -9,6 +9,7 @@ import { ChatAttachment } from "@t3tools/contracts";
 
 import { toPersistenceSqlError } from "../Errors.ts";
 import {
+  DeleteProjectionThreadMessageInput,
   GetProjectionThreadMessageInput,
   ProjectionThreadMessageRepository,
   type ProjectionThreadMessageRepositoryShape,
@@ -146,6 +147,15 @@ const makeProjectionThreadMessageRepository = Effect.gen(function* () {
       `,
   });
 
+  const deleteProjectionThreadMessageRow = SqlSchema.void({
+    Request: DeleteProjectionThreadMessageInput,
+    execute: ({ messageId }) =>
+      sql`
+        DELETE FROM projection_thread_messages
+        WHERE message_id = ${messageId}
+      `,
+  });
+
   const upsert: ProjectionThreadMessageRepositoryShape["upsert"] = (row) =>
     upsertProjectionThreadMessageRow(row).pipe(
       Effect.mapError(toPersistenceSqlError("ProjectionThreadMessageRepository.upsert:query")),
@@ -174,11 +184,19 @@ const makeProjectionThreadMessageRepository = Effect.gen(function* () {
       ),
     );
 
+  const deleteByMessageId: ProjectionThreadMessageRepositoryShape["deleteByMessageId"] = (input) =>
+    deleteProjectionThreadMessageRow(input).pipe(
+      Effect.mapError(
+        toPersistenceSqlError("ProjectionThreadMessageRepository.deleteByMessageId:query"),
+      ),
+    );
+
   return {
     upsert,
     getByMessageId,
     listByThreadId,
     deleteByThreadId,
+    deleteByMessageId,
   } satisfies ProjectionThreadMessageRepositoryShape;
 });
 

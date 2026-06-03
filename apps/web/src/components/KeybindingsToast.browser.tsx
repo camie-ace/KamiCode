@@ -224,7 +224,7 @@ function toShellSnapshot(snapshot: OrchestrationReadModel) {
       branch: thread.branch,
       worktreePath: thread.worktreePath,
       latestTurn: thread.latestTurn,
-      queuedTurnCount: thread.queuedTurns.filter((turn) => turn.status === "queued").length,
+      queuedTurnCount: (thread.queuedTurns ?? []).filter((turn) => turn.status === "queued").length,
       createdAt: thread.createdAt,
       updatedAt: thread.updatedAt,
       archivedAt: thread.archivedAt,

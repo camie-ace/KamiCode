@@ -132,6 +132,7 @@ export function browserHarnessResultToEvidenceRunResult(
     artifactPaths: {
       trace: result.artifactPaths.trace,
       screenshots: result.artifactPaths.screenshots,
+      video: result.artifactPaths.video ?? result.videos?.[0]?.path,
       consoleLog: result.artifactPaths.consoleLog,
       networkLog: result.artifactPaths.networkLog,
       storageState: result.artifactPaths.storageState,
@@ -139,7 +140,7 @@ export function browserHarnessResultToEvidenceRunResult(
       markdown: result.artifactPaths.markdown,
     },
     screenshots: result.screenshots,
-    videos: [],
+    videos: result.videos ?? [],
     observations: result.observations.map((observation) => ({
       stepId: observation.stepId,
       url: observation.url,

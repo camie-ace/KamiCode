@@ -105,7 +105,13 @@ import { BranchToolbar } from "./BranchToolbar";
 import { resolveShortcutCommand, shortcutLabelForCommand } from "../keybindings";
 import PlanSidebar from "./PlanSidebar";
 import ThreadTerminalDrawer from "./ThreadTerminalDrawer";
-import { ChevronDownIcon, TriangleAlertIcon, WifiOffIcon } from "lucide-react";
+import {
+  ChevronDownIcon,
+  ListOrderedIcon,
+  TriangleAlertIcon,
+  WifiOffIcon,
+  XIcon,
+} from "lucide-react";
 import { cn, randomUUID } from "~/lib/utils";
 import { stackedThreadToast, toastManager } from "./ui/toast";
 import { decodeProjectScriptKeybindingRule } from "~/lib/projectScriptKeybindings";
@@ -208,6 +214,69 @@ type EnvironmentUnavailableState = {
 };
 
 type ThreadPlanCatalogEntry = Pick<Thread, "id" | "proposedPlans">;
+
+type QueuedMessageItem = {
+  id: MessageId;
+  queueId: string | null;
+  text: string;
+  status: "queued" | "dispatching";
+  createdAt: string;
+};
+
+const QUEUED_MESSAGE_PREVIEW_LIMIT = 180;
+
+function queuedMessagePreview(text: string): string {
+  const normalized = text.replace(/\s+/g, " ").trim();
+  if (normalized.length <= QUEUED_MESSAGE_PREVIEW_LIMIT) return normalized;
+  return `${normalized.slice(0, QUEUED_MESSAGE_PREVIEW_LIMIT - 3)}...`;
+}
+
+const QueuedMessagesPanel = memo(function QueuedMessagesPanel(props: {
+  items: ReadonlyArray<QueuedMessageItem>;
+  onDelete: (item: QueuedMessageItem) => void;
+}) {
+  if (props.items.length === 0) return null;
+
+  return (
+    <div className="mb-2 rounded-lg border border-border/60 bg-card/80 px-3 py-2 shadow-sm backdrop-blur">
+      <div className="mb-1.5 flex items-center gap-2 text-muted-foreground text-xs">
+        <ListOrderedIcon className="size-3.5" aria-hidden="true" />
+        <span className="font-medium text-foreground">Queued</span>
+        <span>{props.items.length}</span>
+      </div>
+      <div className="grid gap-1.5">
+        {props.items.map((item, index) => (
+          <div
+            key={item.id}
+            className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)_auto_auto] items-center gap-2 rounded-md bg-muted/45 px-2 py-1.5 text-xs"
+          >
+            <span className="tabular-nums text-muted-foreground">{index + 1}</span>
+            <span className="min-w-0 truncate text-foreground/90">
+              {queuedMessagePreview(item.text)}
+            </span>
+            <span className="rounded-full border border-border/70 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-muted-foreground">
+              {item.status === "dispatching" ? "Sending" : "Queued"}
+            </span>
+            <button
+              type="button"
+              className="flex size-5 items-center justify-center rounded-full text-muted-foreground transition-colors enabled:hover:bg-background enabled:hover:text-foreground disabled:opacity-30"
+              disabled={item.status !== "queued"}
+              onClick={() => props.onDelete(item)}
+              aria-label="Delete queued message"
+              title={
+                item.status === "queued"
+                  ? "Delete queued message"
+                  : "This message is already being sent"
+              }
+            >
+              <XIcon className="size-3.5" aria-hidden="true" />
+            </button>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+});
 
 function useThreadPlanCatalog(threadIds: readonly ThreadId[]): ThreadPlanCatalogEntry[] {
   return useStore(
@@ -690,6 +759,9 @@ export default function ChatView(props: ChatViewProps) {
   const [optimisticUserMessages, setOptimisticUserMessages] = useState<ChatMessage[]>([]);
   const optimisticUserMessagesRef = useRef(optimisticUserMessages);
   optimisticUserMessagesRef.current = optimisticUserMessages;
+  const [optimisticQueuedMessages, setOptimisticQueuedMessages] = useState<ChatMessage[]>([]);
+  const optimisticQueuedMessagesRef = useRef(optimisticQueuedMessages);
+  optimisticQueuedMessagesRef.current = optimisticQueuedMessages;
   const [localDraftErrorsByDraftId, setLocalDraftErrorsByDraftId] = useState<
     Record<string, string | null>
   >({});
@@ -1403,6 +1475,9 @@ export default function ChatView(props: ChatViewProps) {
       for (const message of optimisticUserMessagesRef.current) {
         revokeUserMessagePreviewUrls(message);
       }
+      for (const message of optimisticQueuedMessagesRef.current) {
+        revokeUserMessagePreviewUrls(message);
+      }
     };
   }, [clearAttachmentPreviewHandoffs]);
   const handoffAttachmentPreviews = useCallback((messageId: MessageId, previewUrls: string[]) => {
@@ -1505,8 +1580,25 @@ export default function ChatView(props: ChatViewProps) {
       }
     };
   }, [attachmentPreviewHandoffByMessageId, clearAttachmentPreviewHandoff, serverMessages]);
+  const activeQueuedTurns = useMemo(
+    () =>
+      (activeThread?.queuedTurns ?? []).filter(
+        (
+          turn,
+        ): turn is typeof turn & {
+          status: "queued" | "dispatching";
+        } => turn.status === "queued" || turn.status === "dispatching",
+      ),
+    [activeThread?.queuedTurns],
+  );
+  const activeQueuedMessageIds = useMemo(
+    () => new Set(activeQueuedTurns.map((turn) => turn.messageId)),
+    [activeQueuedTurns],
+  );
   const timelineMessages = useMemo(() => {
-    const messages = serverMessages ?? [];
+    const messages = (serverMessages ?? []).filter(
+      (message) => !activeQueuedMessageIds.has(message.id),
+    );
     const serverMessagesWithPreviewHandoff =
       Object.keys(attachmentPreviewHandoffByMessageId).length === 0
         ? messages
@@ -1557,7 +1649,43 @@ export default function ChatView(props: ChatViewProps) {
       return serverMessagesWithPreviewHandoff;
     }
     return [...serverMessagesWithPreviewHandoff, ...pendingMessages];
-  }, [serverMessages, attachmentPreviewHandoffByMessageId, optimisticUserMessages]);
+  }, [
+    serverMessages,
+    activeQueuedMessageIds,
+    attachmentPreviewHandoffByMessageId,
+    optimisticUserMessages,
+  ]);
+  const queuedMessageItems = useMemo<ReadonlyArray<QueuedMessageItem>>(() => {
+    const messagesById = new Map((serverMessages ?? []).map((message) => [message.id, message]));
+    const serverItems = activeQueuedTurns.flatMap((turn): QueuedMessageItem[] => {
+      const message = messagesById.get(turn.messageId);
+      if (!message || message.role !== "user") return [];
+      return [
+        {
+          id: message.id,
+          queueId: turn.queueId,
+          text: message.text,
+          status: turn.status,
+          createdAt: message.createdAt,
+        },
+      ];
+    });
+    const knownIds = new Set(serverItems.map((item) => item.id));
+    const optimisticItems = optimisticQueuedMessages
+      .filter((message) => !knownIds.has(message.id))
+      .map(
+        (message): QueuedMessageItem => ({
+          id: message.id,
+          queueId: null,
+          text: message.text,
+          status: "queued",
+          createdAt: message.createdAt,
+        }),
+      );
+    return [...serverItems, ...optimisticItems].toSorted((left, right) =>
+      left.createdAt.localeCompare(right.createdAt),
+    );
+  }, [activeQueuedTurns, optimisticQueuedMessages, serverMessages]);
   const timelineEntries = useMemo(
     () =>
       deriveTimelineEntries(timelineMessages, activeThread?.proposedPlans ?? [], workLogEntries),
@@ -1783,6 +1911,38 @@ export default function ChatView(props: ChatViewProps) {
   const focusComposer = useCallback(() => {
     composerRef.current?.focusAtEnd();
   }, []);
+  const deleteQueuedMessage = useCallback(
+    (item: QueuedMessageItem) => {
+      if (item.queueId === null) {
+        setOptimisticQueuedMessages((existing) => {
+          const removed = existing.filter((message) => message.id === item.id);
+          for (const message of removed) {
+            revokeUserMessagePreviewUrls(message);
+          }
+          return existing.filter((message) => message.id !== item.id);
+        });
+        return;
+      }
+      const api = readEnvironmentApi(environmentId);
+      if (!api || !activeThread) return;
+      void api.orchestration
+        .dispatchCommand({
+          type: "thread.queued-turn.delete",
+          commandId: newCommandId(),
+          threadId: activeThread.id,
+          queueId: item.queueId,
+          messageId: item.id,
+          createdAt: new Date().toISOString(),
+        })
+        .catch((err: unknown) => {
+          setThreadError(
+            activeThread.id,
+            err instanceof Error ? err.message : "Failed to delete queued message.",
+          );
+        });
+    },
+    [activeThread, environmentId, setThreadError],
+  );
   const scheduleComposerFocus = useCallback(() => {
     window.requestAnimationFrame(() => {
       focusComposer();
@@ -2320,7 +2480,40 @@ export default function ChatView(props: ChatViewProps) {
   }, [activeThread?.id, activeThread?.messages, handoffAttachmentPreviews, optimisticUserMessages]);
 
   useEffect(() => {
+    if (!activeThread?.id || activeQueuedTurns.length === 0) return;
+    const queuedServerIds = new Set(activeQueuedTurns.map((turn) => turn.messageId));
+    const removedMessages = optimisticQueuedMessages.filter((message) =>
+      queuedServerIds.has(message.id),
+    );
+    if (removedMessages.length === 0) {
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      setOptimisticQueuedMessages((existing) =>
+        existing.filter((message) => !queuedServerIds.has(message.id)),
+      );
+    }, 0);
+    for (const removedMessage of removedMessages) {
+      const previewUrls = collectUserMessageBlobPreviewUrls(removedMessage);
+      if (previewUrls.length > 0) {
+        handoffAttachmentPreviews(removedMessage.id, previewUrls);
+        continue;
+      }
+      revokeUserMessagePreviewUrls(removedMessage);
+    }
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [activeQueuedTurns, activeThread?.id, handoffAttachmentPreviews, optimisticQueuedMessages]);
+
+  useEffect(() => {
     setOptimisticUserMessages((existing) => {
+      for (const message of existing) {
+        revokeUserMessagePreviewUrls(message);
+      }
+      return [];
+    });
+    setOptimisticQueuedMessages((existing) => {
       for (const message of existing) {
         revokeUserMessagePreviewUrls(message);
       }
@@ -2711,6 +2904,8 @@ export default function ChatView(props: ChatViewProps) {
     }
     if (!activeProject) return;
     const threadIdForSend = activeThread.id;
+    const dispatchPolicy = options?.dispatchPolicy ?? "immediate";
+    const isQueuedDispatch = dispatchPolicy === "queue";
     const isFirstMessage = !isServerThread || activeThread.messages.length === 0;
     const baseBranchForWorktree =
       isFirstMessage && sendEnvMode === "worktree" && !activeThread.worktreePath
@@ -2727,7 +2922,9 @@ export default function ChatView(props: ChatViewProps) {
     }
 
     sendInFlightRef.current = true;
-    beginLocalDispatch({ preparingWorktree: Boolean(baseBranchForWorktree) });
+    if (!isQueuedDispatch) {
+      beginLocalDispatch({ preparingWorktree: Boolean(baseBranchForWorktree) });
+    }
 
     const composerImagesSnapshot = [...composerImages];
     const composerTerminalContextsSnapshot = [...sendableComposerTerminalContexts];
@@ -2761,25 +2958,27 @@ export default function ChatView(props: ChatViewProps) {
       sizeBytes: image.sizeBytes,
       previewUrl: image.previewUrl,
     }));
-    // Scroll to the current end *before* adding the optimistic message.
-    // This sets LegendList's internal isAtEnd=true so maintainScrollAtEnd
-    // automatically pins to the new item when the data changes.
-    isAtEndRef.current = true;
-    showScrollDebouncer.current.cancel();
-    setShowScrollToBottom(false);
-    await legendListRef.current?.scrollToEnd?.({ animated: false });
+    const optimisticMessage: ChatMessage = {
+      id: messageIdForSend,
+      role: "user",
+      text: outgoingMessageText,
+      ...(optimisticAttachments.length > 0 ? { attachments: optimisticAttachments } : {}),
+      createdAt: messageCreatedAt,
+      streaming: false,
+    };
+    if (isQueuedDispatch) {
+      setOptimisticQueuedMessages((existing) => [...existing, optimisticMessage]);
+    } else {
+      // Scroll to the current end *before* adding the optimistic message.
+      // This sets LegendList's internal isAtEnd=true so maintainScrollAtEnd
+      // automatically pins to the new item when the data changes.
+      isAtEndRef.current = true;
+      showScrollDebouncer.current.cancel();
+      setShowScrollToBottom(false);
+      await legendListRef.current?.scrollToEnd?.({ animated: false });
 
-    setOptimisticUserMessages((existing) => [
-      ...existing,
-      {
-        id: messageIdForSend,
-        role: "user",
-        text: outgoingMessageText,
-        ...(optimisticAttachments.length > 0 ? { attachments: optimisticAttachments } : {}),
-        createdAt: messageCreatedAt,
-        streaming: false,
-      },
-    ]);
+      setOptimisticUserMessages((existing) => [...existing, optimisticMessage]);
+    }
 
     setThreadError(threadIdForSend, null);
     if (expiredTerminalContextCount > 0) {
@@ -2875,7 +3074,9 @@ export default function ChatView(props: ChatViewProps) {
                 : {}),
             }
           : undefined;
-      beginLocalDispatch({ preparingWorktree: false });
+      if (!isQueuedDispatch) {
+        beginLocalDispatch({ preparingWorktree: false });
+      }
       await api.orchestration.dispatchCommand({
         type: "thread.turn.start",
         commandId: newCommandId(),
@@ -2890,7 +3091,7 @@ export default function ChatView(props: ChatViewProps) {
         titleSeed: title,
         runtimeMode,
         interactionMode,
-        dispatchPolicy: options?.dispatchPolicy ?? "immediate",
+        dispatchPolicy,
         ...(bootstrap ? { bootstrap } : {}),
         createdAt: messageCreatedAt,
       });
@@ -2902,14 +3103,19 @@ export default function ChatView(props: ChatViewProps) {
         composerImagesRef.current.length === 0 &&
         composerTerminalContextsRef.current.length === 0
       ) {
-        setOptimisticUserMessages((existing) => {
+        const removeOptimisticMessage = (existing: ChatMessage[]) => {
           const removed = existing.filter((message) => message.id === messageIdForSend);
           for (const message of removed) {
             revokeUserMessagePreviewUrls(message);
           }
           const next = existing.filter((message) => message.id !== messageIdForSend);
           return next.length === existing.length ? existing : next;
-        });
+        };
+        if (isQueuedDispatch) {
+          setOptimisticQueuedMessages(removeOptimisticMessage);
+        } else {
+          setOptimisticUserMessages(removeOptimisticMessage);
+        }
         promptRef.current = promptForSend;
         const retryComposerImages = composerImagesSnapshot.map(cloneComposerImageForRetry);
         composerImagesRef.current = retryComposerImages;
@@ -3621,6 +3827,7 @@ export default function ChatView(props: ChatViewProps) {
           >
             <div className="relative isolate">
               <ComposerBannerStack className="relative z-0" items={composerBannerItems} />
+              <QueuedMessagesPanel items={queuedMessageItems} onDelete={deleteQueuedMessage} />
               <div className="relative z-10">
                 <ChatComposer
                   composerRef={composerRef}

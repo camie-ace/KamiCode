@@ -9,6 +9,7 @@ import {
   Loader2Icon,
   Maximize2Icon,
   RefreshCwIcon,
+  VideoIcon,
   XCircleIcon,
   type LucideIcon,
 } from "lucide-react";
@@ -37,11 +38,18 @@ type TestHarnessRunStatus = "pass" | "fail" | "blocked" | "error";
 interface TestHarnessRunArtifactPaths {
   readonly trace?: string | undefined;
   readonly screenshots?: ReadonlyArray<string> | undefined;
+  readonly video?: string | undefined;
+  readonly videos?: ReadonlyArray<string> | undefined;
   readonly summary?: string | undefined;
   readonly markdown?: string | undefined;
 }
 
 interface TestHarnessRunScreenshot {
+  readonly label: string;
+  readonly path: string;
+}
+
+interface TestHarnessRunVideo {
   readonly label: string;
   readonly path: string;
 }
@@ -58,6 +66,7 @@ interface TestHarnessRunHistoryItem {
   readonly outputSummary?: string | undefined;
   readonly artifactPaths: TestHarnessRunArtifactPaths;
   readonly screenshots: ReadonlyArray<TestHarnessRunScreenshot>;
+  readonly videos?: ReadonlyArray<TestHarnessRunVideo> | undefined;
   readonly consoleErrors: ReadonlyArray<string>;
   readonly networkFailures: ReadonlyArray<string>;
   readonly completedAt: string;
@@ -287,6 +296,7 @@ function TestHarnessRunCard({
   const duration = formatRunDuration(run.durationMs);
   const summary = formatEvidenceSummaryForDisplay(run.outputSummary ?? run.evidenceSummary);
   const issueSummary = runIssueSummary(run);
+  const latestVideo = run.videos?.at(-1)?.path ?? run.artifactPaths.video;
 
   return (
     <article className="overflow-hidden rounded-xl border border-border/65 bg-card/35">
@@ -333,6 +343,7 @@ function TestHarnessRunCard({
               icon={CameraIcon}
             />
           ) : null}
+          <ArtifactLink label="Recording" path={latestVideo} icon={VideoIcon} />
         </div>
         {issueSummary ? (
           <div className="rounded-lg border border-amber-400/30 bg-amber-500/10 px-2 py-1.5 text-[11px] text-amber-700 dark:text-amber-200">

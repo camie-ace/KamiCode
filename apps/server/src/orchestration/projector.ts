@@ -21,11 +21,13 @@ import {
   ThreadInteractionModeSetPayload,
   ThreadMetaUpdatedPayload,
   ThreadProposedPlanUpsertedPayload,
+  ThreadQueuedTurnDeletedPayload,
   ThreadRuntimeModeSetPayload,
   ThreadUnarchivedPayload,
   ThreadRevertedPayload,
   ThreadSessionSetPayload,
   ThreadTurnDiffCompletedPayload,
+  ThreadTurnStartRequestedPayload,
 } from "./Schemas.ts";
 
 type ThreadPatch = Partial<Omit<OrchestrationThread, "id" | "projectId">>;
@@ -418,6 +420,67 @@ export function projectEvent(
           ...nextBase,
           threads: updateThread(nextBase.threads, payload.threadId, {
             messages: cappedMessages,
+            updatedAt: event.occurredAt,
+          }),
+        };
+      });
+
+    case "thread.turn-start-requested":
+      return Effect.gen(function* () {
+        const payload = yield* decodeForEvent(
+          ThreadTurnStartRequestedPayload,
+          event.payload,
+          event.type,
+          "payload",
+        );
+        if (payload.dispatchPolicy !== "queue") {
+          return nextBase;
+        }
+        const thread = nextBase.threads.find((entry) => entry.id === payload.threadId);
+        if (!thread) {
+          return nextBase;
+        }
+        return {
+          ...nextBase,
+          threads: updateThread(nextBase.threads, payload.threadId, {
+            queuedTurns: [
+              ...(thread.queuedTurns ?? []),
+              {
+                queueId: `queue:${event.eventId}`,
+                threadId: payload.threadId,
+                messageId: payload.messageId,
+                status: "queued",
+                requestedAt: payload.createdAt,
+                startedAt: null,
+                completedAt: null,
+                turnId: null,
+                failureDetail: null,
+              },
+            ],
+            updatedAt: event.occurredAt,
+          }),
+        };
+      });
+
+    case "thread.queued-turn-deleted":
+      return Effect.gen(function* () {
+        const payload = yield* decodeForEvent(
+          ThreadQueuedTurnDeletedPayload,
+          event.payload,
+          event.type,
+          "payload",
+        );
+        const thread = nextBase.threads.find((entry) => entry.id === payload.threadId);
+        if (!thread) {
+          return nextBase;
+        }
+        return {
+          ...nextBase,
+          threads: updateThread(nextBase.threads, payload.threadId, {
+            messages: thread.messages.filter((message) => message.id !== payload.messageId),
+            queuedTurns: (thread.queuedTurns ?? []).filter(
+              (turn) => turn.queueId !== payload.queueId,
+            ),
             updatedAt: event.occurredAt,
           }),
         };

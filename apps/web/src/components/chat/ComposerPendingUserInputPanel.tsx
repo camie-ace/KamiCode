@@ -5,7 +5,7 @@ import {
   derivePendingUserInputProgress,
   type PendingUserInputDraftAnswer,
 } from "../../pendingUserInput";
-import { CheckIcon } from "lucide-react";
+import { CheckIcon, Clock3Icon, KeyRoundIcon, ShieldCheckIcon, UserPlusIcon } from "lucide-react";
 import { cn } from "~/lib/utils";
 
 interface PendingUserInputPanelProps {
@@ -15,6 +15,33 @@ interface PendingUserInputPanelProps {
   questionIndex: number;
   onToggleOption: (questionId: string, optionLabel: string) => void;
   onAdvance: () => void;
+}
+
+function isAuthStrategyQuestion(question: PendingUserInput["questions"][number]): boolean {
+  const id = question.id.toLowerCase();
+  const header = question.header.toLowerCase();
+  const labels = question.options.map((option) => option.label.toLowerCase());
+  return (
+    id.includes("auth") ||
+    header.includes("auth") ||
+    labels.some(
+      (label) =>
+        label.includes("sign-in credentials") ||
+        label.includes("permanent user") ||
+        label.includes("temporary user"),
+    )
+  );
+}
+
+function AuthOptionIcon({ label }: { label: string }) {
+  const normalized = label.toLowerCase();
+  if (normalized.includes("permanent")) {
+    return <UserPlusIcon className="size-4" aria-hidden="true" />;
+  }
+  if (normalized.includes("temporary")) {
+    return <Clock3Icon className="size-4" aria-hidden="true" />;
+  }
+  return <KeyRoundIcon className="size-4" aria-hidden="true" />;
 }
 
 export const ComposerPendingUserInputPanel = memo(function ComposerPendingUserInputPanel({
@@ -123,20 +150,45 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
     return null;
   }
 
+  const isAuthPrompt = isAuthStrategyQuestion(activeQuestion);
+
   return (
-    <div className="px-4 py-3 sm:px-5">
-      <div className="flex items-center gap-3">
-        <div className="flex items-center gap-2">
-          {prompt.questions.length > 1 ? (
-            <span className="flex h-5 items-center rounded-md bg-muted/60 px-1.5 text-[10px] font-medium tabular-nums text-muted-foreground/60">
-              {questionIndex + 1}/{prompt.questions.length}
-            </span>
-          ) : null}
-          <span className="text-[11px] font-semibold tracking-widest text-muted-foreground/50 uppercase">
-            {activeQuestion.header}
-          </span>
+    <div className={cn("px-4 py-3 sm:px-5", isAuthPrompt && "bg-amber-500/5")}>
+      {isAuthPrompt ? (
+        <div className="flex items-start gap-3">
+          <div className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg border border-amber-500/25 bg-amber-500/10 text-amber-500">
+            <ShieldCheckIcon className="size-4" aria-hidden="true" />
+          </div>
+          <div className="min-w-0">
+            <div className="flex items-center gap-2">
+              {prompt.questions.length > 1 ? (
+                <span className="flex h-5 items-center rounded-md bg-muted/60 px-1.5 text-[10px] font-medium tabular-nums text-muted-foreground/60">
+                  {questionIndex + 1}/{prompt.questions.length}
+                </span>
+              ) : null}
+              <span className="text-[11px] font-semibold tracking-widest text-amber-500/85 uppercase">
+                Test Auth
+              </span>
+            </div>
+            <p className="mt-1 text-xs text-muted-foreground/75">
+              The agent needs an authenticated path before it can verify a gated feature.
+            </p>
+          </div>
         </div>
-      </div>
+      ) : (
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2">
+            {prompt.questions.length > 1 ? (
+              <span className="flex h-5 items-center rounded-md bg-muted/60 px-1.5 text-[10px] font-medium tabular-nums text-muted-foreground/60">
+                {questionIndex + 1}/{prompt.questions.length}
+              </span>
+            ) : null}
+            <span className="text-[11px] font-semibold tracking-widest text-muted-foreground/50 uppercase">
+              {activeQuestion.header}
+            </span>
+          </div>
+        </div>
+      )}
       <p className="mt-1.5 text-sm text-foreground/90">{activeQuestion.question}</p>
       {activeQuestion.multiSelect ? (
         <p className="mt-1 text-xs text-muted-foreground/65">Select one or more options.</p>
@@ -154,12 +206,27 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
               className={cn(
                 "group flex w-full items-center gap-3 rounded-lg border px-3 py-2 text-left transition-all duration-150",
                 isSelected
-                  ? "border-blue-500/40 bg-blue-500/8 text-foreground"
-                  : "border-transparent bg-muted/20 text-foreground/80 hover:bg-muted/40 hover:border-border/40",
+                  ? isAuthPrompt
+                    ? "border-amber-500/40 bg-amber-500/10 text-foreground"
+                    : "border-blue-500/40 bg-blue-500/8 text-foreground"
+                  : isAuthPrompt
+                    ? "border-amber-500/15 bg-background/60 text-foreground/85 hover:bg-amber-500/8 hover:border-amber-500/30"
+                    : "border-transparent bg-muted/20 text-foreground/80 hover:bg-muted/40 hover:border-border/40",
                 isResponding && "opacity-50 cursor-not-allowed",
               )}
             >
-              {shortcutKey !== null ? (
+              {isAuthPrompt ? (
+                <span
+                  className={cn(
+                    "flex size-8 shrink-0 items-center justify-center rounded-md transition-colors duration-150",
+                    isSelected
+                      ? "bg-amber-500/20 text-amber-500"
+                      : "bg-muted/35 text-muted-foreground/65 group-hover:bg-amber-500/12 group-hover:text-amber-500",
+                  )}
+                >
+                  <AuthOptionIcon label={option.label} />
+                </span>
+              ) : shortcutKey !== null ? (
                 <kbd
                   className={cn(
                     "flex size-5 shrink-0 items-center justify-center rounded text-[11px] font-medium tabular-nums transition-colors duration-150",
@@ -179,7 +246,14 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
                   </span>
                 ) : null}
               </div>
-              {isSelected ? <CheckIcon className="size-3.5 shrink-0 text-blue-400" /> : null}
+              {isSelected ? (
+                <CheckIcon
+                  className={cn(
+                    "size-3.5 shrink-0",
+                    isAuthPrompt ? "text-amber-500" : "text-blue-400",
+                  )}
+                />
+              ) : null}
             </button>
           );
         })}

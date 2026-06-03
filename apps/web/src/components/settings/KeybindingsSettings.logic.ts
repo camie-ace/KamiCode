@@ -270,6 +270,9 @@ export function commandLabel(command: KeybindingCommand): string {
   if (raw.startsWith("script.") && raw.endsWith(".run")) {
     return `Run Script: ${titleCaseCommandSegment(raw.slice("script.".length, -".run".length))}`;
   }
+  if (raw === "chat.queue") {
+    return "Chat: Queue Message";
+  }
   return raw.split(".").map(titleCaseCommandSegment).join(": ");
 }
 

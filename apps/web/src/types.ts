@@ -2,6 +2,7 @@ import type {
   EnvironmentId,
   ModelSelection,
   OrchestrationLatestTurn,
+  OrchestrationQueuedTurn,
   OrchestrationProposedPlanId,
   RepositoryIdentity,
   OrchestrationSessionStatus,
@@ -113,6 +114,7 @@ export interface Thread {
   archivedAt: string | null;
   updatedAt?: string | undefined;
   latestTurn: OrchestrationLatestTurn | null;
+  queuedTurns?: OrchestrationQueuedTurn[] | undefined;
   pendingSourceProposedPlan?: OrchestrationLatestTurn["sourceProposedPlan"];
   branch: string | null;
   worktreePath: string | null;
@@ -135,6 +137,7 @@ export interface ThreadShell {
   updatedAt?: string | undefined;
   branch: string | null;
   worktreePath: string | null;
+  queuedTurnCount?: number | undefined;
 }
 
 export interface ThreadTurnState {

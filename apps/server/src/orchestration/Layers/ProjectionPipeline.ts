@@ -525,7 +525,6 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
           });
           return;
         }
-
         default:
           return;
       }
@@ -1277,6 +1276,19 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             sourceProposedPlanId: event.payload.sourceProposedPlan?.planId ?? null,
             failureDetail: null,
           });
+          return;
+        }
+
+        case "thread.queued-turn-deleted": {
+          const cancelled = yield* projectionTurnQueueRepository.markCancelled({
+            queueId: event.payload.queueId,
+            cancelledAt: event.payload.deletedAt,
+          });
+          if (cancelled) {
+            yield* projectionThreadMessageRepository.deleteByMessageId({
+              messageId: event.payload.messageId,
+            });
+          }
           return;
         }
 

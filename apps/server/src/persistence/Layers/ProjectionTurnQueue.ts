@@ -9,6 +9,7 @@ import * as SqlSchema from "effect/unstable/sql/SqlSchema";
 
 import { toPersistenceSqlError } from "../Errors.ts";
 import {
+  MarkProjectionTurnQueueCancelledInput,
   MarkProjectionTurnQueueFailedInput,
   MarkProjectionTurnQueueStartedInput,
   ProjectionTurnQueueRepository,
@@ -26,6 +27,9 @@ const ProjectionTurnQueueDbRow = ProjectionTurnQueueRow.mapFields(
 
 const CountRow = Schema.Struct({
   count: Schema.Number,
+});
+const QueueIdRow = Schema.Struct({
+  queueId: ProjectionTurnQueueRow.fields.queueId,
 });
 
 const makeProjectionTurnQueueRepository = Effect.gen(function* () {
@@ -150,6 +154,20 @@ const makeProjectionTurnQueueRepository = Effect.gen(function* () {
       `,
   });
 
+  const markCancelledRow = SqlSchema.findOneOption({
+    Request: MarkProjectionTurnQueueCancelledInput,
+    Result: QueueIdRow,
+    execute: ({ queueId, cancelledAt }) =>
+      sql`
+        UPDATE projection_turn_queue
+        SET status = 'cancelled',
+            completed_at = ${cancelledAt}
+        WHERE queue_id = ${queueId}
+          AND status = 'queued'
+        RETURNING queue_id AS "queueId"
+      `,
+  });
+
   const listActiveRows = SqlSchema.findAll({
     Request: ThreadQueueInput,
     Result: ProjectionTurnQueueDbRow,
@@ -229,6 +247,12 @@ const makeProjectionTurnQueueRepository = Effect.gen(function* () {
       Effect.mapError(toPersistenceSqlError("ProjectionTurnQueueRepository.markFailed:query")),
     );
 
+  const markCancelled: ProjectionTurnQueueRepositoryShape["markCancelled"] = (input) =>
+    markCancelledRow(input).pipe(
+      Effect.mapError(toPersistenceSqlError("ProjectionTurnQueueRepository.markCancelled:query")),
+      Effect.map(Option.isSome),
+    );
+
   const listActiveByThreadId: ProjectionTurnQueueRepositoryShape["listActiveByThreadId"] = (
     input,
   ) =>
@@ -254,6 +278,7 @@ const makeProjectionTurnQueueRepository = Effect.gen(function* () {
     claimNextQueuedByThreadId,
     markStarted,
     markFailed,
+    markCancelled,
     listActiveByThreadId,
     countQueuedByThreadId,
   } satisfies ProjectionTurnQueueRepositoryShape;

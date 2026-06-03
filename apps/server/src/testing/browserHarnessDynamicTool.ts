@@ -95,6 +95,8 @@ export const BrowserHarnessDynamicToolArgumentsSchema = Schema.Struct({
   projectId: Schema.optionalKey(Schema.String),
   environmentId: Schema.optionalKey(Schema.String),
   headless: Schema.optionalKey(Schema.Boolean),
+  recordVideo: Schema.optionalKey(Schema.Boolean),
+  authExpectation: Schema.optionalKey(Schema.Literals(["unknown", "anonymous", "authenticated"])),
   timeoutMs: Schema.optionalKey(Schema.Number),
   lingerMs: Schema.optionalKey(Schema.Number),
   auth: Schema.optionalKey(KamiCodeAuthSchema),
@@ -218,7 +220,7 @@ export const KAMI_TEST_HARNESS_DYNAMIC_TOOL_SPEC = {
   namespace: KAMI_TEST_HARNESS_TOOL_NAMESPACE,
   name: KAMI_TEST_HARNESS_TOOL_NAME,
   description:
-    "Run KamiCode's visible evidence runner for the current project and return observations, screenshots, trace/video-capable artifact paths, console errors, and network failures.",
+    "Run KamiCode's headless recorded evidence runner for the current project and return observations, screenshots, videos, traces, console errors, and network failures.",
   inputSchema: {
     type: "object",
     additionalProperties: false,
@@ -250,7 +252,18 @@ export const KAMI_TEST_HARNESS_DYNAMIC_TOOL_SPEC = {
       },
       headless: {
         type: "boolean",
-        description: "Use false or omit for visible browser testing.",
+        description:
+          "Defaults to true. Set false only when the user explicitly asks to watch a live visible browser.",
+      },
+      recordVideo: {
+        type: "boolean",
+        description:
+          "Defaults to true. Set false only for a deterministic non-visual check where recording is unnecessary.",
+      },
+      authExpectation: {
+        enum: ["unknown", "anonymous", "authenticated"],
+        description:
+          "Use authenticated when validating a gated feature, anonymous for login/auth screens, and unknown only when auth is irrelevant. Authenticated runs that land on a login/auth gate are BLOCKED.",
       },
       timeoutMs: {
         type: "number",
@@ -476,6 +489,10 @@ export function runBrowserHarnessDynamicTool(
             ...(args.projectId ? { projectId: args.projectId } : {}),
             ...(args.environmentId ? { environmentId: args.environmentId } : {}),
             ...(args.headless !== undefined ? { headless: args.headless } : {}),
+            ...(args.recordVideo !== undefined ? { recordVideo: args.recordVideo } : {}),
+            ...(args.authExpectation !== undefined
+              ? { authExpectation: args.authExpectation }
+              : {}),
             ...(args.timeoutMs !== undefined
               ? { timeoutMs: args.timeoutMs }
               : auth?.type === "kamicode-pairing"

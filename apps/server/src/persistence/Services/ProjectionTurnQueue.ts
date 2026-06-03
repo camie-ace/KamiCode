@@ -70,6 +70,13 @@ export const MarkProjectionTurnQueueFailedInput = Schema.Struct({
 });
 export type MarkProjectionTurnQueueFailedInput = typeof MarkProjectionTurnQueueFailedInput.Type;
 
+export const MarkProjectionTurnQueueCancelledInput = Schema.Struct({
+  queueId: TrimmedNonEmptyString,
+  cancelledAt: IsoDateTime,
+});
+export type MarkProjectionTurnQueueCancelledInput =
+  typeof MarkProjectionTurnQueueCancelledInput.Type;
+
 export interface ProjectionTurnQueueRepositoryShape {
   readonly upsert: (
     row: UpsertProjectionTurnQueueInput,
@@ -84,6 +91,9 @@ export interface ProjectionTurnQueueRepositoryShape {
   readonly markFailed: (
     input: MarkProjectionTurnQueueFailedInput,
   ) => Effect.Effect<void, ProjectionRepositoryError>;
+  readonly markCancelled: (
+    input: MarkProjectionTurnQueueCancelledInput,
+  ) => Effect.Effect<boolean, ProjectionRepositoryError>;
   readonly listActiveByThreadId: (
     input: ThreadQueueInput,
   ) => Effect.Effect<ReadonlyArray<ProjectionTurnQueueRow>, ProjectionRepositoryError>;

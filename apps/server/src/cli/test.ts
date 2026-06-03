@@ -29,7 +29,17 @@ const browserFlag = Flag.choice("browser", ["chromium", "firefox", "webkit"]).pi
 );
 
 const headlessFlag = Flag.boolean("headless").pipe(
-  Flag.withDescription("Run the browser headlessly. By default the browser is visible."),
+  Flag.withDescription("Run the browser headlessly. This is the default."),
+  Flag.withDefault(true),
+);
+
+const visibleFlag = Flag.boolean("visible").pipe(
+  Flag.withDescription("Open a visible browser window. Use only when live viewing is intended."),
+  Flag.withDefault(false),
+);
+
+const noVideoFlag = Flag.boolean("no-video").pipe(
+  Flag.withDescription("Disable Playwright video recording."),
   Flag.withDefault(false),
 );
 
@@ -49,6 +59,8 @@ interface BrowserCommandFlags {
   readonly devUrl: Option.Option<URL>;
   readonly browser: string;
   readonly headless: boolean;
+  readonly visible: boolean;
+  readonly noVideo: boolean;
   readonly json: boolean;
   readonly goal: Option.Option<string>;
   readonly script: Option.Option<string>;
@@ -59,6 +71,7 @@ interface BrowserCommandFlags {
   readonly environmentId: Option.Option<string>;
   readonly auth: Option.Option<string>;
   readonly authCredential: Option.Option<string>;
+  readonly authExpectation: Option.Option<"unknown" | "anonymous" | "authenticated">;
   readonly timeoutMs: number;
   readonly lingerMs: number;
   readonly viewportWidth: number;
@@ -155,7 +168,8 @@ const runBrowserCommand = (flags: BrowserCommandFlags) =>
           cwd,
           stateDir: paths.stateDir,
           browser: flags.browser as BrowserHarnessBrowser,
-          headless: flags.headless,
+          headless: flags.visible ? false : flags.headless,
+          recordVideo: !flags.noVideo,
           timeoutMs: flags.timeoutMs,
           lingerMs: flags.lingerMs,
           viewport: {
@@ -172,6 +186,9 @@ const runBrowserCommand = (flags: BrowserCommandFlags) =>
           ...(Option.isSome(flags.projectId) ? { projectId: flags.projectId.value } : {}),
           ...(Option.isSome(flags.environmentId)
             ? { environmentId: flags.environmentId.value }
+            : {}),
+          ...(Option.isSome(flags.authExpectation)
+            ? { authExpectation: flags.authExpectation.value }
             : {}),
           ...(auth ? { auth } : {}),
         }),
@@ -195,6 +212,8 @@ const browserCommand = Command.make("browser", {
   url: Argument.string("url").pipe(Argument.withDescription("URL to open and test.")),
   browser: browserFlag,
   headless: headlessFlag,
+  visible: visibleFlag,
+  noVideo: noVideoFlag,
   json: jsonFlag,
   goal: Flag.string("goal").pipe(Flag.withDescription("Human-readable test goal."), Flag.optional),
   script: Flag.string("script").pipe(
@@ -233,6 +252,12 @@ const browserCommand = Command.make("browser", {
     Flag.withDescription("Credential for the selected auth flow. Avoid committing or logging it."),
     Flag.optional,
   ),
+  authExpectation: Flag.choice("auth-expectation", ["unknown", "anonymous", "authenticated"]).pipe(
+    Flag.withDescription(
+      "Expected auth state for the target. Authenticated runs that land on login/auth are blocked.",
+    ),
+    Flag.optional,
+  ),
   timeoutMs: Flag.integer("timeout-ms").pipe(
     Flag.withDescription("Default Playwright timeout in milliseconds."),
     Flag.withDefault(30_000),
@@ -250,7 +275,9 @@ const browserCommand = Command.make("browser", {
     Flag.withDefault(960),
   ),
 }).pipe(
-  Command.withDescription("Run a visible Playwright browser test harness and write artifacts."),
+  Command.withDescription(
+    "Run a headless recorded Playwright browser test harness and write artifacts.",
+  ),
   Command.withHandler((flags) => runBrowserCommand(flags)),
 );
 

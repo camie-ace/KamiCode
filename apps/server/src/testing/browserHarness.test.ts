@@ -10,11 +10,13 @@ import { describe, expect, it } from "vitest";
 import {
   createBrowserHarnessProjectKey,
   createBrowserHarnessRunId,
+  detectBrowserHarnessAuthGate,
   formatBrowserHarnessCliOutput,
   formatBrowserHarnessMarkdown,
   runBrowserHarness,
   resolveBrowserHarnessRunPaths,
   sanitizeBrowserHarnessSegment,
+  shouldBlockBrowserHarnessAuthGate,
   type BrowserHarnessRunResult,
 } from "./browserHarness.ts";
 
@@ -235,10 +237,37 @@ describe("browserHarness", () => {
     expect(formatBrowserHarnessMarkdown(result)).toContain("## Observations");
   });
 
+  it("detects auth gates that would otherwise be mistaken for feature evidence", () => {
+    const authGate = detectBrowserHarnessAuthGate({
+      url: "http://localhost:5173/login",
+      visibleTextSample: ["Login", "Email", "Password"],
+    });
+
+    expect(authGate.detected).toBe(true);
+    expect(
+      shouldBlockBrowserHarnessAuthGate({
+        status: "passed",
+        authGate,
+        authExpectation: "authenticated",
+        goal: "Validate dashboard upload controls",
+      }),
+    ).toBe(true);
+    expect(
+      shouldBlockBrowserHarnessAuthGate({
+        status: "passed",
+        authGate,
+        authExpectation: "anonymous",
+        goal: "Validate login form",
+      }),
+    ).toBe(false);
+  });
+
   it("fails bare assert actions instead of treating natural language as verified", async () => {
     const result = await runBrowserHarness({
-      url: "data:text/html,<title>Assert Smoke</title><h1>Hello</h1>",
+      url: `data:text/html,${encodeURIComponent("<title>Assert Smoke</title><h1>Hello</h1>")}`,
       headless: true,
+      recordVideo: false,
+      timeoutMs: 5_000,
       projectId: "assert-smoke",
       actions: [
         {
@@ -257,8 +286,10 @@ describe("browserHarness", () => {
 
   it("passes assert actions with machine-checkable text and title expectations", async () => {
     const result = await runBrowserHarness({
-      url: "data:text/html,<title>Assert Smoke</title><h1>Hello</h1>",
+      url: `data:text/html,${encodeURIComponent("<title>Assert Smoke</title><h1>Hello</h1>")}`,
       headless: true,
+      recordVideo: false,
+      timeoutMs: 5_000,
       projectId: "assert-smoke",
       actions: [
         {

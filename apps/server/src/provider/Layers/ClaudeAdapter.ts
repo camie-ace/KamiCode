@@ -647,7 +647,7 @@ const ClaudeTestHarnessActionSchema = z.discriminatedUnion("type", [
 ]);
 
 const ClaudeTestHarnessToolInputSchema = {
-  url: z.string().describe("Absolute URL to open in the visible browser."),
+  url: z.string().describe("Absolute URL to open in the headless recorded browser."),
   goal: z.string().optional().describe("Short natural-language goal for this evidence run."),
   actions: z
     .array(ClaudeTestHarnessActionSchema)
@@ -657,7 +657,15 @@ const ClaudeTestHarnessToolInputSchema = {
     ),
   projectId: z.string().optional(),
   environmentId: z.string().optional(),
-  headless: z.boolean().optional().describe("Use false or omit for visible browser testing."),
+  headless: z
+    .boolean()
+    .optional()
+    .describe("Defaults to true. Set false only when the user explicitly requests live viewing."),
+  recordVideo: z.boolean().optional().describe("Defaults to true."),
+  authExpectation: z
+    .enum(["unknown", "anonymous", "authenticated"])
+    .optional()
+    .describe("Use authenticated for gated features and anonymous for auth/login screens."),
   timeoutMs: z.number().optional(),
   lingerMs: z.number().optional(),
   auth: z
@@ -693,7 +701,7 @@ function createClaudeTestHarnessMcpServer(input: {
     tools: [
       tool(
         KAMI_TEST_HARNESS_TOOL_NAME,
-        "Run KamiCode's visible Playwright evidence harness and return screenshots, trace, console/network summaries, timings, and final browser state.",
+        "Run KamiCode's headless recorded Playwright evidence harness and return screenshots, video, trace, console/network summaries, timings, and final browser state.",
         ClaudeTestHarnessToolInputSchema,
         async (args) => {
           const response = await input.runEffect(

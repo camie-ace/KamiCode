@@ -3,6 +3,7 @@ import type {
   OrchestrationEvent,
   OrchestrationReadModel,
 } from "@t3tools/contracts";
+import { DEFAULT_TURN_DISPATCH_POLICY } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 
@@ -369,6 +370,38 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       };
     }
 
+    case "thread.queued-turn.delete": {
+      const thread = yield* requireThread({
+        readModel,
+        command,
+        threadId: command.threadId,
+      });
+      const queuedTurn = (thread.queuedTurns ?? []).find(
+        (turn) => turn.queueId === command.queueId && turn.messageId === command.messageId,
+      );
+      if (!queuedTurn || queuedTurn.status !== "queued") {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Queued turn '${command.queueId}' is not queued and cannot be deleted.`,
+        });
+      }
+      return {
+        ...withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        }),
+        type: "thread.queued-turn-deleted",
+        payload: {
+          threadId: command.threadId,
+          queueId: command.queueId,
+          messageId: command.messageId,
+          deletedAt: command.createdAt,
+        },
+      };
+    }
+
     case "thread.turn.start": {
       const targetThread = yield* requireThread({
         readModel,
@@ -437,7 +470,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           ...(command.titleSeed !== undefined ? { titleSeed: command.titleSeed } : {}),
           runtimeMode: targetThread.runtimeMode,
           interactionMode: targetThread.interactionMode,
-          dispatchPolicy: command.dispatchPolicy,
+          dispatchPolicy: command.dispatchPolicy ?? DEFAULT_TURN_DISPATCH_POLICY,
           ...(sourceProposedPlan !== undefined ? { sourceProposedPlan } : {}),
           createdAt: command.createdAt,
         },

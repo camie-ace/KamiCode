@@ -88,6 +88,27 @@ import {
   userAuthLogoutRouteLayer,
   userAuthSessionRouteLayer,
 } from "./userAuth/http.ts";
+import { SharedProjectsLive } from "./sharedProjects/Layers/SharedProjects.ts";
+import {
+  sharedProjectsAppendThreadMessageRouteLayer,
+  sharedProjectsBootstrapRouteLayer,
+  sharedProjectsClaimInviteRouteLayer,
+  sharedProjectsCreateInviteRouteLayer,
+  sharedProjectsCurrentUserRouteLayer,
+  sharedProjectsDetailRouteLayer,
+  sharedProjectsListRouteLayer,
+  sharedProjectsPublishRouteLayer,
+  sharedProjectsPublishThreadRouteLayer,
+  sharedProjectsRemoveMemberRouteLayer,
+  sharedProjectsSetDefaultEnvironmentRouteLayer,
+  sharedProjectsSyncContextRouteLayer,
+  sharedProjectsSyncRemoteRuntimeRouteLayer,
+  sharedProjectsUpdateMemberRoleRouteLayer,
+  sharedProjectsUpdateThreadVisibilityRouteLayer,
+  sharedProjectsUpsertDeployRouteLayer,
+  sharedProjectsUpsertEnvironmentRouteLayer,
+  sharedProjectsUpsertRuntimeRouteLayer,
+} from "./sharedProjects/http.ts";
 import * as ProcessDiagnostics from "./diagnostics/ProcessDiagnostics.ts";
 import * as ProcessResourceMonitor from "./diagnostics/ProcessResourceMonitor.ts";
 import * as TraceDiagnostics from "./diagnostics/TraceDiagnostics.ts";
@@ -255,6 +276,11 @@ const UserAuthLayerLive = UserAuthLive.pipe(
   Layer.provide(GitHubOAuthClientLive),
 );
 
+const SharedProjectsLayerLive = SharedProjectsLive.pipe(
+  Layer.provideMerge(PersistenceLayerLive),
+  Layer.provideMerge(RepositoryIdentityResolverLive),
+);
+
 const ProviderRuntimeLayerLive = ProviderSessionReaperLive.pipe(
   Layer.provideMerge(ProviderLayerLive),
   Layer.provideMerge(OrchestrationLayerLive),
@@ -296,6 +322,7 @@ const RuntimeCoreDependenciesLive = ReactorLayerLive.pipe(
   Layer.provideMerge(ServerEnvironmentLive),
   Layer.provideMerge(AuthLayerLive),
   Layer.provideMerge(UserAuthLayerLive),
+  Layer.provideMerge(SharedProjectsLayerLive),
 );
 
 const RuntimeDependenciesLive = RuntimeCoreDependenciesLive.pipe(
@@ -330,6 +357,24 @@ export const makeRoutesLayer = Layer.mergeAll(
   userAuthGitHubDesktopSessionRouteLayer,
   userAuthGitHubCallbackRouteLayer,
   userAuthLogoutRouteLayer,
+  sharedProjectsListRouteLayer,
+  sharedProjectsCurrentUserRouteLayer,
+  sharedProjectsDetailRouteLayer,
+  sharedProjectsBootstrapRouteLayer,
+  sharedProjectsPublishRouteLayer,
+  sharedProjectsSyncContextRouteLayer,
+  sharedProjectsCreateInviteRouteLayer,
+  sharedProjectsClaimInviteRouteLayer,
+  sharedProjectsUpdateMemberRoleRouteLayer,
+  sharedProjectsRemoveMemberRouteLayer,
+  sharedProjectsPublishThreadRouteLayer,
+  sharedProjectsUpdateThreadVisibilityRouteLayer,
+  sharedProjectsAppendThreadMessageRouteLayer,
+  sharedProjectsUpsertRuntimeRouteLayer,
+  sharedProjectsUpsertEnvironmentRouteLayer,
+  sharedProjectsSetDefaultEnvironmentRouteLayer,
+  sharedProjectsUpsertDeployRouteLayer,
+  sharedProjectsSyncRemoteRuntimeRouteLayer,
   attachmentsRouteLayer,
   testHarnessTraceViewerRouteLayer,
   testHarnessArtifactRouteLayer,

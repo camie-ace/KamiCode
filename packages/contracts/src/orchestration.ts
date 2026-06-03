@@ -377,9 +377,7 @@ export const OrchestrationThread = Schema.Struct({
   branch: Schema.NullOr(TrimmedNonEmptyString),
   worktreePath: Schema.NullOr(TrimmedNonEmptyString),
   latestTurn: Schema.NullOr(OrchestrationLatestTurn),
-  queuedTurns: Schema.Array(OrchestrationQueuedTurn).pipe(
-    Schema.withDecodingDefault(Effect.succeed([])),
-  ),
+  queuedTurns: Schema.optional(Schema.Array(OrchestrationQueuedTurn)),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
   archivedAt: Schema.NullOr(IsoDateTime).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
@@ -427,7 +425,7 @@ export const OrchestrationThreadShell = Schema.Struct({
   branch: Schema.NullOr(TrimmedNonEmptyString),
   worktreePath: Schema.NullOr(TrimmedNonEmptyString),
   latestTurn: Schema.NullOr(OrchestrationLatestTurn),
-  queuedTurnCount: NonNegativeInt.pipe(Schema.withDecodingDefault(Effect.succeed(0))),
+  queuedTurnCount: Schema.optional(NonNegativeInt),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
   archivedAt: Schema.NullOr(IsoDateTime).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
@@ -581,6 +579,15 @@ const ThreadInteractionModeSetCommand = Schema.Struct({
   createdAt: IsoDateTime,
 });
 
+const ThreadQueuedTurnDeleteCommand = Schema.Struct({
+  type: Schema.Literal("thread.queued-turn.delete"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  queueId: TrimmedNonEmptyString,
+  messageId: MessageId,
+  createdAt: IsoDateTime,
+});
+
 const ThreadTurnStartBootstrapCreateThread = Schema.Struct({
   projectId: ProjectId,
   title: TrimmedNonEmptyString,
@@ -622,9 +629,7 @@ export const ThreadTurnStartCommand = Schema.Struct({
   interactionMode: ProviderInteractionMode.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_PROVIDER_INTERACTION_MODE)),
   ),
-  dispatchPolicy: TurnDispatchPolicy.pipe(
-    Schema.withDecodingDefault(Effect.succeed(DEFAULT_TURN_DISPATCH_POLICY)),
-  ),
+  dispatchPolicy: Schema.optional(TurnDispatchPolicy),
   bootstrap: Schema.optional(ThreadTurnStartBootstrap),
   sourceProposedPlan: Schema.optional(SourceProposedPlanReference),
   createdAt: IsoDateTime,
@@ -702,6 +707,7 @@ const DispatchableClientOrchestrationCommand = Schema.Union([
   ThreadMetaUpdateCommand,
   ThreadRuntimeModeSetCommand,
   ThreadInteractionModeSetCommand,
+  ThreadQueuedTurnDeleteCommand,
   ThreadTurnStartCommand,
   ThreadTurnInterruptCommand,
   ThreadApprovalRespondCommand,
@@ -723,6 +729,7 @@ export const ClientOrchestrationCommand = Schema.Union([
   ThreadMetaUpdateCommand,
   ThreadRuntimeModeSetCommand,
   ThreadInteractionModeSetCommand,
+  ThreadQueuedTurnDeleteCommand,
   ClientThreadTurnStartCommand,
   ThreadTurnInterruptCommand,
   ThreadApprovalRespondCommand,
@@ -827,6 +834,7 @@ export const OrchestrationEventType = Schema.Literals([
   "thread.interaction-mode-set",
   "thread.message-sent",
   "thread.turn-start-requested",
+  "thread.queued-turn-deleted",
   "thread.turn-interrupt-requested",
   "thread.approval-response-requested",
   "thread.user-input-response-requested",
@@ -952,6 +960,13 @@ export const ThreadTurnStartRequestedPayload = Schema.Struct({
   ),
   sourceProposedPlan: Schema.optional(SourceProposedPlanReference),
   createdAt: IsoDateTime,
+});
+
+export const ThreadQueuedTurnDeletedPayload = Schema.Struct({
+  threadId: ThreadId,
+  queueId: TrimmedNonEmptyString,
+  messageId: MessageId,
+  deletedAt: IsoDateTime,
 });
 
 export const ThreadTurnInterruptRequestedPayload = Schema.Struct({
@@ -1097,6 +1112,11 @@ export const OrchestrationEvent = Schema.Union([
     ...EventBaseFields,
     type: Schema.Literal("thread.turn-start-requested"),
     payload: ThreadTurnStartRequestedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.queued-turn-deleted"),
+    payload: ThreadQueuedTurnDeletedPayload,
   }),
   Schema.Struct({
     ...EventBaseFields,

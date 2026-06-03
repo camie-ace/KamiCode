@@ -18,6 +18,7 @@ import {
 import { isTemporaryWorktreeBranch, WORKTREE_BRANCH_PREFIX } from "@t3tools/shared/git";
 import * as Cache from "effect/Cache";
 import * as Cause from "effect/Cause";
+import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Equal from "effect/Equal";
@@ -129,6 +130,18 @@ export function buildTestModeTurnInput(input: {
       "- Missing URL behavior: ask the user for the target URL before running the harness.",
     );
   }
+  lines.push(
+    "- Browser verification: use headless recorded evidence by default; only use a visible browser when the user explicitly asks.",
+  );
+  lines.push(
+    '- Auth verification: use authExpectation="authenticated" for gated features. If no saved session, local test credentials, seeded user, bypass, or mock auth exists, ask for the auth strategy before browser testing.',
+  );
+  lines.push(
+    "- Auth strategy options: I'll provide sign-in credentials; Create permanent user; Create temporary user.",
+  );
+  lines.push(
+    "- Auth gate rule: a login/sign-in/auth page is BLOCKED or partial evidence unless the requested goal is the auth page itself.",
+  );
   lines.push("");
   lines.push("User test request:");
   lines.push(
@@ -738,7 +751,7 @@ const make = Effect.gen(function* () {
       .markFailed({
         queueId: input.row.queueId,
         failedAt: input.createdAt,
-        failureDetail: input.detail as TrimmedNonEmptyString,
+        failureDetail: input.detail as typeof TrimmedNonEmptyString.Type,
       })
       .pipe(
         Effect.flatMap(() =>
@@ -773,7 +786,7 @@ const make = Effect.gen(function* () {
           return;
         }
 
-        const claimedAt = new Date().toISOString();
+        const claimedAt = yield* DateTime.now.pipe(Effect.map(DateTime.formatIso));
         const claimed = yield* projectionTurnQueueRepository.claimNextQueuedByThreadId(
           { threadId },
           claimedAt,
@@ -829,11 +842,17 @@ const make = Effect.gen(function* () {
         const turnStart = yield* providerService.sendTurn(sendTurnRequest.value).pipe(
           Effect.map(Option.some),
           Effect.catchCause((cause) =>
-            failQueuedTurnStart({
-              row: queuedTurn,
-              detail: formatFailureDetail(cause),
-              createdAt: new Date().toISOString(),
-            }).pipe(Effect.as(Option.none())),
+            DateTime.now.pipe(
+              Effect.map(DateTime.formatIso),
+              Effect.flatMap((failedAt) =>
+                failQueuedTurnStart({
+                  row: queuedTurn,
+                  detail: formatFailureDetail(cause),
+                  createdAt: failedAt,
+                }),
+              ),
+              Effect.as(Option.none()),
+            ),
           ),
         );
         if (Option.isNone(turnStart)) {
@@ -1189,6 +1208,14 @@ const make = Effect.gen(function* () {
         event.type === "thread.message-sent" &&
         event.payload.role === "assistant" &&
         !event.payload.streaming
+      ) {
+        return yield* drainThreadQueue(event.payload.threadId).pipe(Effect.forkScoped);
+      }
+      if (
+        event.type === "thread.session-set" &&
+        event.payload.session.activeTurnId === null &&
+        event.payload.session.status !== "starting" &&
+        event.payload.session.status !== "running"
       ) {
         return yield* drainThreadQueue(event.payload.threadId).pipe(Effect.forkScoped);
       }

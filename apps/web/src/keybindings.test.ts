@@ -8,6 +8,7 @@ import {
 } from "@t3tools/contracts";
 import {
   formatShortcutLabel,
+  isChatQueueShortcut,
   isChatNewShortcut,
   isChatNewLocalShortcut,
   isDiffToggleShortcut,
@@ -118,6 +119,18 @@ const DEFAULT_BINDINGS = compile([
   { shortcut: modShortcut("o", { shiftKey: true }), command: "chat.new" },
   { shortcut: modShortcut("n", { shiftKey: true }), command: "chat.newLocal" },
   { shortcut: modShortcut("o"), command: "editor.openFavorite" },
+  {
+    shortcut: {
+      key: "enter",
+      metaKey: false,
+      ctrlKey: true,
+      shiftKey: false,
+      altKey: false,
+      modKey: false,
+    },
+    command: "chat.queue",
+    whenAst: whenNot(whenIdentifier("terminalFocus")),
+  },
   { shortcut: modShortcut("[", { shiftKey: true }), command: "thread.previous" },
   { shortcut: modShortcut("]", { shiftKey: true }), command: "thread.next" },
   { shortcut: modShortcut("1"), command: "thread.jump.1" },
@@ -444,6 +457,27 @@ describe("chat/editor shortcuts", () => {
     assert.isTrue(
       isChatNewLocalShortcut(event({ key: "n", ctrlKey: true, shiftKey: true }), DEFAULT_BINDINGS, {
         platform: "Linux",
+      }),
+    );
+  });
+
+  it("matches chat.queue shortcut as Ctrl+Enter on all platforms", () => {
+    assert.isTrue(
+      isChatQueueShortcut(event({ key: "Enter", ctrlKey: true }), DEFAULT_BINDINGS, {
+        platform: "MacIntel",
+        context: { terminalFocus: false },
+      }),
+    );
+    assert.isTrue(
+      isChatQueueShortcut(event({ key: "Enter", ctrlKey: true }), DEFAULT_BINDINGS, {
+        platform: "Linux",
+        context: { terminalFocus: false },
+      }),
+    );
+    assert.isFalse(
+      isChatQueueShortcut(event({ key: "Enter", metaKey: true }), DEFAULT_BINDINGS, {
+        platform: "MacIntel",
+        context: { terminalFocus: false },
       }),
     );
   });

@@ -1,5 +1,5 @@
 import { memo, type PointerEventHandler } from "react";
-import { ChevronDownIcon, ChevronLeftIcon } from "lucide-react";
+import { ChevronDownIcon, ChevronLeftIcon, ListPlusIcon } from "lucide-react";
 import { cn } from "~/lib/utils";
 import { Button } from "../ui/button";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
@@ -23,8 +23,10 @@ interface ComposerPrimaryActionsProps {
   isEnvironmentUnavailable: boolean;
   isPreparingWorktree: boolean;
   hasSendableContent: boolean;
+  queueShortcutLabel: string | null | undefined;
   preserveComposerFocusOnPointerDown?: boolean;
   onPreviousPendingQuestion: () => void;
+  onQueueMessage: () => void;
   onInterrupt: () => void;
   onImplementPlanInNewThread: () => void;
 }
@@ -62,8 +64,10 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
   isEnvironmentUnavailable,
   isPreparingWorktree,
   hasSendableContent,
+  queueShortcutLabel = null,
   preserveComposerFocusOnPointerDown = false,
   onPreviousPendingQuestion,
+  onQueueMessage,
   onInterrupt,
   onImplementPlanInNewThread,
 }: ComposerPrimaryActionsProps) {
@@ -123,18 +127,34 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
   }
 
   if (isRunning) {
+    const queueTitle = queueShortcutLabel
+      ? `Queue message (${queueShortcutLabel})`
+      : "Queue message";
     return (
-      <button
-        type="button"
-        className="flex size-8 cursor-pointer items-center justify-center rounded-full bg-rose-500/90 text-white transition-all duration-150 hover:bg-rose-500 hover:scale-105 sm:h-8 sm:w-8"
-        {...pointerFocusProps}
-        onClick={onInterrupt}
-        aria-label="Stop generation"
-      >
-        <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor" aria-hidden="true">
-          <rect x="2" y="2" width="8" height="8" rx="1.5" />
-        </svg>
-      </button>
+      <div className="flex items-center justify-end gap-1.5">
+        <button
+          type="button"
+          className="flex size-8 items-center justify-center rounded-full border border-border/70 bg-background/80 text-muted-foreground transition-all duration-150 enabled:cursor-pointer enabled:hover:border-border enabled:hover:bg-accent enabled:hover:text-foreground enabled:hover:scale-105 disabled:pointer-events-none disabled:opacity-35 sm:h-8 sm:w-8"
+          {...pointerFocusProps}
+          onClick={onQueueMessage}
+          disabled={!hasSendableContent}
+          aria-label="Queue message"
+          title={queueTitle}
+        >
+          <ListPlusIcon className="size-4" aria-hidden="true" />
+        </button>
+        <button
+          type="button"
+          className="flex size-8 cursor-pointer items-center justify-center rounded-full bg-rose-500/90 text-white transition-all duration-150 hover:bg-rose-500 hover:scale-105 sm:h-8 sm:w-8"
+          {...pointerFocusProps}
+          onClick={onInterrupt}
+          aria-label="Stop generation"
+        >
+          <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor" aria-hidden="true">
+            <rect x="2" y="2" width="8" height="8" rx="1.5" />
+          </svg>
+        </button>
+      </div>
     );
   }
 

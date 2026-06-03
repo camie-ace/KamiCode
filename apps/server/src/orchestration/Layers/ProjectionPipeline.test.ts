@@ -175,6 +175,148 @@ it.layer(BaseTestLayer)("OrchestrationProjectionPipeline", (it) => {
   );
 });
 
+it.layer(Layer.fresh(makeProjectionPipelinePrefixedTestLayer("t3-queue-delete-")))(
+  "OrchestrationProjectionPipeline queue deletion",
+  (it) => {
+    it.effect("deletes queued messages before they are processed", () =>
+      Effect.gen(function* () {
+        const projectionPipeline = yield* OrchestrationProjectionPipeline;
+        const eventStore = yield* OrchestrationEventStore;
+        const sql = yield* SqlClient.SqlClient;
+        const now = "2026-01-01T00:00:00.000Z";
+        const projectId = ProjectId.make("project-queued-delete");
+        const threadId = ThreadId.make("thread-queued-delete");
+        const messageId = MessageId.make("message-queued-delete");
+        const queueId = "queue:evt-queued-delete-request";
+
+        const projectEvent = (event: Parameters<typeof eventStore.append>[0]) =>
+          eventStore
+            .append(event)
+            .pipe(Effect.flatMap((savedEvent) => projectionPipeline.projectEvent(savedEvent)));
+
+        yield* projectEvent({
+          type: "project.created",
+          eventId: EventId.make("evt-queued-delete-project"),
+          aggregateKind: "project",
+          aggregateId: projectId,
+          occurredAt: now,
+          commandId: CommandId.make("cmd-queued-delete-project"),
+          causationEventId: null,
+          correlationId: CommandId.make("cmd-queued-delete-project"),
+          metadata: {},
+          payload: {
+            projectId,
+            title: "Project",
+            workspaceRoot: "/tmp/project-queued-delete",
+            defaultModelSelection: null,
+            scripts: [],
+            createdAt: now,
+            updatedAt: now,
+          },
+        });
+        yield* projectEvent({
+          type: "thread.created",
+          eventId: EventId.make("evt-queued-delete-thread"),
+          aggregateKind: "thread",
+          aggregateId: threadId,
+          occurredAt: now,
+          commandId: CommandId.make("cmd-queued-delete-thread"),
+          causationEventId: null,
+          correlationId: CommandId.make("cmd-queued-delete-thread"),
+          metadata: {},
+          payload: {
+            threadId,
+            projectId,
+            title: "Thread",
+            modelSelection: {
+              instanceId: ProviderInstanceId.make("codex"),
+              model: "gpt-5-codex",
+            },
+            runtimeMode: "full-access",
+            interactionMode: "default",
+            branch: null,
+            worktreePath: null,
+            createdAt: now,
+            updatedAt: now,
+          },
+        });
+        yield* projectEvent({
+          type: "thread.message-sent",
+          eventId: EventId.make("evt-queued-delete-message"),
+          aggregateKind: "thread",
+          aggregateId: threadId,
+          occurredAt: now,
+          commandId: CommandId.make("cmd-queued-delete-message"),
+          causationEventId: null,
+          correlationId: CommandId.make("cmd-queued-delete-message"),
+          metadata: {},
+          payload: {
+            threadId,
+            messageId,
+            role: "user",
+            text: "queued text",
+            attachments: [],
+            turnId: null,
+            streaming: false,
+            createdAt: now,
+            updatedAt: now,
+          },
+        });
+        yield* projectEvent({
+          type: "thread.turn-start-requested",
+          eventId: EventId.make("evt-queued-delete-request"),
+          aggregateKind: "thread",
+          aggregateId: threadId,
+          occurredAt: now,
+          commandId: CommandId.make("cmd-queued-delete-request"),
+          causationEventId: EventId.make("evt-queued-delete-message"),
+          correlationId: CommandId.make("cmd-queued-delete-request"),
+          metadata: {},
+          payload: {
+            threadId,
+            messageId,
+            runtimeMode: "full-access",
+            interactionMode: "default",
+            dispatchPolicy: "queue",
+            createdAt: now,
+          },
+        });
+        yield* projectEvent({
+          type: "thread.queued-turn-deleted",
+          eventId: EventId.make("evt-queued-delete-delete"),
+          aggregateKind: "thread",
+          aggregateId: threadId,
+          occurredAt: now,
+          commandId: CommandId.make("cmd-queued-delete-delete"),
+          causationEventId: EventId.make("evt-queued-delete-request"),
+          correlationId: CommandId.make("cmd-queued-delete-delete"),
+          metadata: {},
+          payload: {
+            threadId,
+            queueId,
+            messageId,
+            deletedAt: now,
+          },
+        });
+
+        const messageRows = yield* sql<{ count: number }>`
+          SELECT COUNT(*) AS count
+          FROM projection_thread_messages
+          WHERE message_id = ${messageId}
+        `;
+        const queueRows = yield* sql<{ status: string }>`
+          SELECT status
+          FROM projection_turn_queue
+          WHERE queue_id = ${queueId}
+        `;
+
+        assert.strictEqual(messageRows[0]?.count, 0);
+        assert.strictEqual(queueRows[0]?.status, "cancelled");
+      }),
+    );
+  },
+);
+
 it.layer(Layer.fresh(makeProjectionPipelinePrefixedTestLayer("t3-base-")))(
   "OrchestrationProjectionPipeline",
   (it) => {

@@ -7,6 +7,7 @@ import { pathToFileURL } from "node:url";
 
 export type BrowserHarnessBrowser = "chromium" | "firefox" | "webkit";
 export type BrowserHarnessStatus = "passed" | "failed" | "blocked" | "error";
+export type BrowserHarnessAuthExpectation = "unknown" | "anonymous" | "authenticated";
 
 export interface BrowserHarnessKamiCodeAuth {
   readonly type: "kamicode-pairing";
@@ -66,6 +67,8 @@ export interface BrowserHarnessRunInput {
   readonly actions?: ReadonlyArray<TestHarnessAction> | undefined;
   readonly browser?: BrowserHarnessBrowser | undefined;
   readonly headless?: boolean | undefined;
+  readonly recordVideo?: boolean | undefined;
+  readonly authExpectation?: BrowserHarnessAuthExpectation | undefined;
   readonly timeoutMs?: number | undefined;
   readonly lingerMs?: number | undefined;
   readonly viewport?: { readonly width: number; readonly height: number } | undefined;
@@ -84,6 +87,11 @@ export interface BrowserHarnessScreenshot {
   readonly path: string;
 }
 
+export interface BrowserHarnessVideo {
+  readonly label: string;
+  readonly path: string;
+}
+
 export interface BrowserHarnessConsoleMessage {
   readonly type: string;
   readonly text: string;
@@ -97,6 +105,8 @@ export interface BrowserHarnessConsoleMessage {
 export interface BrowserHarnessArtifactPaths {
   readonly trace: string;
   readonly screenshots: ReadonlyArray<string>;
+  readonly video?: string | undefined;
+  readonly videos?: ReadonlyArray<string> | undefined;
   readonly consoleLog: string;
   readonly networkLog: string;
   readonly storageState: string;
@@ -124,6 +134,8 @@ export interface BrowserHarnessRunResult {
   readonly artifactPaths: BrowserHarnessArtifactPaths;
   readonly evidenceSummary: string;
   readonly screenshots: ReadonlyArray<BrowserHarnessScreenshot>;
+  readonly videos?: ReadonlyArray<BrowserHarnessVideo> | undefined;
+  readonly authGate?: BrowserHarnessAuthGateDetection | undefined;
   readonly steps: ReadonlyArray<BrowserHarnessStep>;
   readonly observations: ReadonlyArray<TestHarnessObservation>;
   readonly consoleMessages: ReadonlyArray<BrowserHarnessConsoleMessage>;
@@ -145,6 +157,7 @@ export interface BrowserHarnessRunPaths {
   readonly projectStateDir: string;
   readonly artifactsDir: string;
   readonly screenshotsDir: string;
+  readonly videosDir: string;
   readonly summaryPath: string;
   readonly markdownPath: string;
   readonly tracePath: string;
@@ -210,9 +223,14 @@ interface PlaywrightPage {
   keyboard: PlaywrightKeyboard;
   mouse: PlaywrightMouse;
   close(): Promise<void>;
+  video?(): PlaywrightVideo | null;
   on(event: "console", handler: (message: PlaywrightConsoleMessage) => void): void;
   on(event: "pageerror", handler: (error: unknown) => void): void;
   on(event: "requestfailed", handler: (request: PlaywrightRequest) => void): void;
+}
+
+interface PlaywrightVideo {
+  path(): Promise<string>;
 }
 
 interface PlaywrightTracing {
@@ -235,6 +253,10 @@ interface PlaywrightBrowser {
     acceptDownloads: boolean;
     userAgent: string;
     storageState?: string;
+    recordVideo?: {
+      dir: string;
+      size?: { readonly width: number; readonly height: number };
+    };
   }): Promise<PlaywrightBrowserContext>;
   close(): Promise<void>;
 }
@@ -249,8 +271,18 @@ const DEFAULT_BROWSER: BrowserHarnessBrowser = "chromium";
 const DEFAULT_TIMEOUT_MS = 30_000;
 const DEFAULT_LINGER_MS = 0;
 const DEFAULT_VIEWPORT = { width: 1440, height: 960 } as const;
+const DEFAULT_HEADLESS = true;
+const DEFAULT_RECORD_VIDEO = true;
+const CLEANUP_TIMEOUT_MS = 5_000;
 const DEFAULT_ENVIRONMENT_ID = "default";
 const FALLBACK_STATE_ROOT = path.join(os.tmpdir(), "kamicode");
+
+export interface BrowserHarnessAuthGateDetection {
+  readonly detected: boolean;
+  readonly reason?: string | undefined;
+  readonly url?: string | undefined;
+  readonly matchedText?: ReadonlyArray<string> | undefined;
+}
 
 function normalizeOptionalText(value: string | undefined): string | undefined {
   const trimmed = value?.trim();
@@ -333,6 +365,7 @@ export function resolveBrowserHarnessRunPaths(
     projectStateDir,
     artifactsDir,
     screenshotsDir: path.join(artifactsDir, "screenshots"),
+    videosDir: path.join(artifactsDir, "videos"),
     summaryPath: path.join(artifactsDir, "summary.json"),
     markdownPath: path.join(artifactsDir, "summary.md"),
     tracePath: path.join(artifactsDir, "trace.zip"),
@@ -378,12 +411,128 @@ async function writeJson(pathname: string, value: unknown): Promise<void> {
   await Fs.writeFile(pathname, `${JSON.stringify(value, null, 2)}\n`, "utf8");
 }
 
+async function settleWithin(
+  operation: () => Promise<unknown>,
+  timeoutMs: number,
+): Promise<boolean> {
+  let timeoutId: NodeJS.Timeout | undefined;
+  const completed = operation().then(
+    () => true,
+    () => true,
+  );
+  const timedOut = new Promise<boolean>((resolve) => {
+    timeoutId = setTimeout(() => resolve(false), timeoutMs);
+  });
+  const result = await Promise.race([completed, timedOut]);
+  if (timeoutId) {
+    clearTimeout(timeoutId);
+  }
+  return result;
+}
+
 function isKamiCodePairingUrl(value: string): boolean {
   try {
     return new URL(value).pathname.replace(/\/+$/g, "") === "/pair";
   } catch {
     return false;
   }
+}
+
+function isAuthGatePath(value: string): boolean {
+  try {
+    const pathName = new URL(value).pathname.toLowerCase().replace(/\/+$/g, "");
+    return (
+      pathName === "/login" ||
+      pathName === "/signin" ||
+      pathName === "/sign-in" ||
+      pathName === "/auth" ||
+      pathName.endsWith("/login") ||
+      pathName.endsWith("/signin") ||
+      pathName.endsWith("/sign-in") ||
+      pathName.includes("/auth/login") ||
+      pathName.includes("/auth/signin") ||
+      pathName === "/pair"
+    );
+  } catch {
+    return false;
+  }
+}
+
+export function detectBrowserHarnessAuthGate(input: {
+  readonly url: string | null;
+  readonly visibleTextSample: ReadonlyArray<string>;
+}): BrowserHarnessAuthGateDetection {
+  const matchedText: string[] = [];
+  const normalizedText = input.visibleTextSample.join(" ").toLowerCase();
+  const authTextChecks = [
+    "sign in",
+    "log in",
+    "forgot password",
+    "continue with google",
+    "pair with this environment",
+  ];
+
+  for (const marker of authTextChecks) {
+    if (normalizedText.includes(marker)) {
+      matchedText.push(marker);
+    }
+  }
+
+  if (
+    normalizedText.includes("password") &&
+    (normalizedText.includes("email") || normalizedText.includes("username"))
+  ) {
+    matchedText.push("email/username + password");
+  }
+
+  const url = input.url ?? undefined;
+  const pathMatched = url ? isAuthGatePath(url) : false;
+  if (!pathMatched && matchedText.length === 0) {
+    return { detected: false };
+  }
+
+  return {
+    detected: true,
+    ...(url ? { url } : {}),
+    reason: pathMatched ? "auth route" : "auth form text",
+    ...(matchedText.length > 0 ? { matchedText } : {}),
+  };
+}
+
+export function shouldBlockBrowserHarnessAuthGate(input: {
+  readonly status: BrowserHarnessStatus;
+  readonly authGate: BrowserHarnessAuthGateDetection;
+  readonly authExpectation: BrowserHarnessAuthExpectation;
+  readonly goal: string | null;
+}): boolean {
+  return (
+    input.status === "passed" &&
+    input.authGate.detected &&
+    input.authExpectation !== "anonymous" &&
+    (input.authExpectation === "authenticated" || !goalTargetsAuthScreen(input.goal))
+  );
+}
+
+function goalTargetsAuthScreen(goal: string | null): boolean {
+  if (!goal) {
+    return false;
+  }
+  return /\b(auth|authentication|login|log in|sign in|signin|sign-in|password reset|pairing)\b/iu.test(
+    goal,
+  );
+}
+
+function authGateBlockMessage(input: {
+  readonly authGate: BrowserHarnessAuthGateDetection;
+  readonly authExpectation: BrowserHarnessAuthExpectation;
+}): string {
+  const location = input.authGate.url ? ` at ${input.authGate.url}` : "";
+  const reason = input.authGate.reason ? ` (${input.authGate.reason})` : "";
+  const expectation =
+    input.authExpectation === "authenticated"
+      ? "Authenticated verification was requested"
+      : "The browser appears to have reached an unauthenticated boundary";
+  return `${expectation}${location}${reason}. Ask the user to provide sign-in credentials, approve creation of a permanent test user, or approve creation of a temporary test user before claiming feature verification.`;
 }
 
 function buildKamiCodePairingUrl(input: {
@@ -697,6 +846,7 @@ export function formatBrowserHarnessMarkdown(result: BrowserHarnessRunResult): s
     ...result.screenshots.map(
       (screenshot) => `- Screenshot (${screenshot.label}): ${screenshot.path}`,
     ),
+    ...(result.videos ?? []).map((video) => `- Video (${video.label}): ${video.path}`),
     "",
     "## Steps",
     "",
@@ -729,6 +879,9 @@ export function formatBrowserHarnessMarkdown(result: BrowserHarnessRunResult): s
   if (result.errorMessage) {
     lines.push("", "## Error", "", result.errorMessage);
   }
+  if (result.authGate?.detected) {
+    lines.push("", "## Auth Gate", "", JSON.stringify(result.authGate, null, 2));
+  }
   if (result.pageErrors.length > 0) {
     lines.push("", "## Page Errors", "", ...result.pageErrors.map((entry) => `- ${entry}`));
   }
@@ -749,6 +902,7 @@ export function formatBrowserHarnessMarkdown(result: BrowserHarnessRunResult): s
 
 export function formatBrowserHarnessCliOutput(result: BrowserHarnessRunResult): string {
   const firstScreenshot = result.screenshots.at(-1)?.path;
+  const firstVideo = result.videos?.at(-1)?.path;
   return [
     `Browser test ${result.status.toUpperCase()}`,
     `Artifacts: ${result.artifactsDir}`,
@@ -758,6 +912,7 @@ export function formatBrowserHarnessCliOutput(result: BrowserHarnessRunResult): 
     `Network: ${result.networkPath}`,
     `Storage state: ${result.storageStatePath}`,
     ...(firstScreenshot ? [`Screenshot: ${firstScreenshot}`] : []),
+    ...(firstVideo ? [`Video: ${firstVideo}`] : []),
     ...(result.errorMessage ? [`Error: ${result.errorMessage}`] : []),
   ].join("\n");
 }
@@ -772,8 +927,11 @@ export async function runBrowserHarness(
   const timeoutMs = input.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const lingerMs = input.lingerMs ?? DEFAULT_LINGER_MS;
   const viewport = input.viewport ?? DEFAULT_VIEWPORT;
+  const shouldRecordVideo = input.recordVideo ?? DEFAULT_RECORD_VIDEO;
+  const authExpectation = input.authExpectation ?? "unknown";
   const goal = normalizeOptionalText(input.goal) ?? null;
   const screenshots: BrowserHarnessScreenshot[] = [];
+  const videos: BrowserHarnessVideo[] = [];
   const steps: BrowserHarnessStep[] = [];
   const observations: TestHarnessObservation[] = [];
   const consoleMessages: BrowserHarnessConsoleMessage[] = [];
@@ -786,11 +944,15 @@ export async function runBrowserHarness(
   let browser: PlaywrightBrowser | null = null;
   let context: PlaywrightBrowserContext | null = null;
   let page: PlaywrightPage | null = null;
+  let pageVideo: PlaywrightVideo | null = null;
   let finalUrl: string | null = null;
   let title: string | null = null;
 
   await Fs.mkdir(paths.artifactsDir, { recursive: true });
   await Fs.mkdir(paths.screenshotsDir, { recursive: true });
+  if (shouldRecordVideo) {
+    await Fs.mkdir(paths.videosDir, { recursive: true });
+  }
   await Fs.mkdir(path.dirname(paths.storageStatePath), { recursive: true });
 
   const screenshot = async (label: string): Promise<string> => {
@@ -876,7 +1038,7 @@ export async function runBrowserHarness(
       throw new Error(`Unsupported browser '${browserName}'.`);
     }
 
-    browser = await browserType.launch({ headless: input.headless ?? false });
+    browser = await browserType.launch({ headless: input.headless ?? DEFAULT_HEADLESS });
     context = await browser.newContext({
       viewport,
       acceptDownloads: true,
@@ -884,12 +1046,21 @@ export async function runBrowserHarness(
       ...((await pathExists(paths.storageStatePath))
         ? { storageState: paths.storageStatePath }
         : {}),
+      ...(shouldRecordVideo
+        ? {
+            recordVideo: {
+              dir: paths.videosDir,
+              size: viewport,
+            },
+          }
+        : {}),
     });
     context.setDefaultTimeout(timeoutMs);
     context.setDefaultNavigationTimeout(timeoutMs);
     await context.tracing.start({ screenshots: true, snapshots: true, sources: true });
 
     page = await context.newPage();
+    pageVideo = page.video?.() ?? null;
     page.on("console", (message) => {
       const location = message.location();
       consoleMessages.push({
@@ -1017,23 +1188,59 @@ export async function runBrowserHarness(
     }
   } finally {
     if (context) {
-      await context.storageState({ path: paths.storageStatePath }).catch(() => {});
-      await context.tracing.stop({ path: paths.tracePath }).catch(() => {
+      await settleWithin(
+        () => context!.storageState({ path: paths.storageStatePath }),
+        CLEANUP_TIMEOUT_MS,
+      );
+      const traceStopped = await settleWithin(
+        () => context!.tracing.stop({ path: paths.tracePath }),
+        CLEANUP_TIMEOUT_MS,
+      );
+      if (!traceStopped) {
         status = status === "passed" ? "error" : status;
-      });
+      }
     }
     if (lingerMs > 0) {
       await new Promise((resolve) => setTimeout(resolve, lingerMs));
     }
-    if (page) await page.close().catch(() => {});
-    if (context) await context.close().catch(() => {});
-    if (browser) await browser.close().catch(() => {});
+    if (page) {
+      await settleWithin(() => page!.close(), CLEANUP_TIMEOUT_MS);
+    }
+    if (context) {
+      await settleWithin(() => context!.close(), CLEANUP_TIMEOUT_MS);
+    }
+    if (pageVideo) {
+      let videoPath: string | null = null;
+      await settleWithin(
+        () =>
+          pageVideo!.path().then((pathName) => {
+            videoPath = pathName;
+          }),
+        CLEANUP_TIMEOUT_MS,
+      );
+      if (videoPath) {
+        videos.push({ label: "recording", path: videoPath });
+      }
+    }
+    if (browser) {
+      await settleWithin(() => browser!.close(), CLEANUP_TIMEOUT_MS);
+    }
   }
 
   const completedAtDate = new Date();
+  const authGate = detectBrowserHarnessAuthGate({
+    url: finalUrl ?? input.url,
+    visibleTextSample: observations.at(-1)?.visibleTextSample ?? [],
+  });
+  if (shouldBlockBrowserHarnessAuthGate({ status, authGate, authExpectation, goal })) {
+    status = "blocked";
+    error = authGateBlockMessage({ authGate, authExpectation });
+  }
   const artifactPaths: BrowserHarnessArtifactPaths = {
     trace: paths.tracePath,
     screenshots: screenshots.map((screenshot) => screenshot.path),
+    ...(videos[0]?.path ? { video: videos[0].path } : {}),
+    ...(videos.length > 0 ? { videos: videos.map((video) => video.path) } : {}),
     consoleLog: paths.consolePath,
     networkLog: paths.networkPath,
     storageState: paths.storageStatePath,
@@ -1042,10 +1249,13 @@ export async function runBrowserHarness(
   };
   const consoleErrors = collectConsoleErrors({ consoleMessages, pageErrors });
   const evidenceSummary = [
-    `${observations.length} observation(s), ${screenshots.length} screenshot(s), trace recorded.`,
+    `${observations.length} observation(s), ${screenshots.length} screenshot(s), ${videos.length} video(s), trace recorded.`,
     `${consoleErrors.length} console/page error(s), ${failedRequests.length} failed network request(s).`,
     finalUrl ? `Final URL: ${finalUrl}.` : "Final URL unknown.",
-  ].join(" ");
+    authGate.detected ? "Auth gate detected." : "",
+  ]
+    .filter((part) => part.length > 0)
+    .join(" ");
   const result: BrowserHarnessRunResult = {
     runId: paths.runId,
     projectId: paths.projectKey,
@@ -1066,6 +1276,8 @@ export async function runBrowserHarness(
     artifactPaths,
     evidenceSummary,
     screenshots,
+    videos,
+    authGate,
     steps,
     observations,
     consoleMessages,
