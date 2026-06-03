@@ -3,12 +3,13 @@ import { describe, expect, it } from "vitest";
 import type { AppState, EnvironmentState } from "../store";
 import type { ThreadSession } from "../types";
 import {
-  collectNewlyCompletedTurns,
+  collectSettledCompletedTurns,
   getTurnCompletionAlertVolume,
   isApplicationInFocus,
   TURN_COMPLETION_ALERT_DURATION_MS,
   TURN_COMPLETION_ALERT_INITIAL_VOLUME,
   TURN_COMPLETION_ALERT_MAX_VOLUME,
+  turnCompletionAlertKey,
 } from "./turnCompletionAlert";
 
 function makeEnvironmentState(input: {
@@ -95,19 +96,9 @@ function makeState(environmentState: EnvironmentState): AppState {
   };
 }
 
-describe("collectNewlyCompletedTurns", () => {
-  it("detects when the same turn transitions to completed after the session is idle", () => {
-    const previousState = makeState(
-      makeEnvironmentState({
-        threadId: "thread-1",
-        turn: {
-          turnId: "turn-1",
-          state: "running",
-          completedAt: null,
-        },
-      }),
-    );
-    const nextState = makeState(
+describe("collectSettledCompletedTurns", () => {
+  it("detects a settled completed turn from the current snapshot", () => {
+    const state = makeState(
       makeEnvironmentState({
         threadId: "thread-1",
         turn: {
@@ -118,7 +109,7 @@ describe("collectNewlyCompletedTurns", () => {
       }),
     );
 
-    expect(collectNewlyCompletedTurns(previousState, nextState)).toEqual([
+    expect(collectSettledCompletedTurns(state)).toEqual([
       {
         environmentId: "env-1",
         threadId: "thread-1",
@@ -128,23 +119,8 @@ describe("collectNewlyCompletedTurns", () => {
     ]);
   });
 
-  it("does not alert when the turn diff completes while the session is still running", () => {
-    const previousState = makeState(
-      makeEnvironmentState({
-        threadId: "thread-1",
-        turn: {
-          turnId: "turn-1",
-          state: "running",
-          completedAt: null,
-        },
-        session: {
-          status: "running",
-          orchestrationStatus: "running",
-          activeTurnId: "turn-1",
-        },
-      }),
-    );
-    const nextState = makeState(
+  it("does not report a completed turn while its session is still working", () => {
+    const state = makeState(
       makeEnvironmentState({
         threadId: "thread-1",
         turn: {
@@ -160,42 +136,31 @@ describe("collectNewlyCompletedTurns", () => {
       }),
     );
 
-    expect(collectNewlyCompletedTurns(previousState, nextState)).toEqual([]);
+    expect(collectSettledCompletedTurns(state)).toEqual([]);
   });
 
-  it("alerts when an already-completed turn becomes settled after the session stops running", () => {
-    const previousState = makeState(
+  it("can filter out historical completions by completion timestamp", () => {
+    const state = makeState(
       makeEnvironmentState({
         threadId: "thread-1",
         turn: {
           turnId: "turn-1",
           state: "completed",
           completedAt: "2026-06-03T10:01:00.000Z",
-        },
-        session: {
-          status: "running",
-          orchestrationStatus: "running",
-          activeTurnId: "turn-1",
-        },
-      }),
-    );
-    const nextState = makeState(
-      makeEnvironmentState({
-        threadId: "thread-1",
-        turn: {
-          turnId: "turn-1",
-          state: "completed",
-          completedAt: "2026-06-03T10:01:00.000Z",
-        },
-        session: {
-          status: "ready",
-          orchestrationStatus: "idle",
-          activeTurnId: undefined,
         },
       }),
     );
 
-    expect(collectNewlyCompletedTurns(previousState, nextState)).toEqual([
+    expect(
+      collectSettledCompletedTurns(state, {
+        completedAfterEpochMs: Date.parse("2026-06-03T10:01:01.000Z"),
+      }),
+    ).toEqual([]);
+    expect(
+      collectSettledCompletedTurns(state, {
+        completedAfterEpochMs: Date.parse("2026-06-03T10:01:00.000Z"),
+      }),
+    ).toEqual([
       {
         environmentId: "env-1",
         threadId: "thread-1",
@@ -203,54 +168,21 @@ describe("collectNewlyCompletedTurns", () => {
         completedAt: "2026-06-03T10:01:00.000Z",
       },
     ]);
-  });
-
-  it("ignores duplicate completed snapshots for the same turn", () => {
-    const previousState = makeState(
-      makeEnvironmentState({
-        threadId: "thread-1",
-        turn: {
-          turnId: "turn-1",
-          state: "completed",
-          completedAt: "2026-06-03T10:01:00.000Z",
-        },
-      }),
-    );
-    const nextState = makeState(
-      makeEnvironmentState({
-        threadId: "thread-1",
-        turn: {
-          turnId: "turn-1",
-          state: "completed",
-          completedAt: "2026-06-03T10:01:00.000Z",
-        },
-      }),
-    );
-
-    expect(collectNewlyCompletedTurns(previousState, nextState)).toEqual([]);
-  });
-
-  it("ignores threads that were not present in the previous snapshot", () => {
-    const previousState: AppState = {
-      activeEnvironmentId: "env-1" as never,
-      environmentStateById: {},
-    };
-    const nextState = makeState(
-      makeEnvironmentState({
-        threadId: "thread-1",
-        turn: {
-          turnId: "turn-1",
-          state: "completed",
-          completedAt: "2026-06-03T10:01:00.000Z",
-        },
-      }),
-    );
-
-    expect(collectNewlyCompletedTurns(previousState, nextState)).toEqual([]);
   });
 });
 
 describe("turn completion alert helpers", () => {
+  it("builds a stable alert key from the environment, thread, turn, and completion time", () => {
+    expect(
+      turnCompletionAlertKey({
+        environmentId: "env-1" as never,
+        threadId: "thread-1" as never,
+        turnId: "turn-1" as never,
+        completedAt: "2026-06-03T10:01:00.000Z",
+      }),
+    ).toBe("env-1:thread-1:turn-1:2026-06-03T10:01:00.000Z");
+  });
+
   it("reports application focus only when the document is visible and focused", () => {
     expect(
       isApplicationInFocus({

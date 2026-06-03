@@ -2,12 +2,15 @@ import { useEffect, useRef } from "react";
 
 import { useStore } from "../store";
 import {
-  collectNewlyCompletedTurns,
+  collectSettledCompletedTurns,
   isApplicationInFocus,
   TURN_COMPLETION_ALERT_DURATION_MS,
   TURN_COMPLETION_ALERT_INITIAL_VOLUME,
   TURN_COMPLETION_ALERT_MAX_VOLUME,
+  turnCompletionAlertKey,
 } from "../lib/turnCompletionAlert";
+
+const COMPLETION_ALERT_MOUNT_GRACE_MS = 2_500;
 
 interface RunningCompletionAlarm {
   stop: () => void;
@@ -97,7 +100,10 @@ function startCompletionAlarm(audioContext: AudioContext): RunningCompletionAlar
 
 export function TurnCompletionSoundCoordinator() {
   const audioContextRef = useRef<AudioContext | null>(null);
-  const previousStateRef = useRef(useStore.getState());
+  const mountedAtEpochMsRef = useRef(Date.now());
+  const alertedTurnKeysRef = useRef(
+    new Set(collectSettledCompletedTurns(useStore.getState()).map(turnCompletionAlertKey)),
+  );
   const stopAlertRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
@@ -180,9 +186,18 @@ export function TurnCompletionSoundCoordinator() {
     };
 
     const unsubscribe = useStore.subscribe((nextState) => {
-      const previousState = previousStateRef.current;
-      previousStateRef.current = nextState;
-      if (collectNewlyCompletedTurns(previousState, nextState).length === 0) {
+      const nextAlerts = collectSettledCompletedTurns(nextState, {
+        completedAfterEpochMs: mountedAtEpochMsRef.current - COMPLETION_ALERT_MOUNT_GRACE_MS,
+      });
+      const unannouncedAlerts = nextAlerts.filter((alert) => {
+        const key = turnCompletionAlertKey(alert);
+        if (alertedTurnKeysRef.current.has(key)) {
+          return false;
+        }
+        alertedTurnKeysRef.current.add(key);
+        return true;
+      });
+      if (unannouncedAlerts.length === 0) {
         return;
       }
       if (isApplicationInFocus(document)) {
@@ -193,16 +208,16 @@ export function TurnCompletionSoundCoordinator() {
 
     document.addEventListener("visibilitychange", handleFocusStateChange);
     window.addEventListener("focus", handleFocusStateChange);
-    window.addEventListener("pointerdown", primeAudio, { passive: true });
-    window.addEventListener("keydown", primeAudio);
+    window.addEventListener("pointerdown", primeAudio, { capture: true, passive: true });
+    window.addEventListener("keydown", primeAudio, true);
 
     return () => {
       unsubscribe();
       stopAlert();
       document.removeEventListener("visibilitychange", handleFocusStateChange);
       window.removeEventListener("focus", handleFocusStateChange);
-      window.removeEventListener("pointerdown", primeAudio);
-      window.removeEventListener("keydown", primeAudio);
+      window.removeEventListener("pointerdown", primeAudio, true);
+      window.removeEventListener("keydown", primeAudio, true);
       const audioContext = audioContextRef.current;
       audioContextRef.current = null;
       if (audioContext) {

@@ -4,7 +4,6 @@ import type { AppState, EnvironmentState } from "../store";
 import type { ThreadSession } from "../types";
 
 export const TURN_COMPLETION_ALERT_DURATION_MS = 10_000;
-export const TURN_COMPLETION_ALERT_INTERVAL_MS = 1_250;
 export const TURN_COMPLETION_ALERT_INITIAL_VOLUME = 0.35;
 export const TURN_COMPLETION_ALERT_MAX_VOLUME = 0.85;
 
@@ -13,6 +12,10 @@ export interface CompletedTurnAlert {
   readonly threadId: ThreadId;
   readonly turnId: TurnId;
   readonly completedAt: string;
+}
+
+interface CollectSettledCompletedTurnOptions {
+  readonly completedAfterEpochMs?: number;
 }
 
 type ComparableLatestTurn = {
@@ -92,49 +95,44 @@ function getSettledCompletedLatestTurn(
   return turn;
 }
 
-export function collectNewlyCompletedTurns(
-  previousState: AppState | null,
-  nextState: AppState,
-): CompletedTurnAlert[] {
-  if (!previousState) {
-    return [];
+function isCompletedAfterThreshold(
+  completedAt: string,
+  completedAfterEpochMs: number | undefined,
+): boolean {
+  if (completedAfterEpochMs === undefined) {
+    return true;
   }
+  const completedAtEpochMs = Date.parse(completedAt);
+  return !Number.isNaN(completedAtEpochMs) && completedAtEpochMs >= completedAfterEpochMs;
+}
 
+export function turnCompletionAlertKey(alert: CompletedTurnAlert): string {
+  return `${alert.environmentId}:${alert.threadId}:${alert.turnId}:${alert.completedAt}`;
+}
+
+export function collectSettledCompletedTurns(
+  state: AppState,
+  options: CollectSettledCompletedTurnOptions = {},
+): CompletedTurnAlert[] {
   const alerts: CompletedTurnAlert[] = [];
-  for (const [environmentId, nextEnvironmentState] of Object.entries(
-    nextState.environmentStateById,
-  )) {
-    for (const threadId of Object.keys(nextEnvironmentState.threadTurnStateById) as ThreadId[]) {
-      const previousEnvironmentState = previousState.environmentStateById[environmentId];
-      const previousTurn = getComparableLatestTurn(previousEnvironmentState, threadId);
-      if (!previousTurn) {
+  for (const [environmentId, environmentState] of Object.entries(state.environmentStateById)) {
+    for (const threadId of Object.keys(environmentState.threadTurnStateById) as ThreadId[]) {
+      const turn = getSettledCompletedLatestTurn(environmentState, threadId);
+      if (!turn) {
         continue;
       }
-
-      const nextTurn = getSettledCompletedLatestTurn(nextEnvironmentState, threadId);
-      if (!nextTurn) {
-        continue;
-      }
-      const previousSettledTurn = getSettledCompletedLatestTurn(previousEnvironmentState, threadId);
-
-      const didCompleteNewTurn =
-        previousTurn.turnId !== nextTurn.turnId || previousSettledTurn === null;
-      const completedAtChanged =
-        previousTurn.turnId === nextTurn.turnId &&
-        previousTurn.completedAt !== nextTurn.completedAt;
-      if (!didCompleteNewTurn && !completedAtChanged) {
+      if (!isCompletedAfterThreshold(turn.completedAt, options.completedAfterEpochMs)) {
         continue;
       }
 
       alerts.push({
         environmentId: environmentId as EnvironmentId,
         threadId,
-        turnId: nextTurn.turnId,
-        completedAt: nextTurn.completedAt,
+        turnId: turn.turnId,
+        completedAt: turn.completedAt,
       });
     }
   }
-
   return alerts;
 }
 
