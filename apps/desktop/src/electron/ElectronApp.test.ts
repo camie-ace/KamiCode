@@ -47,7 +47,7 @@ vi.mock("electron", () => ({
     getAppPath: getAppPathMock,
     getVersion: getVersionMock,
     isPackaged: true,
-    name: "T3 Code",
+    name: "KamiCode",
     on: onMock,
     quit: quitMock,
     relaunch: relaunchMock,

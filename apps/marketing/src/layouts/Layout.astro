@@ -5,8 +5,8 @@ interface Props {
 }
 
 const {
-  title = "T3 Code",
-  description = "T3 Code — The open-source control plane for coding agents.",
+  title = "KamiCode",
+  description = "KamiCode — The open-source control plane for coding agents.",
 } = Astro.props;
 ---
 
@@ -31,8 +31,9 @@ const {
     <div class="page">
       <nav class="nav">
         <div class="nav-inner">
-          <a href="/" class="nav-brand" aria-label="T3 Code home">
-            <span class="nav-brand-name">T3 Code</span>
+          <a href="/" class="nav-brand" aria-label="KamiCode home">
+            <img class="nav-brand-mark" src="/icon.webp" alt="" width="28" height="28" />
+            <span class="nav-brand-name">KamiCode</span>
           </a>
           <div class="nav-right">
             <a
@@ -308,12 +309,19 @@ const {
   .nav-brand {
     display: inline-flex;
     align-items: center;
+    gap: 8px;
     color: var(--fg);
     transition: color 0.2s ease;
   }
 
   .nav-brand:hover {
     color: #fff;
+  }
+
+  .nav-brand-mark {
+    width: 28px;
+    height: 28px;
+    object-fit: contain;
   }
 
   .nav-brand-name {

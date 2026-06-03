@@ -36,6 +36,16 @@ const mobileEndorsementRows = [
     </div>
 
     <div class="container hero-inner">
+      <img
+        class="hero-wordmark"
+        src="/kamicode-wordmark.webp"
+        alt="KamiCode"
+        width="1200"
+        height="433"
+        loading="eager"
+        decoding="async"
+      />
+
       <h1 class="hero-title display">
         The open-source<br />control plane<br />for coding agents.
       </h1>
@@ -68,7 +78,7 @@ const mobileEndorsementRows = [
         <figure class="hero-screenshot-frame">
           <img
             src="/updated-screenshot.webp"
-            alt="T3 Code app showing multiple coding agent threads in one workspace"
+            alt="KamiCode app showing multiple coding agent threads in one workspace"
             width="2508"
             height="1682"
             loading="eager"
@@ -83,8 +93,8 @@ const mobileEndorsementRows = [
   <section id="endorsements" class="sec-endorsements" aria-labelledby="endorsements-title">
     <div class="container">
       <div class="endorsements-head">
-        <h2 id="endorsements-title">Developers love T3 Code</h2>
-        <p>Real reactions from people building with T3 Code today.</p>
+        <h2 id="endorsements-title">Developers love KamiCode</h2>
+        <p>Real reactions from people building with KamiCode today.</p>
       </div>
     </div>
 
@@ -171,7 +181,7 @@ const mobileEndorsementRows = [
       <div class="section-head">
         <h2>Bring your own sub</h2>
         <p>
-          T3 Code doesn't resell tokens. Plug in Claude Code, Codex, OpenCode,
+          KamiCode doesn't resell tokens. Plug in Claude Code, Codex, OpenCode,
           or Cursor with the credentials you already have — we orchestrate
           them, you keep your plan.
         </p>
@@ -284,7 +294,7 @@ const mobileEndorsementRows = [
         <div class="eyebrow">Open source</div>
         <h2>If you don't like something, fork it.</h2>
         <p>
-          T3 Code is as open as they come. We built this app to be modifiable,
+          KamiCode is as open as they come. We built this app to be modifiable,
           customizable, and forkable. Go nuts - that's the whole point.
         </p>
       </div>
@@ -301,7 +311,7 @@ const mobileEndorsementRows = [
             <div><span class="prompt">$</span> cd t3code &amp;&amp; bun install</div>
             <div class="dim">✓ 1 284 packages installed in 4.2s</div>
             <div><span class="prompt">$</span> bun dev</div>
-            <div class="dim">▲ T3 Code dev server → <span class="accent">http://localhost:4001</span></div>
+            <div class="dim">▲ KamiCode dev server -> <span class="accent">http://localhost:4001</span></div>
             <div class="cursor"><span class="prompt">$</span><span class="caret"></span></div>
           </div>
         </div>
@@ -353,7 +363,7 @@ const mobileEndorsementRows = [
         Your agents deserve better than a terminal.
       </h2>
       <p class="cta-sub">
-        T3 Code is free, open source and fast. Install it, plug in the harness
+        KamiCode is free, open source and fast. Install it, plug in the harness
         you already pay for, and let your agents get to work.
       </p>
       <div class="cta-actions">
@@ -511,6 +521,13 @@ const mobileEndorsementRows = [
   .hero-inner {
     position: relative;
     text-align: center;
+  }
+
+  .hero-wordmark {
+    display: block;
+    width: min(420px, 82vw);
+    height: auto;
+    margin: 0 auto 30px;
   }
 
   .hero-title {

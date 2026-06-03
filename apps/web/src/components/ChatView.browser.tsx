@@ -5848,7 +5848,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
           model: "gpt-5.3-codex-spark",
         },
         planMarkdown:
-          "# Imaginary Long-Range Plan: T3 Code Adaptive Orchestration and Safe-Delay Execution Initiative",
+          "# Imaginary Long-Range Plan: KamiCode Adaptive Orchestration and Safe-Delay Execution Initiative",
       }),
     });
 
@@ -5881,7 +5881,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
           model: "gpt-5.3-codex-spark",
         },
         planMarkdown:
-          "# Imaginary Long-Range Plan: T3 Code Adaptive Orchestration and Safe-Delay Execution Initiative",
+          "# Imaginary Long-Range Plan: KamiCode Adaptive Orchestration and Safe-Delay Execution Initiative",
       }),
     });
 
@@ -5986,6 +5986,110 @@ describe("ChatView timeline estimator parity (full app)", () => {
         expect(searchInput).not.toBeNull();
         expect(document.activeElement).toBe(searchInput);
       });
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("sends the next turn with a switched same-provider auth instance on an existing thread", async () => {
+    const codexBackupInstanceId = ProviderInstanceId.make("codex_backup");
+    const snapshot = createSnapshotForTargetUser({
+      targetMessageId: "msg-user-auth-switch-target" as MessageId,
+      targetText: "auth switch thread",
+    });
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot,
+      configureFixture: (nextFixture) => {
+        nextFixture.serverConfig = {
+          ...nextFixture.serverConfig,
+          providers: [
+            {
+              ...nextFixture.serverConfig.providers[0]!,
+              displayName: "Codex Work",
+              continuation: { groupKey: "codex:home:/Users/julius/.codex" },
+              models: [
+                {
+                  slug: "gpt-work",
+                  name: "GPT Work",
+                  isCustom: false,
+                  capabilities: createModelCapabilities({ optionDescriptors: [] }),
+                },
+              ],
+            },
+            {
+              ...nextFixture.serverConfig.providers[0]!,
+              instanceId: codexBackupInstanceId,
+              displayName: "Codex Backup",
+              continuation: { groupKey: "codex:home:/Users/julius/.codex-backup" },
+              models: [
+                {
+                  slug: "gpt-backup",
+                  name: "GPT Backup",
+                  isCustom: false,
+                  capabilities: createModelCapabilities({ optionDescriptors: [] }),
+                },
+              ],
+            },
+          ],
+        };
+      },
+      resolveRpc: (body) => {
+        if (body._tag === ORCHESTRATION_WS_METHODS.dispatchCommand) {
+          return {
+            sequence: fixture.snapshot.snapshotSequence + 1,
+          };
+        }
+        return undefined;
+      },
+    });
+
+    try {
+      await waitForServerConfigToApply();
+      await waitForComposerEditor();
+
+      const picker = await waitForElement(
+        findComposerProviderModelPicker,
+        "Unable to find provider model picker.",
+      );
+      await picker.click();
+
+      await vi.waitFor(() => {
+        expect(document.querySelector(".model-picker-list")).not.toBeNull();
+        expect(
+          document.querySelector('[data-model-picker-provider="codex_backup"]'),
+        ).not.toBeNull();
+      });
+
+      await page.getByRole("button", { name: "Codex Backup" }).click();
+      await page.getByText("GPT Backup").click();
+
+      useComposerDraftStore.getState().setPrompt(THREAD_REF, "continue on backup auth");
+      await waitForLayout();
+
+      const sendButton = await waitForSendButton();
+      expect(sendButton.disabled).toBe(false);
+      await sendButton.click();
+
+      await vi.waitFor(
+        () => {
+          const turnStartRequest = wsRequests.find(
+            (request) =>
+              request._tag === ORCHESTRATION_WS_METHODS.dispatchCommand &&
+              request.type === "thread.turn.start",
+          ) as
+            | {
+                modelSelection?: { instanceId?: string; model?: string };
+              }
+            | undefined;
+
+          expect(turnStartRequest?.modelSelection).toMatchObject({
+            instanceId: codexBackupInstanceId,
+            model: "gpt-backup",
+          });
+        },
+        { timeout: 8_000, interval: 16 },
+      );
     } finally {
       await mounted.cleanup();
     }

@@ -28,7 +28,6 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
   activeInstanceId: ProviderInstanceId;
   model: string;
   lockedProvider: ProviderDriverKind | null;
-  lockedContinuationGroupKey?: string | null;
   /** Instance entries rendered in the sidebar + used to resolve display name. */
   instanceEntries: ReadonlyArray<ProviderInstanceEntry>;
   keybindings?: ResolvedKeybindingsConfig;
@@ -173,7 +172,6 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
           activeInstanceId={activeInstanceId}
           model={props.model}
           lockedProvider={props.lockedProvider}
-          lockedContinuationGroupKey={props.lockedContinuationGroupKey ?? null}
           instanceEntries={props.instanceEntries}
           {...(props.keybindings ? { keybindings: props.keybindings } : {})}
           modelOptionsByInstance={props.modelOptionsByInstance}
