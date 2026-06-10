@@ -96,6 +96,7 @@ export default Effect.gen(function* () {
       visibility TEXT NOT NULL,
       code_state_json TEXT NOT NULL,
       messages_json TEXT NOT NULL,
+      session_snapshot_json TEXT,
       last_runtime_id TEXT,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,

@@ -602,6 +602,38 @@ describe("addSavedEnvironment", () => {
     await resetEnvironmentServiceForTests();
   });
 
+  it("passes a one-time desktop ssh password without storing it in saved metadata", async () => {
+    mockWriteSavedEnvironmentBearerToken.mockResolvedValue(true);
+
+    const { connectDesktopSshEnvironment, resetEnvironmentServiceForTests } =
+      await import("./service");
+
+    await connectDesktopSshEnvironment(
+      {
+        alias: "devbox",
+        hostname: "devbox",
+        username: null,
+        port: null,
+      },
+      { password: "ssh-secret" },
+    );
+
+    expect(mockEnsureSshEnvironment).toHaveBeenCalledWith(
+      {
+        alias: "devbox",
+        hostname: "devbox",
+        username: null,
+        port: null,
+      },
+      { issuePairingToken: true, password: "ssh-secret" },
+    );
+    expect(JSON.stringify(mockPersistSavedEnvironmentRecord.mock.calls)).not.toContain(
+      "ssh-secret",
+    );
+
+    await resetEnvironmentServiceForTests();
+  });
+
   it("disconnects the desktop ssh process before removing a saved ssh environment", async () => {
     mockSavedRecords = [
       {

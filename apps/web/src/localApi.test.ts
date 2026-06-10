@@ -196,6 +196,9 @@ function makeDesktopBridge(overrides: Partial<DesktopBridge> = {}): DesktopBridg
     issueSshWebSocketToken: async () => {
       throw new Error("issueSshWebSocketToken not implemented in test");
     },
+    deployCollabServer: async () => {
+      throw new Error("deployCollabServer not implemented in test");
+    },
     onSshPasswordPrompt: () => () => undefined,
     resolveSshPasswordPrompt: async () => undefined,
     getServerExposureState: async () => ({

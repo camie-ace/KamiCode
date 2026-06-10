@@ -336,7 +336,7 @@ export function resolveRemoteT3CliPackageSpec(input: {
   }
 
   if (input.isDevelopment) {
-    return "t3@nightly";
+    return input.updateChannel === "nightly" ? "t3@nightly" : "t3@latest";
   }
 
   return input.updateChannel === "nightly" ? "t3@nightly" : "t3@latest";

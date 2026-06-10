@@ -12,6 +12,8 @@ import * as String from "effect/String";
 import { Command, Flag } from "effect/unstable/cli";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
+import { isDirectlyExecuted } from "./lib/node-main.ts";
+
 const ReleaseChannel = Schema.Literals(["stable", "nightly"]);
 type ReleaseChannel = typeof ReleaseChannel.Type;
 
@@ -210,7 +212,7 @@ const command = Command.make(
     ),
 ).pipe(Command.withDescription("Resolve the previous release tag for a stable or nightly series."));
 
-if (import.meta.main) {
+if (isDirectlyExecuted(import.meta.url)) {
   Command.run(command, { version: "0.0.0" }).pipe(
     Effect.scoped,
     Effect.provide(NodeServices.layer),

@@ -1,7 +1,7 @@
 import {
-  AuthBearerBootstrapResult,
-  AuthSessionState,
-  AuthWebSocketTokenResult,
+  AuthBearerBootstrapResultJson,
+  AuthSessionStateJson,
+  AuthWebSocketTokenResultJson,
   type AuthBearerBootstrapResult as AuthBearerBootstrapResultType,
   type AuthSessionState as AuthSessionStateType,
   type AuthWebSocketTokenResult as AuthWebSocketTokenResultType,
@@ -28,7 +28,17 @@ export class DesktopSshRemoteApiError extends Data.TaggedError("DesktopSshRemote
   readonly cause: SshHttpBridgeError | Schema.SchemaError;
 }> {
   override get message() {
-    return `SSH remote API request failed during ${this.operation}.`;
+    const rawCauseMessage =
+      typeof this.cause === "object" &&
+      this.cause !== null &&
+      "message" in this.cause &&
+      typeof this.cause.message === "string"
+        ? this.cause.message
+        : "";
+    const detail = rawCauseMessage.trim().length > 0 ? rawCauseMessage.trim() : null;
+    return detail
+      ? `SSH remote API request failed during ${this.operation}: ${detail}`
+      : `SSH remote API request failed during ${this.operation}.`;
   }
 }
 
@@ -58,9 +68,9 @@ export class DesktopSshRemoteApi extends Context.Service<
 const decodeExecutionEnvironmentDescriptor = Schema.decodeUnknownEffect(
   ExecutionEnvironmentDescriptor,
 );
-const decodeAuthBearerBootstrapResult = Schema.decodeUnknownEffect(AuthBearerBootstrapResult);
-const decodeAuthSessionState = Schema.decodeUnknownEffect(AuthSessionState);
-const decodeAuthWebSocketTokenResult = Schema.decodeUnknownEffect(AuthWebSocketTokenResult);
+const decodeAuthBearerBootstrapResult = Schema.decodeUnknownEffect(AuthBearerBootstrapResultJson);
+const decodeAuthSessionState = Schema.decodeUnknownEffect(AuthSessionStateJson);
+const decodeAuthWebSocketTokenResult = Schema.decodeUnknownEffect(AuthWebSocketTokenResultJson);
 
 const mapError =
   (operation: DesktopSshRemoteApiOperation) =>

@@ -6,6 +6,7 @@ import {
   FolderPlusIcon,
   SearchIcon,
   SettingsIcon,
+  Share2Icon,
   SquarePenIcon,
   TerminalIcon,
   TriangleAlertIcon,
@@ -158,6 +159,12 @@ import {
 import { useThreadSelectionStore } from "../threadSelectionStore";
 import { useCommandPaletteStore } from "../commandPaletteStore";
 import {
+  fetchSharedProjectDetail,
+  listSharedProjects,
+  publishLocalProject,
+  publishSharedThread,
+} from "../sharedProjectsApi";
+import {
   getSidebarThreadIdsToPrewarm,
   resolveAdjacentThreadId,
   isContextMenuPointerDown,
@@ -197,6 +204,11 @@ import {
   type SidebarProjectSnapshot,
 } from "../sidebarProjectGrouping";
 import { SidebarProviderUpdatePill } from "./sidebar/SidebarProviderUpdatePill";
+import {
+  loadThreadDetailForSharing,
+  toSharedSessionSnapshot,
+  toSharedThreadMessages,
+} from "../sharedSessionSnapshot";
 const SIDEBAR_SORT_LABELS: Record<SidebarProjectSortOrder, string> = {
   updated_at: "Last user message",
   created_at: "Created at",
@@ -310,6 +322,8 @@ interface SidebarThreadRowProps {
   ) => Promise<void>;
   cancelRename: () => void;
   attemptArchiveThread: (threadRef: ScopedThreadRef) => Promise<void>;
+  shareThread: (threadRef: ScopedThreadRef) => Promise<void>;
+  pendingShareThreadKey: string | null;
   openPrLink: (event: React.MouseEvent<HTMLElement>, prUrl: string) => void;
 }
 
@@ -335,6 +349,8 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
     commitRename,
     cancelRename,
     attemptArchiveThread,
+    shareThread,
+    pendingShareThreadKey,
     openPrLink,
     thread,
   } = props;
@@ -377,6 +393,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
   const isHighlighted = isActive || isSelected;
   const isThreadRunning =
     thread.session?.status === "running" && thread.session.activeTurnId != null;
+  const isSharingThread = pendingShareThreadKey === threadKey;
   const threadStatus = resolveThreadStatusPill({
     thread: {
       ...thread,
@@ -536,6 +553,14 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
     },
     [attemptArchiveThread, threadRef],
   );
+  const handleShareClick = useCallback(
+    (event: React.MouseEvent<HTMLButtonElement>) => {
+      event.preventDefault();
+      event.stopPropagation();
+      void shareThread(threadRef);
+    },
+    [shareThread, threadRef],
+  );
   const rowButtonRender = useMemo(() => <div role="button" tabIndex={0} />, []);
 
   return (
@@ -634,44 +659,75 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
               >
                 Confirm
               </button>
-            ) : !isThreadRunning ? (
-              appSettingsConfirmThreadArchive ? (
-                <div className="pointer-events-none absolute top-1/2 right-1 -translate-y-1/2 opacity-0 transition-opacity duration-150 max-sm:pointer-events-auto max-sm:opacity-100 group-hover/menu-sub-item:pointer-events-auto group-hover/menu-sub-item:opacity-100 group-focus-within/menu-sub-item:pointer-events-auto group-focus-within/menu-sub-item:opacity-100">
-                  <button
-                    type="button"
-                    data-thread-selection-safe
-                    data-testid={`thread-archive-${thread.id}`}
-                    aria-label={`Archive ${thread.title}`}
-                    className="inline-flex size-5 cursor-pointer items-center justify-center text-muted-foreground/60 transition-colors hover:text-foreground focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
-                    onPointerDown={stopPropagationOnPointerDown}
-                    onClick={handleStartArchiveConfirmation}
-                  >
-                    <ArchiveIcon className="size-3.5" />
-                  </button>
-                </div>
-              ) : (
+            ) : (
+              <>
                 <Tooltip>
                   <TooltipTrigger
                     render={
-                      <div className="pointer-events-none absolute top-1/2 right-1 -translate-y-1/2 opacity-0 transition-opacity duration-150 max-sm:pointer-events-auto max-sm:opacity-100 group-hover/menu-sub-item:pointer-events-auto group-hover/menu-sub-item:opacity-100 group-focus-within/menu-sub-item:pointer-events-auto group-focus-within/menu-sub-item:opacity-100">
+                      <div
+                        className={`pointer-events-none absolute top-1/2 ${
+                          isThreadRunning ? "right-1" : "right-7"
+                        } -translate-y-1/2 opacity-0 transition-opacity duration-150 max-sm:pointer-events-auto max-sm:opacity-100 group-hover/menu-sub-item:pointer-events-auto group-hover/menu-sub-item:opacity-100 group-focus-within/menu-sub-item:pointer-events-auto group-focus-within/menu-sub-item:opacity-100`}
+                      >
                         <button
                           type="button"
                           data-thread-selection-safe
-                          data-testid={`thread-archive-${thread.id}`}
-                          aria-label={`Archive ${thread.title}`}
-                          className="inline-flex size-5 cursor-pointer items-center justify-center text-muted-foreground/60 transition-colors hover:text-foreground focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
+                          data-testid={`thread-share-${thread.id}`}
+                          aria-label={`Share session ${thread.title}`}
+                          disabled={isSharingThread}
+                          className="inline-flex size-5 cursor-pointer items-center justify-center text-muted-foreground/60 transition-colors hover:text-foreground disabled:cursor-wait disabled:opacity-60 focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
                           onPointerDown={stopPropagationOnPointerDown}
-                          onClick={handleArchiveImmediateClick}
+                          onClick={handleShareClick}
                         >
-                          <ArchiveIcon className="size-3.5" />
+                          <Share2Icon
+                            className={`size-3.5 ${isSharingThread ? "animate-pulse" : ""}`}
+                          />
                         </button>
                       </div>
                     }
                   />
-                  <TooltipPopup side="top">Archive</TooltipPopup>
+                  <TooltipPopup side="top">
+                    {isSharingThread ? "Sharing session..." : "Share session"}
+                  </TooltipPopup>
                 </Tooltip>
-              )
-            ) : null}
+                {!isThreadRunning && appSettingsConfirmThreadArchive ? (
+                  <div className="pointer-events-none absolute top-1/2 right-1 -translate-y-1/2 opacity-0 transition-opacity duration-150 max-sm:pointer-events-auto max-sm:opacity-100 group-hover/menu-sub-item:pointer-events-auto group-hover/menu-sub-item:opacity-100 group-focus-within/menu-sub-item:pointer-events-auto group-focus-within/menu-sub-item:opacity-100">
+                    <button
+                      type="button"
+                      data-thread-selection-safe
+                      data-testid={`thread-archive-${thread.id}`}
+                      aria-label={`Archive ${thread.title}`}
+                      className="inline-flex size-5 cursor-pointer items-center justify-center text-muted-foreground/60 transition-colors hover:text-foreground focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
+                      onPointerDown={stopPropagationOnPointerDown}
+                      onClick={handleStartArchiveConfirmation}
+                    >
+                      <ArchiveIcon className="size-3.5" />
+                    </button>
+                  </div>
+                ) : !isThreadRunning ? (
+                  <Tooltip>
+                    <TooltipTrigger
+                      render={
+                        <div className="pointer-events-none absolute top-1/2 right-1 -translate-y-1/2 opacity-0 transition-opacity duration-150 max-sm:pointer-events-auto max-sm:opacity-100 group-hover/menu-sub-item:pointer-events-auto group-hover/menu-sub-item:opacity-100 group-focus-within/menu-sub-item:pointer-events-auto group-focus-within/menu-sub-item:opacity-100">
+                          <button
+                            type="button"
+                            data-thread-selection-safe
+                            data-testid={`thread-archive-${thread.id}`}
+                            aria-label={`Archive ${thread.title}`}
+                            className="inline-flex size-5 cursor-pointer items-center justify-center text-muted-foreground/60 transition-colors hover:text-foreground focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
+                            onPointerDown={stopPropagationOnPointerDown}
+                            onClick={handleArchiveImmediateClick}
+                          >
+                            <ArchiveIcon className="size-3.5" />
+                          </button>
+                        </div>
+                      }
+                    />
+                    <TooltipPopup side="top">Archive</TooltipPopup>
+                  </Tooltip>
+                ) : null}
+              </>
+            )}
             <span className={threadMetaClassName}>
               <span className="inline-flex items-center gap-1">
                 {isRemoteThread && (
@@ -760,6 +816,8 @@ interface SidebarProjectThreadListProps {
   ) => Promise<void>;
   cancelRename: () => void;
   attemptArchiveThread: (threadRef: ScopedThreadRef) => Promise<void>;
+  shareThread: (threadRef: ScopedThreadRef) => Promise<void>;
+  pendingShareThreadKey: string | null;
   openPrLink: (event: React.MouseEvent<HTMLElement>, prUrl: string) => void;
   expandThreadListForProject: (projectKey: string) => void;
   collapseThreadListForProject: (projectKey: string) => void;
@@ -799,6 +857,8 @@ const SidebarProjectThreadList = memo(function SidebarProjectThreadList(
     commitRename,
     cancelRename,
     attemptArchiveThread,
+    shareThread,
+    pendingShareThreadKey,
     openPrLink,
     expandThreadListForProject,
     collapseThreadListForProject,
@@ -849,6 +909,8 @@ const SidebarProjectThreadList = memo(function SidebarProjectThreadList(
               commitRename={commitRename}
               cancelRename={cancelRename}
               attemptArchiveThread={attemptArchiveThread}
+              shareThread={shareThread}
+              pendingShareThreadKey={pendingShareThreadKey}
               openPrLink={openPrLink}
             />
           );
@@ -1059,6 +1121,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
   const [renamingThreadKey, setRenamingThreadKey] = useState<string | null>(null);
   const [renamingTitle, setRenamingTitle] = useState("");
   const [confirmingArchiveThreadKey, setConfirmingArchiveThreadKey] = useState<string | null>(null);
+  const [pendingShareThreadKey, setPendingShareThreadKey] = useState<string | null>(null);
   const [projectRenameTarget, setProjectRenameTarget] = useState<SidebarProjectGroupMember | null>(
     null,
   );
@@ -1080,6 +1143,83 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
         ]),
       ),
     [project.memberProjects],
+  );
+  const shareThread = useCallback(
+    async (threadRef: ScopedThreadRef) => {
+      const threadKey = scopedThreadKey(threadRef);
+      if (pendingShareThreadKey !== null) {
+        return;
+      }
+      setPendingShareThreadKey(threadKey);
+
+      try {
+        const threadSummary = sidebarThreadByKeyRef.current.get(threadKey);
+        if (!threadSummary) {
+          throw new Error("Session was not found in the sidebar.");
+        }
+
+        const projectMember = memberProjectByScopedKey.get(
+          scopedProjectKey(scopeProjectRef(threadSummary.environmentId, threadSummary.projectId)),
+        );
+        if (!projectMember) {
+          throw new Error("Project for this session was not found.");
+        }
+
+        const threadDetail = await loadThreadDetailForSharing(threadRef);
+        const sharedProjects = await listSharedProjects();
+        const existingSharedProject =
+          sharedProjects.projects.find((entry) => entry.sourceProjectId === projectMember.id) ??
+          null;
+        const sharedProjectDetail = existingSharedProject
+          ? await fetchSharedProjectDetail(existingSharedProject.id)
+          : await publishLocalProject({
+              sourceProjectId: projectMember.id,
+              name: projectMember.name,
+              cwd: projectMember.cwd,
+            });
+        const existingSharedThread =
+          sharedProjectDetail.threads.find((entry) => entry.localThreadId === threadDetail.id) ??
+          null;
+        const sessionSnapshot = toSharedSessionSnapshot(
+          threadDetail,
+          sharedProjectDetail.project.repository,
+        );
+
+        await publishSharedThread({
+          projectId: sharedProjectDetail.project.id,
+          localThreadId: threadDetail.id,
+          title: threadDetail.title,
+          visibility: "shared",
+          codeState: {
+            branch: threadDetail.branch ?? sharedProjectDetail.project.repository.currentBranch,
+            headSha: sharedProjectDetail.project.repository.headSha,
+            dirty: sharedProjectDetail.project.repository.dirty,
+            patchAttached: false,
+          },
+          messages: toSharedThreadMessages(threadDetail),
+          sessionSnapshot,
+        });
+
+        toastManager.add({
+          type: "success",
+          title: existingSharedThread ? "Session sharing updated" : "Session shared",
+          description: existingSharedProject
+            ? `${threadDetail.title} is shared in ${sharedProjectDetail.project.name}.`
+            : `Project sharing was enabled, then ${threadDetail.title} was shared.`,
+        });
+      } catch (error) {
+        toastManager.add(
+          stackedThreadToast({
+            type: "error",
+            title: "Failed to share session",
+            description: error instanceof Error ? error.message : "An error occurred.",
+          }),
+        );
+      } finally {
+        setPendingShareThreadKey((current) => (current === threadKey ? null : current));
+      }
+    },
+    [memberProjectByScopedKey, pendingShareThreadKey],
   );
   const memberThreadCountByPhysicalKey = useMemo(() => {
     const counts = new Map<string, number>(
@@ -2103,6 +2243,8 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
         commitRename={commitRename}
         cancelRename={cancelRename}
         attemptArchiveThread={attemptArchiveThread}
+        shareThread={shareThread}
+        pendingShareThreadKey={pendingShareThreadKey}
         openPrLink={openPrLink}
         expandThreadListForProject={expandThreadListForProject}
         collapseThreadListForProject={collapseThreadListForProject}

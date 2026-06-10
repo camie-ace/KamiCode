@@ -2,9 +2,14 @@ import type {
   AppendSharedThreadMessageInput,
   ClaimSharedProjectInviteInput,
   CreateSharedProjectInviteInput,
+  DeleteSharedProjectInput,
+  DeleteSharedProjectResult,
+  ImportSharedThreadInput,
+  ImportSharedThreadResult,
   PublishLocalProjectInput,
   PublishSharedThreadInput,
   RemoveSharedProjectMemberInput,
+  RemoveSharedSshCredentialInput,
   SetSharedDefaultEnvironmentInput,
   SharedProjectBootstrapManifest,
   SharedProjectClaimResult,
@@ -14,6 +19,7 @@ import type {
   SharedProjectId,
   SharedProjectInvite,
   SharedProjectListResult,
+  SharedProjectSshCredential,
   SharedRuntime,
   SharedThread,
   SyncSharedProjectContextInput,
@@ -23,6 +29,7 @@ import type {
   UpsertSharedDeployAssociationInput,
   UpsertSharedEnvironmentInput,
   UpsertSharedRuntimeInput,
+  UpsertSharedSshCredentialInput,
 } from "@t3tools/contracts";
 
 import { resolvePrimaryEnvironmentHttpUrl } from "./environments/primary/target";
@@ -126,6 +133,12 @@ export function removeSharedProjectMember(
   return sharedProjectPost("/api/shared-projects/members/remove", input);
 }
 
+export function deleteSharedProject(
+  input: DeleteSharedProjectInput,
+): Promise<DeleteSharedProjectResult> {
+  return sharedProjectPost("/api/shared-projects/delete", input);
+}
+
 export function publishSharedThread(input: PublishSharedThreadInput): Promise<SharedThread> {
   return sharedProjectPost("/api/shared-projects/threads/publish", input);
 }
@@ -136,6 +149,12 @@ export function updateSharedThreadVisibility(
   return sharedProjectPost("/api/shared-projects/threads/visibility", input);
 }
 
+export function importSharedThread(
+  input: ImportSharedThreadInput,
+): Promise<ImportSharedThreadResult> {
+  return sharedProjectPost("/api/shared-projects/threads/import", input);
+}
+
 export function appendSharedThreadMessage(
   input: AppendSharedThreadMessageInput,
 ): Promise<SharedThread> {
@@ -144,6 +163,18 @@ export function appendSharedThreadMessage(
 
 export function upsertSharedRuntime(input: UpsertSharedRuntimeInput): Promise<SharedRuntime> {
   return sharedProjectPost("/api/shared-projects/runtimes", input);
+}
+
+export function upsertSharedSshCredential(
+  input: UpsertSharedSshCredentialInput,
+): Promise<SharedProjectSshCredential> {
+  return sharedProjectPost("/api/shared-projects/ssh-credentials", input);
+}
+
+export function removeSharedSshCredential(
+  input: RemoveSharedSshCredentialInput,
+): Promise<SharedProjectDetail> {
+  return sharedProjectPost("/api/shared-projects/ssh-credentials/remove", input);
 }
 
 export function upsertSharedEnvironment(

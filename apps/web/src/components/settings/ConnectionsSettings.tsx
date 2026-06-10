@@ -256,6 +256,36 @@ function parseManualDesktopSshTarget(input: {
   };
 }
 
+function mergeManualSshFieldsIntoDiscoveredTarget<T extends DesktopSshEnvironmentTarget>(
+  target: T,
+  input: {
+    readonly host: string;
+    readonly username: string;
+    readonly port: string;
+  },
+): T {
+  if (input.host.trim().length === 0) {
+    return target;
+  }
+
+  const manualTarget = parseManualDesktopSshTarget(input);
+  const manualMatchesDiscoveredHost =
+    manualTarget.hostname === target.hostname ||
+    manualTarget.hostname === target.alias ||
+    manualTarget.alias === target.hostname ||
+    manualTarget.alias === target.alias;
+
+  if (!manualMatchesDiscoveredHost) {
+    return target;
+  }
+
+  return {
+    ...target,
+    username: manualTarget.username ?? target.username,
+    port: manualTarget.port ?? target.port,
+  };
+}
+
 function parsePairingUrlFields(
   input: string,
 ): { readonly host: string; readonly pairingCode: string } | null {
@@ -309,10 +339,13 @@ function formatDesktopSshConnectionError(error: unknown): string {
   const fallback = "Failed to connect SSH host.";
   const rawMessage = error instanceof Error ? error.message : fallback;
   const withoutIpcPrefix = rawMessage.replace(
-    /^Error invoking remote method 'desktop:ensure-ssh-environment':\s*/u,
+    /^Error invoking remote method 'desktop:(?:ensure-ssh-environment|bootstrap-ssh-bearer-session)':\s*/u,
     "",
   );
-  const withoutTaggedErrorPrefix = withoutIpcPrefix.replace(/^Ssh[A-Za-z]+Error:\s*/u, "");
+  const withoutTaggedErrorPrefix = withoutIpcPrefix.replace(
+    /^(?:Ssh|DesktopSsh)[A-Za-z]+Error:\s*/u,
+    "",
+  );
   return withoutTaggedErrorPrefix.trim() || fallback;
 }
 
@@ -1470,6 +1503,7 @@ export function ConnectionsSettings() {
   const [savedBackendSshHost, setSavedBackendSshHost] = useState("");
   const [savedBackendSshUsername, setSavedBackendSshUsername] = useState("");
   const [savedBackendSshPort, setSavedBackendSshPort] = useState("");
+  const [savedBackendSshPassword, setSavedBackendSshPassword] = useState("");
   const [savedBackendError, setSavedBackendError] = useState<string | null>(null);
   const [isAddingSavedBackend, setIsAddingSavedBackend] = useState(false);
   const unsavedDiscoveredSshHosts = useMemo(
@@ -1719,12 +1753,16 @@ export function ConnectionsSettings() {
           username: savedBackendSshUsername,
           port: savedBackendSshPort,
         });
-        const record = await connectDesktopSshEnvironment(target, { label: "" });
+        const record = await connectDesktopSshEnvironment(target, {
+          label: "",
+          ...(savedBackendSshPassword.length > 0 ? { password: savedBackendSshPassword } : {}),
+        });
         setSavedBackendHost("");
         setSavedBackendPairingCode("");
         setSavedBackendSshHost("");
         setSavedBackendSshUsername("");
         setSavedBackendSshPort("");
+        setSavedBackendSshPassword("");
 
         setAddBackendDialogOpen(false);
         toastManager.add({
@@ -1757,6 +1795,7 @@ export function ConnectionsSettings() {
       setSavedBackendSshHost("");
       setSavedBackendSshUsername("");
       setSavedBackendSshPort("");
+      setSavedBackendSshPassword("");
       setAddBackendDialogOpen(false);
       toastManager.add({
         type: "success",
@@ -1781,6 +1820,7 @@ export function ConnectionsSettings() {
     savedBackendMode,
     savedBackendPairingCode,
     savedBackendSshHost,
+    savedBackendSshPassword,
     savedBackendSshPort,
     savedBackendSshUsername,
   ]);
@@ -1877,13 +1917,29 @@ export function ConnectionsSettings() {
         setDiscoveredSshHostsError(null);
       }
       try {
-        const record = await connectDesktopSshEnvironment(
-          target,
-          label === undefined ? undefined : { label },
-        );
+        const passwordOptions =
+          savedBackendMode === "ssh" && savedBackendSshPassword.length > 0
+            ? { password: savedBackendSshPassword }
+            : null;
+        const connectOptions =
+          label === undefined
+            ? (passwordOptions ?? undefined)
+            : passwordOptions === null
+              ? { label }
+              : { label, ...passwordOptions };
+        const resolvedTarget =
+          savedBackendMode === "ssh"
+            ? mergeManualSshFieldsIntoDiscoveredTarget(target, {
+                host: savedBackendSshHost,
+                username: savedBackendSshUsername,
+                port: savedBackendSshPort,
+              })
+            : target;
+        const record = await connectDesktopSshEnvironment(resolvedTarget, connectOptions);
         setSavedBackendSshHost("");
         setSavedBackendSshUsername("");
         setSavedBackendSshPort("");
+        setSavedBackendSshPassword("");
         setAddBackendDialogOpen(false);
         toastManager.add({
           type: "success",
@@ -1903,7 +1959,14 @@ export function ConnectionsSettings() {
         setConnectingSshHostAlias(null);
       }
     },
-    [savedBackendMode, savedDesktopSshEnvironmentsByAlias],
+    [
+      savedBackendMode,
+      savedBackendSshHost,
+      savedBackendSshPassword,
+      savedBackendSshPort,
+      savedBackendSshUsername,
+      savedDesktopSshEnvironmentsByAlias,
+    ],
   );
 
   useEffect(() => {
@@ -2242,6 +2305,21 @@ export function ConnectionsSettings() {
             />
           </label>
         </div>
+        <label className="block">
+          <span className="mb-1.5 block text-xs font-medium text-foreground">Password</span>
+          <Input
+            value={savedBackendSshPassword}
+            onChange={(event) => setSavedBackendSshPassword(event.target.value)}
+            placeholder="Used once, not saved"
+            type="password"
+            autoComplete="current-password"
+            disabled={isAddingSavedBackend}
+            spellCheck={false}
+          />
+          <span className="mt-1 block text-[11px] text-muted-foreground">
+            Optional. This is passed to SSH for this connection attempt only.
+          </span>
+        </label>
         {savedBackendError || discoveredSshHostsError ? (
           <div className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
             {savedBackendError ?? discoveredSshHostsError}

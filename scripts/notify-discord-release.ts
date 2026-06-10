@@ -17,6 +17,8 @@ import {
   HttpClientResponse,
 } from "effect/unstable/http";
 
+import { isDirectlyExecuted } from "./lib/node-main.ts";
+
 export type DiscordReleaseTarget = "prerelease" | "latest";
 
 interface DiscordReleaseAnnouncementOptions {
@@ -226,7 +228,7 @@ export const notifyDiscordReleaseCommand = Command.make(
     }),
 ).pipe(Command.withDescription("Post a T3 Code release announcement to Discord."));
 
-if (import.meta.main) {
+if (isDirectlyExecuted(import.meta.url)) {
   Command.run(notifyDiscordReleaseCommand, { version: "0.0.0" }).pipe(
     Effect.provide(
       Layer.mergeAll(

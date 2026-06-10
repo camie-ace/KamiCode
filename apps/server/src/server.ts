@@ -95,11 +95,14 @@ import {
   sharedProjectsClaimInviteRouteLayer,
   sharedProjectsCreateInviteRouteLayer,
   sharedProjectsCurrentUserRouteLayer,
+  sharedProjectsDeleteRouteLayer,
   sharedProjectsDetailRouteLayer,
+  sharedProjectsImportThreadRouteLayer,
   sharedProjectsListRouteLayer,
   sharedProjectsPublishRouteLayer,
   sharedProjectsPublishThreadRouteLayer,
   sharedProjectsRemoveMemberRouteLayer,
+  sharedProjectsRemoveSshCredentialRouteLayer,
   sharedProjectsSetDefaultEnvironmentRouteLayer,
   sharedProjectsSyncContextRouteLayer,
   sharedProjectsSyncRemoteRuntimeRouteLayer,
@@ -108,6 +111,7 @@ import {
   sharedProjectsUpsertDeployRouteLayer,
   sharedProjectsUpsertEnvironmentRouteLayer,
   sharedProjectsUpsertRuntimeRouteLayer,
+  sharedProjectsUpsertSshCredentialRouteLayer,
 } from "./sharedProjects/http.ts";
 import * as ProcessDiagnostics from "./diagnostics/ProcessDiagnostics.ts";
 import * as ProcessResourceMonitor from "./diagnostics/ProcessResourceMonitor.ts";
@@ -279,6 +283,7 @@ const UserAuthLayerLive = UserAuthLive.pipe(
 const SharedProjectsLayerLive = SharedProjectsLive.pipe(
   Layer.provideMerge(PersistenceLayerLive),
   Layer.provideMerge(RepositoryIdentityResolverLive),
+  Layer.provide(ServerSecretStoreLive),
 );
 
 const ProviderRuntimeLayerLive = ProviderSessionReaperLive.pipe(
@@ -367,10 +372,14 @@ export const makeRoutesLayer = Layer.mergeAll(
   sharedProjectsClaimInviteRouteLayer,
   sharedProjectsUpdateMemberRoleRouteLayer,
   sharedProjectsRemoveMemberRouteLayer,
+  sharedProjectsDeleteRouteLayer,
   sharedProjectsPublishThreadRouteLayer,
   sharedProjectsUpdateThreadVisibilityRouteLayer,
+  sharedProjectsImportThreadRouteLayer,
   sharedProjectsAppendThreadMessageRouteLayer,
   sharedProjectsUpsertRuntimeRouteLayer,
+  sharedProjectsUpsertSshCredentialRouteLayer,
+  sharedProjectsRemoveSshCredentialRouteLayer,
   sharedProjectsUpsertEnvironmentRouteLayer,
   sharedProjectsSetDefaultEnvironmentRouteLayer,
   sharedProjectsUpsertDeployRouteLayer,

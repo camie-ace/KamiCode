@@ -1,3 +1,5 @@
+import { pathToFileURL } from "node:url";
+
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as Effect from "effect/Effect";
@@ -20,7 +22,11 @@ export const cli = Command.make("t3", { ...sharedServerCommandFlags }).pipe(
   Command.withSubcommands([startCommand, serveCommand, authCommand, projectCommand, testCommand]),
 );
 
-if (import.meta.main) {
+const isDirectlyExecuted = process.argv[1]
+  ? import.meta.url === pathToFileURL(process.argv[1]).href
+  : false;
+
+if (isDirectlyExecuted) {
   Command.run(cli, { version: packageJson.version }).pipe(
     Effect.scoped,
     Effect.provide(CliRuntimeLayer),

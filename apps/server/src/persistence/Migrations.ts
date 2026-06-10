@@ -47,6 +47,8 @@ import Migration0031 from "./Migrations/031_ProjectionProjectTestEnvironments.ts
 import Migration0032 from "./Migrations/032_UserAuth.ts";
 import Migration0033 from "./Migrations/033_ProjectionTurnQueue.ts";
 import Migration0034 from "./Migrations/034_SharedProjects.ts";
+import Migration0035 from "./Migrations/035_SharedProjectSshCredentials.ts";
+import Migration0036 from "./Migrations/036_SharedSessionSnapshots.ts";
 
 /**
  * Migration loader with all migrations defined inline.
@@ -93,6 +95,8 @@ export const migrationEntries = [
   [32, "UserAuth", Migration0032],
   [33, "ProjectionTurnQueue", Migration0033],
   [34, "SharedProjects", Migration0034],
+  [35, "SharedProjectSshCredentials", Migration0035],
+  [36, "SharedSessionSnapshots", Migration0036],
 ] as const;
 
 export const makeMigrationLoader = (throughId?: number) =>

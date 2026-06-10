@@ -1,0 +1,14 @@
+.git
+.turbo
+node_modules
+apps/*/node_modules
+packages/*/node_modules
+oxlint-plugin-t3code/node_modules
+dist
+apps/*/dist
+apps/*/dist-electron
+packages/*/dist
+*.tsbuildinfo
+.env
+.env.*
+!.env.example

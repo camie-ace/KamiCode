@@ -6,6 +6,7 @@ import serverPackageJson from "../apps/server/package.json" with { type: "json" 
 
 import { BRAND_ASSET_PATHS } from "./lib/brand-assets.ts";
 import { getDefaultBuildArch } from "./lib/build-target-arch.ts";
+import { isDirectlyExecuted } from "./lib/node-main.ts";
 import { resolveCatalogDependencies } from "./lib/resolve-catalog.ts";
 
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
@@ -947,7 +948,7 @@ const buildDesktopArtifactCli = Command.make("build-desktop-artifact", {
 
 const cliRuntimeLayer = Layer.mergeAll(Logger.layer([Logger.consolePretty()]), NodeServices.layer);
 
-if (import.meta.main) {
+if (isDirectlyExecuted(import.meta.url)) {
   Command.run(buildDesktopArtifactCli, { version: "0.0.0" }).pipe(
     Effect.scoped,
     Effect.provide(cliRuntimeLayer),

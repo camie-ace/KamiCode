@@ -17,6 +17,7 @@ import {
 } from "./methods/serverExposure.ts";
 import {
   bootstrapSshBearerSession,
+  deployCollabServer,
   disconnectSshEnvironment,
   discoverSshHosts,
   ensureSshEnvironment,
@@ -63,6 +64,7 @@ export const installDesktopIpcHandlers = Effect.gen(function* () {
   yield* ipc.handle(bootstrapSshBearerSession);
   yield* ipc.handle(fetchSshSessionState);
   yield* ipc.handle(issueSshWebSocketToken);
+  yield* ipc.handle(deployCollabServer);
   yield* ipc.handle(resolveSshPasswordPrompt);
 
   yield* ipc.handle(getServerExposureState);

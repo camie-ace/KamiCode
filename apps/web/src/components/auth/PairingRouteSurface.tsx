@@ -1,5 +1,5 @@
 import type { AuthSessionState } from "@t3tools/contracts";
-import { GithubIcon, Loader2Icon } from "lucide-react";
+import { CheckIcon, CopyIcon, GithubIcon, Loader2Icon } from "lucide-react";
 import React, { startTransition, useEffect, useRef, useState, useCallback } from "react";
 
 import { APP_DISPLAY_NAME } from "../../branding";
@@ -287,15 +287,40 @@ export function HostedPairingRouteSurface() {
 export function GitHubLoginSurface({ errorMessage }: { errorMessage?: string }) {
   const [isStarting, setIsStarting] = useState(false);
   const [startErrorMessage, setStartErrorMessage] = useState("");
+  const [codeCopied, setCodeCopied] = useState(false);
+  const [desktopDeviceCode, setDesktopDeviceCode] = useState<{
+    readonly userCode: string;
+    readonly verificationUri: string;
+  } | null>(null);
 
   const handleStart = useCallback(() => {
     setIsStarting(true);
     setStartErrorMessage("");
-    void startGitHubUserLogin().catch((error: unknown) => {
+    setCodeCopied(false);
+    setDesktopDeviceCode(null);
+    void startGitHubUserLogin({
+      onDesktopDeviceCode: setDesktopDeviceCode,
+    }).catch((error: unknown) => {
       setStartErrorMessage(errorMessageFromUnknown(error));
       setIsStarting(false);
     });
   }, []);
+
+  const copyDesktopDeviceCode = useCallback(() => {
+    if (!desktopDeviceCode) {
+      return;
+    }
+
+    void navigator.clipboard
+      .writeText(desktopDeviceCode.userCode)
+      .then(() => {
+        setCodeCopied(true);
+        window.setTimeout(() => setCodeCopied(false), 1_500);
+      })
+      .catch((error: unknown) => {
+        setStartErrorMessage(errorMessageFromUnknown(error));
+      });
+  }, [desktopDeviceCode]);
 
   return (
     <div className="drag-region relative flex min-h-screen items-center justify-center overflow-hidden bg-background px-4 py-10 text-foreground sm:px-6">
@@ -319,6 +344,32 @@ export function GitHubLoginSurface({ errorMessage }: { errorMessage?: string }) 
         {errorMessage || startErrorMessage ? (
           <div className="mt-5 rounded-lg border border-destructive/30 bg-destructive/6 px-3 py-2 text-sm text-destructive">
             {startErrorMessage || errorMessage}
+          </div>
+        ) : null}
+
+        {desktopDeviceCode ? (
+          <div className="mt-5 rounded-lg border border-border/70 bg-background/55 px-3 py-3 text-sm text-muted-foreground">
+            <div>Enter this code on GitHub:</div>
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <div className="font-mono text-xl font-semibold tracking-widest text-foreground">
+                {desktopDeviceCode.userCode}
+              </div>
+              <Button
+                size="xs"
+                variant="outline"
+                type="button"
+                onClick={copyDesktopDeviceCode}
+                title="Copy code"
+              >
+                {codeCopied ? (
+                  <CheckIcon className="size-3.5" />
+                ) : (
+                  <CopyIcon className="size-3.5" />
+                )}
+                {codeCopied ? "Copied" : "Copy"}
+              </Button>
+            </div>
+            <div className="mt-2 break-all text-xs">{desktopDeviceCode.verificationUri}</div>
           </div>
         ) : null}
 

@@ -1,0 +1,10 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "composite": true,
+    "types": ["node"],
+    "lib": ["ESNext"],
+    "plugins": []
+  },
+  "include": ["src", "tsdown.config.ts"]
+}

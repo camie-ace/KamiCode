@@ -108,7 +108,7 @@ describe("ssh command", () => {
           updateChannel: "latest",
           isDevelopment: true,
         }),
-        "t3@nightly",
+        "t3@latest",
       );
     }),
   );

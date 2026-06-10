@@ -93,16 +93,22 @@ describe("ssh tunnel scripts", () => {
     const script = buildRemoteT3RunnerScript({ nodeEngineRange: TEST_NODE_ENGINE_RANGE });
 
     assert.include(script, "T3_NODE_SCRIPT_PATH=''");
+    assert.include(script, "T3_PACKAGE_SPEC='t3@latest'");
     assert.include(script, 'exec t3 "$@"');
-    assert.include(script, "exec npx --yes 't3@latest' \"$@\"");
-    assert.include(script, "exec npm exec --yes 't3@latest' -- \"$@\"");
-    assert.include(script, "could not install 't3@latest'");
+    assert.include(script, 'T3_RUNNER_CACHE="$HOME/.t3/runner/t3-cli"');
+    assert.include(script, 'T3_CACHED_T3="$T3_RUNNER_CACHE/node_modules/.bin/t3"');
+    assert.include(script, 'exec "$T3_CACHED_T3" "$@"');
+    assert.include(script, 'npm install --prefix "$T3_RUNNER_CACHE"');
+    assert.include(script, 'exec npx --yes "$T3_PACKAGE_SPEC" "$@"');
+    assert.include(script, 'exec npm exec --yes "$T3_PACKAGE_SPEC" -- "$@"');
+    assert.include(script, "could not install %s");
     assert.include(script, 'prepend_path_if_dir "$HOME/.local/bin"');
     assert.include(script, `T3_NODE_ENGINE_RANGE='${TEST_NODE_ENGINE_RANGE}'`);
     assert.include(script, "remote_node_satisfies_engine()");
     assert.include(script, "function satisfiesSemverRange");
     assert.include(script, "satisfiesSemverRange(rawVersion, range)");
     assert.include(script, 'prepend_path_if_dir "$VOLTA_HOME/bin"');
+    assert.include(script, 'prepend_path_if_dir "$HOME/.t3/node/current/bin"');
     assert.include(script, 'prepend_path_if_dir "$HOME/.asdf/shims"');
     assert.include(script, 'prepend_path_if_dir "$HOME/.local/share/mise/shims"');
     assert.include(script, 'eval "$(fnm env --use-on-cd --shell sh)"');
@@ -110,7 +116,23 @@ describe("ssh tunnel scripts", () => {
     assert.include(script, 'NVM_DIR="$HOME/.nvm"');
     assert.include(script, "nvm use --silent default");
     assert.include(script, 'for T3_NODE_BIN in "$NVM_DIR"/versions/node/*/bin');
+    assert.include(script, "install_t3_user_node()");
+    assert.include(script, "https://nodejs.org/dist/latest-v$T3_NODE_MAJOR.x");
+    assert.include(script, 'T3_NODE_HOME="$HOME/.t3/node"');
+    assert.include(script, 'T3_NODE_VERSION="${T3_NODE_TARBALL%%-linux-*}"');
+    assert.include(script, 'T3_NODE_EXTRACTED_DIR="${T3_NODE_TARBALL%.tar.xz}"');
+    assert.include(script, '"$T3_NODE_TMP/$T3_NODE_EXTRACTED_DIR/bin/node"');
+    assert.include(script, "extract_t3_node_archive()");
+    assert.include(script, 'tar -xJf "$T3_EXTRACT_ARCHIVE"');
+    assert.include(script, 'xz -dc "$T3_EXTRACT_ARCHIVE"');
+    assert.include(script, 'tarfile.open(archive_path, "r:xz")');
+    assert.include(script, "KamiCode could not install Node for SSH runtime");
+    assert.include(script, "sha256sum -c -");
     assert.notInclude(script, "ensure $NVM_DIR/nvm.sh is available");
+    assert.isBelow(
+      script.indexOf('T3_RUNNER_CACHE="$HOME/.t3/runner/t3-cli"'),
+      script.indexOf("if command -v t3 >/dev/null 2>&1"),
+    );
   });
 
   it("does not hard-code a remote node engine range", () => {
@@ -125,9 +147,11 @@ describe("ssh tunnel scripts", () => {
       packageSpec: "t3@nightly; touch /tmp/t3-owned",
     });
 
-    assert.include(script, "exec npx --yes 't3@nightly; touch /tmp/t3-owned' \"$@\"");
-    assert.include(script, "exec npm exec --yes 't3@nightly; touch /tmp/t3-owned' -- \"$@\"");
+    assert.include(script, "T3_PACKAGE_SPEC='t3@nightly; touch /tmp/t3-owned'");
+    assert.include(script, 'exec npx --yes "$T3_PACKAGE_SPEC" "$@"');
+    assert.include(script, 'exec npm exec --yes "$T3_PACKAGE_SPEC" -- "$@"');
     assert.notInclude(script, "exec npx --yes t3@nightly; touch /tmp/t3-owned");
+    assert.notInclude(script, 'npm install --prefix "$T3_RUNNER_CACHE" t3@nightly; touch');
   });
 
   it("builds the remote t3 runner with a node script override", () => {
@@ -157,6 +181,9 @@ describe("ssh tunnel scripts", () => {
     assert.include(buildRemoteLaunchScript(), "RUNNER_CHANGED=1");
     assert.include(buildRemoteLaunchScript(), "ensure_remote_node_path()");
     assert.include(buildRemoteLaunchScript(), "if ! ensure_remote_node_path; then");
+    assert.include(buildRemoteLaunchScript(), "if ! install_t3_user_node; then");
+    assert.notInclude(buildRemoteLaunchScript(), "install_t3_user_node || true");
+    assert.include(buildRemoteLaunchScript(), "fix the installer error above");
     assert.include(
       buildRemoteLaunchScript({ nodeEngineRange: TEST_NODE_ENGINE_RANGE }),
       `T3_NODE_ENGINE_RANGE='${TEST_NODE_ENGINE_RANGE}'`,
@@ -167,8 +194,17 @@ describe("ssh tunnel scripts", () => {
     );
     assert.include(buildRemoteLaunchScript(), 'kill "$REMOTE_PID" 2>/dev/null || true');
     assert.include(buildRemoteLaunchScript(), "wait_ready");
+    assert.include(buildRemoteLaunchScript(), "provision_remote_runner()");
+    assert.include(buildRemoteLaunchScript(), "Preparing KamiCode SSH runtime on the remote host.");
+    assert.include(buildRemoteLaunchScript(), '"$RUNNER_FILE" --version');
+    assert.include(buildRemoteLaunchScript(), "Remote T3 setup failed before server launch.");
+    assert.isBelow(
+      buildRemoteLaunchScript().indexOf("if ! provision_remote_runner; then"),
+      buildRemoteLaunchScript().indexOf('"$RUNNER_FILE" serve --host 127.0.0.1'),
+    );
     assert.include(buildRemoteLaunchScript(), '"$RUNNER_FILE" serve --host 127.0.0.1');
     assert.include(buildRemoteLaunchScript(), '--base-dir "$DEFAULT_SERVER_HOME"');
+    assert.include(buildRemoteLaunchScript(), "120000");
     assert.notInclude(buildRemoteLaunchScript(), "server-home");
     assert.include(buildRemoteLaunchScript(), "Remote T3 server did not become ready");
     assert.include(buildRemoteLaunchScript({ packageSpec: "t3@nightly" }), "t3@nightly");

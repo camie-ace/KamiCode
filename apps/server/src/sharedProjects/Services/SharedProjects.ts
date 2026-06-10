@@ -2,9 +2,14 @@ import type {
   AppendSharedThreadMessageInput,
   ClaimSharedProjectInviteInput,
   CreateSharedProjectInviteInput,
+  DeleteSharedProjectInput,
+  DeleteSharedProjectResult,
+  ImportSharedThreadInput,
+  ImportSharedThreadResult,
   PublishLocalProjectInput,
   PublishSharedThreadInput,
   RemoveSharedProjectMemberInput,
+  RemoveSharedSshCredentialInput,
   SetSharedDefaultEnvironmentInput,
   SharedProjectBootstrapManifest,
   SharedProjectClaimResult,
@@ -13,6 +18,7 @@ import type {
   SharedProjectId,
   SharedProjectInvite,
   SharedProjectListResult,
+  SharedProjectSshCredential,
   SharedProjectSummary,
   SharedRuntime,
   SharedThread,
@@ -23,11 +29,13 @@ import type {
   UpsertSharedDeployAssociationInput,
   UpsertSharedEnvironmentInput,
   UpsertSharedRuntimeInput,
+  UpsertSharedSshCredentialInput,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as Data from "effect/Data";
 import type * as Effect from "effect/Effect";
 
+import type { OrchestrationEngineService } from "../../orchestration/Services/OrchestrationEngine.ts";
 import type { AuthenticatedUser } from "../../userAuth/Services/UserAuth.ts";
 
 export class SharedProjectsError extends Data.TaggedError("SharedProjectsError")<{
@@ -72,6 +80,10 @@ export interface SharedProjectsShape {
     user: AuthenticatedUser,
     input: RemoveSharedProjectMemberInput,
   ) => Effect.Effect<SharedProjectDetail, SharedProjectsError>;
+  readonly deleteProject: (
+    user: AuthenticatedUser,
+    input: DeleteSharedProjectInput,
+  ) => Effect.Effect<DeleteSharedProjectResult, SharedProjectsError>;
   readonly publishThread: (
     user: AuthenticatedUser,
     input: PublishSharedThreadInput,
@@ -80,6 +92,10 @@ export interface SharedProjectsShape {
     user: AuthenticatedUser,
     input: UpdateSharedThreadVisibilityInput,
   ) => Effect.Effect<SharedThread, SharedProjectsError>;
+  readonly importThread: (
+    user: AuthenticatedUser,
+    input: ImportSharedThreadInput,
+  ) => Effect.Effect<ImportSharedThreadResult, SharedProjectsError, OrchestrationEngineService>;
   readonly appendThreadMessage: (
     user: AuthenticatedUser,
     input: AppendSharedThreadMessageInput,
@@ -88,6 +104,14 @@ export interface SharedProjectsShape {
     user: AuthenticatedUser,
     input: UpsertSharedRuntimeInput,
   ) => Effect.Effect<SharedRuntime, SharedProjectsError>;
+  readonly upsertSshCredential: (
+    user: AuthenticatedUser,
+    input: UpsertSharedSshCredentialInput,
+  ) => Effect.Effect<SharedProjectSshCredential, SharedProjectsError>;
+  readonly removeSshCredential: (
+    user: AuthenticatedUser,
+    input: RemoveSharedSshCredentialInput,
+  ) => Effect.Effect<SharedProjectDetail, SharedProjectsError>;
   readonly upsertEnvironment: (
     user: AuthenticatedUser,
     input: UpsertSharedEnvironmentInput,

@@ -133,6 +133,8 @@ export const userAuthGitHubDesktopStartRouteLayer = HttpRouter.add(
       {
         authorizationUrl: login.authorizationUrl,
         handoffId: login.handoffId,
+        userCode: login.userCode,
+        pollIntervalMs: login.pollIntervalMs,
         expiresAt: DateTime.toUtc(login.expiresAt),
       },
       {
@@ -167,6 +169,7 @@ export const userAuthGitHubDesktopSessionRouteLayer = HttpRouter.add(
       return HttpServerResponse.jsonUnsafe(
         {
           status: "pending",
+          pollIntervalMs: result.pollIntervalMs,
         },
         {
           status: 202,

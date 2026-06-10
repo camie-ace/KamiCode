@@ -11,6 +11,13 @@ const DISABLED_USER_AUTH_GATE_STATE = { status: "disabled" } as const;
 const DESKTOP_GITHUB_LOGIN_POLL_INTERVAL_MS = 1_000;
 const DESKTOP_GITHUB_LOGIN_TIMEOUT_MS = 10 * 60_000;
 
+export interface GitHubUserLoginOptions {
+  readonly onDesktopDeviceCode?: (input: {
+    readonly userCode: string;
+    readonly verificationUri: string;
+  }) => void;
+}
+
 let userAuthBootstrapPromise: Promise<UserAuthGateState> | null = null;
 let resolvedAuthenticatedUserAuthGateState: UserAuthGateState | null = null;
 
@@ -77,7 +84,31 @@ function waitForDesktopGitHubLoginPoll(delayMs: number): Promise<void> {
   });
 }
 
-async function startDesktopGitHubUserLogin(): Promise<boolean> {
+function normalizeDesktopPollIntervalMs(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value) && value > 0
+    ? Math.max(value, DESKTOP_GITHUB_LOGIN_POLL_INTERVAL_MS)
+    : DESKTOP_GITHUB_LOGIN_POLL_INTERVAL_MS;
+}
+
+async function readJsonErrorMessage(response: Response, fallback: string): Promise<string> {
+  try {
+    const payload = (await response.json()) as {
+      readonly error?: unknown;
+      readonly message?: unknown;
+    };
+    const message =
+      typeof payload.error === "string" && payload.error.trim().length > 0
+        ? payload.error
+        : typeof payload.message === "string" && payload.message.trim().length > 0
+          ? payload.message
+          : null;
+    return message ?? fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+async function startDesktopGitHubUserLogin(options?: GitHubUserLoginOptions): Promise<boolean> {
   const bridge = window.desktopBridge;
   if (!bridge) {
     return false;
@@ -91,15 +122,29 @@ async function startDesktopGitHubUserLogin(): Promise<boolean> {
     },
   );
   if (!startResponse.ok) {
-    throw new Error(`Failed to start GitHub login (${startResponse.status}).`);
+    throw new Error(
+      await readJsonErrorMessage(
+        startResponse,
+        `Failed to start GitHub login (${startResponse.status}).`,
+      ),
+    );
   }
 
   const start = (await startResponse.json()) as {
     readonly authorizationUrl?: unknown;
     readonly handoffId?: unknown;
+    readonly userCode?: unknown;
+    readonly pollIntervalMs?: unknown;
   };
   if (typeof start.authorizationUrl !== "string" || typeof start.handoffId !== "string") {
     throw new Error("GitHub login start response was invalid.");
+  }
+
+  if (typeof start.userCode === "string" && start.userCode.trim().length > 0) {
+    options?.onDesktopDeviceCode?.({
+      userCode: start.userCode,
+      verificationUri: start.authorizationUrl,
+    });
   }
 
   const opened = await bridge.openExternal(start.authorizationUrl);
@@ -108,8 +153,9 @@ async function startDesktopGitHubUserLogin(): Promise<boolean> {
   }
 
   const startedAt = Date.now();
+  let pollIntervalMs = normalizeDesktopPollIntervalMs(start.pollIntervalMs);
   while (Date.now() - startedAt < DESKTOP_GITHUB_LOGIN_TIMEOUT_MS) {
-    await waitForDesktopGitHubLoginPoll(DESKTOP_GITHUB_LOGIN_POLL_INTERVAL_MS);
+    await waitForDesktopGitHubLoginPoll(pollIntervalMs);
     const sessionResponse = await fetch(
       resolvePrimaryEnvironmentHttpUrl("/api/user/auth/github/desktop/session", {
         handoffId: start.handoffId,
@@ -121,20 +167,22 @@ async function startDesktopGitHubUserLogin(): Promise<boolean> {
     );
 
     if (sessionResponse.status === 202) {
+      try {
+        const payload = (await sessionResponse.json()) as { readonly pollIntervalMs?: unknown };
+        pollIntervalMs = normalizeDesktopPollIntervalMs(payload.pollIntervalMs);
+      } catch {
+        pollIntervalMs = DESKTOP_GITHUB_LOGIN_POLL_INTERVAL_MS;
+      }
       continue;
     }
 
     if (!sessionResponse.ok) {
-      let message = `GitHub login failed (${sessionResponse.status}).`;
-      try {
-        const payload = (await sessionResponse.json()) as { readonly message?: unknown };
-        if (typeof payload.message === "string" && payload.message.trim().length > 0) {
-          message = payload.message;
-        }
-      } catch {
-        // Keep the status-based fallback.
-      }
-      throw new Error(message);
+      throw new Error(
+        await readJsonErrorMessage(
+          sessionResponse,
+          `GitHub login failed (${sessionResponse.status}).`,
+        ),
+      );
     }
 
     const session = (await sessionResponse.json()) as {
@@ -153,8 +201,8 @@ async function startDesktopGitHubUserLogin(): Promise<boolean> {
   throw new Error("Timed out waiting for GitHub login to complete.");
 }
 
-export async function startGitHubUserLogin(): Promise<void> {
-  if (await startDesktopGitHubUserLogin()) {
+export async function startGitHubUserLogin(options?: GitHubUserLoginOptions): Promise<void> {
+  if (await startDesktopGitHubUserLogin(options)) {
     window.location.reload();
     return;
   }

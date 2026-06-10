@@ -68,6 +68,8 @@ contextBridge.exposeInMainWorld("desktopBridge", {
     ipcRenderer.invoke(IpcChannels.FETCH_SSH_SESSION_STATE_CHANNEL, { httpBaseUrl, bearerToken }),
   issueSshWebSocketToken: (httpBaseUrl, bearerToken) =>
     ipcRenderer.invoke(IpcChannels.ISSUE_SSH_WEBSOCKET_TOKEN_CHANNEL, { httpBaseUrl, bearerToken }),
+  deployCollabServer: (input) =>
+    ipcRenderer.invoke(IpcChannels.DEPLOY_COLLAB_SERVER_CHANNEL, input),
   onSshPasswordPrompt: (listener) => {
     const wrappedListener = (_event: Electron.IpcRendererEvent, request: unknown) => {
       if (typeof request !== "object" || request === null) return;

@@ -2,6 +2,8 @@
 
 import * as NodeOS from "node:os";
 
+import { isDirectlyExecuted } from "./lib/node-main.ts";
+
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as NetService from "@t3tools/shared/Net";
@@ -531,7 +533,7 @@ const cliRuntimeLayer = Layer.mergeAll(
   NetService.layer,
 );
 
-if (import.meta.main) {
+if (isDirectlyExecuted(import.meta.url)) {
   Command.run(devRunnerCli, { version: "0.0.0" }).pipe(
     Effect.scoped,
     Effect.provide(cliRuntimeLayer),

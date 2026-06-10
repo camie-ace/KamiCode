@@ -113,6 +113,14 @@ export const AuthBootstrapResult = Schema.Struct({
 });
 export type AuthBootstrapResult = typeof AuthBootstrapResult.Type;
 
+export const AuthBootstrapResultJson = Schema.Struct({
+  authenticated: Schema.Literal(true),
+  role: AuthSessionRole,
+  sessionMethod: ServerAuthSessionMethod,
+  expiresAt: Schema.DateTimeUtcFromString,
+});
+export type AuthBootstrapResultJson = typeof AuthBootstrapResultJson.Encoded;
+
 export const AuthBearerBootstrapResult = Schema.Struct({
   authenticated: Schema.Literal(true),
   role: AuthSessionRole,
@@ -122,11 +130,26 @@ export const AuthBearerBootstrapResult = Schema.Struct({
 });
 export type AuthBearerBootstrapResult = typeof AuthBearerBootstrapResult.Type;
 
+export const AuthBearerBootstrapResultJson = Schema.Struct({
+  authenticated: Schema.Literal(true),
+  role: AuthSessionRole,
+  sessionMethod: Schema.Literal("bearer-session-token"),
+  expiresAt: Schema.DateTimeUtcFromString,
+  sessionToken: TrimmedNonEmptyString,
+});
+export type AuthBearerBootstrapResultJson = typeof AuthBearerBootstrapResultJson.Encoded;
+
 export const AuthWebSocketTokenResult = Schema.Struct({
   token: TrimmedNonEmptyString,
   expiresAt: Schema.DateTimeUtc,
 });
 export type AuthWebSocketTokenResult = typeof AuthWebSocketTokenResult.Type;
+
+export const AuthWebSocketTokenResultJson = Schema.Struct({
+  token: TrimmedNonEmptyString,
+  expiresAt: Schema.DateTimeUtcFromString,
+});
+export type AuthWebSocketTokenResultJson = typeof AuthWebSocketTokenResultJson.Encoded;
 
 export const AuthPairingCredentialResult = Schema.Struct({
   id: TrimmedNonEmptyString,
@@ -264,3 +287,12 @@ export const AuthSessionState = Schema.Struct({
   expiresAt: Schema.optionalKey(Schema.DateTimeUtc),
 });
 export type AuthSessionState = typeof AuthSessionState.Type;
+
+export const AuthSessionStateJson = Schema.Struct({
+  authenticated: Schema.Boolean,
+  auth: ServerAuthDescriptor,
+  role: Schema.optionalKey(AuthSessionRole),
+  sessionMethod: Schema.optionalKey(ServerAuthSessionMethod),
+  expiresAt: Schema.optionalKey(Schema.DateTimeUtcFromString),
+});
+export type AuthSessionStateJson = typeof AuthSessionStateJson.Encoded;

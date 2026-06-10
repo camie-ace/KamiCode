@@ -63,7 +63,11 @@ import type {
   OrchestrationThreadStreamItem,
 } from "./orchestration.ts";
 import { EnvironmentId } from "./baseSchemas.ts";
-import { AuthBearerBootstrapResult, AuthSessionState, AuthWebSocketTokenResult } from "./auth.ts";
+import {
+  AuthBearerBootstrapResultJson,
+  AuthSessionStateJson,
+  AuthWebSocketTokenResultJson,
+} from "./auth.ts";
 import { AdvertisedEndpoint } from "./remoteAccess.ts";
 import { EditorId } from "./editor.ts";
 import { ExecutionEnvironmentDescriptor } from "./environment.ts";
@@ -296,6 +300,7 @@ export const DesktopSshPasswordPromptCancelledResultSchema = Schema.Struct({
 
 export const DesktopSshEnvironmentEnsureOptionsSchema = Schema.Struct({
   issuePairingToken: Schema.optionalKey(Schema.Boolean),
+  password: Schema.optionalKey(Schema.NullOr(Schema.String)),
 });
 
 export const DesktopSshEnvironmentEnsureInputSchema = Schema.Struct({
@@ -326,6 +331,25 @@ export const DesktopSshPasswordPromptResolutionInputSchema = Schema.Struct({
   requestId: Schema.String,
   password: Schema.NullOr(Schema.String),
 });
+
+export const DesktopCollabServerDeployOptionsSchema = Schema.Struct({
+  password: Schema.optionalKey(Schema.NullOr(Schema.String)),
+  publicBaseUrl: Schema.optionalKey(Schema.NullOr(Schema.String)),
+  installDocker: Schema.optionalKey(Schema.Boolean),
+});
+
+export const DesktopCollabServerDeployInputSchema = Schema.Struct({
+  target: DesktopSshEnvironmentTargetSchema,
+  options: Schema.optionalKey(DesktopCollabServerDeployOptionsSchema),
+});
+
+export const DesktopCollabServerDeployResultSchema = Schema.Struct({
+  baseUrl: Schema.String,
+  token: Schema.String,
+  service: Schema.String,
+  targetKey: Schema.String,
+});
+export type DesktopCollabServerDeployResult = typeof DesktopCollabServerDeployResultSchema.Type;
 
 export const PersistedSavedEnvironmentRecordSchema = Schema.Struct({
   environmentId: EnvironmentId,
@@ -384,19 +408,22 @@ export interface DesktopBridge {
   discoverSshHosts: () => Promise<readonly DesktopDiscoveredSshHost[]>;
   ensureSshEnvironment: (
     target: DesktopSshEnvironmentTarget,
-    options?: { issuePairingToken?: boolean },
+    options?: { issuePairingToken?: boolean; password?: string | null },
   ) => Promise<DesktopSshEnvironmentBootstrap>;
   disconnectSshEnvironment: (target: DesktopSshEnvironmentTarget) => Promise<void>;
   fetchSshEnvironmentDescriptor: (httpBaseUrl: string) => Promise<ExecutionEnvironmentDescriptor>;
   bootstrapSshBearerSession: (
     httpBaseUrl: string,
     credential: string,
-  ) => Promise<AuthBearerBootstrapResult>;
-  fetchSshSessionState: (httpBaseUrl: string, bearerToken: string) => Promise<AuthSessionState>;
+  ) => Promise<AuthBearerBootstrapResultJson>;
+  fetchSshSessionState: (httpBaseUrl: string, bearerToken: string) => Promise<AuthSessionStateJson>;
   issueSshWebSocketToken: (
     httpBaseUrl: string,
     bearerToken: string,
-  ) => Promise<AuthWebSocketTokenResult>;
+  ) => Promise<AuthWebSocketTokenResultJson>;
+  deployCollabServer: (
+    input: typeof DesktopCollabServerDeployInputSchema.Type,
+  ) => Promise<DesktopCollabServerDeployResult>;
   onSshPasswordPrompt: (listener: (request: DesktopSshPasswordPromptRequest) => void) => () => void;
   resolveSshPasswordPrompt: (requestId: string, password: string | null) => Promise<void>;
   getServerExposureState: () => Promise<DesktopServerExposureState>;

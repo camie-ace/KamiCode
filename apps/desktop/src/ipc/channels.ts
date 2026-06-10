@@ -26,6 +26,7 @@ export const FETCH_SSH_ENVIRONMENT_DESCRIPTOR_CHANNEL = "desktop:fetch-ssh-envir
 export const BOOTSTRAP_SSH_BEARER_SESSION_CHANNEL = "desktop:bootstrap-ssh-bearer-session";
 export const FETCH_SSH_SESSION_STATE_CHANNEL = "desktop:fetch-ssh-session-state";
 export const ISSUE_SSH_WEBSOCKET_TOKEN_CHANNEL = "desktop:issue-ssh-websocket-token";
+export const DEPLOY_COLLAB_SERVER_CHANNEL = "desktop:deploy-collab-server";
 export const SSH_PASSWORD_PROMPT_CHANNEL = "desktop:ssh-password-prompt";
 export const RESOLVE_SSH_PASSWORD_PROMPT_CHANNEL = "desktop:resolve-ssh-password-prompt";
 export const GET_SERVER_EXPOSURE_STATE_CHANNEL = "desktop:get-server-exposure-state";

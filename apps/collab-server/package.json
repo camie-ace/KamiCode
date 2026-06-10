@@ -1,0 +1,27 @@
+{
+  "name": "@t3tools/collab-server",
+  "version": "0.0.24",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node --experimental-strip-types --watch src/index.ts",
+    "build": "tsdown",
+    "start": "node dist/index.mjs",
+    "migrate": "node --experimental-strip-types src/index.ts migrate",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@t3tools/contracts": "workspace:*",
+    "pg": "^8.16.3"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "tsdown": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  },
+  "engines": {
+    "node": "^22.16 || ^23.11 || >=24.10"
+  }
+}

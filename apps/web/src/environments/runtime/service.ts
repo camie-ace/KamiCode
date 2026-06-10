@@ -695,7 +695,7 @@ async function persistSavedEnvironmentRegistryRollback(
 
 async function resolveDesktopSshEnvironmentBootstrap(
   target: DesktopSshEnvironmentTarget,
-  options?: { readonly issuePairingToken?: boolean },
+  options?: { readonly issuePairingToken?: boolean; readonly password?: string | null },
 ): Promise<DesktopSshEnvironmentBootstrap> {
   const desktopBridge = window.desktopBridge;
   if (!desktopBridge) {
@@ -1706,10 +1706,11 @@ export async function addSavedEnvironment(input: {
 
 export async function connectDesktopSshEnvironment(
   target: DesktopSshEnvironmentTarget,
-  options?: { label?: string },
+  options?: { label?: string; password?: string | null },
 ): Promise<SavedEnvironmentRecord> {
   const bootstrap = await resolveDesktopSshEnvironmentBootstrap(target, {
     issuePairingToken: true,
+    ...(options?.password === undefined ? {} : { password: options.password }),
   });
   if (!bootstrap.pairingToken) {
     throw new Error("Desktop SSH launch did not return a pairing token.");

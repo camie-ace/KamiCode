@@ -2,6 +2,8 @@ import {
   DesktopDiscoveredSshHostSchema,
   DesktopSshBearerBootstrapInputSchema,
   DesktopSshBearerRequestInputSchema,
+  DesktopCollabServerDeployInputSchema,
+  DesktopCollabServerDeployResultSchema,
   DesktopSshEnvironmentEnsureInputSchema,
   DesktopSshEnvironmentEnsureResultSchema,
   DesktopSshEnvironmentTargetSchema,
@@ -9,9 +11,9 @@ import {
   DesktopSshPasswordPromptCancelledType,
   DesktopSshPasswordPromptResolutionInputSchema,
   ExecutionEnvironmentDescriptor,
-  AuthBearerBootstrapResult,
-  AuthSessionState,
-  AuthWebSocketTokenResult,
+  AuthBearerBootstrapResultJson,
+  AuthSessionStateJson,
+  AuthWebSocketTokenResultJson,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
@@ -21,6 +23,7 @@ import { makeIpcMethod } from "../DesktopIpc.ts";
 import * as DesktopSshEnvironment from "../../ssh/DesktopSshEnvironment.ts";
 import * as DesktopSshPasswordPrompts from "../../ssh/DesktopSshPasswordPrompts.ts";
 import * as DesktopSshRemoteApi from "../../ssh/DesktopSshRemoteApi.ts";
+import * as DesktopCollabServerDeploy from "../../ssh/DesktopCollabServerDeploy.ts";
 
 export const discoverSshHosts = makeIpcMethod({
   channel: IpcChannels.DISCOVER_SSH_HOSTS_CHANNEL,
@@ -77,7 +80,7 @@ export const fetchSshEnvironmentDescriptor = makeIpcMethod({
 export const bootstrapSshBearerSession = makeIpcMethod({
   channel: IpcChannels.BOOTSTRAP_SSH_BEARER_SESSION_CHANNEL,
   payload: DesktopSshBearerBootstrapInputSchema,
-  result: AuthBearerBootstrapResult,
+  result: AuthBearerBootstrapResultJson,
   handler: Effect.fn("desktop.ipc.sshEnvironment.bootstrapBearerSession")(function* ({
     httpBaseUrl,
     credential,
@@ -90,7 +93,7 @@ export const bootstrapSshBearerSession = makeIpcMethod({
 export const fetchSshSessionState = makeIpcMethod({
   channel: IpcChannels.FETCH_SSH_SESSION_STATE_CHANNEL,
   payload: DesktopSshBearerRequestInputSchema,
-  result: AuthSessionState,
+  result: AuthSessionStateJson,
   handler: Effect.fn("desktop.ipc.sshEnvironment.fetchSessionState")(function* ({
     httpBaseUrl,
     bearerToken,
@@ -103,13 +106,30 @@ export const fetchSshSessionState = makeIpcMethod({
 export const issueSshWebSocketToken = makeIpcMethod({
   channel: IpcChannels.ISSUE_SSH_WEBSOCKET_TOKEN_CHANNEL,
   payload: DesktopSshBearerRequestInputSchema,
-  result: AuthWebSocketTokenResult,
+  result: AuthWebSocketTokenResultJson,
   handler: Effect.fn("desktop.ipc.sshEnvironment.issueWebSocketToken")(function* ({
     httpBaseUrl,
     bearerToken,
   }) {
     const remoteApi = yield* DesktopSshRemoteApi.DesktopSshRemoteApi;
     return yield* remoteApi.issueWebSocketToken({ httpBaseUrl, bearerToken });
+  }),
+});
+
+export const deployCollabServer = makeIpcMethod({
+  channel: IpcChannels.DEPLOY_COLLAB_SERVER_CHANNEL,
+  payload: DesktopCollabServerDeployInputSchema,
+  result: DesktopCollabServerDeployResultSchema,
+  handler: Effect.fn("desktop.ipc.sshEnvironment.deployCollabServer")(function* ({
+    target,
+    options,
+  }) {
+    return yield* DesktopCollabServerDeploy.deployCollabServer({
+      target,
+      ...(options?.password === undefined ? {} : { password: options.password }),
+      ...(options?.publicBaseUrl === undefined ? {} : { publicBaseUrl: options.publicBaseUrl }),
+      ...(options?.installDocker === undefined ? {} : { installDocker: options.installDocker }),
+    });
   }),
 });
 

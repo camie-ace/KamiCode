@@ -337,6 +337,14 @@ export const ObservabilitySettings = Schema.Struct({
 });
 export type ObservabilitySettings = typeof ObservabilitySettings.Type;
 
+export const HostedCollaborationSettings = Schema.Struct({
+  url: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
+  token: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
+  tokenRedacted: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  deploymentTargetKey: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
+});
+export type HostedCollaborationSettings = typeof HostedCollaborationSettings.Type;
+
 export const DEFAULT_AUTOMATIC_GIT_FETCH_INTERVAL = Duration.seconds(30);
 
 export const ServerSettings = Schema.Struct({
@@ -380,6 +388,9 @@ export const ServerSettings = Schema.Struct({
     Schema.withDecodingDefault(Effect.succeed({})),
   ),
   observability: ObservabilitySettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
+  hostedCollaboration: HostedCollaborationSettings.pipe(
+    Schema.withDecodingDefault(Effect.succeed({})),
+  ),
 });
 export type ServerSettings = typeof ServerSettings.Type;
 
@@ -456,6 +467,14 @@ export const ServerSettingsPatch = Schema.Struct({
     Schema.Struct({
       otlpTracesUrl: Schema.optionalKey(TrimmedString),
       otlpMetricsUrl: Schema.optionalKey(TrimmedString),
+    }),
+  ),
+  hostedCollaboration: Schema.optionalKey(
+    Schema.Struct({
+      url: Schema.optionalKey(TrimmedString),
+      token: Schema.optionalKey(TrimmedString),
+      tokenRedacted: Schema.optionalKey(Schema.Boolean),
+      deploymentTargetKey: Schema.optionalKey(TrimmedString),
     }),
   ),
   providers: Schema.optionalKey(

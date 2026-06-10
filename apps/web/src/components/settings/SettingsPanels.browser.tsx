@@ -416,6 +416,12 @@ const createDesktopBridgeStub = (overrides?: {
       token: "ssh-ws-token",
       expiresAt: "2026-05-01T12:05:00.000Z",
     }),
+    deployCollabServer: vi.fn().mockResolvedValue({
+      baseUrl: "http://ssh.example.com:8787",
+      token: "collab-token",
+      service: "kamicode-collab",
+      targetKey: "ssh-target-key",
+    }),
     onSshPasswordPrompt: vi.fn(() => () => {}),
     resolveSshPasswordPrompt: vi.fn().mockResolvedValue(undefined),
     getServerExposureState: vi.fn().mockResolvedValue(
@@ -1042,6 +1048,7 @@ describe("GeneralSettingsPanel observability", () => {
     await addEnvironmentDialog.getByLabelText("SSH host or alias").fill("devbox.example.com");
     await addEnvironmentDialog.getByLabelText("Username").fill("julius");
     await addEnvironmentDialog.getByLabelText("Port").fill("2222");
+    await addEnvironmentDialog.getByLabelText("Password").fill("ssh-secret");
     await addEnvironmentDialog
       .getByRole("button", { name: "Add environment", exact: true })
       .first()
@@ -1055,7 +1062,73 @@ describe("GeneralSettingsPanel observability", () => {
           username: "julius",
           port: 2222,
         },
-        { label: "" },
+        { label: "", password: "ssh-secret" },
+      );
+    });
+  });
+
+  it("uses typed SSH username and port when connecting a matching suggested host", async () => {
+    const discoverSshHosts = vi.fn().mockResolvedValue([
+      {
+        alias: "144.91.68.19",
+        hostname: "144.91.68.19",
+        username: null,
+        port: null,
+        source: "known-hosts" as const,
+      },
+    ]);
+    window.desktopBridge = createDesktopBridgeStub({
+      discoverSshHosts,
+    });
+    mockConnectDesktopSshEnvironment.mockResolvedValue({
+      environmentId: EnvironmentId.make("environment-ssh-vps"),
+      label: "144.91.68.19",
+      wsBaseUrl: "ws://127.0.0.1:3774/",
+      httpBaseUrl: "http://127.0.0.1:3774/",
+      createdAt: "2036-04-07T00:00:00.000Z",
+      lastConnectedAt: "2036-04-07T00:00:00.000Z",
+      desktopSsh: {
+        alias: "144.91.68.19",
+        hostname: "144.91.68.19",
+        username: "admin",
+        port: 22,
+      },
+    });
+
+    setServerConfigSnapshot(createBaseServerConfig());
+
+    mounted = await render(
+      <AppAtomRegistryProvider>
+        <ConnectionsSettings />
+      </AppAtomRegistryProvider>,
+    );
+
+    await page.getByRole("button", { name: "Add environment", exact: true }).click();
+    const addEnvironmentDialog = page.getByRole("dialog", { name: "Add Environment" });
+    await addEnvironmentDialog.getByRole("button", { name: /^SSH\b/ }).click();
+    await vi.waitFor(() => {
+      expect(discoverSshHosts).toHaveBeenCalledTimes(1);
+    });
+
+    await addEnvironmentDialog.getByLabelText("SSH host or alias").fill("144.91.68.19");
+    await addEnvironmentDialog.getByLabelText("Username").fill("admin");
+    await addEnvironmentDialog.getByLabelText("Port").fill("22");
+    await addEnvironmentDialog.getByLabelText("Password").fill("ssh-secret");
+    await addEnvironmentDialog
+      .getByRole("button", { name: "Add environment", exact: true })
+      .last()
+      .click();
+
+    await vi.waitFor(() => {
+      expect(mockConnectDesktopSshEnvironment).toHaveBeenCalledWith(
+        {
+          alias: "144.91.68.19",
+          hostname: "144.91.68.19",
+          username: "admin",
+          port: 22,
+          source: "known-hosts",
+        },
+        { password: "ssh-secret" },
       );
     });
   });

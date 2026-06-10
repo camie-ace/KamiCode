@@ -27,7 +27,11 @@ import {
   signPayload,
   timingSafeEqualBase64Url,
 } from "../../auth/utils.ts";
-import { GitHubOAuthClient, GitHubOAuthError } from "../Services/GitHubOAuthClient.ts";
+import {
+  type GitHubOAuthToken,
+  GitHubOAuthClient,
+  GitHubOAuthError,
+} from "../Services/GitHubOAuthClient.ts";
 import {
   type AuthenticatedUser,
   DESKTOP_GITHUB_STATE_PREFIX,
@@ -58,17 +62,29 @@ type DesktopGitHubLoginHandoff =
       readonly status: "pending";
       readonly state: string;
       readonly redirectUri: string;
+      readonly deviceCode?: undefined;
+      readonly pollIntervalMs?: undefined;
+      readonly nextPollAt?: undefined;
+      readonly expiresAt: DateTime.DateTime;
+    }
+  | {
+      readonly status: "pending";
+      readonly state?: undefined;
+      readonly redirectUri?: undefined;
+      readonly deviceCode: string;
+      readonly pollIntervalMs: number;
+      readonly nextPollAt: number;
       readonly expiresAt: DateTime.DateTime;
     }
   | {
       readonly status: "error";
-      readonly state: string;
+      readonly state?: string;
       readonly message: string;
       readonly expiresAt: DateTime.DateTime;
     }
   | {
       readonly status: "authenticated";
-      readonly state: string;
+      readonly state?: string;
       readonly sessionState: UserAuthSessionState;
       readonly sessionToken: string;
       readonly sessionExpiresAt: DateTime.DateTime;
@@ -177,7 +193,8 @@ export const makeUserAuth = Effect.gen(function* () {
   const stateCookieName = `${cookieName}_github_state`;
   const githubClientId = normalizeRequiredConfig(config.githubOAuthClientId);
   const githubClientSecret = normalizeRequiredConfig(config.githubOAuthClientSecret);
-  const enabled = githubClientId !== null && githubClientSecret !== null;
+  const enabled =
+    githubClientId !== null && (config.mode === "desktop" || githubClientSecret !== null);
 
   const toUserAuthError = (message: string, status?: UserAuthError["status"]) => (cause: unknown) =>
     new UserAuthError({
@@ -186,8 +203,23 @@ export const makeUserAuth = Effect.gen(function* () {
       cause,
     });
 
-  const ensureConfigured = () =>
-    enabled && githubClientId && githubClientSecret
+  const ensureGitHubLoginEnabled = () =>
+    enabled && githubClientId
+      ? Effect.succeed({
+          clientId: githubClientId,
+        })
+      : Effect.fail(
+          new UserAuthError({
+            message:
+              config.mode === "desktop"
+                ? "GitHub login is not configured. Set T3CODE_GITHUB_OAUTH_CLIENT_ID."
+                : "GitHub OAuth login is not configured. Set T3CODE_GITHUB_OAUTH_CLIENT_ID and T3CODE_GITHUB_OAUTH_CLIENT_SECRET.",
+            status: 503,
+          }),
+        );
+
+  const ensureOAuthAppConfigured = () =>
+    githubClientId && githubClientSecret
       ? Effect.succeed({
           clientId: githubClientId,
           clientSecret: githubClientSecret,
@@ -358,7 +390,7 @@ export const makeUserAuth = Effect.gen(function* () {
 
   const authenticateRequest: UserAuthShape["authenticateRequest"] = (request) =>
     Effect.gen(function* () {
-      yield* ensureConfigured();
+      yield* ensureGitHubLoginEnabled();
       const token = request.cookies[cookieName];
       if (!token) {
         return yield* new UserAuthError({
@@ -371,7 +403,7 @@ export const makeUserAuth = Effect.gen(function* () {
 
   const createGitHubLogin: UserAuthShape["createGitHubLogin"] = (request) =>
     Effect.gen(function* () {
-      const credentials = yield* ensureConfigured();
+      const credentials = yield* ensureOAuthAppConfigured();
       const state = randomBase64Url(32);
       const issuedAt = yield* DateTime.now;
       const expiresAt = DateTime.add(issuedAt, {
@@ -391,53 +423,15 @@ export const makeUserAuth = Effect.gen(function* () {
       };
     });
 
-  const createDesktopGitHubLogin: UserAuthShape["createDesktopGitHubLogin"] = (request) =>
+  const createDesktopGitHubLogin: UserAuthShape["createDesktopGitHubLogin"] = (_request) =>
     Effect.gen(function* () {
-      const credentials = yield* ensureConfigured();
+      const credentials = yield* ensureGitHubLoginEnabled();
       const handoffId = randomBase64Url(18);
-      const state = `${DESKTOP_GITHUB_STATE_PREFIX}${handoffId}:${randomBase64Url(32)}`;
       const issuedAt = yield* DateTime.now;
-      const expiresAt = DateTime.add(issuedAt, {
-        milliseconds: Duration.toMillis(DEFAULT_STATE_TTL),
-      });
-      const redirectUri = yield* resolveCallbackUrl(request);
-      const authorizationUrl = new URL("https://github.com/login/oauth/authorize");
-      authorizationUrl.searchParams.set("client_id", credentials.clientId);
-      authorizationUrl.searchParams.set("redirect_uri", redirectUri);
-      authorizationUrl.searchParams.set("state", state);
-      authorizationUrl.searchParams.set("scope", "read:user");
-
-      yield* Ref.update(desktopGitHubLoginHandoffs, (handoffs) => {
-        const next = new Map(handoffs);
-        next.set(handoffId, {
-          status: "pending",
-          state,
-          redirectUri,
-          expiresAt,
-        });
-        return next;
-      });
-
-      return {
-        authorizationUrl: authorizationUrl.toString(),
-        handoffId,
-        expiresAt,
-      };
-    });
-
-  const completeGitHubOAuthCode = (input: {
-    readonly clientId: string;
-    readonly clientSecret: string;
-    readonly code: string;
-    readonly redirectUri: string;
-  }) =>
-    Effect.gen(function* () {
-      const token = yield* githubOAuthClient
-        .exchangeCode({
-          clientId: input.clientId,
-          clientSecret: input.clientSecret,
-          code: input.code,
-          redirectUri: input.redirectUri,
+      const deviceLogin = yield* githubOAuthClient
+        .createDeviceCode({
+          clientId: credentials.clientId,
+          scope: "read:user",
         })
         .pipe(
           Effect.mapError(
@@ -449,6 +443,35 @@ export const makeUserAuth = Effect.gen(function* () {
               }),
           ),
         );
+      const expiresAt = DateTime.add(issuedAt, {
+        seconds: deviceLogin.expiresInSeconds,
+      });
+      const pollIntervalMs = Math.max(deviceLogin.intervalSeconds, 1) * 1_000;
+      const now = yield* Clock.currentTimeMillis;
+
+      yield* Ref.update(desktopGitHubLoginHandoffs, (handoffs) => {
+        const next = new Map(handoffs);
+        next.set(handoffId, {
+          status: "pending",
+          deviceCode: deviceLogin.deviceCode,
+          pollIntervalMs,
+          nextPollAt: now,
+          expiresAt,
+        });
+        return next;
+      });
+
+      return {
+        authorizationUrl: deviceLogin.verificationUri,
+        handoffId,
+        userCode: deviceLogin.userCode,
+        pollIntervalMs,
+        expiresAt,
+      };
+    });
+
+  const completeGitHubToken = (token: GitHubOAuthToken) =>
+    Effect.gen(function* () {
       const githubUser = yield* githubOAuthClient
         .fetchUser({ accessToken: token.accessToken })
         .pipe(
@@ -488,9 +511,36 @@ export const makeUserAuth = Effect.gen(function* () {
       };
     });
 
+  const completeGitHubOAuthCode = (input: {
+    readonly clientId: string;
+    readonly clientSecret: string;
+    readonly code: string;
+    readonly redirectUri: string;
+  }) =>
+    Effect.gen(function* () {
+      const token = yield* githubOAuthClient
+        .exchangeCode({
+          clientId: input.clientId,
+          clientSecret: input.clientSecret,
+          code: input.code,
+          redirectUri: input.redirectUri,
+        })
+        .pipe(
+          Effect.mapError(
+            (cause: GitHubOAuthError) =>
+              new UserAuthError({
+                message: cause.message,
+                status: cause.status === 400 ? 400 : 500,
+                cause,
+              }),
+          ),
+        );
+      return yield* completeGitHubToken(token);
+    });
+
   const completeGitHubLogin: UserAuthShape["completeGitHubLogin"] = (input) =>
     Effect.gen(function* () {
-      const credentials = yield* ensureConfigured();
+      const credentials = yield* ensureOAuthAppConfigured();
       const storedState = input.request.cookies[stateCookieName];
       if (!storedState || storedState !== input.state) {
         return yield* new UserAuthError({
@@ -510,7 +560,7 @@ export const makeUserAuth = Effect.gen(function* () {
 
   const completeDesktopGitHubLogin: UserAuthShape["completeDesktopGitHubLogin"] = (input) =>
     Effect.gen(function* () {
-      const credentials = yield* ensureConfigured();
+      const credentials = yield* ensureOAuthAppConfigured();
       const handoffId = parseDesktopGitHubLoginHandoffId(input.state);
       if (!handoffId) {
         return yield* new UserAuthError({
@@ -579,24 +629,18 @@ export const makeUserAuth = Effect.gen(function* () {
 
   const consumeDesktopGitHubLogin: UserAuthShape["consumeDesktopGitHubLogin"] = (input) =>
     Effect.gen(function* () {
-      const now = yield* DateTime.now;
-      const handoff = yield* Ref.modify(desktopGitHubLoginHandoffs, (current) => {
-        const next = new Map(current);
-        const value = next.get(input.handoffId);
-        if (!value) {
-          return [null, next] as const;
-        }
-        if (DateTime.isGreaterThanOrEqualTo(now, value.expiresAt)) {
-          next.delete(input.handoffId);
-          return [null, next] as const;
-        }
-        if (value.status === "authenticated" || value.status === "error") {
-          next.delete(input.handoffId);
-        }
-        return [value, next] as const;
-      });
+      const credentials = yield* ensureGitHubLoginEnabled();
+      const nowDateTime = yield* DateTime.now;
+      const nowMs = yield* Clock.currentTimeMillis;
+      const handoffs = yield* Ref.get(desktopGitHubLoginHandoffs);
+      const handoff = handoffs.get(input.handoffId);
 
-      if (!handoff) {
+      if (!handoff || DateTime.isGreaterThanOrEqualTo(nowDateTime, handoff.expiresAt)) {
+        yield* Ref.update(desktopGitHubLoginHandoffs, (current) => {
+          const next = new Map(current);
+          next.delete(input.handoffId);
+          return next;
+        });
         return yield* new UserAuthError({
           message: "GitHub login handoff expired.",
           status: 400,
@@ -604,16 +648,96 @@ export const makeUserAuth = Effect.gen(function* () {
       }
 
       if (handoff.status === "pending") {
-        return { status: "pending" } as const;
+        if (!handoff.deviceCode) {
+          return { status: "pending" } as const;
+        }
+
+        if (nowMs < handoff.nextPollAt) {
+          return {
+            status: "pending",
+            pollIntervalMs: Math.max(handoff.nextPollAt - nowMs, handoff.pollIntervalMs),
+          } as const;
+        }
+
+        const result = yield* githubOAuthClient
+          .pollDeviceAuthorization({
+            clientId: credentials.clientId,
+            deviceCode: handoff.deviceCode,
+          })
+          .pipe(
+            Effect.mapError(
+              (cause: GitHubOAuthError) =>
+                new UserAuthError({
+                  message: cause.message,
+                  status: cause.status === 400 ? 400 : 500,
+                  cause,
+                }),
+            ),
+          );
+
+        if (result.status === "pending") {
+          const pollIntervalMs = Math.max(
+            (result.intervalSeconds ?? Math.ceil(handoff.pollIntervalMs / 1_000)) * 1_000,
+            handoff.pollIntervalMs,
+          );
+          yield* Ref.update(desktopGitHubLoginHandoffs, (current) => {
+            const next = new Map(current);
+            next.set(input.handoffId, {
+              ...handoff,
+              pollIntervalMs,
+              nextPollAt: nowMs + pollIntervalMs,
+            });
+            return next;
+          });
+          return {
+            status: "pending",
+            pollIntervalMs,
+          } as const;
+        }
+
+        if (result.status === "denied" || result.status === "expired") {
+          yield* Ref.update(desktopGitHubLoginHandoffs, (current) => {
+            const next = new Map(current);
+            next.delete(input.handoffId);
+            return next;
+          });
+          return {
+            status: "error",
+            message: result.message,
+          } as const;
+        }
+
+        const completed = yield* completeGitHubToken(result.token);
+        yield* Ref.update(desktopGitHubLoginHandoffs, (current) => {
+          const next = new Map(current);
+          next.delete(input.handoffId);
+          return next;
+        });
+        return {
+          status: "authenticated",
+          sessionState: completed.sessionState,
+          sessionToken: completed.sessionToken,
+          sessionExpiresAt: completed.sessionExpiresAt,
+        } as const;
       }
 
       if (handoff.status === "error") {
+        yield* Ref.update(desktopGitHubLoginHandoffs, (current) => {
+          const next = new Map(current);
+          next.delete(input.handoffId);
+          return next;
+        });
         return {
           status: "error",
           message: handoff.message,
         } as const;
       }
 
+      yield* Ref.update(desktopGitHubLoginHandoffs, (current) => {
+        const next = new Map(current);
+        next.delete(input.handoffId);
+        return next;
+      });
       return {
         status: "authenticated",
         sessionState: handoff.sessionState,
