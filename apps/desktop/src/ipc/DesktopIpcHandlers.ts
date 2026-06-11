@@ -1,6 +1,13 @@
 import * as Effect from "effect/Effect";
 
 import * as DesktopIpc from "./DesktopIpc.ts";
+import {
+  clearCloudAuthToken,
+  createCloudAuthRequest,
+  fetchCloudAuth,
+  getCloudAuthToken,
+  setCloudAuthToken,
+} from "./methods/cloudAuth.ts";
 import { getClientSettings, setClientSettings } from "./methods/clientSettings.ts";
 import {
   getSavedEnvironmentRegistry,
@@ -23,7 +30,7 @@ import {
   ensureSshEnvironment,
   fetchSshEnvironmentDescriptor,
   fetchSshSessionState,
-  issueSshWebSocketToken,
+  issueSshWebSocketTicket,
   resolveSshPasswordPrompt,
 } from "./methods/sshEnvironment.ts";
 import {
@@ -63,7 +70,7 @@ export const installDesktopIpcHandlers = Effect.gen(function* () {
   yield* ipc.handle(fetchSshEnvironmentDescriptor);
   yield* ipc.handle(bootstrapSshBearerSession);
   yield* ipc.handle(fetchSshSessionState);
-  yield* ipc.handle(issueSshWebSocketToken);
+  yield* ipc.handle(issueSshWebSocketTicket);
   yield* ipc.handle(deployCollabServer);
   yield* ipc.handle(resolveSshPasswordPrompt);
 
@@ -77,7 +84,11 @@ export const installDesktopIpcHandlers = Effect.gen(function* () {
   yield* ipc.handle(setTheme);
   yield* ipc.handle(showContextMenu);
   yield* ipc.handle(openExternal);
-
+  yield* ipc.handle(createCloudAuthRequest);
+  yield* ipc.handle(getCloudAuthToken);
+  yield* ipc.handle(setCloudAuthToken);
+  yield* ipc.handle(clearCloudAuthToken);
+  yield* ipc.handle(fetchCloudAuth);
   yield* ipc.handle(getUpdateState);
   yield* ipc.handle(setUpdateChannel);
   yield* ipc.handle(downloadUpdate);

@@ -16,8 +16,8 @@ Standalone hosted control plane for shared projects. Local KamiCode runtimes kee
 
 ```sh
 cp apps/collab-server/.env.example apps/collab-server/.env
-bun install
-bun run --filter @t3tools/collab-server dev
+pnpm install
+pnpm --filter @t3tools/collab-server dev
 ```
 
 The service runs migrations on startup when `KAMICODE_COLLAB_RUN_MIGRATIONS=1`.
@@ -27,7 +27,7 @@ The service runs migrations on startup when `KAMICODE_COLLAB_RUN_MIGRATIONS=1`.
 The simplest SSH deployment is:
 
 1. Provision Postgres.
-2. Build this package with `bun run --filter @t3tools/collab-server build`.
+2. Build this package with `pnpm --filter @t3tools/collab-server build`.
 3. Copy `apps/collab-server/dist`, `package.json`, and production `node_modules` to the server.
 4. Set the environment variables from `.env.example`.
 5. Run `node dist/index.mjs` under systemd.

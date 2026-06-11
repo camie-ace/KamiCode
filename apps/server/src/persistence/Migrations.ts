@@ -43,12 +43,14 @@ import Migration0027 from "./Migrations/027_ProviderSessionRuntimeInstanceId.ts"
 import Migration0028 from "./Migrations/028_ProjectionThreadSessionInstanceId.ts";
 import Migration0029 from "./Migrations/029_ProjectionThreadDetailOrderingIndexes.ts";
 import Migration0030 from "./Migrations/030_ProjectionThreadShellArchiveIndexes.ts";
-import Migration0031 from "./Migrations/031_ProjectionProjectTestEnvironments.ts";
-import Migration0032 from "./Migrations/032_UserAuth.ts";
-import Migration0033 from "./Migrations/033_ProjectionTurnQueue.ts";
-import Migration0034 from "./Migrations/034_SharedProjects.ts";
-import Migration0035 from "./Migrations/035_SharedProjectSshCredentials.ts";
-import Migration0036 from "./Migrations/036_SharedSessionSnapshots.ts";
+import Migration0031 from "./Migrations/031_AuthAuthorizationScopes.ts";
+import Migration0032 from "./Migrations/032_AuthPairingProofKeyThumbprint.ts";
+import Migration0033 from "./Migrations/033_ProjectionProjectTestEnvironments.ts";
+import Migration0034 from "./Migrations/034_UserAuth.ts";
+import Migration0035 from "./Migrations/035_ProjectionTurnQueue.ts";
+import Migration0036 from "./Migrations/036_SharedProjects.ts";
+import Migration0037 from "./Migrations/037_SharedProjectSshCredentials.ts";
+import Migration0038 from "./Migrations/038_SharedSessionSnapshots.ts";
 
 /**
  * Migration loader with all migrations defined inline.
@@ -91,12 +93,14 @@ export const migrationEntries = [
   [28, "ProjectionThreadSessionInstanceId", Migration0028],
   [29, "ProjectionThreadDetailOrderingIndexes", Migration0029],
   [30, "ProjectionThreadShellArchiveIndexes", Migration0030],
-  [31, "ProjectionProjectTestEnvironments", Migration0031],
-  [32, "UserAuth", Migration0032],
-  [33, "ProjectionTurnQueue", Migration0033],
-  [34, "SharedProjects", Migration0034],
-  [35, "SharedProjectSshCredentials", Migration0035],
-  [36, "SharedSessionSnapshots", Migration0036],
+  [31, "AuthAuthorizationScopes", Migration0031],
+  [32, "AuthPairingProofKeyThumbprint", Migration0032],
+  [33, "ProjectionProjectTestEnvironments", Migration0033],
+  [34, "UserAuth", Migration0034],
+  [35, "ProjectionTurnQueue", Migration0035],
+  [36, "SharedProjects", Migration0036],
+  [37, "SharedProjectSshCredentials", Migration0037],
+  [38, "SharedSessionSnapshots", Migration0038],
 ] as const;
 
 export const makeMigrationLoader = (throughId?: number) =>

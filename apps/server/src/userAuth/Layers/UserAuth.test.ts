@@ -6,7 +6,7 @@ import type * as HttpServerRequest from "effect/unstable/http/HttpServerRequest"
 
 import type { ServerConfigShape } from "../../config.ts";
 import { ServerConfig } from "../../config.ts";
-import { ServerSecretStoreLive } from "../../auth/Layers/ServerSecretStore.ts";
+import * as ServerSecretStore from "../../auth/ServerSecretStore.ts";
 import { SqlitePersistenceMemory } from "../../persistence/Layers/Sqlite.ts";
 import { GitHubOAuthClient } from "../Services/GitHubOAuthClient.ts";
 import type { GitHubOAuthClientShape } from "../Services/GitHubOAuthClient.ts";
@@ -83,7 +83,7 @@ const makeUserAuthLayer = (
 ) =>
   UserAuthLive.pipe(
     Layer.provide(SqlitePersistenceMemory),
-    Layer.provide(ServerSecretStoreLive),
+    Layer.provide(ServerSecretStore.layer),
     Layer.provide(makeGitHubOAuthClientLayer(githubOAuthClient)),
     Layer.provide(makeServerConfigLayer(overrides)),
   );

@@ -23,6 +23,7 @@
  */
 import { CodexSettings, ProviderDriverKind, type ServerProvider } from "@t3tools/contracts";
 import * as Duration from "effect/Duration";
+import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Option from "effect/Option";
@@ -32,7 +33,7 @@ import * as Stream from "effect/Stream";
 import { HttpClient } from "effect/unstable/http";
 import { ChildProcessSpawner } from "effect/unstable/process";
 
-import { ServerAuth } from "../../auth/Services/ServerAuth.ts";
+import { EnvironmentAuth } from "../../auth/EnvironmentAuth.ts";
 import { makeCodexTextGeneration } from "../../textGeneration/CodexTextGeneration.ts";
 import { ServerConfig } from "../../config.ts";
 import { ProviderDriverError } from "../Errors.ts";
@@ -71,6 +72,7 @@ const UPDATE = makePackageManagedProviderMaintenanceResolver({
  */
 export type CodexDriverEnv =
   | ChildProcessSpawner.ChildProcessSpawner
+  | Crypto.Crypto
   | FileSystem.FileSystem
   | HttpClient.HttpClient
   | Path.Path
@@ -112,7 +114,7 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv> = {
       const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
       const httpClient = yield* HttpClient.HttpClient;
       const eventLoggers = yield* ProviderEventLoggers;
-      const serverAuth = yield* Effect.serviceOption(ServerAuth);
+      const serverAuth = yield* Effect.serviceOption(EnvironmentAuth);
       const processEnv = mergeProviderInstanceEnvironment(environment);
       const homeLayout = yield* resolveCodexHomeLayout(config);
       const continuationIdentity = codexContinuationIdentity(homeLayout);
@@ -157,7 +159,6 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv> = {
               issueTestHarnessPairingCredential: () =>
                 serverAuth.value
                   .issuePairingCredential({
-                    role: "client",
                     label: "KamiCode test harness",
                   })
                   .pipe(

@@ -62,7 +62,7 @@ export interface DesktopWindowShape {
 }
 
 export class DesktopWindow extends Context.Service<DesktopWindow, DesktopWindowShape>()(
-  "t3/desktop/Window",
+  "@t3tools/desktop/window/DesktopWindow",
 ) {}
 
 const { logInfo: logWindowInfo, logWarning: logWindowWarning } =
@@ -109,6 +109,17 @@ function syncWindowIcon(
 
 function getInitialWindowBackgroundColor(shouldUseDarkColors: boolean): string {
   return shouldUseDarkColors ? "#0a0a0a" : "#ffffff";
+}
+
+export function isSameOriginRendererNavigation(input: {
+  readonly applicationUrl: string;
+  readonly navigationUrl: string;
+}): boolean {
+  try {
+    return new URL(input.applicationUrl).origin === new URL(input.navigationUrl).origin;
+  } catch {
+    return false;
+  }
 }
 
 function getWindowTitleBarOptions(shouldUseDarkColors: boolean): WindowTitleBarOptions {
@@ -204,6 +215,9 @@ const make = Effect.gen(function* () {
   const createWindow = Effect.fn("desktop.window.createWindow")(function* (
     backendHttpUrl: URL,
   ): Effect.fn.Return<Electron.BrowserWindow, DesktopWindowError> {
+    const applicationUrl = environment.isDevelopment
+      ? yield* resolveDesktopDevServerUrl(environment)
+      : backendHttpUrl.href;
     const iconPaths = yield* assets.iconPaths;
     const iconOption = getIconOption(iconPaths, environment.platform);
     const shouldUseDarkColors = yield* electronTheme.shouldUseDarkColors;
@@ -316,6 +330,21 @@ const make = Effect.gen(function* () {
     window.webContents.on("did-create-window", (childWindow) => {
       childWindow.webContents.setWindowOpenHandler(handleWindowOpen);
     });
+    window.webContents.on("will-navigate", (event, url) => {
+      if (
+        isSameOriginRendererNavigation({
+          applicationUrl,
+          navigationUrl: url,
+        })
+      ) {
+        return;
+      }
+
+      event.preventDefault();
+      if (Option.isSome(ElectronShell.parseSafeExternalUrl(url))) {
+        void runPromise(electronShell.openExternal(url));
+      }
+    });
 
     window.on("page-title-updated", (event) => {
       event.preventDefault();
@@ -357,11 +386,10 @@ const make = Effect.gen(function* () {
     });
 
     if (environment.isDevelopment) {
-      const devServerUrl = yield* resolveDesktopDevServerUrl(environment);
-      void window.loadURL(devServerUrl);
+      void window.loadURL(applicationUrl);
       window.webContents.openDevTools({ mode: "detach" });
     } else {
-      void window.loadURL(backendHttpUrl.href);
+      void window.loadURL(applicationUrl);
     }
 
     window.on("closed", () => {

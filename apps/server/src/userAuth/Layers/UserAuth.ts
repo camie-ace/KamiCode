@@ -20,7 +20,7 @@ import { ServerConfig } from "../../config.ts";
 import { UserAuthRepositoryLive } from "../../persistence/Layers/UserAuth.ts";
 import { UserAuthRepository } from "../../persistence/Services/UserAuth.ts";
 import type { UserAuthUserRecord } from "../../persistence/Services/UserAuth.ts";
-import { ServerSecretStore } from "../../auth/Services/ServerSecretStore.ts";
+import { ServerSecretStore } from "../../auth/ServerSecretStore.ts";
 import {
   base64UrlDecodeUtf8,
   base64UrlEncode,

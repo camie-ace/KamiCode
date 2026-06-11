@@ -1,5 +1,11 @@
 import {
   AppendSharedThreadMessageInput,
+  AuthOrchestrationOperateScope,
+  AuthOrchestrationReadScope,
+  type AuthEnvironmentScope,
+  type EnvironmentAuthInvalidError,
+  type EnvironmentInternalError,
+  type EnvironmentScopeRequiredError,
   ClaimSharedProjectInviteInput,
   CreateSharedProjectInviteInput,
   DeleteSharedProjectInput,
@@ -32,14 +38,20 @@ import {
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import type * as Schema from "effect/Schema";
-import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
+import {
+  HttpRouter,
+  HttpServerRequest,
+  HttpServerRespondable,
+  HttpServerResponse,
+} from "effect/unstable/http";
 import type * as HttpServerResponseModule from "effect/unstable/http/HttpServerResponse";
 
-import { respondToAuthError } from "../auth/http.ts";
-import { AuthError, ServerAuth } from "../auth/Services/ServerAuth.ts";
 import { browserApiCorsHeaders } from "../httpCors.ts";
 import { ServerSettingsService } from "../serverSettings.ts";
-import { respondToUserAuthError } from "../userAuth/http.ts";
+import {
+  authenticateEnvironmentRequestWithScope,
+  respondToUserAuthError,
+} from "../userAuth/http.ts";
 import { UserAuth, UserAuthError, type AuthenticatedUser } from "../userAuth/Services/UserAuth.ts";
 import { importSharedThreadSnapshot } from "./importSharedThreadSnapshot.ts";
 import { SharedProjects, SharedProjectsError } from "./Services/SharedProjects.ts";
@@ -58,13 +70,12 @@ const respondToSharedProjectsError = (error: SharedProjectsError) =>
     );
   });
 
-const authenticateSharedProjectUser = Effect.gen(function* () {
-  const request = yield* HttpServerRequest.HttpServerRequest;
-  const serverAuth = yield* ServerAuth;
-  yield* serverAuth.authenticateHttpRequest(request);
-  const userAuth = yield* UserAuth;
-  return yield* userAuth.authenticateRequest(request);
-});
+const authenticateSharedProjectUser = (scope: AuthEnvironmentScope) =>
+  Effect.gen(function* () {
+    const request = yield* authenticateEnvironmentRequestWithScope(scope);
+    const userAuth = yield* UserAuth;
+    return yield* userAuth.authenticateRequest(request);
+  });
 
 const projectIdFromQuery = Effect.gen(function* () {
   const request = yield* HttpServerRequest.HttpServerRequest;
@@ -79,7 +90,12 @@ const projectIdFromQuery = Effect.gen(function* () {
   return SharedProjectId.make(projectId);
 });
 
-type SharedProjectsRouteError = AuthError | UserAuthError | SharedProjectsError;
+type SharedProjectsRouteError =
+  | EnvironmentAuthInvalidError
+  | EnvironmentInternalError
+  | EnvironmentScopeRequiredError
+  | UserAuthError
+  | SharedProjectsError;
 
 const parseBody = <S extends Schema.Codec<unknown, unknown, never, unknown>>(
   schema: S,
@@ -288,9 +304,13 @@ const withSharedProjectErrorHandling = <R>(
   effect: Effect.Effect<HttpServerResponseModule.HttpServerResponse, SharedProjectsRouteError, R>,
 ): Effect.Effect<HttpServerResponseModule.HttpServerResponse, never, R> =>
   effect.pipe(
-    Effect.catchTag("AuthError", (error) => respondToAuthError(error)),
-    Effect.catchTag("UserAuthError", (error) => respondToUserAuthError(error)),
-    Effect.catchTag("SharedProjectsError", (error) => respondToSharedProjectsError(error)),
+    Effect.catchTags({
+      EnvironmentAuthInvalidError: HttpServerRespondable.toResponse,
+      EnvironmentInternalError: HttpServerRespondable.toResponse,
+      EnvironmentScopeRequiredError: HttpServerRespondable.toResponse,
+      UserAuthError: respondToUserAuthError,
+      SharedProjectsError: respondToSharedProjectsError,
+    }),
   );
 
 export const sharedProjectsListRouteLayer = HttpRouter.add(
@@ -298,7 +318,7 @@ export const sharedProjectsListRouteLayer = HttpRouter.add(
   "/api/shared-projects",
   withSharedProjectErrorHandling(
     Effect.gen(function* () {
-      const user = yield* authenticateSharedProjectUser;
+      const user = yield* authenticateSharedProjectUser(AuthOrchestrationReadScope);
       const hosted = yield* hostedSharedProjectRequest<SharedProjectListResult>({
         user,
         method: "GET",
@@ -325,7 +345,7 @@ export const sharedProjectsCurrentUserRouteLayer = HttpRouter.add(
   "/api/shared-projects/current-user",
   withSharedProjectErrorHandling(
     Effect.gen(function* () {
-      const user = yield* authenticateSharedProjectUser;
+      const user = yield* authenticateSharedProjectUser(AuthOrchestrationReadScope);
       const hosted = yield* hostedSharedProjectRequest<{
         readonly user: AuthenticatedUser["user"];
       }>({
@@ -352,7 +372,7 @@ export const sharedProjectsDetailRouteLayer = HttpRouter.add(
   "/api/shared-projects/detail",
   withSharedProjectErrorHandling(
     Effect.gen(function* () {
-      const user = yield* authenticateSharedProjectUser;
+      const user = yield* authenticateSharedProjectUser(AuthOrchestrationReadScope);
       const projectId = yield* projectIdFromQuery;
       const hosted = yield* hostedSharedProjectRequest<SharedProjectDetail>({
         user,
@@ -378,7 +398,7 @@ export const sharedProjectsBootstrapRouteLayer = HttpRouter.add(
   "/api/shared-projects/bootstrap",
   withSharedProjectErrorHandling(
     Effect.gen(function* () {
-      const user = yield* authenticateSharedProjectUser;
+      const user = yield* authenticateSharedProjectUser(AuthOrchestrationReadScope);
       const projectId = yield* projectIdFromQuery;
       const hosted = yield* hostedSharedProjectRequest<SharedProjectBootstrapManifest>({
         user,
@@ -407,7 +427,7 @@ export const sharedProjectsPublishRouteLayer = HttpRouter.add(
   "/api/shared-projects/publish",
   withSharedProjectErrorHandling(
     Effect.gen(function* () {
-      const user = yield* authenticateSharedProjectUser;
+      const user = yield* authenticateSharedProjectUser(AuthOrchestrationOperateScope);
       const input = yield* parseBody(PublishLocalProjectInput);
       const hosted = yield* hostedSharedProjectRequest<SharedProjectDetail>({
         user,
@@ -433,7 +453,7 @@ export const sharedProjectsSyncContextRouteLayer = HttpRouter.add(
   "/api/shared-projects/context/sync",
   withSharedProjectErrorHandling(
     Effect.gen(function* () {
-      const user = yield* authenticateSharedProjectUser;
+      const user = yield* authenticateSharedProjectUser(AuthOrchestrationOperateScope);
       const input = yield* parseBody(SyncSharedProjectContextInput);
       const hosted = yield* hostedSharedProjectRequest<SharedProjectDetail>({
         user,
@@ -459,7 +479,7 @@ export const sharedProjectsCreateInviteRouteLayer = HttpRouter.add(
   "/api/shared-projects/invites",
   withSharedProjectErrorHandling(
     Effect.gen(function* () {
-      const user = yield* authenticateSharedProjectUser;
+      const user = yield* authenticateSharedProjectUser(AuthOrchestrationOperateScope);
       const input = yield* parseBody(CreateSharedProjectInviteInput);
       const hosted = yield* hostedSharedProjectRequest<SharedProjectInvite>({
         user,
@@ -485,7 +505,7 @@ export const sharedProjectsClaimInviteRouteLayer = HttpRouter.add(
   "/api/shared-projects/invites/claim",
   withSharedProjectErrorHandling(
     Effect.gen(function* () {
-      const user = yield* authenticateSharedProjectUser;
+      const user = yield* authenticateSharedProjectUser(AuthOrchestrationOperateScope);
       const input = yield* parseBody(ClaimSharedProjectInviteInput);
       const hosted = yield* hostedSharedProjectRequest<SharedProjectClaimResult>({
         user,
@@ -511,7 +531,7 @@ export const sharedProjectsUpdateMemberRoleRouteLayer = HttpRouter.add(
   "/api/shared-projects/members/role",
   withSharedProjectErrorHandling(
     Effect.gen(function* () {
-      const user = yield* authenticateSharedProjectUser;
+      const user = yield* authenticateSharedProjectUser(AuthOrchestrationOperateScope);
       const input = yield* parseBody(UpdateSharedProjectMemberRoleInput);
       const hosted = yield* hostedSharedProjectRequest<SharedProjectDetail>({
         user,
@@ -537,7 +557,7 @@ export const sharedProjectsRemoveMemberRouteLayer = HttpRouter.add(
   "/api/shared-projects/members/remove",
   withSharedProjectErrorHandling(
     Effect.gen(function* () {
-      const user = yield* authenticateSharedProjectUser;
+      const user = yield* authenticateSharedProjectUser(AuthOrchestrationOperateScope);
       const input = yield* parseBody(RemoveSharedProjectMemberInput);
       const hosted = yield* hostedSharedProjectRequest<SharedProjectDetail>({
         user,
@@ -563,7 +583,7 @@ export const sharedProjectsDeleteRouteLayer = HttpRouter.add(
   "/api/shared-projects/delete",
   withSharedProjectErrorHandling(
     Effect.gen(function* () {
-      const user = yield* authenticateSharedProjectUser;
+      const user = yield* authenticateSharedProjectUser(AuthOrchestrationOperateScope);
       const input = yield* parseBody(DeleteSharedProjectInput);
       const hosted = yield* hostedSharedProjectRequest<DeleteSharedProjectResult>({
         user,
@@ -589,7 +609,7 @@ export const sharedProjectsPublishThreadRouteLayer = HttpRouter.add(
   "/api/shared-projects/threads/publish",
   withSharedProjectErrorHandling(
     Effect.gen(function* () {
-      const user = yield* authenticateSharedProjectUser;
+      const user = yield* authenticateSharedProjectUser(AuthOrchestrationOperateScope);
       const input = yield* parseBody(PublishSharedThreadInput);
       const hosted = yield* hostedSharedProjectRequest<SharedThread>({
         user,
@@ -615,7 +635,7 @@ export const sharedProjectsUpdateThreadVisibilityRouteLayer = HttpRouter.add(
   "/api/shared-projects/threads/visibility",
   withSharedProjectErrorHandling(
     Effect.gen(function* () {
-      const user = yield* authenticateSharedProjectUser;
+      const user = yield* authenticateSharedProjectUser(AuthOrchestrationOperateScope);
       const input = yield* parseBody(UpdateSharedThreadVisibilityInput);
       const hosted = yield* hostedSharedProjectRequest<SharedThread>({
         user,
@@ -641,7 +661,7 @@ export const sharedProjectsImportThreadRouteLayer = HttpRouter.add(
   "/api/shared-projects/threads/import",
   withSharedProjectErrorHandling(
     Effect.gen(function* () {
-      const user = yield* authenticateSharedProjectUser;
+      const user = yield* authenticateSharedProjectUser(AuthOrchestrationOperateScope);
       const input = yield* parseBody(ImportSharedThreadInput);
       const hosted = yield* hostedSharedProjectRequest<SharedProjectDetail>({
         user,
@@ -685,7 +705,7 @@ export const sharedProjectsAppendThreadMessageRouteLayer = HttpRouter.add(
   "/api/shared-projects/threads/messages",
   withSharedProjectErrorHandling(
     Effect.gen(function* () {
-      const user = yield* authenticateSharedProjectUser;
+      const user = yield* authenticateSharedProjectUser(AuthOrchestrationOperateScope);
       const input = yield* parseBody(AppendSharedThreadMessageInput);
       const sharedProjects = yield* SharedProjects;
       const thread = yield* sharedProjects.appendThreadMessage(user, input);
@@ -699,7 +719,7 @@ export const sharedProjectsUpsertRuntimeRouteLayer = HttpRouter.add(
   "/api/shared-projects/runtimes",
   withSharedProjectErrorHandling(
     Effect.gen(function* () {
-      const user = yield* authenticateSharedProjectUser;
+      const user = yield* authenticateSharedProjectUser(AuthOrchestrationOperateScope);
       const input = yield* parseBody(UpsertSharedRuntimeInput);
       const hosted = yield* hostedSharedProjectRequest<SharedRuntime>({
         user,
@@ -728,7 +748,7 @@ export const sharedProjectsUpsertSshCredentialRouteLayer = HttpRouter.add(
   "/api/shared-projects/ssh-credentials",
   withSharedProjectErrorHandling(
     Effect.gen(function* () {
-      const user = yield* authenticateSharedProjectUser;
+      const user = yield* authenticateSharedProjectUser(AuthOrchestrationOperateScope);
       const input = yield* parseBody(UpsertSharedSshCredentialInput);
       const sharedProjects = yield* SharedProjects;
       const credential = yield* sharedProjects.upsertSshCredential(user, input);
@@ -745,7 +765,7 @@ export const sharedProjectsRemoveSshCredentialRouteLayer = HttpRouter.add(
   "/api/shared-projects/ssh-credentials/remove",
   withSharedProjectErrorHandling(
     Effect.gen(function* () {
-      const user = yield* authenticateSharedProjectUser;
+      const user = yield* authenticateSharedProjectUser(AuthOrchestrationOperateScope);
       const input = yield* parseBody(RemoveSharedSshCredentialInput);
       const sharedProjects = yield* SharedProjects;
       const detail = yield* sharedProjects.removeSshCredential(user, input);
@@ -759,7 +779,7 @@ export const sharedProjectsUpsertEnvironmentRouteLayer = HttpRouter.add(
   "/api/shared-projects/environments",
   withSharedProjectErrorHandling(
     Effect.gen(function* () {
-      const user = yield* authenticateSharedProjectUser;
+      const user = yield* authenticateSharedProjectUser(AuthOrchestrationOperateScope);
       const input = yield* parseBody(UpsertSharedEnvironmentInput);
       const hosted = yield* hostedSharedProjectRequest<SharedProjectEnvironment>({
         user,
@@ -788,7 +808,7 @@ export const sharedProjectsSetDefaultEnvironmentRouteLayer = HttpRouter.add(
   "/api/shared-projects/environments/default",
   withSharedProjectErrorHandling(
     Effect.gen(function* () {
-      const user = yield* authenticateSharedProjectUser;
+      const user = yield* authenticateSharedProjectUser(AuthOrchestrationOperateScope);
       const input = yield* parseBody(SetSharedDefaultEnvironmentInput);
       const hosted = yield* hostedSharedProjectRequest<SharedProjectDetail>({
         user,
@@ -814,7 +834,7 @@ export const sharedProjectsUpsertDeployRouteLayer = HttpRouter.add(
   "/api/shared-projects/deploys",
   withSharedProjectErrorHandling(
     Effect.gen(function* () {
-      const user = yield* authenticateSharedProjectUser;
+      const user = yield* authenticateSharedProjectUser(AuthOrchestrationOperateScope);
       const input = yield* parseBody(UpsertSharedDeployAssociationInput);
       const hosted = yield* hostedSharedProjectRequest<SharedProjectDetail>({
         user,
@@ -840,7 +860,7 @@ export const sharedProjectsSyncRemoteRuntimeRouteLayer = HttpRouter.add(
   "/api/shared-projects/sync-remote-runtime",
   withSharedProjectErrorHandling(
     Effect.gen(function* () {
-      const user = yield* authenticateSharedProjectUser;
+      const user = yield* authenticateSharedProjectUser(AuthOrchestrationOperateScope);
       const input = yield* parseBody(SyncSharedRemoteRuntimeInput);
       const hosted = yield* hostedSharedProjectRequest<SharedProjectDetail>({
         user,

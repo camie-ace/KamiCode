@@ -78,7 +78,7 @@ export interface DesktopEnvironmentShape {
 export class DesktopEnvironment extends Context.Service<
   DesktopEnvironment,
   DesktopEnvironmentShape
->()("t3/desktop/Environment") {}
+>()("@t3tools/desktop/app/DesktopEnvironment") {}
 
 const APP_BASE_NAME = "KamiCode";
 const APP_ID = "ai.kagura.kamicode";
@@ -200,7 +200,9 @@ const makeDesktopEnvironment = Effect.fn("desktop.environment.make")(function* (
     otlpExportIntervalMs: config.otlpExportIntervalMs,
     branding,
     displayName,
-    appUserModelId: isDevelopment ? `${APP_ID}.dev` : APP_ID,
+    appUserModelId: Option.getOrElse(config.appUserModelIdOverride, () =>
+      isDevelopment ? `${APP_ID}.dev` : APP_ID,
+    ),
     linuxDesktopEntryName: isDevelopment ? "kamicode-dev.desktop" : "kamicode.desktop",
     linuxWmClass: isDevelopment ? "kamicode-dev" : "kamicode",
     userDataDirName,

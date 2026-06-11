@@ -127,7 +127,7 @@ ensure_command() {
     fail_missing_command "$1"
   fi
   case "$1" in
-    git|curl|unzip)
+    git|curl|tar)
       install_packages "$1"
       ;;
     docker)
@@ -155,7 +155,7 @@ fi
 ensure_command git
 ensure_command curl
 ensure_command docker
-ensure_command unzip
+ensure_command tar
 
 if command -v systemctl >/dev/null 2>&1; then
   if ! systemctl is-active --quiet docker >/dev/null 2>&1; then
@@ -194,20 +194,46 @@ else
   git clone --depth 1 "$REPO_URL" "$REPO_DIR"
 fi
 
-export BUN_INSTALL="$HOME/.bun"
-export PATH="$BUN_INSTALL/bin:$PATH"
-if ! command -v bun >/dev/null 2>&1; then
-  curl -fsSL https://bun.sh/install | bash >/dev/null
-  export PATH="$BUN_INSTALL/bin:$PATH"
+NODE_VERSION="24.13.1"
+PNPM_VERSION="10.24.0"
+NODE_DIR="$APP_DIR/node"
+TOOLS_BIN_DIR="$APP_DIR/bin"
+export PATH="$TOOLS_BIN_DIR:$NODE_DIR/bin:$PATH"
+export COREPACK_ENABLE_DOWNLOAD_PROMPT=0
+
+node_is_usable() {
+  command -v node >/dev/null 2>&1 || return 1
+  command -v corepack >/dev/null 2>&1 || return 1
+  node -e 'var v = process.versions.node.split(".").map(Number); var ok = (v[0] === 24 && (v[1] > 13 || (v[1] === 13 && v[2] >= 1))) || v[0] > 24; process.exit(ok ? 0 : 1)' >/dev/null 2>&1
+}
+
+if ! node_is_usable; then
+  case "$(uname -m)" in
+    x86_64|amd64) NODE_ARCH="x64" ;;
+    aarch64|arm64) NODE_ARCH="arm64" ;;
+    *)
+      printf 'Collaboration server auto-deploy does not support the remote CPU architecture: %s\n' "$(uname -m)" >&2
+      exit 1
+      ;;
+  esac
+  rm -rf "$NODE_DIR"
+  mkdir -p "$NODE_DIR"
+  curl -fsSL "https://nodejs.org/dist/v\${NODE_VERSION}/node-v\${NODE_VERSION}-linux-\${NODE_ARCH}.tar.gz" | tar -xz --strip-components=1 -C "$NODE_DIR"
 fi
-need_command bun
+need_command node
+need_command corepack
+
+mkdir -p "$TOOLS_BIN_DIR"
+corepack enable --install-directory "$TOOLS_BIN_DIR" pnpm
+corepack prepare "pnpm@\${PNPM_VERSION}" --activate
+need_command pnpm
 
 if [ -f "$REPO_DIR/apps/collab-server/package.json" ]; then
   cd "$REPO_DIR"
-  bun install --frozen-lockfile --ignore-scripts
-  bun run --filter @t3tools/collab-server build
-  RUN_DIR="$REPO_DIR"
-  START_EXEC="$(command -v bun) run --filter @t3tools/collab-server start"
+  pnpm install --frozen-lockfile --ignore-scripts
+  pnpm --filter @t3tools/collab-server build
+  RUN_DIR="$REPO_DIR/apps/collab-server"
+  START_EXEC="$(command -v node) dist/index.mjs"
 else
   if [ -z "$LOCAL_COLLAB_BUNDLE_BASE64" ]; then
     printf 'The cloned GitHub repository does not contain apps/collab-server, and no local collab server bundle was available. Push the current collaboration server changes to GitHub or build apps/collab-server locally before deploying.\n' >&2
@@ -222,15 +248,16 @@ else
   "name": "@t3tools/collab-server-deploy-bundle",
   "private": true,
   "type": "module",
+  "packageManager": "pnpm@10.24.0",
   "dependencies": {
     "pg": "^8.16.3"
   }
 }
 EOF
   cd "$BUNDLE_DIR"
-  bun install --production --ignore-scripts
+  pnpm install --prod --ignore-scripts
   RUN_DIR="$BUNDLE_DIR"
-  START_EXEC="$(command -v bun) dist/index.mjs"
+  START_EXEC="$(command -v node) dist/index.mjs"
 fi
 
 if ! $DOCKER_BIN ps -a --format '{{.Names}}' | grep -qx "$POSTGRES_CONTAINER"; then
@@ -289,7 +316,7 @@ EOF
   systemctl --user daemon-reload
   systemctl --user enable --now "\${SERVICE_NAME}.service"
 else
-  pkill -f '@t3tools/collab-server start|collab-server-bundle/dist/index.mjs|bun dist/index.mjs' >/dev/null 2>&1 || true
+  pkill -f '@t3tools/collab-server start|collab-server-bundle/dist/index.mjs|node dist/index.mjs' >/dev/null 2>&1 || true
   set -a
   # shellcheck disable=SC1090
   . "$ENV_FILE"

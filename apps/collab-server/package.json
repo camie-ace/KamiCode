@@ -8,8 +8,8 @@
     "build": "tsdown",
     "start": "node dist/index.mjs",
     "migrate": "node --experimental-strip-types src/index.ts migrate",
-    "typecheck": "tsc --noEmit",
-    "test": "vitest run --passWithNoTests"
+    "typecheck": "tsgo --noEmit",
+    "test": "vp test run --passWithNoTests"
   },
   "dependencies": {
     "@t3tools/contracts": "workspace:*",
@@ -17,9 +17,8 @@
   },
   "devDependencies": {
     "@types/node": "catalog:",
-    "tsdown": "catalog:",
-    "typescript": "catalog:",
-    "vitest": "catalog:"
+    "tsdown": "^0.20.3",
+    "vite-plus": "catalog:"
   },
   "engines": {
     "node": "^22.16 || ^23.11 || >=24.10"

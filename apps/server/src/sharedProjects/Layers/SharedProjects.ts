@@ -67,7 +67,7 @@ import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
-import { ServerSecretStore } from "../../auth/Services/ServerSecretStore.ts";
+import { ServerSecretStore } from "../../auth/ServerSecretStore.ts";
 import { OrchestrationEngineService } from "../../orchestration/Services/OrchestrationEngine.ts";
 import * as ProcessRunner from "../../processRunner.ts";
 import {
