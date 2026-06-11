@@ -1,3 +1,4 @@
+﻿// @effect-diagnostics nodeBuiltinImport:off - standalone non-Effect service; uses node:http types directly.
 import type { SharedProjectId } from "@t3tools/contracts";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { Pool } from "pg";

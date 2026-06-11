@@ -1,3 +1,4 @@
+﻿// @effect-diagnostics nodeBuiltinImport:off - standalone non-Effect service; uses node:http types directly.
 import type { KamiUser } from "@t3tools/contracts";
 import type { IncomingMessage } from "node:http";
 

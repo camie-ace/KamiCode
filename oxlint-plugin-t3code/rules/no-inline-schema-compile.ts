@@ -1,10 +1,12 @@
 import { defineRule } from "@oxlint/plugins";
+import * as Option from "effect/Option";
+import * as Schema from "effect/Schema";
 
 import { getPropertyName, isIdentifier, unwrapExpression } from "../utils.ts";
 
 // Effect Schema decoder/encoder APIs allocate compiled functions. Keep them
 // outside function bodies so hot paths do not rebuild compilers per call.
-const COMPILER_METHODS = new Set<string>([
+const COMPILER_METHODS = new Set<keyof typeof Schema>([
   "is",
   "asserts",
   "decodeEffect",
@@ -30,44 +32,45 @@ const COMPILER_METHODS = new Set<string>([
   "encodeUnknownSync",
 ]);
 
-const getSchemaCompilerMethod = (callee: unknown): string | null => {
+const getSchemaCompilerMethod = (callee: unknown): Option.Option<string> => {
   const expression = unwrapExpression(callee);
-  if (!expression || expression.type !== "MemberExpression") {
-    return null;
+  if (Option.isNone(expression) || expression.value.type !== "MemberExpression") {
+    return Option.none();
   }
 
-  const object = unwrapExpression(expression.object);
-  if (!isIdentifier(object, "Schema")) return null;
+  const object = unwrapExpression(expression.value.object);
+  if (!isIdentifier(object, "Schema")) return Option.none();
 
-  const method = getPropertyName(expression.property);
-  return method !== null && COMPILER_METHODS.has(method) ? method : null;
+  return Option.filter(getPropertyName(expression.value.property), (method) =>
+    COMPILER_METHODS.has(method as keyof typeof Schema),
+  );
 };
 
 const isStaticSchemaReference = (node: unknown): boolean => {
   const expression = unwrapExpression(node);
-  if (!expression) return false;
+  if (Option.isNone(expression)) return false;
 
-  if (expression.type === "Identifier") {
-    const [firstChar] = expression.name;
+  if (expression.value.type === "Identifier") {
+    const [firstChar] = expression.value.name;
     return firstChar !== undefined && firstChar.toUpperCase() === firstChar;
   }
 
-  return expression.type === "MemberExpression";
+  return expression.value.type === "MemberExpression";
 };
 
 const isNestedStaticSchemaCall = (node: unknown): boolean => {
   const expression = unwrapExpression(node);
-  if (!expression || expression.type !== "CallExpression") return false;
+  if (Option.isNone(expression) || expression.value.type !== "CallExpression") return false;
 
-  const callee = unwrapExpression(expression.callee);
-  if (!callee || callee.type !== "MemberExpression") return false;
+  const callee = unwrapExpression(expression.value.callee);
+  if (Option.isNone(callee) || callee.value.type !== "MemberExpression") return false;
 
-  const object = unwrapExpression(callee.object);
+  const object = unwrapExpression(callee.value.object);
   if (!isIdentifier(object, "Schema")) return false;
 
-  const method = getPropertyName(callee.property);
-  if (method === "fromJsonString") {
-    const firstArg = expression.arguments[0];
+  const method = getPropertyName(callee.value.property);
+  if (Option.isSome(method) && method.value === "fromJsonString") {
+    const firstArg = expression.value.arguments[0];
     return isStaticSchemaReference(firstArg) || isNestedStaticSchemaCall(firstArg);
   }
 
@@ -76,13 +79,16 @@ const isNestedStaticSchemaCall = (node: unknown): boolean => {
 
 const isImmediatelyInvoked = (node: unknown): boolean => {
   const expression = unwrapExpression(node);
-  if (!expression) return false;
+  if (Option.isNone(expression)) return false;
 
-  const parent = "parent" in expression ? unwrapExpression(expression.parent) : null;
+  const parent =
+    "parent" in expression.value ? unwrapExpression(expression.value.parent) : Option.none();
   return (
-    parent !== null &&
-    parent.type === "CallExpression" &&
-    unwrapExpression(parent.callee) === expression
+    Option.isSome(parent) &&
+    parent.value.type === "CallExpression" &&
+    unwrapExpression(parent.value.callee).pipe(
+      Option.exists((callee) => callee === expression.value),
+    )
   );
 };
 
@@ -127,7 +133,7 @@ export default defineRule({
         if (functionDepth === 0) return;
 
         const method = getSchemaCompilerMethod(node.callee);
-        if (method === null) return;
+        if (Option.isNone(method)) return;
         if (!isImmediatelyInvoked(node)) return;
 
         const firstArg = node.arguments[0];
@@ -136,7 +142,7 @@ export default defineRule({
 
         context.report({
           node: node.callee,
-          message: high ? messageHigh(method) : messageMedium(method),
+          message: high ? messageHigh(method.value) : messageMedium(method.value),
         });
       },
     };

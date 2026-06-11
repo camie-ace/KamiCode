@@ -1,3 +1,4 @@
+﻿// @effect-diagnostics globalDate:off - standalone non-Effect service; uses wall-clock Date directly.
 import type {
   KamiUserId,
   ProjectId,

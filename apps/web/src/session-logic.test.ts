@@ -1158,7 +1158,7 @@ describe("deriveWorkLogEntries", () => {
       }),
     ];
 
-    const [entry] = deriveWorkLogEntries(activities, undefined);
+    const [entry] = deriveWorkLogEntries(activities);
     expect(entry?.evidenceRun).toMatchObject({
       runId: "run-1",
       runner: "playwright",

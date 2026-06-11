@@ -1312,10 +1312,10 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       });
 
       const url = yield* getHttpServerUrl("/api/missing");
-      const response = yield* Effect.promise(() => fetch(url, { redirect: "manual" }));
+      const response = yield* fetchEffect(url, { redirect: "manual" });
 
       assert.equal(response.status, 404);
-      assert.equal(response.headers.get("location"), null);
+      assert.isUndefined(response.headers.location);
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 

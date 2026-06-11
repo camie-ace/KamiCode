@@ -108,6 +108,22 @@ const PackageJson = Schema.fromJsonString(
     scripts: Schema.optional(Schema.Record(Schema.String, Schema.Unknown)),
   }),
 );
+const SshCredentialSecretJson = Schema.fromJsonString(
+  Schema.Struct({
+    password: Schema.NullOr(Schema.String),
+    privateKey: Schema.NullOr(Schema.String),
+    passphrase: Schema.NullOr(Schema.String),
+  }),
+);
+const SshSecretEnvelopeJson = Schema.fromJsonString(
+  Schema.Struct({
+    v: Schema.Literal(1),
+    alg: Schema.Literal(SSH_SECRET_ALGORITHM),
+    iv: Schema.String,
+    tag: Schema.String,
+    data: Schema.String,
+  }),
+);
 
 const encodeContextBundleJson = Schema.encodeSync(ContextBundleJson);
 const decodeContextBundleJson = Schema.decodeUnknownSync(ContextBundleJson);
@@ -120,6 +136,8 @@ const decodeSessionSnapshotJson = Schema.decodeUnknownSync(SessionSnapshotJson);
 const encodeStringArrayJson = Schema.encodeSync(StringArrayJson);
 const decodeStringArrayJson = Schema.decodeUnknownSync(StringArrayJson);
 const decodePackageJson = Schema.decodeUnknownSync(PackageJson);
+const encodeSshSecretJson = Schema.encodeSync(SshCredentialSecretJson);
+const encodeSshEnvelopeJson = Schema.encodeSync(SshSecretEnvelopeJson);
 const decodeChatAttachment = Schema.decodeUnknownSync(ChatAttachmentSchema);
 const decodeModelSelection = Schema.decodeUnknownSync(ModelSelectionSchema);
 const decodeProviderInteractionMode = Schema.decodeUnknownSync(ProviderInteractionModeSchema);
@@ -666,10 +684,10 @@ function encryptSshSecret(
       const iv = randomBytes(12);
       const cipher = createCipheriv(SSH_SECRET_ALGORITHM, encryptionKeyBuffer(key), iv);
       const encrypted = Buffer.concat([
-        cipher.update(JSON.stringify(secret), "utf8"),
+        cipher.update(encodeSshSecretJson(secret), "utf8"),
         cipher.final(),
       ]);
-      return JSON.stringify({
+      return encodeSshEnvelopeJson({
         v: 1,
         alg: SSH_SECRET_ALGORITHM,
         iv: iv.toString("base64"),

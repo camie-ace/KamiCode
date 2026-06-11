@@ -178,7 +178,6 @@ export function writeBrowserSavedEnvironmentSecret(
   writeBrowserSavedEnvironmentRegistryDocument({
     version: document.version ?? 1,
     // The persistence update is copy-on-write so storage subscribers observe a new document.
-    // oxlint-disable-next-line oxc/no-map-spread
     records: records.map((record) => {
       if (record.environmentId !== environmentId) {
         return record;

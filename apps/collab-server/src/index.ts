@@ -1,3 +1,4 @@
+﻿// @effect-diagnostics globalConsole:off - standalone non-Effect service; logs to stdout/stderr directly.
 import { loadConfig } from "./config.ts";
 import { createPool } from "./db.ts";
 import { createCollabHttpServer } from "./http.ts";

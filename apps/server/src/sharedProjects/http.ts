@@ -37,8 +37,10 @@ import {
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
-import type * as Schema from "effect/Schema";
+import * as Schema from "effect/Schema";
 import {
+  HttpClient,
+  HttpClientRequest,
   HttpRouter,
   HttpServerRequest,
   HttpServerRespondable,
@@ -234,13 +236,15 @@ const hostedIdentityHeaders = (user: AuthenticatedUser, token: string): Record<s
   return headers;
 };
 
+const decodeHostedPayloadJson = Schema.decodeEffect(Schema.UnknownFromJsonString);
+
 const hostedSharedProjectRequest = <T>(input: {
   readonly user: AuthenticatedUser;
   readonly method: "GET" | "POST";
   readonly path: string;
   readonly query?: HostedCollabQuery;
   readonly body?: unknown;
-}): Effect.Effect<T | null, SharedProjectsError, ServerSettingsService> =>
+}): Effect.Effect<T | null, SharedProjectsError, HttpClient.HttpClient | ServerSettingsService> =>
   Effect.gen(function* () {
     const config = yield* hostedCollabConfig;
     if (config === null) {
@@ -252,43 +256,48 @@ const hostedSharedProjectRequest = <T>(input: {
         url.searchParams.set(key, String(value));
       }
     }
-    const headers = hostedIdentityHeaders(input.user, config.token);
-    if (input.body !== undefined) {
-      headers["content-type"] = "application/json";
-    }
-    const response = yield* Effect.tryPromise({
-      try: () =>
-        fetch(url, {
-          method: input.method,
-          headers,
-          body: input.body === undefined ? undefined : JSON.stringify(input.body),
-        }),
-      catch: (cause) =>
-        new SharedProjectsError({
-          message: "Hosted collaboration server is not reachable.",
-          status: 500,
-          cause,
-        }),
-    });
-    const text = yield* Effect.tryPromise({
-      try: () => response.text(),
-      catch: (cause) =>
-        new SharedProjectsError({
-          message: "Could not read hosted collaboration server response.",
-          status: 500,
-          cause,
-        }),
-    });
-    const payload = yield* Effect.try({
-      try: () => (text.trim().length === 0 ? null : (JSON.parse(text) as unknown)),
-      catch: (cause) =>
-        new SharedProjectsError({
-          message: "Hosted collaboration server returned invalid JSON.",
-          status: 500,
-          cause,
-        }),
-    });
-    if (!response.ok) {
+    const httpClient = yield* HttpClient.HttpClient;
+    const request = HttpClientRequest.make(input.method)(url, {
+      headers: hostedIdentityHeaders(input.user, config.token),
+    }).pipe(
+      input.body === undefined
+        ? (request) => request
+        : HttpClientRequest.bodyJsonUnsafe(input.body),
+    );
+    const response = yield* httpClient.execute(request).pipe(
+      Effect.mapError(
+        (cause) =>
+          new SharedProjectsError({
+            message: "Hosted collaboration server is not reachable.",
+            status: 500,
+            cause,
+          }),
+      ),
+    );
+    const text = yield* response.text.pipe(
+      Effect.mapError(
+        (cause) =>
+          new SharedProjectsError({
+            message: "Could not read hosted collaboration server response.",
+            status: 500,
+            cause,
+          }),
+      ),
+    );
+    const payload =
+      text.trim().length === 0
+        ? null
+        : yield* decodeHostedPayloadJson(text).pipe(
+            Effect.mapError(
+              (cause) =>
+                new SharedProjectsError({
+                  message: "Hosted collaboration server returned invalid JSON.",
+                  status: 500,
+                  cause,
+                }),
+            ),
+          );
+    if (response.status < 200 || response.status >= 300) {
       return yield* new SharedProjectsError({
         message: hostedErrorMessage(
           payload,
