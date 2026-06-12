@@ -4,7 +4,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { describe, it } from "vitest";
+import { describe, it } from "vite-plus/test";
 
 import {
   PROJECT_MEMORY_RELATIVE_PATH,

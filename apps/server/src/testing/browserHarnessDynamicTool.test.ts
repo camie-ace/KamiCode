@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 
 import * as Effect from "effect/Effect";
-import { describe, it } from "vitest";
+import { describe, it } from "vite-plus/test";
 
 import {
   formatBrowserHarnessDynamicToolResult,

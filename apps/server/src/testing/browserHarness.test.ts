@@ -5,7 +5,7 @@ import os from "node:os";
 import type { AddressInfo } from "node:net";
 import path from "node:path";
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vite-plus/test";
 
 import {
   createBrowserHarnessProjectKey,
