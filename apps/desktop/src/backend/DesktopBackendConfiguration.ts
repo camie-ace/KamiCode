@@ -47,6 +47,8 @@ const DESKTOP_BACKEND_ENV_NAMES = [
   "T3CODE_GITHUB_OAUTH_CALLBACK_URL",
 ] as const;
 
+const DEFAULT_DESKTOP_GITHUB_OAUTH_CLIENT_ID = "Ov23liguksmbhHst10WL";
+
 const backendChildEnvPatch = (): Record<string, string | undefined> =>
   Object.fromEntries(DESKTOP_BACKEND_ENV_NAMES.map((name) => [name, undefined]));
 
@@ -130,7 +132,8 @@ const resolveBackendStartConfig = Effect.fn("desktop.backendConfiguration.resolv
     const environment = yield* DesktopEnvironment.DesktopEnvironment;
     const serverExposure = yield* DesktopServerExposure.DesktopServerExposure;
     const backendExposure = yield* serverExposure.backendConfig;
-    const githubOAuthClientId = readOptionalEnv("T3CODE_GITHUB_OAUTH_CLIENT_ID");
+    const githubOAuthClientId =
+      readOptionalEnv("T3CODE_GITHUB_OAUTH_CLIENT_ID") ?? DEFAULT_DESKTOP_GITHUB_OAUTH_CLIENT_ID;
     const githubOAuthClientSecret = readOptionalEnv("T3CODE_GITHUB_OAUTH_CLIENT_SECRET");
     const githubOAuthCallbackUrl = readOptionalEnvUrl("T3CODE_GITHUB_OAUTH_CALLBACK_URL");
 
