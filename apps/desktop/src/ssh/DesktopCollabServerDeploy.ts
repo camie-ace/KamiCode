@@ -197,6 +197,7 @@ fi
 export BUN_INSTALL="$HOME/.bun"
 export PATH="$BUN_INSTALL/bin:$PATH"
 if ! command -v bun >/dev/null 2>&1; then
+  ensure_command unzip
   curl -fsSL https://bun.sh/install | bash >/dev/null
   export PATH="$BUN_INSTALL/bin:$PATH"
 fi
