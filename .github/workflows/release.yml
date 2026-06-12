@@ -91,6 +91,7 @@ jobs:
       - name: Build Windows installer
         env:
           T3CODE_DESKTOP_UPDATE_REPOSITORY: ${{ github.repository }}
+          T3CODE_GITHUB_OAUTH_CLIENT_ID: ${{ secrets.T3CODE_GITHUB_OAUTH_CLIENT_ID }}
         run: |
           node scripts/build-desktop-artifact.ts `
             --platform win `
