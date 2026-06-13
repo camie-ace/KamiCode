@@ -969,6 +969,10 @@ export default function ChatView(props: ChatViewProps) {
   const [optimisticQueuedMessages, setOptimisticQueuedMessages] = useState<ChatMessage[]>([]);
   const optimisticQueuedMessagesRef = useRef(optimisticQueuedMessages);
   optimisticQueuedMessagesRef.current = optimisticQueuedMessages;
+  const [locallyCancelledQueuedMessageIds, setLocallyCancelledQueuedMessageIds] = useState<
+    ReadonlySet<MessageId>
+  >(() => new Set());
+  const queuedDeleteInFlightByQueueIdRef = useRef<Set<string>>(new Set());
   const [localDraftErrorsByDraftId, setLocalDraftErrorsByDraftId] = useState<
     Record<string, string | null>
   >({});
@@ -1835,10 +1839,19 @@ export default function ChatView(props: ChatViewProps) {
       ),
     [activeThread?.queuedTurns],
   );
-  const activeQueuedMessageIds = useMemo(
-    () => new Set(activeQueuedTurns.map((turn) => turn.messageId)),
-    [activeQueuedTurns],
-  );
+  const activeQueuedMessageIds = useMemo(() => {
+    const ids = new Set<MessageId>();
+    for (const turn of activeQueuedTurns) {
+      ids.add(turn.messageId);
+    }
+    for (const message of optimisticQueuedMessages) {
+      ids.add(message.id);
+    }
+    for (const messageId of locallyCancelledQueuedMessageIds) {
+      ids.add(messageId);
+    }
+    return ids;
+  }, [activeQueuedTurns, locallyCancelledQueuedMessageIds, optimisticQueuedMessages]);
   const timelineMessages = useMemo(() => {
     const messages = (serverMessages ?? []).filter(
       (message) => !activeQueuedMessageIds.has(message.id),
@@ -1901,6 +1914,7 @@ export default function ChatView(props: ChatViewProps) {
   const queuedMessageItems = useMemo<ReadonlyArray<QueuedMessageItem>>(() => {
     const messagesById = new Map((serverMessages ?? []).map((message) => [message.id, message]));
     const serverItems = activeQueuedTurns.flatMap((turn): QueuedMessageItem[] => {
+      if (locallyCancelledQueuedMessageIds.has(turn.messageId)) return [];
       const message = messagesById.get(turn.messageId);
       if (!message || message.role !== "user") return [];
       return [
@@ -1915,7 +1929,9 @@ export default function ChatView(props: ChatViewProps) {
     });
     const knownIds = new Set(serverItems.map((item) => item.id));
     const optimisticItems = optimisticQueuedMessages
-      .filter((message) => !knownIds.has(message.id))
+      .filter(
+        (message) => !knownIds.has(message.id) && !locallyCancelledQueuedMessageIds.has(message.id),
+      )
       .map(
         (message): QueuedMessageItem => ({
           id: message.id,
@@ -1928,7 +1944,12 @@ export default function ChatView(props: ChatViewProps) {
     return [...serverItems, ...optimisticItems].toSorted((left, right) =>
       left.createdAt.localeCompare(right.createdAt),
     );
-  }, [activeQueuedTurns, optimisticQueuedMessages, serverMessages]);
+  }, [
+    activeQueuedTurns,
+    locallyCancelledQueuedMessageIds,
+    optimisticQueuedMessages,
+    serverMessages,
+  ]);
   const timelineEntries = useMemo(
     () =>
       deriveTimelineEntries(timelineMessages, activeThread?.proposedPlans ?? [], workLogEntries),
@@ -2137,8 +2158,48 @@ export default function ChatView(props: ChatViewProps) {
   const focusComposer = useCallback(() => {
     composerRef.current?.focusAtEnd();
   }, [composerRef]);
+  const dispatchQueuedMessageDelete = useCallback(
+    (input: { queueId: string; messageId: MessageId }) => {
+      const api = readEnvironmentApi(environmentId);
+      const threadId = activeThread?.id;
+      if (!api || !threadId) return;
+      if (queuedDeleteInFlightByQueueIdRef.current.has(input.queueId)) return;
+      queuedDeleteInFlightByQueueIdRef.current.add(input.queueId);
+      void api.orchestration
+        .dispatchCommand({
+          type: "thread.queued-turn.delete",
+          commandId: newCommandId(),
+          threadId,
+          queueId: input.queueId,
+          messageId: input.messageId,
+          createdAt: new Date().toISOString(),
+        })
+        .catch((err: unknown) => {
+          setLocallyCancelledQueuedMessageIds((existing) => {
+            if (!existing.has(input.messageId)) return existing;
+            const next = new Set(existing);
+            next.delete(input.messageId);
+            return next;
+          });
+          setThreadError(
+            threadId,
+            err instanceof Error ? err.message : "Failed to delete queued message.",
+          );
+        })
+        .finally(() => {
+          queuedDeleteInFlightByQueueIdRef.current.delete(input.queueId);
+        });
+    },
+    [activeThread?.id, environmentId, setThreadError],
+  );
   const deleteQueuedMessage = useCallback(
     (item: QueuedMessageItem) => {
+      setLocallyCancelledQueuedMessageIds((existing) => {
+        if (existing.has(item.id)) return existing;
+        const next = new Set(existing);
+        next.add(item.id);
+        return next;
+      });
       if (item.queueId === null) {
         setOptimisticQueuedMessages((existing) => {
           const removed = existing.filter((message) => message.id === item.id);
@@ -2149,26 +2210,17 @@ export default function ChatView(props: ChatViewProps) {
         });
         return;
       }
-      const api = readEnvironmentApi(environmentId);
-      if (!api || !activeThread) return;
-      void api.orchestration
-        .dispatchCommand({
-          type: "thread.queued-turn.delete",
-          commandId: newCommandId(),
-          threadId: activeThread.id,
-          queueId: item.queueId,
-          messageId: item.id,
-          createdAt: new Date().toISOString(),
-        })
-        .catch((err: unknown) => {
-          setThreadError(
-            activeThread.id,
-            err instanceof Error ? err.message : "Failed to delete queued message.",
-          );
-        });
+      dispatchQueuedMessageDelete({ queueId: item.queueId, messageId: item.id });
     },
-    [activeThread, environmentId, setThreadError],
+    [dispatchQueuedMessageDelete],
   );
+  useEffect(() => {
+    if (locallyCancelledQueuedMessageIds.size === 0) return;
+    for (const turn of activeQueuedTurns) {
+      if (!locallyCancelledQueuedMessageIds.has(turn.messageId)) continue;
+      dispatchQueuedMessageDelete({ queueId: turn.queueId, messageId: turn.messageId });
+    }
+  }, [activeQueuedTurns, dispatchQueuedMessageDelete, locallyCancelledQueuedMessageIds]);
   const scheduleComposerFocus = useCallback(() => {
     window.requestAnimationFrame(() => {
       focusComposer();
@@ -2810,6 +2862,8 @@ export default function ChatView(props: ChatViewProps) {
       }
       return [];
     });
+    setLocallyCancelledQueuedMessageIds(new Set());
+    queuedDeleteInFlightByQueueIdRef.current.clear();
     resetLocalDispatch();
     setExpandedImage(null);
   }, [draftId, resetLocalDispatch, threadId]);

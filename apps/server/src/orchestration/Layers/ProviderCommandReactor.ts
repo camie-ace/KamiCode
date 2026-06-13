@@ -920,11 +920,14 @@ const make = Effect.gen(function* () {
           continue;
         }
 
-        yield* projectionTurnQueueRepository.markStarted({
+        const markedStarted = yield* projectionTurnQueueRepository.markStarted({
           queueId: queuedTurn.queueId,
           turnId: turnStart.value.turnId,
           startedAt: claimedAt,
         });
+        if (!markedStarted) {
+          return;
+        }
         return;
       }
     } finally {

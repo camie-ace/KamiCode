@@ -87,7 +87,7 @@ export interface ProjectionTurnQueueRepositoryShape {
   ) => Effect.Effect<Option.Option<ProjectionTurnQueueRow>, ProjectionRepositoryError>;
   readonly markStarted: (
     input: MarkProjectionTurnQueueStartedInput,
-  ) => Effect.Effect<void, ProjectionRepositoryError>;
+  ) => Effect.Effect<boolean, ProjectionRepositoryError>;
   readonly markFailed: (
     input: MarkProjectionTurnQueueFailedInput,
   ) => Effect.Effect<void, ProjectionRepositoryError>;

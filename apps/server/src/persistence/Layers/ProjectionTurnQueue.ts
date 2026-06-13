@@ -82,12 +82,27 @@ const makeProjectionTurnQueueRepository = Effect.gen(function* () {
       `,
   });
 
-  const selectNextQueued = SqlSchema.findOneOption({
-    Request: ThreadQueueInput,
+  const claimNextQueued = SqlSchema.findOneOption({
+    Request: Schema.Struct({
+      threadId: ThreadQueueInput.fields.threadId,
+      claimedAt: ProjectionTurnQueueRow.fields.startedAt,
+    }),
     Result: ProjectionTurnQueueDbRow,
-    execute: ({ threadId }) =>
+    execute: ({ threadId, claimedAt }) =>
       sql`
-        SELECT
+        UPDATE projection_turn_queue
+        SET status = 'dispatching',
+            started_at = ${claimedAt}
+        WHERE queue_id = (
+          SELECT queue_id
+          FROM projection_turn_queue
+          WHERE thread_id = ${threadId}
+            AND status = 'queued'
+          ORDER BY requested_at ASC, queue_id ASC
+          LIMIT 1
+        )
+          AND status = 'queued'
+        RETURNING
           queue_id AS "queueId",
           thread_id AS "threadId",
           event_id AS "eventId",
@@ -105,31 +120,12 @@ const makeProjectionTurnQueueRepository = Effect.gen(function* () {
           source_proposed_plan_thread_id AS "sourceProposedPlanThreadId",
           source_proposed_plan_id AS "sourceProposedPlanId",
           failure_detail AS "failureDetail"
-        FROM projection_turn_queue
-        WHERE thread_id = ${threadId}
-          AND status = 'queued'
-        ORDER BY requested_at ASC, queue_id ASC
-        LIMIT 1
       `,
   });
 
-  const markDispatchingByQueueId = SqlSchema.void({
-    Request: Schema.Struct({
-      queueId: ProjectionTurnQueueRow.fields.queueId,
-      claimedAt: ProjectionTurnQueueRow.fields.startedAt,
-    }),
-    execute: ({ queueId, claimedAt }) =>
-      sql`
-        UPDATE projection_turn_queue
-        SET status = 'dispatching',
-            started_at = ${claimedAt}
-        WHERE queue_id = ${queueId}
-          AND status = 'queued'
-      `,
-  });
-
-  const markStartedRow = SqlSchema.void({
+  const markStartedRow = SqlSchema.findOneOption({
     Request: MarkProjectionTurnQueueStartedInput,
+    Result: QueueIdRow,
     execute: ({ queueId, turnId, startedAt }) =>
       sql`
         UPDATE projection_turn_queue
@@ -139,6 +135,8 @@ const makeProjectionTurnQueueRepository = Effect.gen(function* () {
             completed_at = NULL,
             failure_detail = NULL
         WHERE queue_id = ${queueId}
+          AND status = 'dispatching'
+        RETURNING queue_id AS "queueId"
       `,
   });
 
@@ -151,6 +149,7 @@ const makeProjectionTurnQueueRepository = Effect.gen(function* () {
             completed_at = ${failedAt},
             failure_detail = ${failureDetail}
         WHERE queue_id = ${queueId}
+          AND status = 'dispatching'
       `,
   });
 
@@ -163,7 +162,7 @@ const makeProjectionTurnQueueRepository = Effect.gen(function* () {
         SET status = 'cancelled',
             completed_at = ${cancelledAt}
         WHERE queue_id = ${queueId}
-          AND status = 'queued'
+          AND status IN ('queued', 'dispatching')
         RETURNING queue_id AS "queueId"
       `,
   });
@@ -217,29 +216,17 @@ const makeProjectionTurnQueueRepository = Effect.gen(function* () {
 
   const claimNextQueuedByThreadId: ProjectionTurnQueueRepositoryShape["claimNextQueuedByThreadId"] =
     (input, claimedAt) =>
-      sql
-        .withTransaction(
-          selectNextQueued(input).pipe(
-            Effect.flatMap((rowOption) =>
-              Option.match(rowOption, {
-                onNone: () => Effect.succeed(Option.none()),
-                onSome: (row) =>
-                  markDispatchingByQueueId({ queueId: row.queueId, claimedAt }).pipe(
-                    Effect.as(Option.some(row as ProjectionTurnQueueRow)),
-                  ),
-              }),
-            ),
-          ),
-        )
-        .pipe(
-          Effect.mapError(
-            toPersistenceSqlError("ProjectionTurnQueueRepository.claimNextQueuedByThreadId:query"),
-          ),
-        );
+      claimNextQueued({ ...input, claimedAt }).pipe(
+        Effect.mapError(
+          toPersistenceSqlError("ProjectionTurnQueueRepository.claimNextQueuedByThreadId:query"),
+        ),
+        Effect.map(Option.map((row) => row as ProjectionTurnQueueRow)),
+      );
 
   const markStarted: ProjectionTurnQueueRepositoryShape["markStarted"] = (input) =>
     markStartedRow(input).pipe(
       Effect.mapError(toPersistenceSqlError("ProjectionTurnQueueRepository.markStarted:query")),
+      Effect.map(Option.isSome),
     );
 
   const markFailed: ProjectionTurnQueueRepositoryShape["markFailed"] = (input) =>
