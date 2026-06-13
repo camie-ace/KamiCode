@@ -51,6 +51,8 @@ import Migration0035 from "./Migrations/035_ProjectionTurnQueue.ts";
 import Migration0036 from "./Migrations/036_SharedProjects.ts";
 import Migration0037 from "./Migrations/037_SharedProjectSshCredentials.ts";
 import Migration0038 from "./Migrations/038_SharedSessionSnapshots.ts";
+import Migration0039 from "./Migrations/039_ReapplyAuthSessionTables.ts";
+import Migration0040 from "./Migrations/040_ReapplyAuthPairingProofKeyThumbprint.ts";
 
 /**
  * Migration loader with all migrations defined inline.
@@ -101,6 +103,11 @@ export const migrationEntries = [
   [36, "SharedProjects", Migration0036],
   [37, "SharedProjectSshCredentials", Migration0037],
   [38, "SharedSessionSnapshots", Migration0038],
+  // 39/40 re-apply upstream's auth-table migrations (31/32), which were skipped
+  // on existing KamiCode installs because ids 31/32 were already recorded as
+  // applied (pre-merge migrations). Append-only heal — see 039/040 for detail.
+  [39, "ReapplyAuthSessionTables", Migration0039],
+  [40, "ReapplyAuthPairingProofKeyThumbprint", Migration0040],
 ] as const;
 
 export const makeMigrationLoader = (throughId?: number) =>
