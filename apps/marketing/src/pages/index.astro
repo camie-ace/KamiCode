@@ -1,18 +1,6 @@
 ---
 import Layout from "../layouts/Layout.astro";
 import { LATEST_WINDOWS_DOWNLOAD_URL, REPOSITORY_URL } from "../lib/releases";
-import { tweets } from "../lib/tweets";
-
-const desktopEndorsementRows = [
-  tweets.filter((_, index) => index % 2 === 0),
-  tweets.filter((_, index) => index % 2 === 1),
-];
-
-const mobileEndorsementRows = [
-  tweets.filter((_, index) => index % 3 === 0),
-  tweets.filter((_, index) => index % 3 === 1),
-  tweets.filter((_, index) => index % 3 === 2),
-];
 ---
 
 <Layout>
@@ -57,13 +45,13 @@ const mobileEndorsementRows = [
       />
 
       <h1 class="hero-title display">
-        The dev tool<br />for AI&#8209;native<br />teams.
+        Stop trusting AI.<br />Start verifying it.
       </h1>
 
       <p class="hero-sub">
-        KamiCode orchestrates Claude Code, Codex, OpenCode and Cursor — with
-        <strong>agentic testing</strong> that ships proof, and
-        <strong>team collaboration</strong> on every project.
+        Orchestrate Claude Code, Codex, OpenCode and Cursor with
+        <strong>screenshots, recordings and verifiable traces</strong>
+        attached to every change.
       </p>
 
       <div class="hero-actions">
@@ -88,151 +76,14 @@ const mobileEndorsementRows = [
       <div class="hero-preview">
         <figure class="hero-screenshot-frame">
           <img
-            src="/updated-screenshot.webp"
-            alt="KamiCode app showing multiple coding agent threads in one workspace"
-            width="2508"
-            height="1682"
+            src="/hero-screenshot.webp"
+            alt="KamiCode app showing an agent thread with screen recordings and passing test evidence attached to a change"
+            width="1920"
+            height="1080"
             loading="eager"
             decoding="async"
           />
         </figure>
-      </div>
-    </div>
-  </section>
-
-  <!-- ── Endorsements ─────────────────────────────────────────── -->
-  <section id="endorsements" class="sec-endorsements" aria-labelledby="endorsements-title">
-    <div class="container">
-      <div class="endorsements-head">
-        <h2 id="endorsements-title">Developers love KamiCode</h2>
-        <p>Real reactions from people building with KamiCode today.</p>
-      </div>
-    </div>
-
-    <div class="endorsement-carousel endorsement-carousel--desktop" aria-label="Developer endorsements">
-        {
-          desktopEndorsementRows.map((row, rowIndex) => (
-            <div class:list={["endorsement-row", rowIndex === 1 && "is-reverse"]}>
-              <div class="endorsement-track">
-                {[0, 1].map((groupIndex) => (
-                  <div class="endorsement-track-group" aria-hidden={groupIndex === 1 ? "true" : undefined}>
-                    {row.map((tweet) => (
-                      <a
-                        class="endorsement-card"
-                        href={tweet.link}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        aria-label={`Read ${tweet.handle}'s post on X`}
-                        tabindex={groupIndex === 1 ? "-1" : undefined}
-                      >
-                        <div class="endorsement-author">
-                          <img
-                            src={`/pfps/${tweet.handle}.webp`}
-                            alt=""
-                            width="28"
-                            height="28"
-                            loading="lazy"
-                            decoding="async"
-                          />
-                          <div class="endorsement-handle">@{tweet.handle}</div>
-                        </div>
-                        <p>{tweet.excerpt ?? tweet.content}</p>
-                      </a>
-                    ))}
-                  </div>
-                ))}
-              </div>
-            </div>
-          ))
-        }
-    </div>
-
-    <div class="endorsement-carousel endorsement-carousel--mobile" aria-label="Developer endorsements">
-        {
-          mobileEndorsementRows.map((row, rowIndex) => (
-            <div class:list={["endorsement-row", rowIndex === 1 && "is-reverse"]}>
-              <div class="endorsement-track">
-                {[0, 1].map((groupIndex) => (
-                  <div class="endorsement-track-group" aria-hidden={groupIndex === 1 ? "true" : undefined}>
-                    {row.map((tweet) => (
-                      <a
-                        class="endorsement-card"
-                        href={tweet.link}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        aria-label={`Read ${tweet.handle}'s post on X`}
-                        tabindex={groupIndex === 1 ? "-1" : undefined}
-                      >
-                        <div class="endorsement-author">
-                          <img
-                            src={`/pfps/${tweet.handle}.webp`}
-                            alt=""
-                            width="28"
-                            height="28"
-                            loading="lazy"
-                            decoding="async"
-                          />
-                          <div class="endorsement-handle">@{tweet.handle}</div>
-                        </div>
-                        <p>{tweet.excerpt ?? tweet.content}</p>
-                      </a>
-                    ))}
-                  </div>
-                ))}
-              </div>
-            </div>
-          ))
-        }
-    </div>
-  </section>
-
-  <!-- ── Harnesses ─────────────────────────────────────────────── -->
-  <section id="harnesses" class="sec-harness">
-    <div class="container">
-      <div class="section-head">
-        <h2>Bring your own sub</h2>
-        <p>
-          KamiCode doesn't resell tokens. Plug in Claude Code, Codex, OpenCode,
-          or Cursor with the credentials you already have — we orchestrate
-          them, you keep your plan.
-        </p>
-      </div>
-
-      <div class="harness-grid">
-        <div class="harness">
-          <div class="harness-mark"><img src="/harnesses/claude-ai-icon.svg" alt="" /></div>
-          <div class="harness-meta">
-            <div class="harness-name">Claude Code</div>
-            <div class="harness-tag">claude auth login</div>
-          </div>
-        </div>
-        <div class="harness">
-          <div class="harness-mark"><img src="/harnesses/openai_dark.svg" alt="" /></div>
-          <div class="harness-meta">
-            <div class="harness-name">Codex CLI</div>
-            <div class="harness-tag">codex login</div>
-          </div>
-        </div>
-        <div class="harness">
-          <div class="harness-mark"><img src="/harnesses/opencode-dark.svg" alt="" /></div>
-          <div class="harness-meta">
-            <div class="harness-name">OpenCode</div>
-            <div class="harness-tag">opencode auth</div>
-          </div>
-        </div>
-        <div class="harness">
-          <div class="harness-mark"><img src="/harnesses/cursor_light.svg" alt="" /></div>
-          <div class="harness-meta">
-            <div class="harness-name">Cursor</div>
-            <div class="harness-tag">cursor-agent</div>
-          </div>
-        </div>
-      </div>
-
-      <div class="harness-footer">
-        <div class="harness-footer-item"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12l5 5L20 6"/></svg> No keys resold. No quota caps.</div>
-        <div class="harness-footer-item"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12l5 5L20 6"/></svg> Switch models mid-thread.</div>
-        <div class="harness-footer-item"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12l5 5L20 6"/></svg> More harnesses shipping weekly.</div>
       </div>
     </div>
   </section>
@@ -301,67 +152,6 @@ const mobileEndorsementRows = [
               <span class="evidence-step-tag evidence-step-tag--ok">200 OK</span>
             </div>
           </div>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <!-- ── Git ──────────────────────────────────────────────────── -->
-  <section id="git" class="sec-git">
-    <div class="container git-inner">
-      <div class="git-visual">
-        <div class="pr-card tile">
-          <div class="pr-head">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="2.2"/><circle cx="6" cy="18" r="2.2"/><circle cx="18" cy="6" r="2.2"/><path d="M6 8v8M18 8v5a3 3 0 01-3 3h-3M13 13l-2 3 2 3"/></svg>
-            <span class="pr-title">Add marketing hero animation</span>
-            <span class="pr-status">Ready</span>
-          </div>
-          <div class="pr-meta">
-            <span><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="2.2"/><circle cx="6" cy="18" r="2.2"/><circle cx="18" cy="6" r="2.2"/><path d="M6 8v8M6 12a6 6 0 006-6h6"/></svg> feat/marketing-hero → main</span>
-            <span>+142 −38</span>
-            <span>3 commits</span>
-          </div>
-          <div class="pr-files">
-            <div><code>apps/marketing/src/pages/index.astro</code> <span>+14 −2</span></div>
-            <div><code>apps/marketing/src/layouts/Layout.astro</code> <span>+8 −0</span></div>
-            <div><code>apps/marketing/public/hero.css</code> <span>+120 −36</span></div>
-          </div>
-          <div class="pr-foot">
-            <button class="btn btn-ghost" style="font-size:12px;padding:6px 10px">View diff</button>
-            <button class="btn btn-primary" style="font-size:12px;padding:6px 12px">
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5C5.65.5.5 5.65.5 12a11.5 11.5 0 007.86 10.93c.58.1.79-.25.79-.56v-2c-3.2.69-3.88-1.37-3.88-1.37-.52-1.33-1.27-1.69-1.27-1.69-1.04-.71.08-.7.08-.7 1.15.08 1.76 1.18 1.76 1.18 1.02 1.76 2.68 1.25 3.33.96.1-.75.4-1.25.72-1.54-2.55-.29-5.24-1.27-5.24-5.67 0-1.25.45-2.28 1.18-3.08-.12-.29-.51-1.45.11-3.02 0 0 .96-.31 3.15 1.18a10.96 10.96 0 015.74 0c2.19-1.49 3.15-1.18 3.15-1.18.62 1.57.23 2.73.11 3.02.74.8 1.18 1.83 1.18 3.08 0 4.41-2.7 5.38-5.27 5.66.41.36.78 1.06.78 2.13v3.16c0 .31.21.67.8.56A11.5 11.5 0 0023.5 12C23.5 5.65 18.35.5 12 .5z"/></svg>
-              Open pull request
-            </button>
-          </div>
-        </div>
-        <div class="pr-trail">
-          <div class="pr-trail-dot"></div>
-          <div class="pr-trail-line"></div>
-          <div class="pr-trail-dot"></div>
-        </div>
-        <div class="pr-button-shell">
-          <button class="pr-button">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="2.2"/><circle cx="6" cy="18" r="2.2"/><circle cx="18" cy="6" r="2.2"/><path d="M6 8v8M18 8v5a3 3 0 01-3 3h-3M13 13l-2 3 2 3"/></svg>
-            Commit &amp; push
-            <span class="pr-button-kbd">⌘⏎</span>
-          </button>
-        </div>
-      </div>
-
-      <div class="git-copy">
-        <div class="section-head" style="margin-bottom:0">
-          <h2>One button to commit, push, and make a PR.</h2>
-          <p>
-            Every agent thread writes to its own branch. When it's good, one
-            button opens the PR on GitHub with a generated title, body and
-            changelog. No terminal dance required.
-          </p>
-          <ul class="checklist" style="margin-top:24px">
-            <li><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12l5 5L20 6"/></svg> Auto-generated PR titles &amp; bodies</li>
-            <li><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12l5 5L20 6"/></svg> Inline diff review before you push</li>
-            <li><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12l5 5L20 6"/></svg> Draft PRs, stack PRs, amend PRs</li>
-            <li><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12l5 5L20 6"/></svg> Works with your existing GitHub auth</li>
-          </ul>
         </div>
       </div>
     </div>
@@ -439,6 +229,68 @@ const mobileEndorsementRows = [
     </div>
   </section>
 
+  <!-- ── Git ──────────────────────────────────────────────────── -->
+  <section id="git" class="sec-git">
+    <div class="container git-inner">
+      <div class="git-visual">
+        <div class="pr-card tile">
+          <div class="pr-head">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="2.2"/><circle cx="6" cy="18" r="2.2"/><circle cx="18" cy="6" r="2.2"/><path d="M6 8v8M18 8v5a3 3 0 01-3 3h-3M13 13l-2 3 2 3"/></svg>
+            <span class="pr-title">Add marketing hero animation</span>
+            <span class="pr-status">Ready</span>
+          </div>
+          <div class="pr-meta">
+            <span><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="2.2"/><circle cx="6" cy="18" r="2.2"/><circle cx="18" cy="6" r="2.2"/><path d="M6 8v8M6 12a6 6 0 006-6h6"/></svg> feat/marketing-hero → main</span>
+            <span>+142 −38</span>
+            <span>3 commits</span>
+          </div>
+          <div class="pr-files">
+            <div><code>apps/marketing/src/pages/index.astro</code> <span>+14 −2</span></div>
+            <div><code>apps/marketing/src/layouts/Layout.astro</code> <span>+8 −0</span></div>
+            <div><code>apps/marketing/public/hero.css</code> <span>+120 −36</span></div>
+          </div>
+          <div class="pr-foot">
+            <button class="btn btn-ghost" style="font-size:12px;padding:6px 10px">View diff</button>
+            <button class="btn btn-primary" style="font-size:12px;padding:6px 12px">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5C5.65.5.5 5.65.5 12a11.5 11.5 0 007.86 10.93c.58.1.79-.25.79-.56v-2c-3.2.69-3.88-1.37-3.88-1.37-.52-1.33-1.27-1.69-1.27-1.69-1.04-.71.08-.7.08-.7 1.15.08 1.76 1.18 1.76 1.18 1.02 1.76 2.68 1.25 3.33.96.1-.75.4-1.25.72-1.54-2.55-.29-5.24-1.27-5.24-5.67 0-1.25.45-2.28 1.18-3.08-.12-.29-.51-1.45.11-3.02 0 0 .96-.31 3.15 1.18a10.96 10.96 0 015.74 0c2.19-1.49 3.15-1.18 3.15-1.18.62 1.57.23 2.73.11 3.02.74.8 1.18 1.83 1.18 3.08 0 4.41-2.7 5.38-5.27 5.66.41.36.78 1.06.78 2.13v3.16c0 .31.21.67.8.56A11.5 11.5 0 0023.5 12C23.5 5.65 18.35.5 12 .5z"/></svg>
+              Open pull request
+            </button>
+          </div>
+        </div>
+        <div class="pr-trail">
+          <div class="pr-trail-dot"></div>
+          <div class="pr-trail-line"></div>
+          <div class="pr-trail-dot"></div>
+        </div>
+        <div class="pr-button-shell">
+          <button class="pr-button">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="2.2"/><circle cx="6" cy="18" r="2.2"/><circle cx="18" cy="6" r="2.2"/><path d="M6 8v8M18 8v5a3 3 0 01-3 3h-3M13 13l-2 3 2 3"/></svg>
+            Commit &amp; push
+            <span class="pr-button-kbd">⌘⏎</span>
+          </button>
+        </div>
+      </div>
+
+      <div class="git-copy">
+        <div class="section-head" style="margin-bottom:0">
+          <div class="eyebrow">PR Workflow</div>
+          <h2>One button to commit, push, and make a PR.</h2>
+          <p>
+            Every agent thread writes to its own branch. When it's good, one
+            button opens the PR on GitHub with a generated title, body and
+            changelog. No terminal dance required.
+          </p>
+          <ul class="checklist" style="margin-top:24px">
+            <li><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12l5 5L20 6"/></svg> Auto-generated PR titles &amp; bodies</li>
+            <li><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12l5 5L20 6"/></svg> Inline diff review before you push</li>
+            <li><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12l5 5L20 6"/></svg> Draft PRs, stack PRs, amend PRs</li>
+            <li><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12l5 5L20 6"/></svg> Works with your existing GitHub auth</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
   <!-- ── Open source ───────────────────────────────────────────── -->
   <section id="open" class="sec-open">
     <div class="container">
@@ -504,6 +356,57 @@ const mobileEndorsementRows = [
           Read CONTRIBUTING.md
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17L17 7M8 7h9v9"/></svg>
         </a>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── Harnesses ─────────────────────────────────────────────── -->
+  <section id="harnesses" class="sec-harness">
+    <div class="container">
+      <div class="section-head">
+        <h2>Bring your own sub</h2>
+        <p>
+          KamiCode doesn't resell tokens. Plug in Claude Code, Codex, OpenCode,
+          or Cursor with the credentials you already have — we orchestrate
+          them, you keep your plan.
+        </p>
+      </div>
+
+      <div class="harness-grid">
+        <div class="harness">
+          <div class="harness-mark"><img src="/harnesses/claude-ai-icon.svg" alt="" /></div>
+          <div class="harness-meta">
+            <div class="harness-name">Claude Code</div>
+            <div class="harness-tag">claude auth login</div>
+          </div>
+        </div>
+        <div class="harness">
+          <div class="harness-mark"><img src="/harnesses/openai_dark.svg" alt="" /></div>
+          <div class="harness-meta">
+            <div class="harness-name">Codex CLI</div>
+            <div class="harness-tag">codex login</div>
+          </div>
+        </div>
+        <div class="harness">
+          <div class="harness-mark"><img src="/harnesses/opencode-dark.svg" alt="" /></div>
+          <div class="harness-meta">
+            <div class="harness-name">OpenCode</div>
+            <div class="harness-tag">opencode auth</div>
+          </div>
+        </div>
+        <div class="harness">
+          <div class="harness-mark"><img src="/harnesses/cursor_light.svg" alt="" /></div>
+          <div class="harness-meta">
+            <div class="harness-name">Cursor</div>
+            <div class="harness-tag">cursor-agent</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="harness-footer">
+        <div class="harness-footer-item"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12l5 5L20 6"/></svg> No keys resold. No quota caps.</div>
+        <div class="harness-footer-item"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12l5 5L20 6"/></svg> Switch models mid-thread.</div>
+        <div class="harness-footer-item"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12l5 5L20 6"/></svg> More harnesses shipping weekly.</div>
       </div>
     </div>
   </section>
@@ -880,7 +783,7 @@ const mobileEndorsementRows = [
   .hero-screenshot-frame {
     position: relative;
     overflow: hidden;
-    aspect-ratio: 2508 / 1682;
+    aspect-ratio: 1920 / 1080;
     border-radius: 14px;
     background: #0a0a0c;
     box-shadow: 0 28px 64px -28px rgba(0, 0, 0, 0.75);
@@ -950,147 +853,6 @@ const mobileEndorsementRows = [
     color: var(--fg-muted);
   }
   .harness-footer-item svg { color: var(--ok); }
-
-  /* ── Endorsements ─────────────────────────────────────── */
-  .sec-endorsements {
-    overflow: hidden;
-  }
-
-  .endorsements-head {
-    max-width: 720px;
-    margin-bottom: 56px;
-  }
-
-  .endorsements-head h2 {
-    font-size: clamp(32px, 4vw, 48px);
-    font-weight: 500;
-    letter-spacing: -0.035em;
-    line-height: 1.05;
-    margin-bottom: 18px;
-  }
-
-  .endorsements-head p {
-    color: var(--fg-muted);
-    font-size: 18px;
-    max-width: 620px;
-    letter-spacing: -0.005em;
-  }
-
-  .endorsement-carousel {
-    position: relative;
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
-  }
-
-  .endorsement-carousel--mobile {
-    display: none;
-  }
-
-  .endorsement-carousel::before,
-  .endorsement-carousel::after {
-    content: "";
-    position: absolute;
-    top: 0;
-    bottom: 0;
-    z-index: 2;
-    width: max(48px, calc((100vw - 1240px) / 2 + 56px));
-    pointer-events: none;
-  }
-
-  .endorsement-carousel::before {
-    left: 0;
-    background: linear-gradient(90deg, var(--bg), transparent);
-  }
-
-  .endorsement-carousel::after {
-    right: 0;
-    background: linear-gradient(270deg, var(--bg), transparent);
-  }
-
-  .endorsement-row {
-    overflow: hidden;
-  }
-
-  .endorsement-track {
-    width: max-content;
-    display: flex;
-    animation: endorsementMarquee 76s linear infinite;
-    will-change: transform;
-  }
-
-  .endorsement-track-group {
-    display: flex;
-    gap: 12px;
-    padding-right: 12px;
-  }
-
-  .endorsement-row.is-reverse .endorsement-track {
-    animation-direction: reverse;
-    animation-duration: 84s;
-  }
-
-  .endorsement-carousel:hover .endorsement-track,
-  .endorsement-carousel:focus-within .endorsement-track {
-    animation-play-state: paused;
-  }
-
-  .endorsement-card {
-    position: relative;
-    width: clamp(264px, 22vw, 308px);
-    height: 132px;
-    padding: 14px 16px;
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    background: rgba(255, 255, 255, 0.012);
-    transition:
-      border-color 0.18s ease,
-      background 0.18s ease;
-  }
-
-  .endorsement-card:hover {
-    border-color: var(--border-strong);
-    background: rgba(255, 255, 255, 0.03);
-  }
-
-  .endorsement-author {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    min-width: 0;
-  }
-
-  .endorsement-author img {
-    width: 28px;
-    height: 28px;
-    border-radius: 50%;
-    object-fit: cover;
-    flex-shrink: 0;
-  }
-
-  .endorsement-handle {
-    color: var(--fg-muted);
-    font-size: 13px;
-    font-weight: 500;
-    letter-spacing: -0.005em;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .endorsement-card p {
-    color: var(--fg);
-    font-size: 13.5px;
-    line-height: 1.4;
-    letter-spacing: -0.003em;
-    display: -webkit-box;
-    overflow: hidden;
-    -webkit-box-orient: vertical;
-    -webkit-line-clamp: 3;
-  }
 
   /* ── Agentic Testing ──────────────────────────────────── */
   .sec-testing { background: #09090b; }
@@ -1635,15 +1397,6 @@ const mobileEndorsementRows = [
     margin-bottom: 24px;
   }
 
-  @keyframes endorsementMarquee {
-    from {
-      transform: translateX(0);
-    }
-    to {
-      transform: translateX(-50%);
-    }
-  }
-
   /* ── Responsive ────────────────────────────────────────── */
   @media (max-width: 960px) {
     .hero-preview {
@@ -1668,32 +1421,5 @@ const mobileEndorsementRows = [
     .sec-cta { padding: 96px 0; }
     .container { padding-left: 20px; padding-right: 20px; }
     .hero-preview { display: none; }
-    .endorsements-head {
-      margin-bottom: 40px;
-    }
-    .endorsement-carousel--desktop {
-      display: none;
-    }
-    .endorsement-carousel--mobile {
-      display: flex;
-    }
-    .endorsement-carousel::before,
-    .endorsement-carousel::after {
-      width: 28px;
-    }
-    .endorsement-track {
-      animation-duration: 68s;
-    }
-    .endorsement-row.is-reverse .endorsement-track {
-      animation-duration: 76s;
-    }
-    .endorsement-card {
-      width: 268px;
-      height: 132px;
-      padding: 14px;
-    }
-    .endorsement-card p {
-      font-size: 13px;
-    }
   }
 </style>
