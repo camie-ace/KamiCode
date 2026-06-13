@@ -6,6 +6,7 @@ import type {
   OrchestrationLatestTurn,
   OrchestrationMessage,
   OrchestrationProposedPlan,
+  OrchestrationQueuedTurn,
   OrchestrationReadModel,
   OrchestrationShellSnapshot,
   OrchestrationShellStreamEvent,
@@ -78,6 +79,7 @@ export interface EnvironmentState {
   // ---------------------------------------------------------------------------
   messageIdsByThreadId: Record<ThreadId, MessageId[]>;
   messageByThreadId: Record<ThreadId, Record<MessageId, ChatMessage>>;
+  queuedTurnsByThreadId: Record<ThreadId, OrchestrationQueuedTurn[]>;
   activityIdsByThreadId: Record<ThreadId, string[]>;
   activityByThreadId: Record<ThreadId, Record<string, OrchestrationThreadActivity>>;
   proposedPlanIdsByThreadId: Record<ThreadId, string[]>;
@@ -112,6 +114,7 @@ const initialEnvironmentState: EnvironmentState = {
   threadTurnStateById: {},
   messageIdsByThreadId: {},
   messageByThreadId: {},
+  queuedTurnsByThreadId: {},
   activityIdsByThreadId: {},
   activityByThreadId: {},
   proposedPlanIdsByThreadId: {},
@@ -256,6 +259,7 @@ function mapThread(thread: OrchestrationThread, environmentId: EnvironmentId): T
     interactionMode: thread.interactionMode,
     session: thread.session ? mapSession(thread.session) : null,
     messages: thread.messages.map((message) => mapMessage(environmentId, message)),
+    queuedTurns: (thread.queuedTurns ?? []).map((turn) => ({ ...turn })),
     proposedPlans: thread.proposedPlans.map(mapProposedPlan),
     error: sanitizeThreadErrorMessage(thread.session?.lastError),
     createdAt: thread.createdAt,
@@ -646,6 +650,16 @@ function writeThreadState(
     };
   }
 
+  if (previousThread?.queuedTurns !== nextThread.queuedTurns) {
+    nextState = {
+      ...nextState,
+      queuedTurnsByThreadId: {
+        ...nextState.queuedTurnsByThreadId,
+        [nextThread.id]: nextThread.queuedTurns ?? [],
+      },
+    };
+  }
+
   if (previousThread?.activities !== nextThread.activities) {
     const nextActivitySlice = buildActivitySlice(nextThread);
     nextState = {
@@ -811,6 +825,8 @@ function removeThreadState(state: EnvironmentState, threadId: ThreadId): Environ
   const { [threadId]: _removedTurnState, ...threadTurnStateById } = state.threadTurnStateById;
   const { [threadId]: _removedMessageIds, ...messageIdsByThreadId } = state.messageIdsByThreadId;
   const { [threadId]: _removedMessages, ...messageByThreadId } = state.messageByThreadId;
+  const { [threadId]: _removedQueuedTurns, ...queuedTurnsByThreadId } =
+    state.queuedTurnsByThreadId;
   const { [threadId]: _removedActivityIds, ...activityIdsByThreadId } = state.activityIdsByThreadId;
   const { [threadId]: _removedActivities, ...activityByThreadId } = state.activityByThreadId;
   const { [threadId]: _removedPlanIds, ...proposedPlanIdsByThreadId } =
@@ -831,6 +847,7 @@ function removeThreadState(state: EnvironmentState, threadId: ThreadId): Environ
     threadTurnStateById,
     messageIdsByThreadId,
     messageByThreadId,
+    queuedTurnsByThreadId,
     activityIdsByThreadId,
     activityByThreadId,
     proposedPlanIdsByThreadId,
@@ -1130,6 +1147,7 @@ function syncEnvironmentShellSnapshot(
     sidebarThreadSummaryById: {},
     messageIdsByThreadId: retainThreadScopedRecord(state.messageIdsByThreadId, nextThreadIds),
     messageByThreadId: retainThreadScopedRecord(state.messageByThreadId, nextThreadIds),
+    queuedTurnsByThreadId: retainThreadScopedRecord(state.queuedTurnsByThreadId, nextThreadIds),
     activityIdsByThreadId: retainThreadScopedRecord(state.activityIdsByThreadId, nextThreadIds),
     activityByThreadId: retainThreadScopedRecord(state.activityByThreadId, nextThreadIds),
     proposedPlanIdsByThreadId: retainThreadScopedRecord(
@@ -1376,6 +1394,26 @@ function applyEnvironmentOrchestrationEvent(
           : {}),
         runtimeMode: event.payload.runtimeMode,
         interactionMode: event.payload.interactionMode,
+        ...(event.payload.dispatchPolicy === "queue"
+          ? {
+              queuedTurns: [
+                ...(thread.queuedTurns ?? []).filter(
+                  (turn) => turn.messageId !== event.payload.messageId,
+                ),
+                {
+                  queueId: `queue:${event.eventId}`,
+                  threadId: event.payload.threadId,
+                  messageId: event.payload.messageId,
+                  status: "queued",
+                  requestedAt: event.payload.createdAt,
+                  startedAt: null,
+                  completedAt: null,
+                  turnId: null,
+                  failureDetail: null,
+                },
+              ],
+            }
+          : {}),
         pendingSourceProposedPlan: event.payload.sourceProposedPlan,
         updatedAt: event.occurredAt,
       }));
@@ -1503,6 +1541,16 @@ function applyEnvironmentOrchestrationEvent(
           updatedAt: event.occurredAt,
         };
       });
+
+    case "thread.queued-turn-deleted":
+      return updateThreadState(state, event.payload.threadId, (thread) => ({
+        ...thread,
+        messages: thread.messages.filter((message) => message.id !== event.payload.messageId),
+        queuedTurns: (thread.queuedTurns ?? []).filter(
+          (turn) => turn.queueId !== event.payload.queueId,
+        ),
+        updatedAt: event.occurredAt,
+      }));
 
     case "thread.session-set":
       return updateThreadState(state, event.payload.threadId, (thread) => {
