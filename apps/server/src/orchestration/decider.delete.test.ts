@@ -2,6 +2,7 @@ import {
   CommandId,
   DEFAULT_PROVIDER_INTERACTION_MODE,
   EventId,
+  MessageId,
   ProjectId,
   ThreadId,
   type OrchestrationCommand,
@@ -17,6 +18,7 @@ import { createEmptyReadModel, projectEvent } from "./projector.ts";
 
 const asCommandId = (value: string): CommandId => CommandId.make(value);
 const asEventId = (value: string): EventId => EventId.make(value);
+const asMessageId = (value: string): MessageId => MessageId.make(value);
 const asProjectId = (value: string): ProjectId => ProjectId.make(value);
 const asThreadId = (value: string): ThreadId => ThreadId.make(value);
 
@@ -137,6 +139,54 @@ function normalizeDeleteEvent(event: PlannedEvent | ReadonlyArray<PlannedEvent>)
 }
 
 it.layer(NodeServices.layer)("decider deletion flows", (it) => {
+  it.effect("deletes a queued turn by message id when queue id is not known yet", () =>
+    Effect.gen(function* () {
+      const now = "2026-01-01T00:00:00.000Z";
+      const readModel = yield* projectEvent(yield* seedReadModel, {
+        sequence: 4,
+        eventId: asEventId("evt-queued-turn-start-requested"),
+        aggregateKind: "thread",
+        aggregateId: asThreadId("thread-delete-1"),
+        type: "thread.turn-start-requested",
+        occurredAt: now,
+        commandId: asCommandId("cmd-queued-turn-start"),
+        causationEventId: null,
+        correlationId: asCommandId("cmd-queued-turn-start"),
+        metadata: {},
+        payload: {
+          threadId: asThreadId("thread-delete-1"),
+          messageId: asMessageId("message-delete-queued"),
+          runtimeMode: "approval-required",
+          interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+          dispatchPolicy: "queue",
+          createdAt: now,
+        },
+      });
+
+      const result = yield* decideOrchestrationCommand({
+        command: {
+          type: "thread.queued-turn.delete",
+          commandId: asCommandId("cmd-delete-queued-by-message"),
+          threadId: asThreadId("thread-delete-1"),
+          messageId: asMessageId("message-delete-queued"),
+          createdAt: "2026-01-01T00:00:01.000Z",
+        },
+        readModel,
+      });
+
+      const events = Array.isArray(result) ? result : [result];
+      expect(events).toHaveLength(1);
+      const event = events[0];
+      expect(event?.type).toBe("thread.queued-turn-deleted");
+      if (event?.type !== "thread.queued-turn-deleted") return;
+      expect(event.payload).toMatchObject({
+        threadId: asThreadId("thread-delete-1"),
+        queueId: "queue:evt-queued-turn-start-requested",
+        messageId: asMessageId("message-delete-queued"),
+      });
+    }),
+  );
+
   it.effect("rejects deleting a non-empty project without force", () =>
     Effect.gen(function* () {
       const readModel = yield* seedReadModel;

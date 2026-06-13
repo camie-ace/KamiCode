@@ -252,6 +252,16 @@ type QueuedMessageItem = {
   createdAt: string;
 };
 
+const pendingQueuedMessageDeleteKeys = new Set<string>();
+
+function queuedMessageDeleteKey(
+  environmentId: EnvironmentId,
+  threadId: ThreadId,
+  messageId: MessageId,
+): string {
+  return `${environmentId}:${threadId}:${messageId}`;
+}
+
 const QUEUED_MESSAGE_PREVIEW_LIMIT = 180;
 
 function queuedMessagePreview(text: string): string {
@@ -1850,8 +1860,26 @@ export default function ChatView(props: ChatViewProps) {
     for (const messageId of locallyCancelledQueuedMessageIds) {
       ids.add(messageId);
     }
+    if (activeThread) {
+      for (const message of serverMessages ?? []) {
+        if (
+          pendingQueuedMessageDeleteKeys.has(
+            queuedMessageDeleteKey(environmentId, activeThread.id, message.id),
+          )
+        ) {
+          ids.add(message.id);
+        }
+      }
+    }
     return ids;
-  }, [activeQueuedTurns, locallyCancelledQueuedMessageIds, optimisticQueuedMessages]);
+  }, [
+    activeQueuedTurns,
+    activeThread,
+    environmentId,
+    locallyCancelledQueuedMessageIds,
+    optimisticQueuedMessages,
+    serverMessages,
+  ]);
   const timelineMessages = useMemo(() => {
     const messages = (serverMessages ?? []).filter(
       (message) => !activeQueuedMessageIds.has(message.id),
@@ -1914,6 +1942,14 @@ export default function ChatView(props: ChatViewProps) {
   const queuedMessageItems = useMemo<ReadonlyArray<QueuedMessageItem>>(() => {
     const messagesById = new Map((serverMessages ?? []).map((message) => [message.id, message]));
     const serverItems = activeQueuedTurns.flatMap((turn): QueuedMessageItem[] => {
+      if (
+        activeThread &&
+        pendingQueuedMessageDeleteKeys.has(
+          queuedMessageDeleteKey(environmentId, activeThread.id, turn.messageId),
+        )
+      ) {
+        return [];
+      }
       if (locallyCancelledQueuedMessageIds.has(turn.messageId)) return [];
       const message = messagesById.get(turn.messageId);
       if (!message || message.role !== "user") return [];
@@ -1946,6 +1982,8 @@ export default function ChatView(props: ChatViewProps) {
     );
   }, [
     activeQueuedTurns,
+    activeThread,
+    environmentId,
     locallyCancelledQueuedMessageIds,
     optimisticQueuedMessages,
     serverMessages,
@@ -2159,22 +2197,31 @@ export default function ChatView(props: ChatViewProps) {
     composerRef.current?.focusAtEnd();
   }, [composerRef]);
   const dispatchQueuedMessageDelete = useCallback(
-    (input: { queueId: string; messageId: MessageId }) => {
+    (input: { queueId: string | null; messageId: MessageId }) => {
       const api = readEnvironmentApi(environmentId);
       const threadId = activeThread?.id;
       if (!api || !threadId) return;
-      if (queuedDeleteInFlightByQueueIdRef.current.has(input.queueId)) return;
-      queuedDeleteInFlightByQueueIdRef.current.add(input.queueId);
+      const pendingKey = queuedMessageDeleteKey(environmentId, threadId, input.messageId);
+      const inFlightKey = input.queueId ?? pendingKey;
+      if (queuedDeleteInFlightByQueueIdRef.current.has(inFlightKey)) return;
+      queuedDeleteInFlightByQueueIdRef.current.add(inFlightKey);
       void api.orchestration
         .dispatchCommand({
           type: "thread.queued-turn.delete",
           commandId: newCommandId(),
           threadId,
-          queueId: input.queueId,
+          ...(input.queueId !== null ? { queueId: input.queueId } : {}),
           messageId: input.messageId,
           createdAt: new Date().toISOString(),
         })
+        .then(() => {
+          pendingQueuedMessageDeleteKeys.delete(pendingKey);
+        })
         .catch((err: unknown) => {
+          if (input.queueId === null) {
+            return;
+          }
+          pendingQueuedMessageDeleteKeys.delete(pendingKey);
           setLocallyCancelledQueuedMessageIds((existing) => {
             if (!existing.has(input.messageId)) return existing;
             const next = new Set(existing);
@@ -2187,7 +2234,7 @@ export default function ChatView(props: ChatViewProps) {
           );
         })
         .finally(() => {
-          queuedDeleteInFlightByQueueIdRef.current.delete(input.queueId);
+          queuedDeleteInFlightByQueueIdRef.current.delete(inFlightKey);
         });
     },
     [activeThread?.id, environmentId, setThreadError],
@@ -2200,6 +2247,11 @@ export default function ChatView(props: ChatViewProps) {
         next.add(item.id);
         return next;
       });
+      if (activeThread) {
+        pendingQueuedMessageDeleteKeys.add(
+          queuedMessageDeleteKey(environmentId, activeThread.id, item.id),
+        );
+      }
       if (item.queueId === null) {
         setOptimisticQueuedMessages((existing) => {
           const removed = existing.filter((message) => message.id === item.id);
@@ -2215,12 +2267,28 @@ export default function ChatView(props: ChatViewProps) {
     [dispatchQueuedMessageDelete],
   );
   useEffect(() => {
-    if (locallyCancelledQueuedMessageIds.size === 0) return;
+    if (locallyCancelledQueuedMessageIds.size === 0 && pendingQueuedMessageDeleteKeys.size === 0) {
+      return;
+    }
     for (const turn of activeQueuedTurns) {
-      if (!locallyCancelledQueuedMessageIds.has(turn.messageId)) continue;
+      const pendingKey = activeThread
+        ? queuedMessageDeleteKey(environmentId, activeThread.id, turn.messageId)
+        : null;
+      if (
+        !locallyCancelledQueuedMessageIds.has(turn.messageId) &&
+        (pendingKey === null || !pendingQueuedMessageDeleteKeys.has(pendingKey))
+      ) {
+        continue;
+      }
       dispatchQueuedMessageDelete({ queueId: turn.queueId, messageId: turn.messageId });
     }
-  }, [activeQueuedTurns, dispatchQueuedMessageDelete, locallyCancelledQueuedMessageIds]);
+  }, [
+    activeQueuedTurns,
+    activeThread,
+    dispatchQueuedMessageDelete,
+    environmentId,
+    locallyCancelledQueuedMessageIds,
+  ]);
   const scheduleComposerFocus = useCallback(() => {
     window.requestAnimationFrame(() => {
       focusComposer();
@@ -3413,6 +3481,14 @@ export default function ChatView(props: ChatViewProps) {
         createdAt: messageCreatedAt,
       });
       turnStartSucceeded = true;
+      if (
+        isQueuedDispatch &&
+        pendingQueuedMessageDeleteKeys.has(
+          queuedMessageDeleteKey(environmentId, threadIdForSend, messageIdForSend),
+        )
+      ) {
+        dispatchQueuedMessageDelete({ queueId: null, messageId: messageIdForSend });
+      }
     })().catch(async (err: unknown) => {
       if (
         !turnStartSucceeded &&

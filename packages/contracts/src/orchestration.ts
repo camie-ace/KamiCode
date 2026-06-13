@@ -583,7 +583,7 @@ const ThreadQueuedTurnDeleteCommand = Schema.Struct({
   type: Schema.Literal("thread.queued-turn.delete"),
   commandId: CommandId,
   threadId: ThreadId,
-  queueId: TrimmedNonEmptyString,
+  queueId: Schema.optional(TrimmedNonEmptyString),
   messageId: MessageId,
   createdAt: IsoDateTime,
 });

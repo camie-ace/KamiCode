@@ -51,6 +51,7 @@ import { OrchestrationProjectionPipelineLive } from "./ProjectionPipeline.ts";
 import { OrchestrationProjectionSnapshotQueryLive } from "./ProjectionSnapshotQuery.ts";
 import {
   buildTestModeTurnInput,
+  hasActiveThreadTurn,
   providerErrorLabel,
   providerErrorLabelFromInstanceHint,
   ProviderCommandReactorLive,
@@ -181,6 +182,36 @@ describe("ProviderCommandReactor", () => {
       expect(testInput).toContain("Workspace root: /tmp/provider-project");
       expect(testInput).toContain("Default test URL: http://localhost:5173");
       expect(testInput).toContain("Test upload behavior");
+    });
+  });
+
+  describe("queue drain state", () => {
+    it("treats a running latest turn as active even when session state is stale", () => {
+      expect(
+        hasActiveThreadTurn({
+          latestTurn: {
+            turnId: asTurnId("turn-running-stale-session"),
+            state: "running",
+            requestedAt: "2026-01-01T00:00:00.000Z",
+            startedAt: "2026-01-01T00:00:01.000Z",
+            completedAt: null,
+            assistantMessageId: null,
+          },
+        }),
+      ).toBe(true);
+      expect(
+        hasActiveThreadTurn({
+          latestTurn: {
+            turnId: asTurnId("turn-completed"),
+            state: "completed",
+            requestedAt: "2026-01-01T00:00:00.000Z",
+            startedAt: "2026-01-01T00:00:01.000Z",
+            completedAt: "2026-01-01T00:00:02.000Z",
+            assistantMessageId: null,
+          },
+        }),
+      ).toBe(false);
+      expect(hasActiveThreadTurn({ latestTurn: null })).toBe(false);
     });
   });
 

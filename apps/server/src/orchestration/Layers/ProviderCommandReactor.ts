@@ -9,6 +9,7 @@ import {
   type ProviderInteractionMode,
   type ProjectId,
   type OrchestrationSession,
+  type OrchestrationThread,
   ThreadId,
   TrimmedNonEmptyString,
   type ProviderSession,
@@ -149,6 +150,10 @@ export function buildTestModeTurnInput(input: {
       : "Test the current work based on the conversation context.",
   );
   return lines.join("\n");
+}
+
+export function hasActiveThreadTurn(thread: Pick<OrchestrationThread, "latestTurn">): boolean {
+  return thread.latestTurn?.state === "running";
 }
 
 export function providerErrorLabel(value: string | undefined): string {
@@ -836,6 +841,9 @@ const make = Effect.gen(function* () {
       while (true) {
         const thread = yield* resolveThread(threadId);
         if (!thread || thread.deletedAt !== null || thread.archivedAt !== null) {
+          return;
+        }
+        if (hasActiveThreadTurn(thread)) {
           return;
         }
         if (

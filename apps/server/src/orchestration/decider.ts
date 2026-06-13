@@ -398,12 +398,14 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         threadId: command.threadId,
       });
       const queuedTurn = (thread.queuedTurns ?? []).find(
-        (turn) => turn.queueId === command.queueId && turn.messageId === command.messageId,
+        (turn) =>
+          (command.queueId === undefined || turn.queueId === command.queueId) &&
+          turn.messageId === command.messageId,
       );
       if (!queuedTurn || queuedTurn.status !== "queued") {
         return yield* new OrchestrationCommandInvariantError({
           commandType: command.type,
-          detail: `Queued turn '${command.queueId}' is not queued and cannot be deleted.`,
+          detail: `Queued turn for message '${command.messageId}' is not queued and cannot be deleted.`,
         });
       }
       return {
@@ -416,7 +418,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         type: "thread.queued-turn-deleted",
         payload: {
           threadId: command.threadId,
-          queueId: command.queueId,
+          queueId: queuedTurn.queueId,
           messageId: command.messageId,
           deletedAt: command.createdAt,
         },
