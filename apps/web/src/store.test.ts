@@ -790,8 +790,10 @@ describe("incremental orchestration updates", () => {
       localEnvironmentId,
     );
 
-    const queuedTurns = selectThreadByRef(next, scopeThreadRef(thread.environmentId, thread.id))
-      ?.queuedTurns;
+    const queuedTurns = selectThreadByRef(
+      next,
+      scopeThreadRef(thread.environmentId, thread.id),
+    )?.queuedTurns;
     expect(queuedTurns).toHaveLength(1);
     expect(queuedTurns?.[0]).toMatchObject({
       queueId: "queue:event-1",
