@@ -1182,6 +1182,70 @@ describe("deriveWorkLogEntries", () => {
     expect(entry?.evidenceRun?.networkFailures).toEqual(["GET /missing 404"]);
   });
 
+  it("extracts evidence run artifacts from Claude MCP test harness tool results", () => {
+    const screenshotPath =
+      "C:/Users/THIS PC/.kamicode/userdata/test-harness/projects/cwd-1/runs/run-claude/screenshots/01.png";
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "claude-evidence-complete",
+        kind: "tool.completed",
+        summary: "Evidence run",
+        payload: {
+          itemType: "dynamic_tool_call",
+          title: "Evidence run",
+          detail: "Evidence run: Validate chat UI (http://127.0.0.1:5733)",
+          data: {
+            toolName: "mcp__kamicode__kami_test_harness",
+            input: {
+              url: "http://127.0.0.1:5733",
+              goal: "Validate chat UI",
+            },
+            result: {
+              type: "tool_result",
+              tool_use_id: "tool-1",
+              content: [
+                {
+                  type: "text",
+                  text: `${JSON.stringify({
+                    runner: "playwright",
+                    status: "pass",
+                    success: true,
+                    runId: "run-claude",
+                    goal: "Validate chat UI",
+                    finalUrl: "http://127.0.0.1:5733/",
+                    evidenceSummary: "Chat shell was visible.",
+                    artifactPaths: {
+                      trace:
+                        "C:/Users/THIS PC/.kamicode/userdata/test-harness/projects/cwd-1/runs/run-claude/trace.zip",
+                    },
+                    screenshots: [{ label: "final", path: screenshotPath }],
+                    videos: [],
+                    consoleErrors: [],
+                    networkFailures: [],
+                  })}\n`,
+                },
+              ],
+            },
+          },
+        },
+      }),
+    ];
+
+    const [entry] = deriveWorkLogEntries(activities);
+    expect(entry?.evidenceRun).toMatchObject({
+      runId: "run-claude",
+      runner: "playwright",
+      status: "pass",
+      success: true,
+      goal: "Validate chat UI",
+      finalUrl: "http://127.0.0.1:5733/",
+      evidenceSummary: "Chat shell was visible.",
+      tracePath:
+        "C:/Users/THIS PC/.kamicode/userdata/test-harness/projects/cwd-1/runs/run-claude/trace.zip",
+    });
+    expect(entry?.evidenceRun?.screenshots).toEqual([{ label: "final", path: screenshotPath }]);
+  });
+
   it("uses grep raw output summaries instead of repeating the generic tool label", () => {
     const activities: OrchestrationThreadActivity[] = [
       makeActivity({

@@ -1133,17 +1133,53 @@ function extractDynamicToolInputTextResult(
   payload: Record<string, unknown> | null,
 ): Record<string, unknown> | null {
   const data = asRecord(payload?.data);
-  const contentItems = Array.isArray(data?.contentItems) ? data.contentItems : [];
-  for (const contentItem of contentItems) {
+  const result = asRecord(data?.result);
+  for (const content of [
+    data?.contentItems,
+    result?.contentItems,
+    result?.content,
+    data?.content,
+  ]) {
+    const parsed = extractJsonRecordFromToolContent(content);
+    if (parsed) {
+      return parsed;
+    }
+  }
+  return null;
+}
+
+function extractJsonRecordFromToolContent(value: unknown): Record<string, unknown> | null {
+  const direct = asTrimmedString(value);
+  if (direct) {
+    return parseJsonRecord(direct);
+  }
+
+  if (!Array.isArray(value)) {
+    return null;
+  }
+
+  for (const contentItem of value) {
+    const text = asTrimmedString(contentItem);
+    if (text) {
+      const parsed = parseJsonRecord(text);
+      if (parsed) {
+        return parsed;
+      }
+      continue;
+    }
+
     const record = asRecord(contentItem);
-    if (record?.type !== "inputText") {
+    if (record?.type !== "inputText" && record?.type !== "text") {
       continue;
     }
-    const text = asTrimmedString(record.text);
-    if (!text) {
+    const itemText = asTrimmedString(record.text);
+    if (!itemText) {
       continue;
     }
-    return parseJsonRecord(text);
+    const parsed = parseJsonRecord(itemText);
+    if (parsed) {
+      return parsed;
+    }
   }
   return null;
 }
