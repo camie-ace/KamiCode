@@ -13,6 +13,7 @@
 import {
   DEFAULT_GIT_TEXT_GENERATION_MODEL,
   DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER,
+  DEFAULT_MODEL_BY_PROVIDER,
   DEFAULT_SERVER_SETTINGS,
   isProviderDriverKind,
   type ModelSelection,
@@ -47,8 +48,9 @@ import { ServerConfig } from "./config.ts";
 import { type DeepPartial, deepMerge } from "@t3tools/shared/Struct";
 import { fromJsonStringPretty, fromLenientJson } from "@t3tools/shared/schemaJson";
 import { applyServerSettingsPatch } from "@t3tools/shared/serverSettings";
-import { ServerSecretStoreLive } from "./auth/Layers/ServerSecretStore.ts";
-import { ServerSecretStore } from "./auth/Services/ServerSecretStore.ts";
+import * as ServerSecretStore from "./auth/ServerSecretStore.ts";
+
+const HOSTED_COLLABORATION_TOKEN_SECRET_NAME = "hosted-collaboration-token";
 
 const encodeServerSettings = Schema.encodeEffect(ServerSettings);
 const encodeServerSettingsJson = Schema.encodeUnknownEffect(fromJsonStringPretty(ServerSettings));
@@ -105,7 +107,11 @@ export function redactServerSettingsForClient(settings: ServerSettings): ServerS
         : instance,
     ]),
   );
-  return { ...settings, providerInstances };
+  const hostedCollaboration =
+    settings.hostedCollaboration.token.length > 0 || settings.hostedCollaboration.tokenRedacted
+      ? { ...settings.hostedCollaboration, token: "", tokenRedacted: true }
+      : settings.hostedCollaboration;
+  return { ...settings, providerInstances, hostedCollaboration };
 }
 
 export interface ServerSettingsShape {
@@ -208,6 +214,7 @@ function fallbackTextGenerationProvider(settings: ServerSettings): ServerSetting
       instanceId: ProviderInstanceId.make(fallback),
       model:
         DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER[fallback] ??
+        DEFAULT_MODEL_BY_PROVIDER[fallback] ??
         DEFAULT_GIT_TEXT_GENERATION_MODEL,
     } satisfies ModelSelection,
   };
@@ -257,7 +264,7 @@ const makeServerSettings = Effect.gen(function* () {
   const { settingsPath } = yield* ServerConfig;
   const fs = yield* FileSystem.FileSystem;
   const pathService = yield* Path.Path;
-  const secretStore = yield* ServerSecretStore;
+  const secretStore = yield* ServerSecretStore.ServerSecretStore;
   const writeSemaphore = yield* Semaphore.make(1);
   const cacheKey = "settings" as const;
   const changesPubSub = yield* PubSub.unbounded<ServerSettings>();
@@ -363,6 +370,30 @@ const makeServerSettings = Effect.gen(function* () {
       };
     });
 
+  const materializeHostedCollaborationToken = (
+    settings: ServerSettings,
+  ): Effect.Effect<ServerSettings, ServerSettingsError> =>
+    Effect.gen(function* () {
+      if (!settings.hostedCollaboration.tokenRedacted) {
+        return settings;
+      }
+      const secret = yield* secretStore
+        .get(HOSTED_COLLABORATION_TOKEN_SECRET_NAME)
+        .pipe(
+          Effect.mapError((cause) =>
+            toSettingsError("failed to read hosted collaboration server token", cause),
+          ),
+        );
+      return {
+        ...settings,
+        hostedCollaboration: {
+          ...settings.hostedCollaboration,
+          token: secret ? textDecoder.decode(secret) : "",
+          tokenRedacted: Boolean(secret),
+        },
+      };
+    });
+
   const persistProviderEnvironmentSecrets = (
     current: ServerSettings,
     next: ServerSettings,
@@ -444,6 +475,55 @@ const makeServerSettings = Effect.gen(function* () {
       return {
         ...next,
         providerInstances: providerInstances as ServerSettings["providerInstances"],
+      };
+    });
+
+  const persistHostedCollaborationToken = (
+    next: ServerSettings,
+  ): Effect.Effect<ServerSettings, ServerSettingsError> =>
+    Effect.gen(function* () {
+      const token = next.hostedCollaboration.token.trim();
+      if (next.hostedCollaboration.tokenRedacted) {
+        return {
+          ...next,
+          hostedCollaboration: {
+            ...next.hostedCollaboration,
+            token: "",
+            tokenRedacted: true,
+          },
+        };
+      }
+      if (token.length === 0) {
+        yield* secretStore
+          .remove(HOSTED_COLLABORATION_TOKEN_SECRET_NAME)
+          .pipe(
+            Effect.mapError((cause) =>
+              toSettingsError("failed to remove hosted collaboration server token", cause),
+            ),
+          );
+        return {
+          ...next,
+          hostedCollaboration: {
+            ...next.hostedCollaboration,
+            token: "",
+            tokenRedacted: false,
+          },
+        };
+      }
+      yield* secretStore
+        .set(HOSTED_COLLABORATION_TOKEN_SECRET_NAME, textEncoder.encode(token))
+        .pipe(
+          Effect.mapError((cause) =>
+            toSettingsError("failed to persist hosted collaboration server token", cause),
+          ),
+        );
+      return {
+        ...next,
+        hostedCollaboration: {
+          ...next.hostedCollaboration,
+          token: "",
+          tokenRedacted: true,
+        },
       };
     });
 
@@ -544,6 +624,7 @@ const makeServerSettings = Effect.gen(function* () {
     ready: Deferred.await(startedDeferred),
     getSettings: getSettingsFromCache.pipe(
       Effect.flatMap(materializeProviderEnvironmentSecrets),
+      Effect.flatMap(materializeHostedCollaborationToken),
       Effect.map(resolveTextGenerationProvider),
     ),
     updateSettings: (patch) =>
@@ -553,12 +634,14 @@ const makeServerSettings = Effect.gen(function* () {
           const nextPersisted = yield* persistProviderEnvironmentSecrets(
             current,
             applyServerSettingsPatch(current, patch),
-          );
+          ).pipe(Effect.flatMap(persistHostedCollaborationToken));
           const next = yield* normalizeServerSettings(nextPersisted);
           yield* writeSettingsAtomically(next);
           yield* Cache.set(settingsCache, cacheKey, next);
           yield* emitChange(next);
-          const materialized = yield* materializeProviderEnvironmentSecrets(next);
+          const materialized = yield* materializeProviderEnvironmentSecrets(next).pipe(
+            Effect.flatMap(materializeHostedCollaborationToken),
+          );
           return resolveTextGenerationProvider(materialized);
         }),
       ),
@@ -566,8 +649,9 @@ const makeServerSettings = Effect.gen(function* () {
       return Stream.fromPubSub(changesPubSub).pipe(
         Stream.mapEffect((settings) =>
           materializeProviderEnvironmentSecrets(settings).pipe(
+            Effect.flatMap(materializeHostedCollaborationToken),
             Effect.catch((error: ServerSettingsError) =>
-              Effect.logWarning("failed to materialize provider environment secrets", {
+              Effect.logWarning("failed to materialize server settings secrets", {
                 detail: error.detail,
               }).pipe(Effect.as(settings)),
             ),
@@ -580,5 +664,5 @@ const makeServerSettings = Effect.gen(function* () {
 });
 
 export const ServerSettingsLive = Layer.effect(ServerSettingsService, makeServerSettings).pipe(
-  Layer.provide(ServerSecretStoreLive),
+  Layer.provide(ServerSecretStore.layer),
 );

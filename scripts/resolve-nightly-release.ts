@@ -11,6 +11,8 @@ import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 import { Command, Flag } from "effect/unstable/cli";
 
+import { isDirectlyExecuted } from "./lib/node-main.ts";
+
 interface NightlyReleaseMetadata {
   readonly baseVersion: string;
   readonly version: string;
@@ -135,7 +137,7 @@ const command = Command.make(
     ),
 ).pipe(Command.withDescription("Resolve nightly release version metadata."));
 
-if (import.meta.main) {
+if (isDirectlyExecuted(import.meta.url)) {
   Command.run(command, { version: "0.0.0" }).pipe(
     Effect.provide(NodeServices.layer),
     NodeRuntime.runMain,

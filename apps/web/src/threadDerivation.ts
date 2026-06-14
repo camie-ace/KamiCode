@@ -1,4 +1,5 @@
 import type { MessageId, ThreadId, TurnId } from "@t3tools/contracts";
+import type { OrchestrationQueuedTurn } from "@t3tools/contracts";
 import type { EnvironmentState } from "./store";
 import type {
   ChatMessage,
@@ -11,6 +12,7 @@ import type {
 } from "./types";
 
 const EMPTY_MESSAGES: ChatMessage[] = [];
+const EMPTY_QUEUED_TURNS: OrchestrationQueuedTurn[] = [];
 const EMPTY_ACTIVITIES: Thread["activities"] = [];
 const EMPTY_PROPOSED_PLANS: ProposedPlan[] = [];
 const EMPTY_TURN_DIFF_SUMMARIES: TurnDiffSummary[] = [];
@@ -26,6 +28,7 @@ const threadCache = new WeakMap<
     session: ThreadSession | null;
     turnState: ThreadTurnState | undefined;
     messages: Thread["messages"];
+    queuedTurns: OrchestrationQueuedTurn[];
     activities: Thread["activities"];
     proposedPlans: Thread["proposedPlans"];
     turnDiffSummaries: Thread["turnDiffSummaries"];
@@ -66,6 +69,13 @@ function selectThreadMessages(state: EnvironmentState, threadId: ThreadId): Thre
     state.messageByThreadId[threadId] ?? EMPTY_MESSAGE_MAP,
     EMPTY_MESSAGES,
   );
+}
+
+function selectThreadQueuedTurns(
+  state: EnvironmentState,
+  threadId: ThreadId,
+): OrchestrationQueuedTurn[] {
+  return state.queuedTurnsByThreadId[threadId] ?? EMPTY_QUEUED_TURNS;
 }
 
 function selectThreadActivities(state: EnvironmentState, threadId: ThreadId): Thread["activities"] {
@@ -110,6 +120,7 @@ export function getThreadFromEnvironmentState(
   const session = state.threadSessionById[threadId] ?? null;
   const turnState = state.threadTurnStateById[threadId];
   const messages = selectThreadMessages(state, threadId);
+  const queuedTurns = selectThreadQueuedTurns(state, threadId);
   const activities = selectThreadActivities(state, threadId);
   const proposedPlans = selectThreadProposedPlans(state, threadId);
   const turnDiffSummaries = selectThreadTurnDiffSummaries(state, threadId);
@@ -120,6 +131,7 @@ export function getThreadFromEnvironmentState(
     cached.session === session &&
     cached.turnState === turnState &&
     cached.messages === messages &&
+    cached.queuedTurns === queuedTurns &&
     cached.activities === activities &&
     cached.proposedPlans === proposedPlans &&
     cached.turnDiffSummaries === turnDiffSummaries
@@ -133,6 +145,7 @@ export function getThreadFromEnvironmentState(
     latestTurn: turnState?.latestTurn ?? null,
     pendingSourceProposedPlan: turnState?.pendingSourceProposedPlan,
     messages,
+    queuedTurns,
     activities,
     proposedPlans,
     turnDiffSummaries,
@@ -142,6 +155,7 @@ export function getThreadFromEnvironmentState(
     session,
     turnState,
     messages,
+    queuedTurns,
     activities,
     proposedPlans,
     turnDiffSummaries,

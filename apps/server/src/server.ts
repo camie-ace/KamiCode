@@ -1,13 +1,15 @@
+import { EnvironmentHttpApi } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import { FetchHttpClient, HttpRouter, HttpServer } from "effect/unstable/http";
+import * as HttpApiBuilder from "effect/unstable/httpapi/HttpApiBuilder";
 
 import { ServerConfig } from "./config.ts";
 import {
   attachmentsRouteLayer,
   otlpTracesProxyRouteLayer,
   projectFaviconRouteLayer,
-  serverEnvironmentRouteLayer,
+  serverEnvironmentHttpApiLayer,
   staticAndDevRouteLayer,
   browserApiCorsLayer,
   testHarnessArtifactRouteLayer,
@@ -45,6 +47,8 @@ import { ProviderRuntimeIngestionLive } from "./orchestration/Layers/ProviderRun
 import { ProviderCommandReactorLive } from "./orchestration/Layers/ProviderCommandReactor.ts";
 import { CheckpointReactorLive } from "./orchestration/Layers/CheckpointReactor.ts";
 import { ThreadDeletionReactorLive } from "./orchestration/Layers/ThreadDeletionReactor.ts";
+import * as AgentAwarenessRelay from "./relay/AgentAwarenessRelay.ts";
+import { hasCloudPublicConfig } from "./cloud/publicConfig.ts";
 import { ProviderRegistryLive } from "./provider/Layers/ProviderRegistry.ts";
 import { ServerSettingsLive } from "./serverSettings.ts";
 import { ProjectFaviconResolverLive } from "./project/Layers/ProjectFaviconResolver.ts";
@@ -59,25 +63,19 @@ import * as VcsProcess from "./vcs/VcsProcess.ts";
 import * as VcsProvisioningService from "./vcs/VcsProvisioningService.ts";
 import * as VcsStatusBroadcaster from "./vcs/VcsStatusBroadcaster.ts";
 import * as GitWorkflowService from "./git/GitWorkflowService.ts";
+import * as ReviewService from "./review/ReviewService.ts";
 import * as SourceControlProviderRegistry from "./sourceControl/SourceControlProviderRegistry.ts";
 import * as SourceControlRepositoryService from "./sourceControl/SourceControlRepositoryService.ts";
 import { ProjectSetupScriptRunnerLive } from "./project/Layers/ProjectSetupScriptRunner.ts";
 import { ObservabilityLive } from "./observability/Layers/Observability.ts";
 import { ServerEnvironmentLive } from "./environment/Layers/ServerEnvironment.ts";
-import {
-  authBearerBootstrapRouteLayer,
-  authBootstrapRouteLayer,
-  authClientsRevokeOthersRouteLayer,
-  authClientsRevokeRouteLayer,
-  authClientsRouteLayer,
-  authPairingLinksRevokeRouteLayer,
-  authPairingLinksRouteLayer,
-  authPairingCredentialRouteLayer,
-  authSessionRouteLayer,
-  authWebSocketTokenRouteLayer,
-} from "./auth/http.ts";
-import { ServerSecretStoreLive } from "./auth/Layers/ServerSecretStore.ts";
-import { ServerAuthLive } from "./auth/Layers/ServerAuth.ts";
+import { authHttpApiLayer, environmentAuthenticatedAuthLayer } from "./auth/http.ts";
+import * as ServerSecretStore from "./auth/ServerSecretStore.ts";
+import * as EnvironmentAuth from "./auth/EnvironmentAuth.ts";
+import { connectHttpApiLayer, reconcileDesiredCloudLink } from "./cloud/http.ts";
+import * as CloudManagedEndpointRuntime from "./cloud/ManagedEndpointRuntime.ts";
+import * as CloudCliTokenManager from "./cloud/CliTokenManager.ts";
+import * as CloudCliState from "./cloud/CliState.ts";
 import { GitHubOAuthClientLive } from "./userAuth/Layers/GitHubOAuthClient.ts";
 import { UserAuthLive } from "./userAuth/Layers/UserAuth.ts";
 import {
@@ -95,11 +93,14 @@ import {
   sharedProjectsClaimInviteRouteLayer,
   sharedProjectsCreateInviteRouteLayer,
   sharedProjectsCurrentUserRouteLayer,
+  sharedProjectsDeleteRouteLayer,
   sharedProjectsDetailRouteLayer,
+  sharedProjectsImportThreadRouteLayer,
   sharedProjectsListRouteLayer,
   sharedProjectsPublishRouteLayer,
   sharedProjectsPublishThreadRouteLayer,
   sharedProjectsRemoveMemberRouteLayer,
+  sharedProjectsRemoveSshCredentialRouteLayer,
   sharedProjectsSetDefaultEnvironmentRouteLayer,
   sharedProjectsSyncContextRouteLayer,
   sharedProjectsSyncRemoteRuntimeRouteLayer,
@@ -108,6 +109,7 @@ import {
   sharedProjectsUpsertDeployRouteLayer,
   sharedProjectsUpsertEnvironmentRouteLayer,
   sharedProjectsUpsertRuntimeRouteLayer,
+  sharedProjectsUpsertSshCredentialRouteLayer,
 } from "./sharedProjects/http.ts";
 import * as ProcessDiagnostics from "./diagnostics/ProcessDiagnostics.ts";
 import * as ProcessResourceMonitor from "./diagnostics/ProcessResourceMonitor.ts";
@@ -118,11 +120,9 @@ import {
   makePersistedServerRuntimeState,
   persistServerRuntimeState,
 } from "./serverRuntimeState.ts";
-import {
-  orchestrationDispatchRouteLayer,
-  orchestrationSnapshotRouteLayer,
-} from "./orchestration/http.ts";
+import { orchestrationHttpApiLayer } from "./orchestration/http.ts";
 import * as NetService from "@t3tools/shared/Net";
+import * as RelayClient from "@t3tools/shared/relayClient";
 import { disableTailscaleServe, ensureTailscaleServe } from "@t3tools/tailscale";
 
 const PtyAdapterLive = Layer.unwrap(
@@ -134,6 +134,13 @@ const PtyAdapterLive = Layer.unwrap(
       const NodePTY = yield* Effect.promise(() => import("./terminal/Layers/NodePTY.ts"));
       return NodePTY.layer;
     }
+  }),
+);
+
+const RelayClientLive = Layer.unwrap(
+  Effect.gen(function* () {
+    const config = yield* ServerConfig;
+    return RelayClient.layerCloudflared({ baseDir: config.baseDir });
   }),
 );
 
@@ -179,6 +186,7 @@ const ReactorLayerLive = Layer.empty.pipe(
   Layer.provideMerge(ProviderCommandReactorLive),
   Layer.provideMerge(CheckpointReactorLive),
   Layer.provideMerge(ThreadDeletionReactorLive),
+  Layer.provideMerge(AgentAwarenessRelay.layer.pipe(Layer.provide(ServerSecretStore.layer))),
   Layer.provideMerge(RuntimeReceiptBusLive),
 );
 
@@ -233,11 +241,17 @@ const SourceControlRepositoryServiceLayerLive = SourceControlRepositoryService.l
   Layer.provideMerge(SourceControlProviderRegistryLayerLive),
 );
 
+const ReviewLayerLive = ReviewService.layer.pipe(
+  Layer.provideMerge(GitVcsDriver.layer),
+  Layer.provideMerge(VcsDriverRegistryLayerLive),
+);
+
 const VcsLayerLive = Layer.empty.pipe(
   Layer.provideMerge(VcsProjectConfig.layer),
   Layer.provideMerge(VcsDriverRegistryLayerLive),
   Layer.provideMerge(VcsProvisioningService.layer.pipe(Layer.provide(VcsDriverRegistryLayerLive))),
   Layer.provideMerge(GitWorkflowLayerLive),
+  Layer.provideMerge(ReviewLayerLive),
   Layer.provideMerge(SourceControlRepositoryServiceLayerLive),
   Layer.provideMerge(VcsStatusBroadcaster.layer.pipe(Layer.provide(GitWorkflowLayerLive))),
 );
@@ -265,20 +279,29 @@ const WorkspaceLayerLive = Layer.mergeAll(
   WorkspaceFileSystemLayerLive,
 );
 
-const AuthLayerLive = ServerAuthLive.pipe(
+const AuthLayerLive = EnvironmentAuth.layer.pipe(
   Layer.provideMerge(PersistenceLayerLive),
-  Layer.provide(ServerSecretStoreLive),
+  Layer.provide(ServerSecretStore.layer),
+);
+
+const CloudManagedEndpointRuntimeLive = Layer.mergeAll(
+  RelayClientLive,
+  CloudManagedEndpointRuntime.layer.pipe(
+    Layer.provide(ServerSecretStore.layer),
+    Layer.provide(RelayClientLive),
+  ),
 );
 
 const UserAuthLayerLive = UserAuthLive.pipe(
   Layer.provideMerge(PersistenceLayerLive),
-  Layer.provide(ServerSecretStoreLive),
+  Layer.provide(ServerSecretStore.layer),
   Layer.provide(GitHubOAuthClientLive),
 );
 
 const SharedProjectsLayerLive = SharedProjectsLive.pipe(
   Layer.provideMerge(PersistenceLayerLive),
   Layer.provideMerge(RepositoryIdentityResolverLive),
+  Layer.provide(ServerSecretStore.layer),
 );
 
 const ProviderRuntimeLayerLive = ProviderSessionReaperLive.pipe(
@@ -286,7 +309,7 @@ const ProviderRuntimeLayerLive = ProviderSessionReaperLive.pipe(
   Layer.provideMerge(OrchestrationLayerLive),
 );
 
-const RuntimeCoreDependenciesLive = ReactorLayerLive.pipe(
+const RuntimeCoreServicesLive = ReactorLayerLive.pipe(
   // Core Services
   Layer.provideMerge(CheckpointingLayerLive),
   Layer.provideMerge(SourceControlProviderRegistryLayerLive),
@@ -320,9 +343,20 @@ const RuntimeCoreDependenciesLive = ReactorLayerLive.pipe(
   Layer.provideMerge(ProjectFaviconResolverLive),
   Layer.provideMerge(RepositoryIdentityResolverLive),
   Layer.provideMerge(ServerEnvironmentLive),
+);
+
+const RuntimeCoreDependenciesLive = RuntimeCoreServicesLive.pipe(
+  // Auth, collaboration, and cloud runtime.
   Layer.provideMerge(AuthLayerLive),
   Layer.provideMerge(UserAuthLayerLive),
   Layer.provideMerge(SharedProjectsLayerLive),
+  Layer.provideMerge(ServerSecretStore.layer),
+  Layer.provideMerge(
+    Layer.mergeAll(
+      CloudCliTokenManager.layer.pipe(Layer.provide(ServerSecretStore.layer)),
+      CloudManagedEndpointRuntimeLive,
+    ),
+  ),
 );
 
 const RuntimeDependenciesLive = RuntimeCoreDependenciesLive.pipe(
@@ -341,16 +375,13 @@ const RuntimeServicesLive = ServerRuntimeStartupLive.pipe(
 );
 
 export const makeRoutesLayer = Layer.mergeAll(
-  authBearerBootstrapRouteLayer,
-  authBootstrapRouteLayer,
-  authClientsRevokeOthersRouteLayer,
-  authClientsRevokeRouteLayer,
-  authClientsRouteLayer,
-  authPairingLinksRevokeRouteLayer,
-  authPairingLinksRouteLayer,
-  authPairingCredentialRouteLayer,
-  authSessionRouteLayer,
-  authWebSocketTokenRouteLayer,
+  HttpApiBuilder.layer(EnvironmentHttpApi).pipe(
+    Layer.provide(authHttpApiLayer),
+    Layer.provide(connectHttpApiLayer),
+    Layer.provide(orchestrationHttpApiLayer),
+    Layer.provide(serverEnvironmentHttpApiLayer),
+    Layer.provide(environmentAuthenticatedAuthLayer),
+  ),
   userAuthSessionRouteLayer,
   userAuthGitHubStartRouteLayer,
   userAuthGitHubDesktopStartRouteLayer,
@@ -367,10 +398,14 @@ export const makeRoutesLayer = Layer.mergeAll(
   sharedProjectsClaimInviteRouteLayer,
   sharedProjectsUpdateMemberRoleRouteLayer,
   sharedProjectsRemoveMemberRouteLayer,
+  sharedProjectsDeleteRouteLayer,
   sharedProjectsPublishThreadRouteLayer,
   sharedProjectsUpdateThreadVisibilityRouteLayer,
+  sharedProjectsImportThreadRouteLayer,
   sharedProjectsAppendThreadMessageRouteLayer,
   sharedProjectsUpsertRuntimeRouteLayer,
+  sharedProjectsUpsertSshCredentialRouteLayer,
+  sharedProjectsRemoveSshCredentialRouteLayer,
   sharedProjectsUpsertEnvironmentRouteLayer,
   sharedProjectsSetDefaultEnvironmentRouteLayer,
   sharedProjectsUpsertDeployRouteLayer,
@@ -379,11 +414,8 @@ export const makeRoutesLayer = Layer.mergeAll(
   testHarnessTraceViewerRouteLayer,
   testHarnessArtifactRouteLayer,
   testHarnessRunsRouteLayer,
-  orchestrationDispatchRouteLayer,
-  orchestrationSnapshotRouteLayer,
   otlpTracesProxyRouteLayer,
   projectFaviconRouteLayer,
-  serverEnvironmentRouteLayer,
   staticAndDevRouteLayer,
   websocketRpcRouteLayer,
 ).pipe(Layer.provide(browserApiCorsLayer));
@@ -475,6 +507,27 @@ export const makeServerLayer = Layer.unwrap(
           ),
         )
       : Layer.empty;
+    const cloudDesiredLinkReconcileLayer = Layer.effectDiscard(
+      Effect.gen(function* () {
+        if (!hasCloudPublicConfig) return;
+        if (!(yield* CloudCliState.readCliDesiredCloudLink)) return;
+        const server = yield* HttpServer.HttpServer;
+        const address = server.address;
+        if (typeof address === "string" || !("port" in address)) return;
+        yield* Effect.forkScoped(
+          Effect.sleep("250 millis").pipe(
+            Effect.andThen(reconcileDesiredCloudLink(`http://127.0.0.1:${address.port}`)),
+            Effect.retry({ times: 4 }),
+            Effect.tap(() => Effect.logInfo("T3 Connect desired link reconciled on startup")),
+            Effect.catch((cause) =>
+              Effect.logWarning("Failed to reconcile T3 Connect desired link on startup", {
+                cause,
+              }),
+            ),
+          ),
+        );
+      }),
+    );
 
     const serverApplicationLayer = Layer.mergeAll(
       HttpRouter.serve(makeRoutesLayer, {
@@ -483,6 +536,7 @@ export const makeServerLayer = Layer.unwrap(
       httpListeningLayer,
       runtimeStateLayer,
       tailscaleServeLayer,
+      cloudDesiredLinkReconcileLayer,
     );
 
     return serverApplicationLayer.pipe(

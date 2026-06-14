@@ -7,6 +7,8 @@ import * as FileSystem from "effect/FileSystem";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import { Argument, Command, Flag } from "effect/unstable/cli";
+
+import { isDirectlyExecuted } from "./lib/node-main.ts";
 import {
   resolveWebAssetBrandForChannel,
   resolveWebIconOverrides,
@@ -67,7 +69,7 @@ export const applyWebBrandAssetsCommand = Command.make(
     ),
 ).pipe(Command.withDescription("Copy web brand assets into a built hosted web app."));
 
-if (import.meta.main) {
+if (isDirectlyExecuted(import.meta.url)) {
   Command.run(applyWebBrandAssetsCommand, { version: "0.0.0" }).pipe(
     Effect.provide(NodeServices.layer),
     NodeRuntime.runMain,

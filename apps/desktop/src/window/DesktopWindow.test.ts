@@ -6,7 +6,7 @@ import * as Option from "effect/Option";
 import * as Ref from "effect/Ref";
 
 import type * as Electron from "electron";
-import { vi } from "vitest";
+import { vi } from "vite-plus/test";
 
 import * as DesktopAssets from "../app/DesktopAssets.ts";
 import * as DesktopConfig from "../app/DesktopConfig.ts";
@@ -32,10 +32,13 @@ const environmentInput = {
 } satisfies DesktopEnvironment.MakeDesktopEnvironmentInput;
 
 function makeFakeBrowserWindow() {
+  const webContentsListeners = new Map<string, (...args: readonly unknown[]) => void>();
   const webContents = {
     copyImageAt: vi.fn(),
     isLoadingMainFrame: vi.fn(() => false),
-    on: vi.fn(),
+    on: vi.fn((eventName: string, listener: (...args: readonly unknown[]) => void) => {
+      webContentsListeners.set(eventName, listener);
+    }),
     once: vi.fn(),
     openDevTools: vi.fn(),
     replaceMisspelling: vi.fn(),
@@ -66,6 +69,7 @@ function makeFakeBrowserWindow() {
     openDevTools: webContents.openDevTools,
     setIcon: window.setIcon,
     setWindowOpenHandler: webContents.setWindowOpenHandler,
+    webContentsListeners,
   };
 }
 
@@ -107,11 +111,6 @@ const electronMenuLayer = Layer.succeed(ElectronMenu.ElectronMenu, {
   showContextMenu: () => Effect.succeed(Option.none()),
 } satisfies ElectronMenu.ElectronMenuShape);
 
-const electronShellLayer = Layer.succeed(ElectronShell.ElectronShell, {
-  openExternal: () => Effect.succeed(true),
-  copyText: () => Effect.void,
-} satisfies ElectronShell.ElectronShellShape);
-
 const electronThemeLayer = Layer.succeed(ElectronTheme.ElectronTheme, {
   shouldUseDarkColors: Effect.succeed(false),
   setSource: () => Effect.void,
@@ -126,6 +125,7 @@ function makeTestLayer(input: {
   readonly openExternal?: ElectronShell.ElectronShellShape["openExternal"];
   readonly environmentInput?: DesktopEnvironment.MakeDesktopEnvironmentInput;
   readonly iconPaths?: DesktopAssets.DesktopIconPaths;
+  readonly openedExternalUrls?: unknown[];
 }) {
   const desktopEnvironmentLayer = DesktopEnvironment.layer(
     input.environmentInput ?? environmentInput,
@@ -173,7 +173,14 @@ function makeTestLayer(input: {
               openExternal: input.openExternal,
               copyText: () => Effect.void,
             } satisfies ElectronShell.ElectronShellShape)
-          : electronShellLayer,
+          : Layer.succeed(ElectronShell.ElectronShell, {
+              openExternal: (url) =>
+                Effect.sync(() => {
+                  input.openedExternalUrls?.push(url);
+                  return true;
+                }),
+              copyText: () => Effect.void,
+            } satisfies ElectronShell.ElectronShellShape),
         electronThemeLayer,
         electronWindowLayer,
       ),
@@ -182,6 +189,27 @@ function makeTestLayer(input: {
 }
 
 describe("DesktopWindow", () => {
+  it("recognizes only same-origin renderer navigations", () => {
+    assert.isTrue(
+      DesktopWindow.isSameOriginRendererNavigation({
+        applicationUrl: "http://127.0.0.1:3773/",
+        navigationUrl: "http://127.0.0.1:3773/settings/connections",
+      }),
+    );
+    assert.isFalse(
+      DesktopWindow.isSameOriginRendererNavigation({
+        applicationUrl: "http://127.0.0.1:3773/",
+        navigationUrl: "https://accounts.microsoft.com/oauth",
+      }),
+    );
+    assert.isFalse(
+      DesktopWindow.isSameOriginRendererNavigation({
+        applicationUrl: "http://127.0.0.1:3773/",
+        navigationUrl: "not a url",
+      }),
+    );
+  });
+
   it.effect("does not open a development window until the backend is ready", () =>
     Effect.gen(function* () {
       const fakeWindow = makeFakeBrowserWindow();
@@ -239,6 +267,44 @@ describe("DesktopWindow", () => {
         assert.equal(Option.isSome(options), true);
         assert.equal(Option.isSome(options) ? options.value.icon : undefined, iconPath);
         assert.deepEqual(fakeWindow.setIcon.mock.calls[0], [iconPath]);
+      }).pipe(Effect.provide(layer));
+    }),
+  );
+
+  it.effect("opens safe off-origin renderer navigations in the system browser", () =>
+    Effect.gen(function* () {
+      const fakeWindow = makeFakeBrowserWindow();
+      const createCount = yield* Ref.make(0);
+      const mainWindow = yield* Ref.make<Option.Option<Electron.BrowserWindow>>(Option.none());
+      const openedExternalUrls: unknown[] = [];
+      const layer = makeTestLayer({
+        window: fakeWindow.window,
+        createCount,
+        mainWindow,
+        openedExternalUrls,
+      });
+
+      yield* Effect.gen(function* () {
+        const desktopWindow = yield* DesktopWindow.DesktopWindow;
+        yield* desktopWindow.handleBackendReady;
+
+        const willNavigate = fakeWindow.webContentsListeners.get("will-navigate");
+        if (!willNavigate) {
+          return yield* Effect.die("will-navigate listener was not registered");
+        }
+        let prevented = false;
+        willNavigate(
+          {
+            preventDefault: () => {
+              prevented = true;
+            },
+          },
+          "https://accounts.microsoft.com/oauth",
+        );
+        yield* Effect.promise(() => Promise.resolve());
+
+        assert.isTrue(prevented);
+        assert.deepEqual(openedExternalUrls, ["https://accounts.microsoft.com/oauth"]);
       }).pipe(Effect.provide(layer));
     }),
   );

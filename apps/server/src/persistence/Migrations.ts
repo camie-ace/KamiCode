@@ -43,10 +43,16 @@ import Migration0027 from "./Migrations/027_ProviderSessionRuntimeInstanceId.ts"
 import Migration0028 from "./Migrations/028_ProjectionThreadSessionInstanceId.ts";
 import Migration0029 from "./Migrations/029_ProjectionThreadDetailOrderingIndexes.ts";
 import Migration0030 from "./Migrations/030_ProjectionThreadShellArchiveIndexes.ts";
-import Migration0031 from "./Migrations/031_ProjectionProjectTestEnvironments.ts";
-import Migration0032 from "./Migrations/032_UserAuth.ts";
-import Migration0033 from "./Migrations/033_ProjectionTurnQueue.ts";
-import Migration0034 from "./Migrations/034_SharedProjects.ts";
+import Migration0031 from "./Migrations/031_AuthAuthorizationScopes.ts";
+import Migration0032 from "./Migrations/032_AuthPairingProofKeyThumbprint.ts";
+import Migration0033 from "./Migrations/033_ProjectionProjectTestEnvironments.ts";
+import Migration0034 from "./Migrations/034_UserAuth.ts";
+import Migration0035 from "./Migrations/035_ProjectionTurnQueue.ts";
+import Migration0036 from "./Migrations/036_SharedProjects.ts";
+import Migration0037 from "./Migrations/037_SharedProjectSshCredentials.ts";
+import Migration0038 from "./Migrations/038_SharedSessionSnapshots.ts";
+import Migration0039 from "./Migrations/039_ReapplyAuthSessionTables.ts";
+import Migration0040 from "./Migrations/040_ReapplyAuthPairingProofKeyThumbprint.ts";
 
 /**
  * Migration loader with all migrations defined inline.
@@ -89,10 +95,19 @@ export const migrationEntries = [
   [28, "ProjectionThreadSessionInstanceId", Migration0028],
   [29, "ProjectionThreadDetailOrderingIndexes", Migration0029],
   [30, "ProjectionThreadShellArchiveIndexes", Migration0030],
-  [31, "ProjectionProjectTestEnvironments", Migration0031],
-  [32, "UserAuth", Migration0032],
-  [33, "ProjectionTurnQueue", Migration0033],
-  [34, "SharedProjects", Migration0034],
+  [31, "AuthAuthorizationScopes", Migration0031],
+  [32, "AuthPairingProofKeyThumbprint", Migration0032],
+  [33, "ProjectionProjectTestEnvironments", Migration0033],
+  [34, "UserAuth", Migration0034],
+  [35, "ProjectionTurnQueue", Migration0035],
+  [36, "SharedProjects", Migration0036],
+  [37, "SharedProjectSshCredentials", Migration0037],
+  [38, "SharedSessionSnapshots", Migration0038],
+  // 39/40 re-apply upstream's auth-table migrations (31/32), which were skipped
+  // on existing KamiCode installs because ids 31/32 were already recorded as
+  // applied (pre-merge migrations). Append-only heal — see 039/040 for detail.
+  [39, "ReapplyAuthSessionTables", Migration0039],
+  [40, "ReapplyAuthPairingProofKeyThumbprint", Migration0040],
 ] as const;
 
 export const makeMigrationLoader = (throughId?: number) =>

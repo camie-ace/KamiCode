@@ -1,4 +1,11 @@
-import { ProjectId, ThreadId, ProviderInstanceId } from "@t3tools/contracts";
+import {
+  EventId,
+  MessageId,
+  ProjectId,
+  ProviderInstanceId,
+  ThreadId,
+  TurnId,
+} from "@t3tools/contracts";
 import { assert, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -8,13 +15,16 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { SqlitePersistenceMemory } from "./Sqlite.ts";
 import { ProjectionProjectRepositoryLive } from "./ProjectionProjects.ts";
 import { ProjectionThreadRepositoryLive } from "./ProjectionThreads.ts";
+import { ProjectionTurnQueueRepositoryLive } from "./ProjectionTurnQueue.ts";
 import { ProjectionProjectRepository } from "../Services/ProjectionProjects.ts";
 import { ProjectionThreadRepository } from "../Services/ProjectionThreads.ts";
+import { ProjectionTurnQueueRepository } from "../Services/ProjectionTurnQueue.ts";
 
 const projectionRepositoriesLayer = it.layer(
   Layer.mergeAll(
     ProjectionProjectRepositoryLive.pipe(Layer.provideMerge(SqlitePersistenceMemory)),
     ProjectionThreadRepositoryLive.pipe(Layer.provideMerge(SqlitePersistenceMemory)),
+    ProjectionTurnQueueRepositoryLive.pipe(Layer.provideMerge(SqlitePersistenceMemory)),
     SqlitePersistenceMemory,
   ),
 );
@@ -127,6 +137,62 @@ projectionRepositoriesLayer("Projection repositories", (it) => {
         instanceId: ProviderInstanceId.make("claudeAgent"),
         model: "claude-opus-4-6",
       });
+    }),
+  );
+
+  it.effect("does not let a started mark overwrite a cancelled dispatching queued turn", () =>
+    Effect.gen(function* () {
+      const queue = yield* ProjectionTurnQueueRepository;
+      const sql = yield* SqlClient.SqlClient;
+      const queueId = "queue:event-cancel-dispatching";
+      const threadId = ThreadId.make("thread-queue-cancel-dispatching");
+
+      yield* queue.upsert({
+        queueId,
+        threadId,
+        eventId: EventId.make("event-cancel-dispatching"),
+        commandId: null,
+        messageId: MessageId.make("message-cancel-dispatching"),
+        status: "queued",
+        requestedAt: "2026-03-24T00:00:00.000Z",
+        startedAt: null,
+        completedAt: null,
+        turnId: null,
+        modelSelection: null,
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        titleSeed: null,
+        sourceProposedPlanThreadId: null,
+        sourceProposedPlanId: null,
+        failureDetail: null,
+      });
+
+      const claimed = yield* queue.claimNextQueuedByThreadId(
+        { threadId },
+        "2026-03-24T00:00:01.000Z",
+      );
+      assert.strictEqual(Option.isSome(claimed), true);
+      assert.strictEqual(Option.getOrThrow(claimed).status, "dispatching");
+
+      const cancelled = yield* queue.markCancelled({
+        queueId,
+        cancelledAt: "2026-03-24T00:00:02.000Z",
+      });
+      assert.strictEqual(cancelled, true);
+
+      const started = yield* queue.markStarted({
+        queueId,
+        turnId: TurnId.make("turn-cancel-dispatching"),
+        startedAt: "2026-03-24T00:00:03.000Z",
+      });
+      assert.strictEqual(started, false);
+
+      const rows = yield* sql<{ readonly status: string }>`
+        SELECT status
+        FROM projection_turn_queue
+        WHERE queue_id = ${queueId}
+      `;
+      assert.strictEqual(rows[0]?.status, "cancelled");
     }),
   );
 });

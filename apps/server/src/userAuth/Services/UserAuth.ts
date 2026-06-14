@@ -47,6 +47,8 @@ export interface UserAuthShape {
     {
       readonly authorizationUrl: string;
       readonly handoffId: string;
+      readonly userCode?: string;
+      readonly pollIntervalMs?: number;
       readonly expiresAt: DateTime.DateTime;
     },
     UserAuthError
@@ -72,7 +74,7 @@ export interface UserAuthShape {
     readonly message: string;
   }) => Effect.Effect<void>;
   readonly consumeDesktopGitHubLogin: (input: { readonly handoffId: string }) => Effect.Effect<
-    | { readonly status: "pending" }
+    | { readonly status: "pending"; readonly pollIntervalMs?: number }
     | { readonly status: "error"; readonly message: string }
     | {
         readonly status: "authenticated";

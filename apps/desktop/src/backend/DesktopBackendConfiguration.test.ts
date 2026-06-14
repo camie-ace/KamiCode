@@ -142,6 +142,30 @@ describe("DesktopBackendConfiguration", () => {
     ),
   );
 
+  it.effect("uses the bundled GitHub OAuth client id when no environment override is set", () =>
+    withHarness(
+      Effect.gen(function* () {
+        const previousClientId = process.env.T3CODE_GITHUB_OAUTH_CLIENT_ID;
+
+        try {
+          delete process.env.T3CODE_GITHUB_OAUTH_CLIENT_ID;
+
+          const configuration = yield* DesktopBackendConfiguration.DesktopBackendConfiguration;
+          const config = yield* configuration.resolve;
+
+          assert.equal(config.bootstrap.githubOAuthClientId, "Ov23liguksmbhHst10WL");
+          assert.isUndefined(config.env.T3CODE_GITHUB_OAUTH_CLIENT_ID);
+        } finally {
+          if (previousClientId === undefined) {
+            delete process.env.T3CODE_GITHUB_OAUTH_CLIENT_ID;
+          } else {
+            process.env.T3CODE_GITHUB_OAUTH_CLIENT_ID = previousClientId;
+          }
+        }
+      }),
+    ),
+  );
+
   it.effect("resolves backend start config with a stable scoped bootstrap token", () =>
     withHarness(
       Effect.gen(function* () {

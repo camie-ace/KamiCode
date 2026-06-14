@@ -9,6 +9,8 @@ import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 import { Argument, Command, Flag } from "effect/unstable/cli";
 
+import { isDirectlyExecuted } from "./lib/node-main.ts";
+
 import {
   mergeUpdateManifests,
   parseUpdateManifest,
@@ -104,7 +106,7 @@ export const mergeUpdateManifestsCommand = Command.make(
     ),
 ).pipe(Command.withDescription("Merge two Electron updater manifests into a multi-arch manifest."));
 
-if (import.meta.main) {
+if (isDirectlyExecuted(import.meta.url)) {
   Command.run(mergeUpdateManifestsCommand, { version: "0.0.0" }).pipe(
     Effect.provide(NodeServices.layer),
     NodeRuntime.runMain,

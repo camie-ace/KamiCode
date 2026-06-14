@@ -1,0 +1,19 @@
+[Unit]
+Description=KamiCode Collaboration Server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/kamicode-collab
+EnvironmentFile=/opt/kamicode-collab/.env
+ExecStart=/usr/bin/node /opt/kamicode-collab/dist/index.mjs
+Restart=always
+RestartSec=5
+User=kamicode
+Group=kamicode
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

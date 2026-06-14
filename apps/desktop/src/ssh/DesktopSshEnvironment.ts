@@ -58,7 +58,7 @@ export interface DesktopSshEnvironmentShape {
   }) => Effect.Effect<readonly DesktopDiscoveredSshHost[], DesktopSshEnvironmentDiscoverError>;
   readonly ensureEnvironment: (
     target: DesktopSshEnvironmentTarget,
-    options?: { readonly issuePairingToken?: boolean },
+    options?: { readonly issuePairingToken?: boolean; readonly password?: string | null },
   ) => Effect.Effect<DesktopSshEnvironmentBootstrap, DesktopSshEnvironmentOperationError>;
   readonly disconnectEnvironment: (
     target: DesktopSshEnvironmentTarget,
@@ -68,7 +68,7 @@ export interface DesktopSshEnvironmentShape {
 export class DesktopSshEnvironment extends Context.Service<
   DesktopSshEnvironment,
   DesktopSshEnvironmentShape
->()("t3/desktop/SshEnvironment") {}
+>()("@t3tools/desktop/ssh/DesktopSshEnvironment") {}
 
 export interface DesktopSshEnvironmentLayerOptions {
   readonly resolveCliPackageSpec?: () => string;
@@ -90,25 +90,36 @@ export function isDesktopSshPasswordPromptCancellation(
 
 const makePasswordPrompt = (
   prompts: DesktopSshPasswordPrompts.DesktopSshPasswordPromptsShape,
+  initialPassword?: string | null,
 ): SshPasswordPromptShape => ({
   isAvailable: true,
-  request: (request: SshPasswordRequest) =>
-    prompts.request(request).pipe(
-      Effect.mapError(
-        (cause) =>
-          new SshPasswordPromptError({
-            message: cause.message,
-            cause,
-          }),
-      ),
-    ),
+  request: (() => {
+    let pendingInitialPassword = initialPassword ?? null;
+
+    return (request: SshPasswordRequest) => {
+      if (pendingInitialPassword !== null) {
+        const password = pendingInitialPassword;
+        pendingInitialPassword = null;
+        return Effect.succeed(password);
+      }
+
+      return prompts.request(request).pipe(
+        Effect.mapError(
+          (cause) =>
+            new SshPasswordPromptError({
+              message: cause.message,
+              cause,
+            }),
+        ),
+      );
+    };
+  })(),
 });
 
 const make = Effect.gen(function* () {
   const manager = yield* SshEnvironmentManager;
   const prompts = yield* DesktopSshPasswordPrompts.DesktopSshPasswordPrompts;
   const runtimeContext = yield* Effect.context<DesktopSshEnvironmentRuntimeServices>();
-  const passwordPrompt = SshPasswordPrompt.of(makePasswordPrompt(prompts));
 
   return DesktopSshEnvironment.of({
     discoverHosts: (input) =>
@@ -116,19 +127,28 @@ const make = Effect.gen(function* () {
         Effect.provide(runtimeContext),
         Effect.withSpan("desktop.ssh.discoverHosts"),
       ),
-    ensureEnvironment: (target, ensureOptions) =>
-      manager
-        .ensureEnvironment(target, ensureOptions)
+    ensureEnvironment: (target, ensureOptions) => {
+      const passwordPrompt = SshPasswordPrompt.of(
+        makePasswordPrompt(prompts, ensureOptions?.password),
+      );
+      const managerOptions =
+        ensureOptions?.issuePairingToken === true ? { issuePairingToken: true } : undefined;
+      return manager
+        .ensureEnvironment(target, managerOptions)
         .pipe(
           Effect.provideService(SshPasswordPrompt, passwordPrompt),
           Effect.provide(runtimeContext),
           Effect.withSpan("desktop.ssh.ensureEnvironment"),
-        ),
+        );
+    },
     disconnectEnvironment: (target) =>
       manager
         .disconnectEnvironment(target)
         .pipe(
-          Effect.provideService(SshPasswordPrompt, passwordPrompt),
+          Effect.provideService(
+            SshPasswordPrompt,
+            SshPasswordPrompt.of(makePasswordPrompt(prompts)),
+          ),
           Effect.provide(runtimeContext),
           Effect.withSpan("desktop.ssh.disconnectEnvironment"),
         ),

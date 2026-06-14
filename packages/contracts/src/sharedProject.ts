@@ -1,6 +1,13 @@
 import * as Schema from "effect/Schema";
 
-import { IsoDateTime, ProjectId, ThreadId, TrimmedNonEmptyString } from "./baseSchemas.ts";
+import {
+  EnvironmentId,
+  IsoDateTime,
+  PortSchema,
+  ProjectId,
+  ThreadId,
+  TrimmedNonEmptyString,
+} from "./baseSchemas.ts";
 import { KamiUser, KamiUserId } from "./userAuth.ts";
 
 export const SharedProjectId = TrimmedNonEmptyString.pipe(Schema.brand("SharedProjectId"));
@@ -16,6 +23,11 @@ export type SharedThreadId = typeof SharedThreadId.Type;
 
 export const SharedRuntimeId = TrimmedNonEmptyString.pipe(Schema.brand("SharedRuntimeId"));
 export type SharedRuntimeId = typeof SharedRuntimeId.Type;
+
+export const SharedSshCredentialId = TrimmedNonEmptyString.pipe(
+  Schema.brand("SharedSshCredentialId"),
+);
+export type SharedSshCredentialId = typeof SharedSshCredentialId.Type;
 
 export const SharedProjectEnvironmentId = TrimmedNonEmptyString.pipe(
   Schema.brand("SharedProjectEnvironmentId"),
@@ -46,6 +58,9 @@ export type SharedRuntimeType = typeof SharedRuntimeType.Type;
 
 export const SharedRuntimeHealth = Schema.Literals(["healthy", "unavailable", "unknown"]);
 export type SharedRuntimeHealth = typeof SharedRuntimeHealth.Type;
+
+export const SharedSshAuthType = Schema.Literals(["agent", "password", "private-key"]);
+export type SharedSshAuthType = typeof SharedSshAuthType.Type;
 
 export const SharedEnvironmentType = Schema.Literals([
   "local-dev",
@@ -160,6 +175,78 @@ export const SharedThreadMessage = Schema.Struct({
 });
 export type SharedThreadMessage = typeof SharedThreadMessage.Type;
 
+export const SharedSessionSnapshotActivity = Schema.Struct({
+  id: TrimmedNonEmptyString,
+  tone: TrimmedNonEmptyString,
+  kind: TrimmedNonEmptyString,
+  summary: Schema.String,
+  payload: Schema.Unknown,
+  turnId: Schema.NullOr(TrimmedNonEmptyString),
+  sequence: Schema.optional(Schema.Number),
+  createdAt: IsoDateTime,
+});
+export type SharedSessionSnapshotActivity = typeof SharedSessionSnapshotActivity.Type;
+
+export const SharedSessionSnapshotCheckpoint = Schema.Struct({
+  turnId: TrimmedNonEmptyString,
+  checkpointTurnCount: Schema.Number,
+  checkpointRef: Schema.NullOr(Schema.String),
+  status: Schema.String,
+  files: Schema.Array(Schema.Unknown),
+  assistantMessageId: Schema.NullOr(TrimmedNonEmptyString),
+  completedAt: Schema.NullOr(IsoDateTime),
+});
+export type SharedSessionSnapshotCheckpoint = typeof SharedSessionSnapshotCheckpoint.Type;
+
+export const SharedSessionSnapshotMessageAttachment = Schema.Struct({
+  id: TrimmedNonEmptyString,
+  type: TrimmedNonEmptyString,
+  name: Schema.String,
+  mimeType: Schema.String,
+  sizeBytes: Schema.Number,
+});
+export type SharedSessionSnapshotMessageAttachment =
+  typeof SharedSessionSnapshotMessageAttachment.Type;
+
+export const SharedSessionSnapshotMessage = Schema.Struct({
+  id: TrimmedNonEmptyString,
+  role: Schema.Literals(["user", "assistant", "system"]),
+  text: Schema.String,
+  authorGithubLogin: Schema.NullOr(TrimmedNonEmptyString),
+  turnId: Schema.NullOr(TrimmedNonEmptyString),
+  createdAt: IsoDateTime,
+  completedAt: Schema.NullOr(IsoDateTime),
+  attachments: Schema.Array(SharedSessionSnapshotMessageAttachment),
+});
+export type SharedSessionSnapshotMessage = typeof SharedSessionSnapshotMessage.Type;
+
+export const SharedSessionSnapshot = Schema.Struct({
+  version: Schema.Literal(1),
+  capturedAt: IsoDateTime,
+  sourceEnvironmentId: EnvironmentId,
+  sourceThreadId: ThreadId,
+  sourceProjectId: ProjectId,
+  title: TrimmedNonEmptyString,
+  threadCreatedAt: IsoDateTime,
+  threadUpdatedAt: Schema.NullOr(IsoDateTime),
+  threadArchivedAt: Schema.NullOr(IsoDateTime),
+  error: Schema.NullOr(Schema.String),
+  repository: SharedRepositoryState,
+  branch: Schema.NullOr(Schema.String),
+  modelSelection: Schema.Unknown,
+  runtimeMode: Schema.String,
+  interactionMode: Schema.String,
+  messages: Schema.Array(SharedSessionSnapshotMessage),
+  activities: Schema.Array(SharedSessionSnapshotActivity),
+  proposedPlans: Schema.Array(Schema.Unknown),
+  checkpoints: Schema.Array(SharedSessionSnapshotCheckpoint),
+  latestTurn: Schema.NullOr(Schema.Unknown),
+  queuedTurns: Schema.Array(Schema.Unknown),
+  session: Schema.NullOr(Schema.Unknown),
+  excludedCategories: Schema.Array(TrimmedNonEmptyString),
+});
+export type SharedSessionSnapshot = typeof SharedSessionSnapshot.Type;
+
 export const SharedThreadCodeState = Schema.Struct({
   branch: Schema.NullOr(Schema.String),
   headSha: Schema.NullOr(Schema.String),
@@ -177,6 +264,7 @@ export const SharedThread = Schema.Struct({
   visibility: SharedThreadVisibility,
   codeState: SharedThreadCodeState,
   messages: Schema.Array(SharedThreadMessage),
+  sessionSnapshot: Schema.NullOr(SharedSessionSnapshot),
   lastRuntimeId: Schema.NullOr(SharedRuntimeId),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
@@ -193,12 +281,37 @@ export const SharedRuntime = Schema.Struct({
   health: SharedRuntimeHealth,
   capabilities: Schema.Array(TrimmedNonEmptyString),
   providerLabel: Schema.NullOr(TrimmedNonEmptyString),
+  sshCredentialId: Schema.NullOr(SharedSshCredentialId),
   unavailableReason: Schema.NullOr(Schema.String),
   lastSeenAt: Schema.NullOr(IsoDateTime),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
 });
 export type SharedRuntime = typeof SharedRuntime.Type;
+
+export const SharedSshCredentialSecretState = Schema.Struct({
+  hasPassword: Schema.Boolean,
+  hasPrivateKey: Schema.Boolean,
+  hasPassphrase: Schema.Boolean,
+});
+export type SharedSshCredentialSecretState = typeof SharedSshCredentialSecretState.Type;
+
+export const SharedProjectSshCredential = Schema.Struct({
+  id: SharedSshCredentialId,
+  projectId: SharedProjectId,
+  label: TrimmedNonEmptyString,
+  host: TrimmedNonEmptyString,
+  port: PortSchema,
+  username: TrimmedNonEmptyString,
+  authType: SharedSshAuthType,
+  secretState: SharedSshCredentialSecretState,
+  createdByUserId: KamiUserId,
+  createdAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+  secretUpdatedAt: IsoDateTime,
+  lastUsedAt: Schema.NullOr(IsoDateTime),
+});
+export type SharedProjectSshCredential = typeof SharedProjectSshCredential.Type;
 
 export const SharedProjectEnvironment = Schema.Struct({
   id: SharedProjectEnvironmentId,
@@ -237,6 +350,7 @@ export const SharedProjectDetail = Schema.Struct({
   invites: Schema.Array(SharedProjectInvite),
   threads: Schema.Array(SharedThread),
   runtimes: Schema.Array(SharedRuntime),
+  sshCredentials: Schema.Array(SharedProjectSshCredential),
   environments: Schema.Array(SharedProjectEnvironment),
   deploys: Schema.Array(SharedDeployAssociation),
 });
@@ -247,6 +361,7 @@ export const SharedProjectBootstrapManifest = Schema.Struct({
   contextBundle: Schema.NullOr(SharedContextBundle),
   threads: Schema.Array(SharedThread),
   runtimes: Schema.Array(SharedRuntime),
+  sshCredentials: Schema.Array(SharedProjectSshCredential),
   environments: Schema.Array(SharedProjectEnvironment),
   deploys: Schema.Array(SharedDeployAssociation),
 });
@@ -291,6 +406,16 @@ export const RemoveSharedProjectMemberInput = Schema.Struct({
 });
 export type RemoveSharedProjectMemberInput = typeof RemoveSharedProjectMemberInput.Type;
 
+export const DeleteSharedProjectInput = Schema.Struct({
+  projectId: SharedProjectId,
+});
+export type DeleteSharedProjectInput = typeof DeleteSharedProjectInput.Type;
+
+export const DeleteSharedProjectResult = Schema.Struct({
+  ok: Schema.Boolean,
+});
+export type DeleteSharedProjectResult = typeof DeleteSharedProjectResult.Type;
+
 export const PublishSharedThreadInput = Schema.Struct({
   projectId: SharedProjectId,
   localThreadId: ThreadId,
@@ -298,6 +423,7 @@ export const PublishSharedThreadInput = Schema.Struct({
   visibility: SharedThreadVisibility,
   codeState: SharedThreadCodeState,
   messages: Schema.optional(Schema.Array(SharedThreadMessage)),
+  sessionSnapshot: Schema.optional(Schema.NullOr(SharedSessionSnapshot)),
 });
 export type PublishSharedThreadInput = typeof PublishSharedThreadInput.Type;
 
@@ -307,6 +433,20 @@ export const UpdateSharedThreadVisibilityInput = Schema.Struct({
   visibility: SharedThreadVisibility,
 });
 export type UpdateSharedThreadVisibilityInput = typeof UpdateSharedThreadVisibilityInput.Type;
+
+export const ImportSharedThreadInput = Schema.Struct({
+  projectId: SharedProjectId,
+  threadId: SharedThreadId,
+  targetProjectId: ProjectId,
+});
+export type ImportSharedThreadInput = typeof ImportSharedThreadInput.Type;
+
+export const ImportSharedThreadResult = Schema.Struct({
+  projectId: ProjectId,
+  threadId: ThreadId,
+  sourceSharedThreadId: SharedThreadId,
+});
+export type ImportSharedThreadResult = typeof ImportSharedThreadResult.Type;
 
 export const AppendSharedThreadMessageInput = Schema.Struct({
   projectId: SharedProjectId,
@@ -326,9 +466,30 @@ export const UpsertSharedRuntimeInput = Schema.Struct({
   health: SharedRuntimeHealth,
   capabilities: Schema.Array(TrimmedNonEmptyString),
   providerLabel: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+  sshCredentialId: Schema.optional(Schema.NullOr(SharedSshCredentialId)),
   unavailableReason: Schema.optional(Schema.NullOr(Schema.String)),
 });
 export type UpsertSharedRuntimeInput = typeof UpsertSharedRuntimeInput.Type;
+
+export const UpsertSharedSshCredentialInput = Schema.Struct({
+  projectId: SharedProjectId,
+  credentialId: Schema.optional(SharedSshCredentialId),
+  label: TrimmedNonEmptyString,
+  host: TrimmedNonEmptyString,
+  port: PortSchema,
+  username: TrimmedNonEmptyString,
+  authType: SharedSshAuthType,
+  password: Schema.optional(Schema.NullOr(Schema.String)),
+  privateKey: Schema.optional(Schema.NullOr(Schema.String)),
+  passphrase: Schema.optional(Schema.NullOr(Schema.String)),
+});
+export type UpsertSharedSshCredentialInput = typeof UpsertSharedSshCredentialInput.Type;
+
+export const RemoveSharedSshCredentialInput = Schema.Struct({
+  projectId: SharedProjectId,
+  credentialId: SharedSshCredentialId,
+});
+export type RemoveSharedSshCredentialInput = typeof RemoveSharedSshCredentialInput.Type;
 
 export const UpsertSharedEnvironmentInput = Schema.Struct({
   projectId: SharedProjectId,

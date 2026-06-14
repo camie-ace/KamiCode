@@ -6,6 +6,7 @@ import type {
   OrchestrationLatestTurn,
   OrchestrationMessage,
   OrchestrationProposedPlan,
+  OrchestrationQueuedTurn,
   OrchestrationReadModel,
   OrchestrationShellSnapshot,
   OrchestrationShellStreamEvent,
@@ -44,6 +45,12 @@ export interface EnvironmentState {
   projectIds: ProjectId[];
   projectById: Record<ProjectId, Project>;
 
+  // TODO(CLIENT-RUNTIME MIGRATION - DO NOT EXPAND THIS WEB-ONLY COPY):
+  // Web still stores shell snapshots and thread details in this denormalized
+  // Zustand shape. Mobile uses createShellSnapshotManager and
+  // createThreadDetailManager from @t3tools/client-runtime. New shared behavior
+  // belongs in those managers/reducers, with a web adapter layered on top.
+  //
   // ---------------------------------------------------------------------------
   // Thread bookkeeping — written by BOTH shell stream and detail stream.
   // Both streams ensure the thread is registered here; the bookkeeping is
@@ -72,6 +79,7 @@ export interface EnvironmentState {
   // ---------------------------------------------------------------------------
   messageIdsByThreadId: Record<ThreadId, MessageId[]>;
   messageByThreadId: Record<ThreadId, Record<MessageId, ChatMessage>>;
+  queuedTurnsByThreadId: Record<ThreadId, OrchestrationQueuedTurn[]>;
   activityIdsByThreadId: Record<ThreadId, string[]>;
   activityByThreadId: Record<ThreadId, Record<string, OrchestrationThreadActivity>>;
   proposedPlanIdsByThreadId: Record<ThreadId, string[]>;
@@ -106,6 +114,7 @@ const initialEnvironmentState: EnvironmentState = {
   threadTurnStateById: {},
   messageIdsByThreadId: {},
   messageByThreadId: {},
+  queuedTurnsByThreadId: {},
   activityIdsByThreadId: {},
   activityByThreadId: {},
   proposedPlanIdsByThreadId: {},
@@ -250,6 +259,7 @@ function mapThread(thread: OrchestrationThread, environmentId: EnvironmentId): T
     interactionMode: thread.interactionMode,
     session: thread.session ? mapSession(thread.session) : null,
     messages: thread.messages.map((message) => mapMessage(environmentId, message)),
+    queuedTurns: (thread.queuedTurns ?? []).map((turn) => ({ ...turn })),
     proposedPlans: thread.proposedPlans.map(mapProposedPlan),
     error: sanitizeThreadErrorMessage(thread.session?.lastError),
     createdAt: thread.createdAt,
@@ -640,6 +650,16 @@ function writeThreadState(
     };
   }
 
+  if (previousThread?.queuedTurns !== nextThread.queuedTurns) {
+    nextState = {
+      ...nextState,
+      queuedTurnsByThreadId: {
+        ...nextState.queuedTurnsByThreadId,
+        [nextThread.id]: nextThread.queuedTurns ?? [],
+      },
+    };
+  }
+
   if (previousThread?.activities !== nextThread.activities) {
     const nextActivitySlice = buildActivitySlice(nextThread);
     nextState = {
@@ -805,6 +825,7 @@ function removeThreadState(state: EnvironmentState, threadId: ThreadId): Environ
   const { [threadId]: _removedTurnState, ...threadTurnStateById } = state.threadTurnStateById;
   const { [threadId]: _removedMessageIds, ...messageIdsByThreadId } = state.messageIdsByThreadId;
   const { [threadId]: _removedMessages, ...messageByThreadId } = state.messageByThreadId;
+  const { [threadId]: _removedQueuedTurns, ...queuedTurnsByThreadId } = state.queuedTurnsByThreadId;
   const { [threadId]: _removedActivityIds, ...activityIdsByThreadId } = state.activityIdsByThreadId;
   const { [threadId]: _removedActivities, ...activityByThreadId } = state.activityByThreadId;
   const { [threadId]: _removedPlanIds, ...proposedPlanIdsByThreadId } =
@@ -825,6 +846,7 @@ function removeThreadState(state: EnvironmentState, threadId: ThreadId): Environ
     threadTurnStateById,
     messageIdsByThreadId,
     messageByThreadId,
+    queuedTurnsByThreadId,
     activityIdsByThreadId,
     activityByThreadId,
     proposedPlanIdsByThreadId,
@@ -885,6 +907,29 @@ function buildLatestTurn(params: {
     assistantMessageId: params.assistantMessageId,
     ...(resolvedPlan ? { sourceProposedPlan: resolvedPlan } : {}),
   };
+}
+
+/**
+ * Turn state to settle a still-running latest turn with when its session
+ * leaves the "running" status, or null while the session is (re)starting or
+ * running and the turn must stay unsettled.
+ */
+function settledTurnStateForSessionStatus(
+  status: OrchestrationSessionStatus,
+): "completed" | "interrupted" | "error" | null {
+  switch (status) {
+    case "idle":
+    case "ready":
+      return "completed";
+    case "error":
+      return "error";
+    case "interrupted":
+    case "stopped":
+      return "interrupted";
+    case "starting":
+    case "running":
+      return null;
+  }
 }
 
 function rebindTurnDiffSummariesForAssistantMessage(
@@ -1101,6 +1146,7 @@ function syncEnvironmentShellSnapshot(
     sidebarThreadSummaryById: {},
     messageIdsByThreadId: retainThreadScopedRecord(state.messageIdsByThreadId, nextThreadIds),
     messageByThreadId: retainThreadScopedRecord(state.messageByThreadId, nextThreadIds),
+    queuedTurnsByThreadId: retainThreadScopedRecord(state.queuedTurnsByThreadId, nextThreadIds),
     activityIdsByThreadId: retainThreadScopedRecord(state.activityIdsByThreadId, nextThreadIds),
     activityByThreadId: retainThreadScopedRecord(state.activityByThreadId, nextThreadIds),
     proposedPlanIdsByThreadId: retainThreadScopedRecord(
@@ -1128,6 +1174,9 @@ export function syncServerShellSnapshot(
   snapshot: OrchestrationShellSnapshot,
   environmentId: EnvironmentId,
 ): AppState {
+  // TODO(CLIENT-RUNTIME MIGRATION - DO NOT EXPAND THIS WEB-ONLY COPY):
+  // Keep web-specific projection here only until the store can consume
+  // createShellSnapshotManager or a shared adapter over its reducer.
   return commitEnvironmentState(
     state,
     environmentId,
@@ -1144,6 +1193,9 @@ export function syncServerThreadDetail(
   thread: OrchestrationThread,
   environmentId: EnvironmentId,
 ): AppState {
+  // TODO(CLIENT-RUNTIME MIGRATION - DO NOT EXPAND THIS WEB-ONLY COPY):
+  // Keep web-specific projection here only until the store can consume
+  // createThreadDetailManager or a shared adapter over its reducer.
   const environmentState = getStoredEnvironmentState(state, environmentId);
   const previousThread = getThreadFromEnvironmentState(environmentState, thread.id);
   return commitEnvironmentState(
@@ -1341,6 +1393,26 @@ function applyEnvironmentOrchestrationEvent(
           : {}),
         runtimeMode: event.payload.runtimeMode,
         interactionMode: event.payload.interactionMode,
+        ...(event.payload.dispatchPolicy === "queue"
+          ? {
+              queuedTurns: [
+                ...(thread.queuedTurns ?? []).filter(
+                  (turn) => turn.messageId !== event.payload.messageId,
+                ),
+                {
+                  queueId: `queue:${event.eventId}`,
+                  threadId: event.payload.threadId,
+                  messageId: event.payload.messageId,
+                  status: "queued",
+                  requestedAt: event.payload.createdAt,
+                  startedAt: null,
+                  completedAt: null,
+                  turnId: null,
+                  failureDetail: null,
+                },
+              ],
+            }
+          : {}),
         pendingSourceProposedPlan: event.payload.sourceProposedPlan,
         updatedAt: event.occurredAt,
       }));
@@ -1420,6 +1492,15 @@ function applyEnvironmentOrchestrationEvent(
                 event.payload.messageId,
               )
             : thread.turnDiffSummaries;
+        // A completed assistant message only settles the turn once the
+        // session is no longer running it — providers may emit several
+        // assistant messages per turn (commentary between tool calls), and
+        // the turn must stay unsettled until the provider reports turn end.
+        const turnStillRunning =
+          event.payload.turnId !== null &&
+          thread.session?.orchestrationStatus === "running" &&
+          thread.session.activeTurnId === event.payload.turnId;
+        const settlesTurn = !event.payload.streaming && !turnStillRunning;
         const latestTurn: Thread["latestTurn"] =
           event.payload.role === "assistant" &&
           event.payload.turnId !== null &&
@@ -1427,13 +1508,13 @@ function applyEnvironmentOrchestrationEvent(
             ? buildLatestTurn({
                 previous: thread.latestTurn,
                 turnId: event.payload.turnId,
-                state: event.payload.streaming
-                  ? "running"
-                  : thread.latestTurn?.state === "interrupted"
+                state: settlesTurn
+                  ? thread.latestTurn?.state === "interrupted"
                     ? "interrupted"
                     : thread.latestTurn?.state === "error"
                       ? "error"
-                      : "completed",
+                      : "completed"
+                  : "running",
                 requestedAt:
                   thread.latestTurn?.turnId === event.payload.turnId
                     ? thread.latestTurn.requestedAt
@@ -1443,11 +1524,11 @@ function applyEnvironmentOrchestrationEvent(
                     ? (thread.latestTurn.startedAt ?? event.payload.createdAt)
                     : event.payload.createdAt,
                 sourceProposedPlan: thread.pendingSourceProposedPlan,
-                completedAt: event.payload.streaming
-                  ? thread.latestTurn?.turnId === event.payload.turnId
+                completedAt: settlesTurn
+                  ? event.payload.updatedAt
+                  : thread.latestTurn?.turnId === event.payload.turnId
                     ? (thread.latestTurn.completedAt ?? null)
-                    : null
-                  : event.payload.updatedAt,
+                    : null,
                 assistantMessageId: event.payload.messageId,
               })
             : thread.latestTurn;
@@ -1460,12 +1541,23 @@ function applyEnvironmentOrchestrationEvent(
         };
       });
 
-    case "thread.session-set":
+    case "thread.queued-turn-deleted":
       return updateThreadState(state, event.payload.threadId, (thread) => ({
         ...thread,
-        session: mapSession(event.payload.session),
-        error: sanitizeThreadErrorMessage(event.payload.session.lastError),
-        latestTurn:
+        messages: thread.messages.filter((message) => message.id !== event.payload.messageId),
+        queuedTurns: (thread.queuedTurns ?? []).filter(
+          (turn) => turn.queueId !== event.payload.queueId,
+        ),
+        updatedAt: event.occurredAt,
+      }));
+
+    case "thread.session-set":
+      return updateThreadState(state, event.payload.threadId, (thread) => {
+        // Leaving the "running" session status is the turn-end signal:
+        // settle a still-running latest turn so its duration reflects the
+        // whole turn, not the last assistant message.
+        const settledTurnState = settledTurnStateForSessionStatus(event.payload.session.status);
+        const latestTurn: Thread["latestTurn"] =
           event.payload.session.status === "running" && event.payload.session.activeTurnId !== null
             ? buildLatestTurn({
                 previous: thread.latestTurn,
@@ -1486,9 +1578,30 @@ function applyEnvironmentOrchestrationEvent(
                     : null,
                 sourceProposedPlan: thread.pendingSourceProposedPlan,
               })
-            : thread.latestTurn,
-        updatedAt: event.occurredAt,
-      }));
+            : thread.latestTurn !== null &&
+                thread.latestTurn.state === "running" &&
+                settledTurnState !== null
+              ? buildLatestTurn({
+                  previous: thread.latestTurn,
+                  turnId: thread.latestTurn.turnId,
+                  state: settledTurnState,
+                  requestedAt: thread.latestTurn.requestedAt,
+                  startedAt: thread.latestTurn.startedAt,
+                  // A running turn's completedAt can only hold a mid-turn
+                  // placeholder checkpoint timestamp — the session leaving
+                  // "running" is the authoritative turn end.
+                  completedAt: event.payload.session.updatedAt,
+                  assistantMessageId: thread.latestTurn.assistantMessageId,
+                })
+              : thread.latestTurn;
+        return {
+          ...thread,
+          session: mapSession(event.payload.session),
+          error: sanitizeThreadErrorMessage(event.payload.session.lastError),
+          latestTurn,
+          updatedAt: event.occurredAt,
+        };
+      });
 
     case "thread.session-stop-requested":
       return updateThreadState(state, event.payload.threadId, (thread) =>
@@ -1553,8 +1666,14 @@ function applyEnvironmentOrchestrationEvent(
               (right.checkpointTurnCount ?? Number.MAX_SAFE_INTEGER),
           )
           .slice(-MAX_THREAD_CHECKPOINTS);
+        // Mid-turn diff updates produce placeholder checkpoints; record the
+        // diff summary, but don't settle a turn its session is still running.
+        const turnStillRunning =
+          thread.session?.orchestrationStatus === "running" &&
+          thread.session.activeTurnId === event.payload.turnId;
         const latestTurn =
-          thread.latestTurn === null || thread.latestTurn.turnId === event.payload.turnId
+          !turnStillRunning &&
+          (thread.latestTurn === null || thread.latestTurn.turnId === event.payload.turnId)
             ? buildLatestTurn({
                 previous: thread.latestTurn,
                 turnId: event.payload.turnId,

@@ -6,7 +6,7 @@ import type * as HttpServerRequest from "effect/unstable/http/HttpServerRequest"
 
 import type { ServerConfigShape } from "../../config.ts";
 import { ServerConfig } from "../../config.ts";
-import { ServerSecretStoreLive } from "../../auth/Layers/ServerSecretStore.ts";
+import * as ServerSecretStore from "../../auth/ServerSecretStore.ts";
 import { SqlitePersistenceMemory } from "../../persistence/Layers/Sqlite.ts";
 import { GitHubOAuthClient } from "../Services/GitHubOAuthClient.ts";
 import type { GitHubOAuthClientShape } from "../Services/GitHubOAuthClient.ts";
@@ -44,6 +44,23 @@ const makeRequest = (
 
 const makeGitHubOAuthClientLayer = (overrides?: Partial<GitHubOAuthClientShape>) =>
   Layer.succeed(GitHubOAuthClient, {
+    createDeviceCode: () =>
+      Effect.succeed({
+        deviceCode: "github-device-code",
+        userCode: "ABCD-1234",
+        verificationUri: "https://github.com/login/device",
+        expiresInSeconds: 900,
+        intervalSeconds: 5,
+      }),
+    pollDeviceAuthorization: () =>
+      Effect.succeed({
+        status: "authenticated",
+        token: {
+          accessToken: "github-device-access-token",
+          tokenType: "bearer",
+          scope: "read:user",
+        },
+      }),
     exchangeCode: () =>
       Effect.succeed({
         accessToken: "github-access-token",
@@ -66,7 +83,7 @@ const makeUserAuthLayer = (
 ) =>
   UserAuthLive.pipe(
     Layer.provide(SqlitePersistenceMemory),
-    Layer.provide(ServerSecretStoreLive),
+    Layer.provide(ServerSecretStore.layer),
     Layer.provide(makeGitHubOAuthClientLayer(githubOAuthClient)),
     Layer.provide(makeServerConfigLayer(overrides)),
   );
@@ -115,25 +132,58 @@ it.layer(NodeServices.layer)("UserAuthLive", (it) => {
     ),
   );
 
-  it.effect("derives the desktop GitHub callback URL from the request origin", () =>
+  it.effect("starts desktop GitHub login with device flow using only the client id", () =>
     Effect.gen(function* () {
       const userAuth = yield* UserAuth;
 
       const login = yield* userAuth.createDesktopGitHubLogin(
         makeRequest({}, { host: "127.0.0.1:3773", url: "/api/user/auth/github/desktop/start" }),
       );
-      const url = new URL(login.authorizationUrl);
 
-      expect(url.searchParams.get("redirect_uri")).toBe(
-        "http://127.0.0.1:3773/api/user/auth/github/callback",
-      );
+      expect(login.authorizationUrl).toBe("https://github.com/login/device");
+      expect(login.userCode).toBe("ABCD-1234");
+      expect(login.pollIntervalMs).toBe(5_000);
     }).pipe(
       Effect.provide(
         makeUserAuthLayer({
           mode: "desktop",
           githubOAuthClientId: "client-id",
-          githubOAuthClientSecret: "client-secret",
-          githubOAuthCallbackUrl: new URL("http://localhost:13773/api/user/auth/github/callback"),
+        }),
+      ),
+    ),
+  );
+
+  it.effect("completes desktop GitHub device login and authenticates the user session cookie", () =>
+    Effect.gen(function* () {
+      const userAuth = yield* UserAuth;
+      const login = yield* userAuth.createDesktopGitHubLogin(makeRequest());
+
+      const result = yield* userAuth.consumeDesktopGitHubLogin({ handoffId: login.handoffId });
+      expect(result.status).toBe("authenticated");
+      if (result.status !== "authenticated") {
+        return;
+      }
+
+      const sessionState = yield* userAuth.getSessionState(
+        makeRequest({
+          [userAuth.cookieName]: result.sessionToken,
+        }),
+      );
+
+      expect(sessionState).toMatchObject({
+        enabled: true,
+        authenticated: true,
+        provider: "github",
+        user: {
+          githubId: "123",
+          githubLogin: "julius",
+        },
+      });
+    }).pipe(
+      Effect.provide(
+        makeUserAuthLayer({
+          mode: "desktop",
+          githubOAuthClientId: "client-id",
         }),
       ),
     ),

@@ -1,7 +1,18 @@
 import {
+  ChatAttachment as ChatAttachmentSchema,
+  CheckpointRef,
+  CommandId,
+  EventId,
   KamiUserId,
+  MessageId,
+  ModelSelection as ModelSelectionSchema,
+  OrchestrationCheckpointFile as OrchestrationCheckpointFileSchema,
+  OrchestrationProposedPlan as OrchestrationProposedPlanSchema,
   ProjectId,
+  ProviderInteractionMode as ProviderInteractionModeSchema,
+  RuntimeMode as RuntimeModeSchema,
   SharedContextBundle as SharedContextBundleSchema,
+  SharedSessionSnapshot as SharedSessionSnapshotSchema,
   SharedThreadCodeState as SharedThreadCodeStateSchema,
   SharedThreadMessage as SharedThreadMessageSchema,
   SharedDeployAssociationId,
@@ -14,11 +25,23 @@ import {
   SharedRuntimeHealth,
   SharedRuntimeId,
   SharedRuntimeType,
+  SharedSshCredentialId,
   SharedThreadId,
   SharedThreadVisibility,
   ThreadId,
+  TurnId,
+  type ModelSelection,
+  type OrchestrationCheckpointFile,
+  type OrchestrationCheckpointStatus,
+  type OrchestrationCommand,
+  type OrchestrationProposedPlan,
+  type OrchestrationThreadActivityTone,
+  type ProviderInteractionMode,
+  type RuntimeMode,
   type SharedContextBundle,
   type SharedDeployAssociation,
+  type ImportSharedThreadResult,
+  type ChatAttachment,
   type SharedProjectBootstrapManifest,
   type SharedProjectClaimResult,
   type SharedProjectDetail,
@@ -26,13 +49,16 @@ import {
   type SharedProjectInvite,
   type SharedProjectListResult,
   type SharedProjectMember,
+  type SharedProjectSshCredential,
   type SharedProjectSummary,
   type SharedRepositoryState,
   type SharedRuntime,
+  type SharedSessionSnapshot,
+  type SharedSshAuthType,
   type SharedThread,
-  type SharedThreadMessage,
+  type UpsertSharedSshCredentialInput,
 } from "@t3tools/contracts";
-import { randomUUID } from "node:crypto";
+import { createCipheriv, createDecipheriv, randomBytes, randomUUID } from "node:crypto";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -41,6 +67,8 @@ import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
+import { ServerSecretStore } from "../../auth/ServerSecretStore.ts";
+import { OrchestrationEngineService } from "../../orchestration/Services/OrchestrationEngine.ts";
 import * as ProcessRunner from "../../processRunner.ts";
 import {
   RepositoryIdentityResolver,
@@ -65,14 +93,35 @@ import {
 const INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const MAX_CONTEXT_FILE_BYTES = 40_000;
 const MAX_CONTEXT_ITEMS = 80;
+const SSH_SECRET_KEY_NAME = "shared-project-ssh-credentials";
+const SSH_SECRET_KEY_BYTES = 32;
+const SSH_SECRET_ALGORITHM = "aes-256-gcm";
+const IMPORTED_SHARED_SESSION_TITLE_PREFIX = "Imported: ";
 
 const ContextBundleJson = Schema.fromJsonString(SharedContextBundleSchema);
 const ThreadCodeStateJson = Schema.fromJsonString(SharedThreadCodeStateSchema);
 const ThreadMessagesJson = Schema.fromJsonString(Schema.Array(SharedThreadMessageSchema));
+const SessionSnapshotJson = Schema.fromJsonString(SharedSessionSnapshotSchema);
 const StringArrayJson = Schema.fromJsonString(Schema.Array(Schema.String));
 const PackageJson = Schema.fromJsonString(
   Schema.Struct({
     scripts: Schema.optional(Schema.Record(Schema.String, Schema.Unknown)),
+  }),
+);
+const SshCredentialSecretJson = Schema.fromJsonString(
+  Schema.Struct({
+    password: Schema.NullOr(Schema.String),
+    privateKey: Schema.NullOr(Schema.String),
+    passphrase: Schema.NullOr(Schema.String),
+  }),
+);
+const SshSecretEnvelopeJson = Schema.fromJsonString(
+  Schema.Struct({
+    v: Schema.Literal(1),
+    alg: Schema.Literal(SSH_SECRET_ALGORITHM),
+    iv: Schema.String,
+    tag: Schema.String,
+    data: Schema.String,
   }),
 );
 
@@ -82,9 +131,21 @@ const encodeThreadCodeStateJson = Schema.encodeSync(ThreadCodeStateJson);
 const decodeThreadCodeStateJson = Schema.decodeUnknownSync(ThreadCodeStateJson);
 const encodeThreadMessagesJson = Schema.encodeSync(ThreadMessagesJson);
 const decodeThreadMessagesJson = Schema.decodeUnknownSync(ThreadMessagesJson);
+const encodeSessionSnapshotJson = Schema.encodeSync(SessionSnapshotJson);
+const decodeSessionSnapshotJson = Schema.decodeUnknownSync(SessionSnapshotJson);
 const encodeStringArrayJson = Schema.encodeSync(StringArrayJson);
 const decodeStringArrayJson = Schema.decodeUnknownSync(StringArrayJson);
 const decodePackageJson = Schema.decodeUnknownSync(PackageJson);
+const encodeSshSecretJson = Schema.encodeSync(SshCredentialSecretJson);
+const encodeSshEnvelopeJson = Schema.encodeSync(SshSecretEnvelopeJson);
+const decodeChatAttachment = Schema.decodeUnknownSync(ChatAttachmentSchema);
+const decodeModelSelection = Schema.decodeUnknownSync(ModelSelectionSchema);
+const decodeProviderInteractionMode = Schema.decodeUnknownSync(ProviderInteractionModeSchema);
+const decodeRuntimeMode = Schema.decodeUnknownSync(RuntimeModeSchema);
+const decodeOrchestrationProposedPlan = Schema.decodeUnknownSync(OrchestrationProposedPlanSchema);
+const decodeOrchestrationCheckpointFile = Schema.decodeUnknownSync(
+  OrchestrationCheckpointFileSchema,
+);
 
 type SharedProjectRow = {
   readonly sharedProjectId: string;
@@ -145,6 +206,7 @@ type ThreadRow = {
   readonly visibility: string;
   readonly codeStateJson: string;
   readonly messagesJson: string;
+  readonly sessionSnapshotJson: string | null;
   readonly lastRuntimeId: string | null;
   readonly createdAt: string;
   readonly updatedAt: string;
@@ -160,10 +222,41 @@ type RuntimeRow = {
   readonly health: string;
   readonly capabilitiesJson: string;
   readonly providerLabel: string | null;
+  readonly sshCredentialId: string | null;
   readonly unavailableReason: string | null;
   readonly lastSeenAt: string | null;
   readonly createdAt: string;
   readonly updatedAt: string;
+};
+
+type SshCredentialRow = {
+  readonly sshCredentialId: string;
+  readonly sharedProjectId: string;
+  readonly label: string;
+  readonly host: string;
+  readonly port: number;
+  readonly username: string;
+  readonly authType: string;
+  readonly encryptedSecretJson: string;
+  readonly secretUpdatedAt: string;
+  readonly createdByUserId: string;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+  readonly lastUsedAt: string | null;
+};
+
+type SshCredentialSecret = {
+  readonly password: string | null;
+  readonly privateKey: string | null;
+  readonly passphrase: string | null;
+};
+
+type SshSecretEnvelope = {
+  readonly v: 1;
+  readonly alg: typeof SSH_SECRET_ALGORITHM;
+  readonly iv: string;
+  readonly tag: string;
+  readonly data: string;
 };
 
 type EnvironmentRow = {
@@ -224,6 +317,10 @@ function runtimeHealthFromDb(value: string): SharedRuntimeHealth {
   return value === "healthy" || value === "unavailable" || value === "unknown" ? value : "unknown";
 }
 
+function sshAuthTypeFromDb(value: string): SharedSshAuthType {
+  return value === "password" || value === "private-key" ? value : "agent";
+}
+
 function threadVisibilityFromDb(value: string): SharedThreadVisibility {
   return value === "private" || value === "shared" ? value : "private";
 }
@@ -254,6 +351,100 @@ function decodeJsonOr<T>(decode: (value: unknown) => T, value: string | null, fa
   } catch {
     return fallback;
   }
+}
+
+function decodeUnknownOrNull<T>(decode: (value: unknown) => T, value: unknown): T | null {
+  try {
+    return decode(value);
+  } catch {
+    return null;
+  }
+}
+
+function newCommandId(scope: string): CommandId {
+  return CommandId.make(`shared-import:${scope}:${randomUUID()}`);
+}
+
+function newLocalThreadId(): ThreadId {
+  return ThreadId.make(randomUUID());
+}
+
+function newLocalMessageId(): MessageId {
+  return MessageId.make(randomUUID());
+}
+
+function newLocalEventId(): EventId {
+  return EventId.make(randomUUID());
+}
+
+function importThreadTitle(title: string): string {
+  const trimmed = title.trim();
+  return `${IMPORTED_SHARED_SESSION_TITLE_PREFIX}${trimmed.length > 0 ? trimmed : "shared session"}`;
+}
+
+function runtimeModeOrDefault(value: unknown): RuntimeMode {
+  return decodeUnknownOrNull(decodeRuntimeMode, value) ?? "full-access";
+}
+
+function interactionModeOrDefault(value: unknown): ProviderInteractionMode {
+  return decodeUnknownOrNull(decodeProviderInteractionMode, value) ?? "default";
+}
+
+function activityToneOrDefault(value: string): OrchestrationThreadActivityTone {
+  return value === "info" || value === "tool" || value === "approval" || value === "error"
+    ? value
+    : "info";
+}
+
+function checkpointStatusOrDefault(value: string): OrchestrationCheckpointStatus {
+  return value === "ready" || value === "missing" || value === "error" ? value : "missing";
+}
+
+function nonNegativeNumber(value: unknown): OrchestrationCheckpointFile["additions"] {
+  return (
+    typeof value === "number" && Number.isFinite(value) && value > 0 ? Math.floor(value) : 0
+  ) as OrchestrationCheckpointFile["additions"];
+}
+
+function normalizeCheckpointFile(value: unknown): OrchestrationCheckpointFile | null {
+  const decoded = decodeUnknownOrNull(decodeOrchestrationCheckpointFile, value);
+  if (decoded) {
+    return decoded;
+  }
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return null;
+  }
+  const record = value as Record<string, unknown>;
+  const path = typeof record.path === "string" ? record.path.trim() : "";
+  if (path.length === 0) {
+    return null;
+  }
+  const kind =
+    typeof record.kind === "string" && record.kind.trim().length > 0
+      ? record.kind.trim()
+      : "modified";
+  return {
+    path,
+    kind,
+    additions: nonNegativeNumber(record.additions),
+    deletions: nonNegativeNumber(record.deletions),
+  };
+}
+
+function normalizeMessageAttachment(value: unknown): ChatAttachment | null {
+  return decodeUnknownOrNull(decodeChatAttachment, value);
+}
+
+function decodeImportedProposedPlan(value: unknown): OrchestrationProposedPlan | null {
+  const decoded = decodeUnknownOrNull(decodeOrchestrationProposedPlan, value);
+  if (!decoded) {
+    return null;
+  }
+  return {
+    ...decoded,
+    id: newId("imported_plan"),
+    implementationThreadId: null,
+  };
 }
 
 function toRepositoryState(row: SharedProjectRow): SharedRepositoryState {
@@ -333,6 +524,13 @@ function toThread(row: ThreadRow): SharedThread {
       patchAttached: false,
     }),
     messages: decodeJsonOr(decodeThreadMessagesJson, row.messagesJson, []),
+    sessionSnapshot: row.sessionSnapshotJson
+      ? decodeJsonOr<SharedSessionSnapshot | null>(
+          decodeSessionSnapshotJson,
+          row.sessionSnapshotJson,
+          null,
+        )
+      : null,
     lastRuntimeId: row.lastRuntimeId === null ? null : SharedRuntimeId.make(row.lastRuntimeId),
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
@@ -350,10 +548,37 @@ function toRuntime(row: RuntimeRow): SharedRuntime {
     health: runtimeHealthFromDb(row.health),
     capabilities: decodeJsonOr(decodeStringArrayJson, row.capabilitiesJson, []),
     providerLabel: row.providerLabel,
+    sshCredentialId:
+      row.sshCredentialId === null ? null : SharedSshCredentialId.make(row.sshCredentialId),
     unavailableReason: row.unavailableReason,
     lastSeenAt: row.lastSeenAt,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
+  };
+}
+
+function toSshCredential(
+  row: SshCredentialRow,
+  secret: SshCredentialSecret,
+): SharedProjectSshCredential {
+  return {
+    id: SharedSshCredentialId.make(row.sshCredentialId),
+    projectId: SharedProjectId.make(row.sharedProjectId),
+    label: row.label,
+    host: row.host,
+    port: row.port,
+    username: row.username,
+    authType: sshAuthTypeFromDb(row.authType),
+    secretState: {
+      hasPassword: secret.password !== null,
+      hasPrivateKey: secret.privateKey !== null,
+      hasPassphrase: secret.passphrase !== null,
+    },
+    createdByUserId: KamiUserId.make(row.createdByUserId),
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+    secretUpdatedAt: row.secretUpdatedAt,
+    lastUsedAt: row.lastUsedAt,
   };
 }
 
@@ -401,6 +626,155 @@ function asSharedProjectsError(operation: string) {
           status: 500,
           cause,
         });
+}
+
+function normalizeSecretValue(
+  value: string | null | undefined,
+  fallback: string | null,
+): string | null {
+  if (value === undefined) return fallback;
+  if (value === null) return null;
+  return value.trim().length > 0 ? value : null;
+}
+
+function parseSshSecret(value: string): SshCredentialSecret {
+  const parsed = JSON.parse(value) as unknown;
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    throw new Error("Invalid SSH credential secret payload.");
+  }
+  const record = parsed as Record<string, unknown>;
+  return {
+    password: typeof record.password === "string" ? record.password : null,
+    privateKey: typeof record.privateKey === "string" ? record.privateKey : null,
+    passphrase: typeof record.passphrase === "string" ? record.passphrase : null,
+  };
+}
+
+function parseSshEnvelope(value: string): SshSecretEnvelope {
+  const parsed = JSON.parse(value) as unknown;
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    throw new Error("Invalid SSH credential envelope.");
+  }
+  const record = parsed as Record<string, unknown>;
+  if (
+    record.v !== 1 ||
+    record.alg !== SSH_SECRET_ALGORITHM ||
+    typeof record.iv !== "string" ||
+    typeof record.tag !== "string" ||
+    typeof record.data !== "string"
+  ) {
+    throw new Error("Unsupported SSH credential envelope.");
+  }
+  return record as SshSecretEnvelope;
+}
+
+function encryptionKeyBuffer(key: Uint8Array): Buffer {
+  if (key.byteLength !== SSH_SECRET_KEY_BYTES) {
+    throw new Error("SSH credential encryption key has invalid length.");
+  }
+  return Buffer.from(key);
+}
+
+function encryptSshSecret(
+  secret: SshCredentialSecret,
+  key: Uint8Array,
+): Effect.Effect<string, SharedProjectsError> {
+  return Effect.try({
+    try: () => {
+      const iv = randomBytes(12);
+      const cipher = createCipheriv(SSH_SECRET_ALGORITHM, encryptionKeyBuffer(key), iv);
+      const encrypted = Buffer.concat([
+        cipher.update(encodeSshSecretJson(secret), "utf8"),
+        cipher.final(),
+      ]);
+      return encodeSshEnvelopeJson({
+        v: 1,
+        alg: SSH_SECRET_ALGORITHM,
+        iv: iv.toString("base64"),
+        tag: cipher.getAuthTag().toString("base64"),
+        data: encrypted.toString("base64"),
+      } satisfies SshSecretEnvelope);
+    },
+    catch: (cause) =>
+      new SharedProjectsError({
+        message: "Failed to encrypt SSH credential.",
+        status: 500,
+        cause,
+      }),
+  });
+}
+
+function decryptSshSecret(
+  encryptedSecretJson: string,
+  key: Uint8Array,
+): Effect.Effect<SshCredentialSecret, SharedProjectsError> {
+  return Effect.try({
+    try: () => {
+      const envelope = parseSshEnvelope(encryptedSecretJson);
+      const decipher = createDecipheriv(
+        SSH_SECRET_ALGORITHM,
+        encryptionKeyBuffer(key),
+        Buffer.from(envelope.iv, "base64"),
+      );
+      decipher.setAuthTag(Buffer.from(envelope.tag, "base64"));
+      const decrypted = Buffer.concat([
+        decipher.update(Buffer.from(envelope.data, "base64")),
+        decipher.final(),
+      ]).toString("utf8");
+      return parseSshSecret(decrypted);
+    },
+    catch: (cause) =>
+      new SharedProjectsError({
+        message: "Failed to decrypt SSH credential metadata.",
+        status: 500,
+        cause,
+      }),
+  });
+}
+
+function isSshSecretEqual(left: SshCredentialSecret, right: SshCredentialSecret): boolean {
+  return (
+    left.password === right.password &&
+    left.privateKey === right.privateKey &&
+    left.passphrase === right.passphrase
+  );
+}
+
+function buildSshSecret(
+  input: UpsertSharedSshCredentialInput,
+  existing: SshCredentialSecret | null,
+): Effect.Effect<SshCredentialSecret, SharedProjectsError> {
+  const existingSecret = existing ?? { password: null, privateKey: null, passphrase: null };
+  if (input.authType === "agent") {
+    return Effect.succeed({ password: null, privateKey: null, passphrase: null });
+  }
+  if (input.authType === "password") {
+    const password = normalizeSecretValue(input.password, existingSecret.password);
+    if (password === null) {
+      return Effect.fail(
+        new SharedProjectsError({
+          message: "Password authentication requires a password before saving.",
+          status: 400,
+        }),
+      );
+    }
+    return Effect.succeed({ password, privateKey: null, passphrase: null });
+  }
+
+  const privateKey = normalizeSecretValue(input.privateKey, existingSecret.privateKey);
+  if (privateKey === null) {
+    return Effect.fail(
+      new SharedProjectsError({
+        message: "Private key authentication requires a private key before saving.",
+        status: 400,
+      }),
+    );
+  }
+  return Effect.succeed({
+    password: null,
+    privateKey,
+    passphrase: normalizeSecretValue(input.passphrase, existingSecret.passphrase),
+  });
 }
 
 function fileExists(fileSystem: FileSystem.FileSystem, filePath: string) {
@@ -573,6 +947,11 @@ export const makeSharedProjects = Effect.fn("makeSharedProjects")(function* () {
   const repositoryIdentityResolver = yield* RepositoryIdentityResolver;
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
+  const secretStore = yield* ServerSecretStore;
+  const sshEncryptionKey = yield* secretStore.getOrCreateRandom(
+    SSH_SECRET_KEY_NAME,
+    SSH_SECRET_KEY_BYTES,
+  );
 
   const loadProjectAccess = Effect.fn("SharedProjects.loadProjectAccess")(function* (
     user: AuthenticatedUser,
@@ -662,9 +1041,16 @@ export const makeSharedProjects = Effect.fn("makeSharedProjects")(function* () {
   ) {
     const projectId = SharedProjectId.make(access.sharedProjectId);
     const role = roleFromDb(access.role);
-    const [memberRows, inviteRows, threadRows, runtimeRows, environmentRows, deployRows] =
-      yield* Effect.all([
-        sql<MemberRow>`
+    const [
+      memberRows,
+      inviteRows,
+      threadRows,
+      runtimeRows,
+      sshCredentialRows,
+      environmentRows,
+      deployRows,
+    ] = yield* Effect.all([
+      sql<MemberRow>`
           SELECT
             shared_project_id AS "sharedProjectId",
             user_id AS "userId",
@@ -682,7 +1068,7 @@ export const makeSharedProjects = Effect.fn("makeSharedProjects")(function* () {
             CASE role WHEN 'owner' THEN 0 WHEN 'admin' THEN 1 WHEN 'member' THEN 2 ELSE 3 END,
             github_login ASC
         `,
-        sql<InviteRow>`
+      sql<InviteRow>`
           SELECT
             invite_code AS "inviteCode",
             shared_project_id AS "sharedProjectId",
@@ -699,7 +1085,7 @@ export const makeSharedProjects = Effect.fn("makeSharedProjects")(function* () {
           WHERE shared_project_id = ${projectId}
           ORDER BY created_at DESC
         `,
-        sql<ThreadRow>`
+      sql<ThreadRow>`
           SELECT
             shared_thread_id AS "sharedThreadId",
             shared_project_id AS "sharedProjectId",
@@ -709,6 +1095,7 @@ export const makeSharedProjects = Effect.fn("makeSharedProjects")(function* () {
             visibility,
             code_state_json AS "codeStateJson",
             messages_json AS "messagesJson",
+            session_snapshot_json AS "sessionSnapshotJson",
             last_runtime_id AS "lastRuntimeId",
             created_at AS "createdAt",
             updated_at AS "updatedAt"
@@ -716,7 +1103,7 @@ export const makeSharedProjects = Effect.fn("makeSharedProjects")(function* () {
           WHERE shared_project_id = ${projectId}
           ORDER BY updated_at DESC
         `,
-        sql<RuntimeRow>`
+      sql<RuntimeRow>`
           SELECT
             runtime_id AS "runtimeId",
             shared_project_id AS "sharedProjectId",
@@ -727,6 +1114,7 @@ export const makeSharedProjects = Effect.fn("makeSharedProjects")(function* () {
             health,
             capabilities_json AS "capabilitiesJson",
             provider_label AS "providerLabel",
+            ssh_credential_id AS "sshCredentialId",
             unavailable_reason AS "unavailableReason",
             last_seen_at AS "lastSeenAt",
             created_at AS "createdAt",
@@ -735,7 +1123,26 @@ export const makeSharedProjects = Effect.fn("makeSharedProjects")(function* () {
           WHERE shared_project_id = ${projectId}
           ORDER BY created_at ASC
         `,
-        sql<EnvironmentRow>`
+      sql<SshCredentialRow>`
+          SELECT
+            ssh_credential_id AS "sshCredentialId",
+            shared_project_id AS "sharedProjectId",
+            label,
+            host,
+            port,
+            username,
+            auth_type AS "authType",
+            encrypted_secret_json AS "encryptedSecretJson",
+            secret_updated_at AS "secretUpdatedAt",
+            created_by_user_id AS "createdByUserId",
+            created_at AS "createdAt",
+            updated_at AS "updatedAt",
+            last_used_at AS "lastUsedAt"
+          FROM shared_project_ssh_credentials
+          WHERE shared_project_id = ${projectId}
+          ORDER BY updated_at DESC
+        `,
+      sql<EnvironmentRow>`
           SELECT
             environment_id AS "environmentId",
             shared_project_id AS "sharedProjectId",
@@ -752,7 +1159,7 @@ export const makeSharedProjects = Effect.fn("makeSharedProjects")(function* () {
           WHERE shared_project_id = ${projectId}
           ORDER BY is_default DESC, created_at ASC
         `,
-        sql<DeployRow>`
+      sql<DeployRow>`
           SELECT
             deploy_id AS "deployId",
             shared_project_id AS "sharedProjectId",
@@ -769,9 +1176,17 @@ export const makeSharedProjects = Effect.fn("makeSharedProjects")(function* () {
           WHERE shared_project_id = ${projectId}
           ORDER BY updated_at DESC
         `,
-      ]);
+    ]);
 
     const now = yield* nowIso;
+    const sshCredentials = yield* Effect.forEach(
+      sshCredentialRows,
+      (row) =>
+        decryptSshSecret(row.encryptedSecretJson, sshEncryptionKey).pipe(
+          Effect.map((secret) => toSshCredential(row, secret)),
+        ),
+      { concurrency: 1 },
+    );
     const canSeePrivateThreads = roleAtLeast(role, "admin");
     return {
       project: toProjectSummary(access),
@@ -787,6 +1202,7 @@ export const makeSharedProjects = Effect.fn("makeSharedProjects")(function* () {
             thread.createdByUserId === user.user.userId,
         ),
       runtimes: runtimeRows.map(toRuntime),
+      sshCredentials,
       environments: environmentRows.map(toEnvironment),
       deploys: deployRows.map(toDeploy),
     } satisfies SharedProjectDetail;
@@ -829,7 +1245,7 @@ export const makeSharedProjects = Effect.fn("makeSharedProjects")(function* () {
         'Local desktop',
         'This device',
         'healthy',
-        ${encodeStringArrayJson(["execute", "test", "sync"])},
+        ${encodeStringArrayJson(["execute", "test"])},
         'User-local provider profile',
         NULL,
         ${createdAt},
@@ -1004,6 +1420,7 @@ export const makeSharedProjects = Effect.fn("makeSharedProjects")(function* () {
         contextBundle: detail.contextBundle,
         threads: detail.threads.filter((thread) => thread.visibility === "shared"),
         runtimes: detail.runtimes,
+        sshCredentials: detail.sshCredentials,
         environments: detail.environments,
         deploys: detail.deploys,
       } satisfies SharedProjectBootstrapManifest;
@@ -1219,6 +1636,7 @@ export const makeSharedProjects = Effect.fn("makeSharedProjects")(function* () {
           contextBundle: detail.contextBundle,
           threads: detail.threads.filter((thread) => thread.visibility === "shared"),
           runtimes: detail.runtimes,
+          sshCredentials: detail.sshCredentials,
           environments: detail.environments,
           deploys: detail.deploys,
         },
@@ -1311,81 +1729,64 @@ export const makeSharedProjects = Effect.fn("makeSharedProjects")(function* () {
       return yield* loadDetail(user, input.projectId);
     }).pipe(Effect.mapError(asSharedProjectsError("remove shared project member")));
 
+  const deleteProject: SharedProjectsShape["deleteProject"] = (user, input) =>
+    Effect.gen(function* () {
+      yield* requireRole(
+        user,
+        input.projectId,
+        (role) => role === "owner",
+        "Only the project owner can stop sharing this project.",
+      );
+      yield* sql`
+        DELETE FROM shared_projects
+        WHERE shared_project_id = ${input.projectId}
+          AND owner_user_id = ${user.user.userId}
+      `;
+      return { ok: true } as const;
+    }).pipe(Effect.mapError(asSharedProjectsError("delete shared project")));
+
   const publishThread: SharedProjectsShape["publishThread"] = (user, input) =>
     Effect.gen(function* () {
       yield* requireRole(
         user,
         input.projectId,
         canEditSharedWork,
-        "Viewers cannot publish or update shared threads.",
+        "Viewers cannot publish shared session snapshots.",
       );
-      const existingRows = yield* sql<ThreadRow>`
-        SELECT
-          shared_thread_id AS "sharedThreadId",
-          shared_project_id AS "sharedProjectId",
-          local_thread_id AS "localThreadId",
-          created_by_user_id AS "createdByUserId",
+      const updatedAt = yield* nowIso;
+      const threadId = SharedThreadId.make(newId("st"));
+      const messages = input.messages ?? [];
+      const sessionSnapshot = input.sessionSnapshot ?? null;
+      yield* sql`
+        INSERT INTO shared_threads (
+          shared_thread_id,
+          shared_project_id,
+          local_thread_id,
+          created_by_user_id,
           title,
           visibility,
-          code_state_json AS "codeStateJson",
-          messages_json AS "messagesJson",
-          last_runtime_id AS "lastRuntimeId",
-          created_at AS "createdAt",
-          updated_at AS "updatedAt"
-        FROM shared_threads
-        WHERE shared_project_id = ${input.projectId}
-          AND local_thread_id = ${input.localThreadId}
-        LIMIT 1
+          code_state_json,
+          messages_json,
+          session_snapshot_json,
+          last_runtime_id,
+          created_at,
+          updated_at
+        )
+        VALUES (
+          ${threadId},
+          ${input.projectId},
+          ${input.localThreadId},
+          ${user.user.userId},
+          ${input.title},
+          ${input.visibility},
+          ${encodeThreadCodeStateJson(input.codeState)},
+          ${encodeThreadMessagesJson(messages)},
+          ${sessionSnapshot === null ? null : encodeSessionSnapshotJson(sessionSnapshot)},
+          NULL,
+          ${updatedAt},
+          ${updatedAt}
+        )
       `;
-      const existing = existingRows[0];
-      const updatedAt = yield* nowIso;
-      const threadId = existing?.sharedThreadId
-        ? SharedThreadId.make(existing.sharedThreadId)
-        : SharedThreadId.make(newId("st"));
-      const messages =
-        input.messages ??
-        (existing ? decodeJsonOr(decodeThreadMessagesJson, existing.messagesJson, []) : []);
-      if (existing) {
-        yield* sql`
-          UPDATE shared_threads
-          SET
-            title = ${input.title},
-            visibility = ${input.visibility},
-            code_state_json = ${encodeThreadCodeStateJson(input.codeState)},
-            messages_json = ${encodeThreadMessagesJson(messages)},
-            updated_at = ${updatedAt}
-          WHERE shared_thread_id = ${threadId}
-        `;
-      } else {
-        yield* sql`
-          INSERT INTO shared_threads (
-            shared_thread_id,
-            shared_project_id,
-            local_thread_id,
-            created_by_user_id,
-            title,
-            visibility,
-            code_state_json,
-            messages_json,
-            last_runtime_id,
-            created_at,
-            updated_at
-          )
-          VALUES (
-            ${threadId},
-            ${input.projectId},
-            ${input.localThreadId},
-            ${user.user.userId},
-            ${input.title},
-            ${input.visibility},
-            ${encodeThreadCodeStateJson(input.codeState)},
-            ${encodeThreadMessagesJson(messages)},
-            NULL,
-            ${updatedAt},
-            ${updatedAt}
-          )
-        `;
-      }
       const rows = yield* sql<ThreadRow>`
         SELECT
           shared_thread_id AS "sharedThreadId",
@@ -1396,6 +1797,7 @@ export const makeSharedProjects = Effect.fn("makeSharedProjects")(function* () {
           visibility,
           code_state_json AS "codeStateJson",
           messages_json AS "messagesJson",
+          session_snapshot_json AS "sessionSnapshotJson",
           last_runtime_id AS "lastRuntimeId",
           created_at AS "createdAt",
           updated_at AS "updatedAt"
@@ -1423,6 +1825,7 @@ export const makeSharedProjects = Effect.fn("makeSharedProjects")(function* () {
           visibility,
           code_state_json AS "codeStateJson",
           messages_json AS "messagesJson",
+          session_snapshot_json AS "sessionSnapshotJson",
           last_runtime_id AS "lastRuntimeId",
           created_at AS "createdAt",
           updated_at AS "updatedAt"
@@ -1455,14 +1858,11 @@ export const makeSharedProjects = Effect.fn("makeSharedProjects")(function* () {
       return toThread({ ...thread, visibility: input.visibility, updatedAt });
     }).pipe(Effect.mapError(asSharedProjectsError("update shared thread visibility")));
 
-  const appendThreadMessage: SharedProjectsShape["appendThreadMessage"] = (user, input) =>
+  const importThread: SharedProjectsShape["importThread"] = (user, input) =>
     Effect.gen(function* () {
-      yield* requireRole(
-        user,
-        input.projectId,
-        canEditSharedWork,
-        "Viewers cannot continue shared threads.",
-      );
+      const orchestrationEngine = yield* OrchestrationEngineService;
+      const access = yield* loadProjectAccess(user, input.projectId);
+      const role = roleFromDb(access.role);
       const rows = yield* sql<ThreadRow>`
         SELECT
           shared_thread_id AS "sharedThreadId",
@@ -1473,6 +1873,7 @@ export const makeSharedProjects = Effect.fn("makeSharedProjects")(function* () {
           visibility,
           code_state_json AS "codeStateJson",
           messages_json AS "messagesJson",
+          session_snapshot_json AS "sessionSnapshotJson",
           last_runtime_id AS "lastRuntimeId",
           created_at AS "createdAt",
           updated_at AS "updatedAt"
@@ -1488,30 +1889,182 @@ export const makeSharedProjects = Effect.fn("makeSharedProjects")(function* () {
           status: 404,
         });
       }
-      const updatedAt = yield* nowIso;
-      const messages = decodeJsonOr(decodeThreadMessagesJson, thread.messagesJson, []);
-      const nextMessage: SharedThreadMessage = {
-        id: newId("msg"),
-        role: input.role,
-        text: input.text,
-        authorGithubLogin: normalizeGitHubLogin(user.user.githubLogin),
-        createdAt: updatedAt,
-      };
-      const nextMessages = [...messages, nextMessage].slice(-500);
-      yield* sql`
-        UPDATE shared_threads
-        SET messages_json = ${encodeThreadMessagesJson(nextMessages)},
-            last_runtime_id = ${input.runtimeId ?? thread.lastRuntimeId},
-            updated_at = ${updatedAt}
-        WHERE shared_thread_id = ${input.threadId}
-      `;
-      return toThread({
-        ...thread,
-        messagesJson: encodeThreadMessagesJson(nextMessages),
-        lastRuntimeId: input.runtimeId ?? thread.lastRuntimeId,
-        updatedAt,
+      if (
+        thread.visibility !== "shared" &&
+        !roleAtLeast(role, "admin") &&
+        thread.createdByUserId !== user.user.userId
+      ) {
+        return yield* new SharedProjectsError({
+          message: "This shared session is private.",
+          status: 403,
+        });
+      }
+      const snapshot = thread.sessionSnapshotJson
+        ? decodeJsonOr<SharedSessionSnapshot | null>(
+            decodeSessionSnapshotJson,
+            thread.sessionSnapshotJson,
+            null,
+          )
+        : null;
+      if (!snapshot) {
+        return yield* new SharedProjectsError({
+          message: "This shared session does not have an importable snapshot yet.",
+          status: 400,
+        });
+      }
+
+      const modelSelection = yield* Effect.try({
+        try: (): ModelSelection => decodeModelSelection(snapshot.modelSelection),
+        catch: (cause) =>
+          new SharedProjectsError({
+            message: "Shared session snapshot has an invalid model selection.",
+            status: 400,
+            cause,
+          }),
       });
-    }).pipe(Effect.mapError(asSharedProjectsError("append shared thread message")));
+      const importedAt = yield* nowIso;
+      const importedThreadId = newLocalThreadId();
+      const importedTitle = importThreadTitle(snapshot.title || thread.title);
+      const messageIdBySource = new Map<string, MessageId>();
+      const commands: OrchestrationCommand[] = [
+        {
+          type: "thread.create",
+          commandId: newCommandId("thread-create"),
+          threadId: importedThreadId,
+          projectId: input.targetProjectId,
+          title: importedTitle,
+          modelSelection,
+          runtimeMode: runtimeModeOrDefault(snapshot.runtimeMode),
+          interactionMode: interactionModeOrDefault(snapshot.interactionMode),
+          branch:
+            snapshot.branch && snapshot.branch.trim().length > 0
+              ? (snapshot.branch.trim() as never)
+              : null,
+          worktreePath: null,
+          createdAt: importedAt,
+        },
+      ];
+
+      for (const message of snapshot.messages) {
+        const localMessageId = newLocalMessageId();
+        const attachments = message.attachments
+          .map(normalizeMessageAttachment)
+          .filter((attachment): attachment is ChatAttachment => attachment !== null);
+        messageIdBySource.set(message.id, localMessageId);
+        commands.push({
+          type: "thread.message.import",
+          commandId: newCommandId("message"),
+          threadId: importedThreadId,
+          messageId: localMessageId,
+          role: message.role,
+          text: message.text,
+          ...(attachments.length > 0 ? { attachments } : {}),
+          turnId: message.turnId === null ? null : TurnId.make(message.turnId),
+          createdAt: message.createdAt,
+          updatedAt: message.completedAt ?? message.createdAt,
+        });
+      }
+
+      for (const rawPlan of snapshot.proposedPlans) {
+        const proposedPlan = decodeImportedProposedPlan(rawPlan);
+        if (!proposedPlan) {
+          continue;
+        }
+        commands.push({
+          type: "thread.proposed-plan.upsert",
+          commandId: newCommandId("proposed-plan"),
+          threadId: importedThreadId,
+          proposedPlan,
+          createdAt: proposedPlan.createdAt,
+        });
+      }
+
+      for (const activity of snapshot.activities) {
+        commands.push({
+          type: "thread.activity.append",
+          commandId: newCommandId("activity"),
+          threadId: importedThreadId,
+          activity: {
+            id: newLocalEventId(),
+            tone: activityToneOrDefault(activity.tone),
+            kind: activity.kind,
+            summary: activity.summary.trim().length > 0 ? activity.summary : activity.kind,
+            payload: activity.payload,
+            turnId: activity.turnId === null ? null : TurnId.make(activity.turnId),
+            ...(activity.sequence !== undefined && activity.sequence >= 0
+              ? { sequence: Math.floor(activity.sequence) as never }
+              : {}),
+            createdAt: activity.createdAt,
+          },
+          createdAt: activity.createdAt,
+        });
+      }
+
+      for (const checkpoint of snapshot.checkpoints) {
+        const files = checkpoint.files
+          .map(normalizeCheckpointFile)
+          .filter((file): file is OrchestrationCheckpointFile => file !== null);
+        commands.push({
+          type: "thread.turn.diff.complete",
+          commandId: newCommandId("checkpoint"),
+          threadId: importedThreadId,
+          turnId: TurnId.make(checkpoint.turnId),
+          completedAt: checkpoint.completedAt ?? importedAt,
+          checkpointRef:
+            checkpoint.checkpointRef && checkpoint.checkpointRef.trim().length > 0
+              ? CheckpointRef.make(checkpoint.checkpointRef)
+              : CheckpointRef.make(`shared-import:${randomUUID()}`),
+          status: checkpointStatusOrDefault(checkpoint.status),
+          files,
+          ...(checkpoint.assistantMessageId
+            ? { assistantMessageId: messageIdBySource.get(checkpoint.assistantMessageId) }
+            : {}),
+          checkpointTurnCount:
+            checkpoint.checkpointTurnCount >= 0
+              ? (Math.floor(checkpoint.checkpointTurnCount) as never)
+              : 0,
+          createdAt: checkpoint.completedAt ?? importedAt,
+        });
+      }
+
+      commands.push({
+        type: "thread.meta.update",
+        commandId: newCommandId("touch"),
+        threadId: importedThreadId,
+        title: importedTitle,
+      });
+
+      yield* Effect.forEach(
+        commands,
+        (command) =>
+          orchestrationEngine.dispatch(command).pipe(
+            Effect.mapError(
+              (cause) =>
+                new SharedProjectsError({
+                  message: "Failed to import shared session into the local project.",
+                  status: 500,
+                  cause,
+                }),
+            ),
+          ),
+        { concurrency: 1 },
+      );
+
+      return {
+        projectId: input.targetProjectId,
+        threadId: importedThreadId,
+        sourceSharedThreadId: input.threadId,
+      } satisfies ImportSharedThreadResult;
+    }).pipe(Effect.mapError(asSharedProjectsError("import shared thread")));
+
+  const appendThreadMessage: SharedProjectsShape["appendThreadMessage"] = () =>
+    Effect.fail(
+      new SharedProjectsError({
+        message:
+          "Shared sessions are snapshot-only. Import the snapshot locally, continue locally, then create a new snapshot share.",
+        status: 400,
+      }),
+    );
 
   const upsertRuntime: SharedProjectsShape["upsertRuntime"] = (user, input) =>
     Effect.gen(function* () {
@@ -1523,14 +2076,45 @@ export const makeSharedProjects = Effect.fn("makeSharedProjects")(function* () {
       );
       const createdAt = yield* nowIso;
       const runtimeId = input.runtimeId ?? SharedRuntimeId.make(newId("rt"));
-      const existingRows = yield* sql<{ readonly createdAt: string }>`
-        SELECT created_at AS "createdAt"
+      if (input.sshCredentialId !== undefined && input.sshCredentialId !== null) {
+        if (input.type !== "ssh-vps") {
+          return yield* new SharedProjectsError({
+            message: "SSH credentials can only be attached to SSH/VPS runtimes.",
+            status: 400,
+          });
+        }
+        const credentialRows = yield* sql<{ readonly sshCredentialId: string }>`
+          SELECT ssh_credential_id AS "sshCredentialId"
+          FROM shared_project_ssh_credentials
+          WHERE shared_project_id = ${input.projectId}
+            AND ssh_credential_id = ${input.sshCredentialId}
+          LIMIT 1
+        `;
+        if (!credentialRows[0]) {
+          return yield* new SharedProjectsError({
+            message: "SSH credential was not found.",
+            status: 404,
+          });
+        }
+      }
+      const existingRows = yield* sql<{
+        readonly sharedProjectId: string;
+        readonly createdAt: string;
+      }>`
+        SELECT shared_project_id AS "sharedProjectId",
+               created_at AS "createdAt"
         FROM shared_runtimes
         WHERE runtime_id = ${runtimeId}
-          AND shared_project_id = ${input.projectId}
         LIMIT 1
       `;
-      const originalCreatedAt = existingRows[0]?.createdAt ?? createdAt;
+      const existing = existingRows[0];
+      if (existing && existing.sharedProjectId !== input.projectId) {
+        return yield* new SharedProjectsError({
+          message: "Runtime id is already used by another shared project.",
+          status: 409,
+        });
+      }
+      const originalCreatedAt = existing?.createdAt ?? createdAt;
       yield* sql`
         INSERT INTO shared_runtimes (
           runtime_id,
@@ -1542,6 +2126,7 @@ export const makeSharedProjects = Effect.fn("makeSharedProjects")(function* () {
           health,
           capabilities_json,
           provider_label,
+          ssh_credential_id,
           unavailable_reason,
           last_seen_at,
           created_at,
@@ -1557,6 +2142,7 @@ export const makeSharedProjects = Effect.fn("makeSharedProjects")(function* () {
           ${input.health},
           ${encodeStringArrayJson(input.capabilities)},
           ${input.providerLabel ?? null},
+          ${input.sshCredentialId ?? null},
           ${input.unavailableReason ?? null},
           ${createdAt},
           ${originalCreatedAt},
@@ -1570,6 +2156,7 @@ export const makeSharedProjects = Effect.fn("makeSharedProjects")(function* () {
           health = excluded.health,
           capabilities_json = excluded.capabilities_json,
           provider_label = excluded.provider_label,
+          ssh_credential_id = excluded.ssh_credential_id,
           unavailable_reason = excluded.unavailable_reason,
           last_seen_at = excluded.last_seen_at,
           updated_at = excluded.updated_at
@@ -1585,6 +2172,7 @@ export const makeSharedProjects = Effect.fn("makeSharedProjects")(function* () {
           health,
           capabilities_json AS "capabilitiesJson",
           provider_label AS "providerLabel",
+          ssh_credential_id AS "sshCredentialId",
           unavailable_reason AS "unavailableReason",
           last_seen_at AS "lastSeenAt",
           created_at AS "createdAt",
@@ -1594,6 +2182,163 @@ export const makeSharedProjects = Effect.fn("makeSharedProjects")(function* () {
       `;
       return toRuntime(rows[0]!);
     }).pipe(Effect.mapError(asSharedProjectsError("upsert shared runtime")));
+
+  const upsertSshCredential: SharedProjectsShape["upsertSshCredential"] = (user, input) =>
+    Effect.gen(function* () {
+      yield* requireRole(
+        user,
+        input.projectId,
+        canManageSharedProject,
+        "Only owners and admins can manage shared SSH credentials.",
+      );
+      const updatedAt = yield* nowIso;
+      const credentialId = input.credentialId ?? SharedSshCredentialId.make(newId("ssh"));
+      const existingRows = yield* sql<SshCredentialRow>`
+        SELECT
+          ssh_credential_id AS "sshCredentialId",
+          shared_project_id AS "sharedProjectId",
+          label,
+          host,
+          port,
+          username,
+          auth_type AS "authType",
+          encrypted_secret_json AS "encryptedSecretJson",
+          secret_updated_at AS "secretUpdatedAt",
+          created_by_user_id AS "createdByUserId",
+          created_at AS "createdAt",
+          updated_at AS "updatedAt",
+          last_used_at AS "lastUsedAt"
+        FROM shared_project_ssh_credentials
+        WHERE shared_project_id = ${input.projectId}
+          AND ssh_credential_id = ${credentialId}
+        LIMIT 1
+      `;
+      const existing = existingRows[0] ?? null;
+      const existingSecret =
+        existing === null
+          ? null
+          : yield* decryptSshSecret(existing.encryptedSecretJson, sshEncryptionKey);
+      const nextSecret = yield* buildSshSecret(input, existingSecret);
+      const secretChanged =
+        existingSecret === null || !isSshSecretEqual(existingSecret, nextSecret);
+      const encryptedSecretJson = secretChanged
+        ? yield* encryptSshSecret(nextSecret, sshEncryptionKey)
+        : existing!.encryptedSecretJson;
+      const secretUpdatedAt = secretChanged ? updatedAt : existing!.secretUpdatedAt;
+
+      yield* sql`
+        INSERT INTO shared_project_ssh_credentials (
+          ssh_credential_id,
+          shared_project_id,
+          label,
+          host,
+          port,
+          username,
+          auth_type,
+          encrypted_secret_json,
+          secret_updated_at,
+          created_by_user_id,
+          created_at,
+          updated_at
+        )
+        VALUES (
+          ${credentialId},
+          ${input.projectId},
+          ${input.label},
+          ${input.host},
+          ${input.port},
+          ${input.username},
+          ${input.authType},
+          ${encryptedSecretJson},
+          ${secretUpdatedAt},
+          ${user.user.userId},
+          ${existing?.createdAt ?? updatedAt},
+          ${updatedAt}
+        )
+        ON CONFLICT (ssh_credential_id)
+        DO UPDATE SET
+          label = excluded.label,
+          host = excluded.host,
+          port = excluded.port,
+          username = excluded.username,
+          auth_type = excluded.auth_type,
+          encrypted_secret_json = excluded.encrypted_secret_json,
+          secret_updated_at = excluded.secret_updated_at,
+          updated_at = excluded.updated_at
+        WHERE shared_project_ssh_credentials.shared_project_id = excluded.shared_project_id
+      `;
+      const rows = yield* sql<SshCredentialRow>`
+        SELECT
+          ssh_credential_id AS "sshCredentialId",
+          shared_project_id AS "sharedProjectId",
+          label,
+          host,
+          port,
+          username,
+          auth_type AS "authType",
+          encrypted_secret_json AS "encryptedSecretJson",
+          secret_updated_at AS "secretUpdatedAt",
+          created_by_user_id AS "createdByUserId",
+          created_at AS "createdAt",
+          updated_at AS "updatedAt",
+          last_used_at AS "lastUsedAt"
+        FROM shared_project_ssh_credentials
+        WHERE shared_project_id = ${input.projectId}
+          AND ssh_credential_id = ${credentialId}
+        LIMIT 1
+      `;
+      const row = rows[0];
+      if (!row) {
+        return yield* new SharedProjectsError({
+          message: "SSH credential id is already used by another shared project.",
+          status: 409,
+        });
+      }
+      const secret = yield* decryptSshSecret(row.encryptedSecretJson, sshEncryptionKey);
+      return toSshCredential(row, secret);
+    }).pipe(Effect.mapError(asSharedProjectsError("save shared SSH credential")));
+
+  const removeSshCredential: SharedProjectsShape["removeSshCredential"] = (user, input) =>
+    Effect.gen(function* () {
+      yield* requireRole(
+        user,
+        input.projectId,
+        canManageSharedProject,
+        "Only owners and admins can remove shared SSH credentials.",
+      );
+      const credentialRows = yield* sql<{ readonly sshCredentialId: string }>`
+        SELECT ssh_credential_id AS "sshCredentialId"
+        FROM shared_project_ssh_credentials
+        WHERE shared_project_id = ${input.projectId}
+          AND ssh_credential_id = ${input.credentialId}
+        LIMIT 1
+      `;
+      if (!credentialRows[0]) {
+        return yield* new SharedProjectsError({
+          message: "SSH credential was not found.",
+          status: 404,
+        });
+      }
+      const runtimeRows = yield* sql<{ readonly runtimeId: string }>`
+        SELECT runtime_id AS "runtimeId"
+        FROM shared_runtimes
+        WHERE shared_project_id = ${input.projectId}
+          AND ssh_credential_id = ${input.credentialId}
+        LIMIT 1
+      `;
+      if (runtimeRows[0]) {
+        return yield* new SharedProjectsError({
+          message: "This SSH credential is still attached to a runtime.",
+          status: 409,
+        });
+      }
+      yield* sql`
+        DELETE FROM shared_project_ssh_credentials
+        WHERE shared_project_id = ${input.projectId}
+          AND ssh_credential_id = ${input.credentialId}
+      `;
+      return yield* loadDetail(user, input.projectId);
+    }).pipe(Effect.mapError(asSharedProjectsError("remove shared SSH credential")));
 
   const upsertEnvironment: SharedProjectsShape["upsertEnvironment"] = (user, input) =>
     Effect.gen(function* () {
@@ -1856,6 +2601,7 @@ export const makeSharedProjects = Effect.fn("makeSharedProjects")(function* () {
           health,
           capabilities_json AS "capabilitiesJson",
           provider_label AS "providerLabel",
+          ssh_credential_id AS "sshCredentialId",
           unavailable_reason AS "unavailableReason",
           last_seen_at AS "lastSeenAt",
           created_at AS "createdAt",
@@ -1945,10 +2691,14 @@ export const makeSharedProjects = Effect.fn("makeSharedProjects")(function* () {
     claimInvite,
     updateMemberRole,
     removeMember,
+    deleteProject,
     publishThread,
     updateThreadVisibility,
+    importThread,
     appendThreadMessage,
     upsertRuntime,
+    upsertSshCredential,
+    removeSshCredential,
     upsertEnvironment,
     setDefaultEnvironment,
     upsertDeployAssociation,

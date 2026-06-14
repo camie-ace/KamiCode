@@ -11,7 +11,7 @@ import {
   TurnId,
   type OrchestrationEvent,
 } from "@t3tools/contracts";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vite-plus/test";
 
 import {
   applyOrchestrationEvent,
@@ -149,6 +149,9 @@ function makeState(thread: Thread): AppState {
         thread.messages.map((message) => [message.id, message] as const),
       ) as EnvironmentState["messageByThreadId"][ThreadId],
     },
+    queuedTurnsByThreadId: {
+      [thread.id]: thread.queuedTurns ?? [],
+    },
     activityIdsByThreadId: {
       [thread.id]: thread.activities.map((activity) => activity.id),
     },
@@ -192,6 +195,7 @@ function makeEmptyState(overrides: Partial<AppState & EnvironmentState> = {}): A
     threadTurnStateById: {},
     messageIdsByThreadId: {},
     messageByThreadId: {},
+    queuedTurnsByThreadId: {},
     activityIdsByThreadId: {},
     activityByThreadId: {},
     proposedPlanIdsByThreadId: {},
@@ -661,6 +665,10 @@ describe("incremental orchestration updates", () => {
         ...baseEnvironmentState.messageByThreadId,
         [thread2.id]: {},
       },
+      queuedTurnsByThreadId: {
+        ...baseEnvironmentState.queuedTurnsByThreadId,
+        [thread2.id]: [],
+      },
       activityIdsByThreadId: {
         ...baseEnvironmentState.activityIdsByThreadId,
         [thread2.id]: [],
@@ -724,6 +732,128 @@ describe("incremental orchestration updates", () => {
     expect(nextEnvironmentState?.messageByThreadId[thread2.id]).toBe(
       previousEnvironmentState?.messageByThreadId[thread2.id],
     );
+    expect(nextEnvironmentState?.queuedTurnsByThreadId[thread2.id]).toBe(
+      previousEnvironmentState?.queuedTurnsByThreadId[thread2.id],
+    );
+  });
+
+  it("preserves queued turns in derived thread detail", () => {
+    const thread = makeThread({
+      queuedTurns: [
+        {
+          queueId: "queue:event-1",
+          threadId: ThreadId.make("thread-1"),
+          messageId: MessageId.make("message-queued"),
+          status: "queued",
+          requestedAt: "2026-02-27T00:00:01.000Z",
+          startedAt: null,
+          completedAt: null,
+          turnId: null,
+          failureDetail: null,
+        },
+      ],
+    });
+    const state = makeState(thread);
+    const ref = scopeThreadRef(thread.environmentId, thread.id);
+
+    expect(selectThreadByRef(state, ref)?.queuedTurns).toEqual(thread.queuedTurns);
+  });
+
+  it("adds queued turns from queued start requests", () => {
+    const thread = makeThread({
+      messages: [
+        {
+          id: MessageId.make("message-queued"),
+          role: "user",
+          text: "later",
+          createdAt: "2026-02-27T00:00:00.000Z",
+          streaming: false,
+        },
+      ],
+    });
+    const state = makeState(thread);
+
+    const next = applyOrchestrationEvent(
+      state,
+      makeEvent("thread.turn-start-requested", {
+        threadId: thread.id,
+        messageId: MessageId.make("message-queued"),
+        modelSelection: {
+          instanceId: ProviderInstanceId.make("codex"),
+          model: DEFAULT_MODEL,
+        },
+        runtimeMode: DEFAULT_RUNTIME_MODE,
+        interactionMode: DEFAULT_INTERACTION_MODE,
+        dispatchPolicy: "queue",
+        createdAt: "2026-02-27T00:00:01.000Z",
+      }),
+      localEnvironmentId,
+    );
+
+    const queuedTurns = selectThreadByRef(
+      next,
+      scopeThreadRef(thread.environmentId, thread.id),
+    )?.queuedTurns;
+    expect(queuedTurns).toHaveLength(1);
+    expect(queuedTurns?.[0]).toMatchObject({
+      queueId: "queue:event-1",
+      threadId: thread.id,
+      messageId: MessageId.make("message-queued"),
+      status: "queued",
+      requestedAt: "2026-02-27T00:00:01.000Z",
+    });
+  });
+
+  it("removes deleted queued turns and their user messages", () => {
+    const thread = makeThread({
+      messages: [
+        {
+          id: MessageId.make("message-queued"),
+          role: "user",
+          text: "remove me",
+          createdAt: "2026-02-27T00:00:00.000Z",
+          streaming: false,
+        },
+        {
+          id: MessageId.make("message-keep"),
+          role: "user",
+          text: "keep me",
+          createdAt: "2026-02-27T00:00:01.000Z",
+          streaming: false,
+        },
+      ],
+      queuedTurns: [
+        {
+          queueId: "queue:event-1",
+          threadId: ThreadId.make("thread-1"),
+          messageId: MessageId.make("message-queued"),
+          status: "queued",
+          requestedAt: "2026-02-27T00:00:01.000Z",
+          startedAt: null,
+          completedAt: null,
+          turnId: null,
+          failureDetail: null,
+        },
+      ],
+    });
+    const state = makeState(thread);
+
+    const next = applyOrchestrationEvent(
+      state,
+      makeEvent("thread.queued-turn-deleted", {
+        threadId: thread.id,
+        queueId: "queue:event-1",
+        messageId: MessageId.make("message-queued"),
+        deletedAt: "2026-02-27T00:00:02.000Z",
+      }),
+      localEnvironmentId,
+    );
+
+    const nextThread = selectThreadByRef(next, scopeThreadRef(thread.environmentId, thread.id));
+    expect(nextThread?.queuedTurns).toEqual([]);
+    expect(nextThread?.messages.map((message) => message.id)).toEqual([
+      MessageId.make("message-keep"),
+    ]);
   });
 
   it("applies replay batches in sequence and updates session state", () => {
@@ -776,9 +906,40 @@ describe("incremental orchestration updates", () => {
       localEnvironmentId,
     );
 
+    // A completed assistant message must not settle the turn while the
+    // session is still running it — providers emit interim assistant
+    // messages between tool calls.
     expect(threadsOf(next)[0]?.session?.status).toBe("running");
-    expect(threadsOf(next)[0]?.latestTurn?.state).toBe("completed");
+    expect(threadsOf(next)[0]?.latestTurn?.state).toBe("running");
+    expect(threadsOf(next)[0]?.latestTurn?.completedAt).toBeNull();
     expect(threadsOf(next)[0]?.messages).toHaveLength(1);
+
+    const settled = applyOrchestrationEvents(
+      next,
+      [
+        makeEvent(
+          "thread.session-set",
+          {
+            threadId: thread.id,
+            session: {
+              threadId: thread.id,
+              status: "ready",
+              providerName: "codex",
+              runtimeMode: "full-access",
+              activeTurnId: null,
+              lastError: null,
+              updatedAt: "2026-02-27T00:00:04.000Z",
+            },
+          },
+          { sequence: 4 },
+        ),
+      ],
+      localEnvironmentId,
+    );
+
+    // Leaving the running session status is the turn-end signal.
+    expect(threadsOf(settled)[0]?.latestTurn?.state).toBe("completed");
+    expect(threadsOf(settled)[0]?.latestTurn?.completedAt).toBe("2026-02-27T00:00:04.000Z");
   });
 
   it("does not regress latestTurn when an older turn diff completes late", () => {

@@ -36,6 +36,7 @@ import {
   remoteStateKey,
   resolveSshTarget,
   runSshCommand,
+  SSH_COMMAND,
   targetConnectionKey,
 } from "./command.ts";
 import {
@@ -53,7 +54,8 @@ const REMOTE_PORT_SCAN_WINDOW = 200;
 const SSH_READY_TIMEOUT_MS = 20_000;
 const SSH_READY_PROBE_TIMEOUT_MS = 1_000;
 const TUNNEL_SHUTDOWN_TIMEOUT_MS = 2_000;
-const REMOTE_READY_TIMEOUT_MS = 15_000;
+const REMOTE_READY_TIMEOUT_MS = 120_000;
+const REMOTE_LAUNCH_COMMAND_TIMEOUT_MS = REMOTE_READY_TIMEOUT_MS + 60_000;
 const REMOTE_REUSE_READY_TIMEOUT_MS = 2_000;
 
 export interface RemoteT3RunnerOptions {
@@ -160,13 +162,8 @@ const RemotePairingResult = Schema.Struct({
   credential: Schema.String,
 });
 
-const RemoteHttpError = Schema.Struct({
-  error: Schema.optional(Schema.String),
-});
-
 const decodeRemoteLaunchResult = Schema.decodeEffect(fromLenientJson(RemoteLaunchResult));
 const decodeRemotePairingResult = Schema.decodeEffect(fromLenientJson(RemotePairingResult));
-const decodeRemoteHttpError = Schema.decodeEffect(Schema.fromJsonString(RemoteHttpError));
 
 const decodeRemoteJsonOutput = <A, E>(
   stdout: string,
@@ -354,6 +351,14 @@ export const REMOTE_NODE_ENV_SCRIPT = `prepend_path_if_dir() {
   fi
 }
 
+T3_NODE_INSTALL_ERROR=""
+
+fail_t3_user_node_install() {
+  T3_NODE_INSTALL_ERROR="$1"
+  printf 'KamiCode could not install Node for SSH runtime: %s\\n' "$T3_NODE_INSTALL_ERROR" >&2
+  return 1
+}
+
 remote_node_satisfies_engine() {
   T3_NODE_ENGINE_RANGE=@@T3_NODE_ENGINE_RANGE@@
   if [ -z "$T3_NODE_ENGINE_RANGE" ]; then
@@ -364,11 +369,195 @@ remote_node_satisfies_engine() {
 NODE
 }
 
+download_t3_remote_file() {
+  T3_DOWNLOAD_URL="$1"
+  T3_DOWNLOAD_PATH="$2"
+  if command -v curl >/dev/null 2>&1; then
+    curl -fsSL "$T3_DOWNLOAD_URL" -o "$T3_DOWNLOAD_PATH"
+    return $?
+  fi
+  if command -v wget >/dev/null 2>&1; then
+    wget -qO "$T3_DOWNLOAD_PATH" "$T3_DOWNLOAD_URL"
+    return $?
+  fi
+  return 1
+}
+
+remote_node_major_from_range() {
+  T3_NODE_ENGINE_RANGE=@@T3_NODE_ENGINE_RANGE@@
+  T3_NODE_MAJOR="$(printf '%s\\n' "$T3_NODE_ENGINE_RANGE" | sed -n 's/^[^0-9]*\\([0-9][0-9]*\\).*/\\1/p')"
+  if [ -z "$T3_NODE_MAJOR" ]; then
+    T3_NODE_MAJOR=24
+  fi
+  printf '%s\\n' "$T3_NODE_MAJOR"
+}
+
+extract_t3_node_archive() {
+  T3_EXTRACT_ARCHIVE="$1"
+  T3_EXTRACT_DEST="$2"
+  T3_EXTRACT_LOG="$3"
+  : > "$T3_EXTRACT_LOG" 2>/dev/null || true
+
+  if tar -xJf "$T3_EXTRACT_ARCHIVE" -C "$T3_EXTRACT_DEST" 2>>"$T3_EXTRACT_LOG"; then
+    return 0
+  fi
+
+  if command -v xz >/dev/null 2>&1; then
+    if xz -dc "$T3_EXTRACT_ARCHIVE" 2>>"$T3_EXTRACT_LOG" | tar -xf - -C "$T3_EXTRACT_DEST" 2>>"$T3_EXTRACT_LOG"; then
+      return 0
+    fi
+  fi
+
+  if command -v python3 >/dev/null 2>&1; then
+    if python3 - "$T3_EXTRACT_ARCHIVE" "$T3_EXTRACT_DEST" >>"$T3_EXTRACT_LOG" 2>&1 <<'PY'
+import sys
+import tarfile
+
+archive_path, destination = sys.argv[1], sys.argv[2]
+with tarfile.open(archive_path, "r:xz") as archive:
+    archive.extractall(destination)
+PY
+    then
+      return 0
+    fi
+  fi
+
+  return 1
+}
+
+install_t3_user_node() {
+  T3_NODE_INSTALL_ERROR=""
+  T3_UNAME_SYSTEM="$(uname -s 2>/dev/null || true)"
+  T3_UNAME_MACHINE="$(uname -m 2>/dev/null || true)"
+  if [ "$T3_UNAME_SYSTEM" != "Linux" ]; then
+    fail_t3_user_node_install "automatic install is only supported on Linux hosts, detected '$T3_UNAME_SYSTEM'"
+    return 1
+  fi
+
+  case "$T3_UNAME_MACHINE" in
+    x86_64|amd64)
+      T3_NODE_ARCH=x64
+      ;;
+    aarch64|arm64)
+      T3_NODE_ARCH=arm64
+      ;;
+    *)
+      fail_t3_user_node_install "unsupported Linux architecture '$T3_UNAME_MACHINE'"
+      return 1
+      ;;
+  esac
+
+  if ! command -v curl >/dev/null 2>&1 && ! command -v wget >/dev/null 2>&1; then
+    fail_t3_user_node_install "remote host is missing curl and wget, so Node cannot be downloaded"
+    return 1
+  fi
+  if ! command -v tar >/dev/null 2>&1; then
+    fail_t3_user_node_install "remote host is missing tar, so Node cannot be extracted"
+    return 1
+  fi
+
+  T3_NODE_MAJOR="$(remote_node_major_from_range)"
+  T3_NODE_BASE_URL="https://nodejs.org/dist/latest-v$T3_NODE_MAJOR.x"
+  T3_NODE_HOME="$HOME/.t3/node"
+  T3_NODE_DOWNLOADS="$T3_NODE_HOME/downloads"
+  T3_NODE_CURRENT="$T3_NODE_HOME/current"
+  T3_SHASUMS_FILE="$T3_NODE_DOWNLOADS/SHASUMS256.txt"
+  if ! mkdir -p "$T3_NODE_DOWNLOADS"; then
+    fail_t3_user_node_install "could not create $T3_NODE_DOWNLOADS"
+    return 1
+  fi
+
+  if ! download_t3_remote_file "$T3_NODE_BASE_URL/SHASUMS256.txt" "$T3_SHASUMS_FILE"; then
+    fail_t3_user_node_install "could not download $T3_NODE_BASE_URL/SHASUMS256.txt using curl or wget"
+    return 1
+  fi
+
+  T3_NODE_TARBALL="$(grep "node-v.*-linux-$T3_NODE_ARCH.tar.xz" "$T3_SHASUMS_FILE" | awk '{print $2}' | head -n 1)"
+  if [ -z "$T3_NODE_TARBALL" ]; then
+    fail_t3_user_node_install "could not find a Linux $T3_NODE_ARCH Node tarball in $T3_NODE_BASE_URL/SHASUMS256.txt"
+    return 1
+  fi
+  T3_NODE_VERSION="\${T3_NODE_TARBALL%%-linux-*}"
+  T3_NODE_EXTRACTED_DIR="\${T3_NODE_TARBALL%.tar.xz}"
+  T3_NODE_INSTALL_DIR="$T3_NODE_HOME/$T3_NODE_EXTRACTED_DIR"
+  T3_NODE_TARBALL_PATH="$T3_NODE_DOWNLOADS/$T3_NODE_TARBALL"
+
+  if [ -x "$T3_NODE_INSTALL_DIR/bin/node" ]; then
+    PATH="$T3_NODE_INSTALL_DIR/bin:$PATH"
+    export PATH
+    remote_node_satisfies_engine
+    return $?
+  fi
+
+  printf 'Installing Node %s for KamiCode SSH runtime under %s.\\n' "$T3_NODE_MAJOR" "$T3_NODE_HOME" >&2
+  if ! download_t3_remote_file "$T3_NODE_BASE_URL/$T3_NODE_TARBALL" "$T3_NODE_TARBALL_PATH"; then
+    fail_t3_user_node_install "could not download $T3_NODE_BASE_URL/$T3_NODE_TARBALL using curl or wget"
+    return 1
+  fi
+
+  T3_NODE_EXPECTED_SHA="$(awk -v file="$T3_NODE_TARBALL" '$2 == file { print $1; exit }' "$T3_SHASUMS_FILE")"
+  if [ -n "$T3_NODE_EXPECTED_SHA" ] && command -v sha256sum >/dev/null 2>&1; then
+    if ! (cd "$T3_NODE_DOWNLOADS" && printf '%s  %s\\n' "$T3_NODE_EXPECTED_SHA" "$T3_NODE_TARBALL" | sha256sum -c - >/dev/null); then
+      fail_t3_user_node_install "downloaded Node archive failed checksum verification"
+      return 1
+    fi
+  fi
+
+  T3_NODE_TMP="$T3_NODE_HOME/extract.$$"
+  T3_NODE_EXTRACT_LOG="$T3_NODE_HOME/extract.$$.log"
+  rm -rf "$T3_NODE_TMP"
+  rm -f "$T3_NODE_EXTRACT_LOG"
+  if ! mkdir -p "$T3_NODE_TMP"; then
+    fail_t3_user_node_install "could not create temporary extract directory $T3_NODE_TMP"
+    return 1
+  fi
+  if ! extract_t3_node_archive "$T3_NODE_TARBALL_PATH" "$T3_NODE_TMP" "$T3_NODE_EXTRACT_LOG"; then
+    T3_NODE_EXTRACT_DETAIL="$(tail -n 8 "$T3_NODE_EXTRACT_LOG" 2>/dev/null | tr '\\n' ' ' | sed 's/[[:space:]][[:space:]]*/ /g' || true)"
+    rm -rf "$T3_NODE_TMP"
+    rm -f "$T3_NODE_EXTRACT_LOG"
+    if [ -n "$T3_NODE_EXTRACT_DETAIL" ]; then
+      fail_t3_user_node_install "could not extract $T3_NODE_TARBALL. Install xz-utils on the remote host or install Node manually. Extract error: $T3_NODE_EXTRACT_DETAIL"
+    else
+      fail_t3_user_node_install "could not extract $T3_NODE_TARBALL. Install xz-utils on the remote host or install Node manually"
+    fi
+    return 1
+  fi
+  if [ ! -x "$T3_NODE_TMP/$T3_NODE_EXTRACTED_DIR/bin/node" ]; then
+    rm -rf "$T3_NODE_TMP"
+    rm -f "$T3_NODE_EXTRACT_LOG"
+    fail_t3_user_node_install "extracted archive did not contain $T3_NODE_EXTRACTED_DIR/bin/node"
+    return 1
+  fi
+  rm -rf "$T3_NODE_INSTALL_DIR"
+  if ! mv "$T3_NODE_TMP/$T3_NODE_EXTRACTED_DIR" "$T3_NODE_INSTALL_DIR"; then
+    rm -rf "$T3_NODE_TMP"
+    rm -f "$T3_NODE_EXTRACT_LOG"
+    fail_t3_user_node_install "could not move extracted Node runtime into $T3_NODE_INSTALL_DIR"
+    return 1
+  fi
+  rm -rf "$T3_NODE_TMP"
+  rm -f "$T3_NODE_EXTRACT_LOG"
+  if [ -L "$T3_NODE_CURRENT" ] || [ -f "$T3_NODE_CURRENT" ]; then
+    rm -f "$T3_NODE_CURRENT"
+  fi
+  if [ ! -e "$T3_NODE_CURRENT" ]; then
+    ln -s "$T3_NODE_INSTALL_DIR" "$T3_NODE_CURRENT" 2>/dev/null || true
+  fi
+  PATH="$T3_NODE_INSTALL_DIR/bin:$PATH"
+  export PATH
+  if ! remote_node_satisfies_engine; then
+    fail_t3_user_node_install "installed Node at $T3_NODE_INSTALL_DIR does not satisfy required range @@T3_NODE_ENGINE_RANGE@@"
+    return 1
+  fi
+  return 0
+}
+
 ensure_remote_node_path() {
   if command -v node >/dev/null 2>&1 && remote_node_satisfies_engine >/dev/null 2>&1; then
     return 0
   fi
 
+  prepend_path_if_dir "$HOME/.t3/node/current/bin"
   prepend_path_if_dir "$HOME/.local/bin"
   prepend_path_if_dir "$HOME/bin"
   prepend_path_if_dir "/opt/homebrew/bin"
@@ -433,6 +622,12 @@ ensure_remote_node_path() {
     done
   fi
 
+  if ! command -v node >/dev/null 2>&1 || ! remote_node_satisfies_engine >/dev/null 2>&1; then
+    if ! install_t3_user_node; then
+      return 1
+    fi
+  fi
+
   command -v node >/dev/null 2>&1 && remote_node_satisfies_engine
 }
 `;
@@ -442,23 +637,46 @@ set -eu
 @@T3_NODE_ENV_SCRIPT@@
 ensure_remote_node_path || true
 T3_NODE_SCRIPT_PATH=@@T3_NODE_SCRIPT_PATH@@
+T3_PACKAGE_SPEC=@@T3_PACKAGE_SPEC@@
 if [ -n "$T3_NODE_SCRIPT_PATH" ]; then
   if ! command -v node >/dev/null 2>&1; then
-    printf 'Remote host is missing node on PATH. Install Node or configure a supported version manager for non-interactive shells.\\n' >&2
+    printf 'Remote host is missing node on PATH after checking common version managers and user-local install under $HOME/.t3/node. Install Node matching @@T3_NODE_ENGINE_RANGE@@ or fix the installer error above.\\n' >&2
     exit 1
   fi
   exec node "$T3_NODE_SCRIPT_PATH" "$@"
 fi
+T3_RUNNER_CACHE="$HOME/.t3/runner/t3-cli"
+T3_RUNNER_SPEC_FILE="$T3_RUNNER_CACHE/package-spec"
+T3_CACHED_T3="$T3_RUNNER_CACHE/node_modules/.bin/t3"
+if [ -x "$T3_CACHED_T3" ] && [ "$(cat "$T3_RUNNER_SPEC_FILE" 2>/dev/null || true)" = "$T3_PACKAGE_SPEC" ]; then
+  exec "$T3_CACHED_T3" "$@"
+fi
+
+if command -v npm >/dev/null 2>&1; then
+  mkdir -p "$T3_RUNNER_CACHE"
+  printf 'Installing %s for KamiCode SSH runtime under %s.\\n' "$T3_PACKAGE_SPEC" "$T3_RUNNER_CACHE" >&2
+  if npm install --prefix "$T3_RUNNER_CACHE" --no-audit --no-fund --loglevel=error "$T3_PACKAGE_SPEC" >/dev/null; then
+    printf '%s\\n' "$T3_PACKAGE_SPEC" >"$T3_RUNNER_SPEC_FILE"
+    if [ -x "$T3_CACHED_T3" ]; then
+      exec "$T3_CACHED_T3" "$@"
+    fi
+    printf 'Installed %s but %s was not created. Falling back to npx/npm exec.\\n' "$T3_PACKAGE_SPEC" "$T3_CACHED_T3" >&2
+  else
+    printf 'Could not install %s into %s. Falling back to npx/npm exec.\\n' "$T3_PACKAGE_SPEC" "$T3_RUNNER_CACHE" >&2
+  fi
+fi
+
 if command -v t3 >/dev/null 2>&1; then
   exec t3 "$@"
 fi
+
 if command -v npx >/dev/null 2>&1; then
-  exec npx --yes @@T3_PACKAGE_SPEC@@ "$@"
+  exec npx --yes "$T3_PACKAGE_SPEC" "$@"
 fi
 if command -v npm >/dev/null 2>&1; then
-  exec npm exec --yes @@T3_PACKAGE_SPEC@@ -- "$@"
+  exec npm exec --yes "$T3_PACKAGE_SPEC" -- "$@"
 fi
-printf 'Remote host is missing the t3 CLI and could not install @@T3_PACKAGE_SPEC@@ because node/npm/npx are unavailable on PATH. Install Node or configure a supported version manager for non-interactive shells.\\n' >&2
+printf 'Remote host is missing the t3 CLI and could not install %s because node/npm/npx are unavailable on PATH. Install Node or configure a supported version manager for non-interactive shells.\\n' "$T3_PACKAGE_SPEC" >&2
 exit 1
 `;
 
@@ -472,6 +690,7 @@ PORT_FILE="$STATE_DIR/port"
 PID_FILE="$STATE_DIR/pid"
 MANAGED_FILE="$STATE_DIR/managed"
 LOG_FILE="$STATE_DIR/server.log"
+SETUP_LOG_FILE="$STATE_DIR/setup.log"
 RUNNER_FILE="$STATE_DIR/run-t3.sh"
 RUNNER_NEXT="$STATE_DIR/run-t3.next.$$"
 mkdir -p "$STATE_DIR"
@@ -489,7 +708,20 @@ fi
 mv "$RUNNER_NEXT" "$RUNNER_FILE"
 chmod 700 "$RUNNER_FILE"
 if ! ensure_remote_node_path; then
-  printf 'Remote host is missing node on PATH. Install Node or configure a supported version manager for non-interactive shells.\\n' >&2
+  printf 'Remote host is missing node on PATH after checking common version managers and user-local install under $HOME/.t3/node. Install Node matching @@T3_NODE_ENGINE_RANGE@@ or fix the installer error above.\\n' >&2
+  exit 1
+fi
+provision_remote_runner() {
+  : >"$SETUP_LOG_FILE"
+  printf 'Preparing KamiCode SSH runtime on the remote host.\\n' >&2
+  if T3CODE_NO_BROWSER=1 "$RUNNER_FILE" --version >>"$SETUP_LOG_FILE" 2>&1; then
+    return 0
+  fi
+  printf 'Remote T3 setup failed before server launch.\\n' >&2
+  tail -n 80 "$SETUP_LOG_FILE" >&2 2>/dev/null || true
+  return 1
+}
+if ! provision_remote_runner; then
   exit 1
 fi
 pick_port() {
@@ -732,6 +964,7 @@ export const launchOrReuseRemoteServer = Effect.fn("ssh/tunnel.launchOrReuseRemo
     const result = yield* runSshCommand(target, {
       remoteCommandArgs: ["sh", "-s", "--", remoteStateKey(target)],
       stdin: buildRemoteLaunchScript(runner),
+      timeoutMs: REMOTE_LAUNCH_COMMAND_TIMEOUT_MS,
       ...(input?.authSecret === undefined ? {} : { authSecret: input.authSecret }),
       ...(input?.batchMode === undefined ? {} : { batchMode: input.batchMode }),
       ...(input?.interactiveAuth === undefined ? {} : { interactiveAuth: input.interactiveAuth }),
@@ -789,6 +1022,7 @@ export const issueRemotePairingToken = Effect.fn("ssh/tunnel.issueRemotePairingT
   const result = yield* runSshCommand(target, {
     remoteCommandArgs: ["sh", "-s"],
     stdin: buildRemotePairingScript(target, runner),
+    timeoutMs: REMOTE_LAUNCH_COMMAND_TIMEOUT_MS,
     ...(input?.authSecret === undefined ? {} : { authSecret: input.authSecret }),
     ...(input?.batchMode === undefined ? {} : { batchMode: input.batchMode }),
     ...(input?.interactiveAuth === undefined ? {} : { interactiveAuth: input.interactiveAuth }),
@@ -991,92 +1225,27 @@ function isLoopbackHostname(hostname: string): boolean {
   return normalized === "127.0.0.1" || normalized === "::1" || normalized === "localhost";
 }
 
-function resolveLoopbackSshHttpUrl(
-  rawHttpBaseUrl: unknown,
-  pathname: string,
-): Effect.Effect<URL, SshHttpBridgeError> {
-  return Effect.try({
-    try: () => {
-      if (typeof rawHttpBaseUrl !== "string" || rawHttpBaseUrl.trim().length === 0) {
-        throw new Error("Invalid SSH forwarded http base URL.");
-      }
-      const baseUrl = new URL(rawHttpBaseUrl);
-      if (!isLoopbackHostname(baseUrl.hostname)) {
-        throw new Error("SSH desktop bridge only supports loopback forwarded URLs.");
-      }
-      const url = new URL(baseUrl.toString());
-      url.pathname = pathname;
-      url.search = "";
-      url.hash = "";
-      return url;
-    },
-    catch: (cause) =>
-      new SshHttpBridgeError({
-        message: cause instanceof Error ? cause.message : "Invalid SSH forwarded http base URL.",
-        cause,
-      }),
-  });
-}
-
-export const fetchLoopbackSshJson = Effect.fn("ssh/tunnel.fetchLoopbackSshJson")(function* <
-  T,
->(input: {
-  readonly httpBaseUrl: unknown;
-  readonly pathname: string;
-  readonly method?: "GET" | "POST";
-  readonly bearerToken?: unknown;
-  readonly body?: unknown;
-}): Effect.fn.Return<T, SshHttpBridgeError, HttpClient.HttpClient> {
-  const requestUrl = yield* resolveLoopbackSshHttpUrl(input.httpBaseUrl, input.pathname);
-  const bearerToken =
-    typeof input.bearerToken === "string" && input.bearerToken.trim().length > 0
-      ? input.bearerToken
-      : null;
-
-  const request = (
-    input.method === "POST"
-      ? HttpClientRequest.post(requestUrl.toString())
-      : HttpClientRequest.get(requestUrl.toString())
-  ).pipe(
-    input.body === undefined ? (req) => req : HttpClientRequest.bodyJsonUnsafe(input.body),
-    bearerToken
-      ? HttpClientRequest.setHeader("authorization", `Bearer ${bearerToken}`)
-      : (req) => req,
-  );
-  const client = yield* HttpClient.HttpClient;
-  const response = yield* client.execute(request).pipe(
-    Effect.mapError(
-      (cause) =>
+export const resolveLoopbackSshHttpBaseUrl = Effect.fn("ssh/tunnel.resolveLoopbackSshHttpBaseUrl")(
+  function* (rawHttpBaseUrl: unknown): Effect.fn.Return<string, SshHttpBridgeError> {
+    return yield* Effect.try({
+      try: () => {
+        if (typeof rawHttpBaseUrl !== "string" || rawHttpBaseUrl.trim().length === 0) {
+          throw new Error("Invalid SSH forwarded http base URL.");
+        }
+        const baseUrl = new URL(rawHttpBaseUrl);
+        if (!isLoopbackHostname(baseUrl.hostname)) {
+          throw new Error("SSH desktop bridge only supports loopback forwarded URLs.");
+        }
+        return baseUrl.toString();
+      },
+      catch: (cause) =>
         new SshHttpBridgeError({
-          message: `Failed to reach SSH forwarded endpoint ${requestUrl.toString()}.`,
+          message: cause instanceof Error ? cause.message : "Invalid SSH forwarded http base URL.",
           cause,
         }),
-    ),
-  );
-  if (response.status < 200 || response.status >= 300) {
-    const text = yield* response.text.pipe(Effect.catch(() => Effect.succeed("")));
-    const parsedError = yield* decodeRemoteHttpError(text).pipe(
-      Effect.catch(() => Effect.succeed(null)),
-    );
-    const message =
-      parsedError?.error && parsedError.error.trim().length > 0
-        ? parsedError.error
-        : text || `SSH forwarded request failed (${response.status}).`;
-    return yield* new SshHttpBridgeError({
-      status: response.status,
-      message: `[ssh_http:${response.status}] ${message} (${input.method ?? "GET"} ${requestUrl.toString()})`,
     });
-  }
-  return (yield* response.json.pipe(
-    Effect.mapError(
-      (cause) =>
-        new SshHttpBridgeError({
-          message: `SSH forwarded endpoint ${requestUrl.toString()} returned invalid JSON.`,
-          cause,
-        }),
-    ),
-  )) as T;
-});
+  },
+);
 
 const reserveLocalTunnelPort = Effect.fn("ssh/tunnel.reserveLocalTunnelPort")(function* () {
   const net = yield* NetService.NetService;
@@ -1138,7 +1307,7 @@ const startSshTunnel = Effect.fn("ssh/tunnel.startSshTunnel")(function* (input: 
     `${input.localPort}:127.0.0.1:${input.remotePort}`,
     hostSpec,
   ];
-  const tunnelCommand = ["ssh", ...args];
+  const tunnelCommand = [SSH_COMMAND, ...args];
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   const scope = yield* Scope.Scope;
   yield* Effect.logDebug("ssh.tunnel.spawn.start", {
@@ -1151,9 +1320,8 @@ const startSshTunnel = Effect.fn("ssh/tunnel.startSshTunnel")(function* (input: 
   });
   const child = yield* spawner
     .spawn(
-      ChildProcess.make("ssh", args, {
+      ChildProcess.make(SSH_COMMAND, args, {
         env: childEnvironment,
-        shell: process.platform === "win32",
         stdin: {
           stream: Stream.empty,
           endOnDone: true,
@@ -1753,10 +1921,13 @@ const makeSshEnvironmentManager = Effect.fn("ssh/tunnel.SshEnvironmentManager.ma
   return SshEnvironmentManager.of({ ensureEnvironment, disconnectEnvironment });
 });
 
+/**
+ * @effect-expect-leaking ChildProcessSpawner | FileSystem | HttpClient | NetService | Path | SshPasswordPrompt
+ */
 export class SshEnvironmentManager extends Context.Service<
   SshEnvironmentManager,
   SshEnvironmentManagerShape
->()("@t3tools/ssh/SshEnvironmentManager") {
+>()("@t3tools/ssh/tunnel/SshEnvironmentManager") {
   static readonly layer = (options: SshEnvironmentManagerOptions = {}) =>
     Layer.effect(SshEnvironmentManager, makeSshEnvironmentManager(options));
 }

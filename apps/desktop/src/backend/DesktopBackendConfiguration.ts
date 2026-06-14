@@ -1,10 +1,12 @@
 import { parsePersistedServerObservabilitySettings } from "@t3tools/shared/serverSettings";
 import * as Context from "effect/Context";
+import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
+import * as Encoding from "effect/Encoding";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
-import * as Random from "effect/Random";
+import * as PlatformError from "effect/PlatformError";
 import * as Ref from "effect/Ref";
 
 import * as DesktopBackendManager from "./DesktopBackendManager.ts";
@@ -13,13 +15,16 @@ import * as DesktopObservability from "../app/DesktopObservability.ts";
 import * as DesktopServerExposure from "./DesktopServerExposure.ts";
 
 export interface DesktopBackendConfigurationShape {
-  readonly resolve: Effect.Effect<DesktopBackendManager.DesktopBackendStartConfig>;
+  readonly resolve: Effect.Effect<
+    DesktopBackendManager.DesktopBackendStartConfig,
+    PlatformError.PlatformError
+  >;
 }
 
 export class DesktopBackendConfiguration extends Context.Service<
   DesktopBackendConfiguration,
   DesktopBackendConfigurationShape
->()("t3/desktop/BackendConfiguration") {}
+>()("@t3tools/desktop/backend/DesktopBackendConfiguration") {}
 
 interface BackendObservabilitySettings {
   readonly otlpTracesUrl: Option.Option<string>;
@@ -46,6 +51,8 @@ const DESKTOP_BACKEND_ENV_NAMES = [
   "T3CODE_GITHUB_OAUTH_CLIENT_SECRET",
   "T3CODE_GITHUB_OAUTH_CALLBACK_URL",
 ] as const;
+
+const DEFAULT_DESKTOP_GITHUB_OAUTH_CLIENT_ID = "Ov23liguksmbhHst10WL";
 
 const backendChildEnvPatch = (): Record<string, string | undefined> =>
   Object.fromEntries(DESKTOP_BACKEND_ENV_NAMES.map((name) => [name, undefined]));
@@ -101,23 +108,6 @@ const readPersistedBackendObservabilitySettings: Effect.Effect<
   };
 });
 
-const getOrCreateBootstrapToken = Effect.fn("desktop.backendConfiguration.bootstrapToken")(
-  function* (tokenRef: Ref.Ref<Option.Option<string>>) {
-    const existing = yield* Ref.get(tokenRef);
-    if (Option.isSome(existing)) {
-      return existing.value;
-    }
-
-    let token = "";
-    while (token.length < 48) {
-      token += (yield* Random.nextUUIDv4).replace(/-/g, "");
-    }
-    token = token.slice(0, 48);
-    yield* Ref.set(tokenRef, Option.some(token));
-    return token;
-  },
-);
-
 const resolveBackendStartConfig = Effect.fn("desktop.backendConfiguration.resolveStartConfig")(
   function* (input: {
     readonly bootstrapToken: string;
@@ -130,7 +120,8 @@ const resolveBackendStartConfig = Effect.fn("desktop.backendConfiguration.resolv
     const environment = yield* DesktopEnvironment.DesktopEnvironment;
     const serverExposure = yield* DesktopServerExposure.DesktopServerExposure;
     const backendExposure = yield* serverExposure.backendConfig;
-    const githubOAuthClientId = readOptionalEnv("T3CODE_GITHUB_OAUTH_CLIENT_ID");
+    const githubOAuthClientId =
+      readOptionalEnv("T3CODE_GITHUB_OAUTH_CLIENT_ID") ?? DEFAULT_DESKTOP_GITHUB_OAUTH_CLIENT_ID;
     const githubOAuthClientSecret = readOptionalEnv("T3CODE_GITHUB_OAUTH_CLIENT_SECRET");
     const githubOAuthCallbackUrl = readOptionalEnvUrl("T3CODE_GITHUB_OAUTH_CALLBACK_URL");
 
@@ -175,11 +166,22 @@ export const layer = Layer.effect(
     const environment = yield* DesktopEnvironment.DesktopEnvironment;
     const fileSystem = yield* FileSystem.FileSystem;
     const serverExposure = yield* DesktopServerExposure.DesktopServerExposure;
+    const crypto = yield* Crypto.Crypto;
     const tokenRef = yield* Ref.make(Option.none<string>());
+    const getOrCreateBootstrapToken = Effect.gen(function* () {
+      const existing = yield* Ref.get(tokenRef);
+      if (Option.isSome(existing)) {
+        return existing.value;
+      }
+
+      const token = Encoding.encodeHex(yield* crypto.randomBytes(24));
+      yield* Ref.set(tokenRef, Option.some(token));
+      return token;
+    });
 
     return DesktopBackendConfiguration.of({
       resolve: Effect.gen(function* () {
-        const bootstrapToken = yield* getOrCreateBootstrapToken(tokenRef);
+        const bootstrapToken = yield* getOrCreateBootstrapToken;
         const observabilitySettings = yield* readPersistedBackendObservabilitySettings.pipe(
           Effect.provideService(FileSystem.FileSystem, fileSystem),
           Effect.provideService(DesktopEnvironment.DesktopEnvironment, environment),

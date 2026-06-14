@@ -26,15 +26,12 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
-        with:
-          bun-version-file: package.json
-
-      - name: Setup Node
-        uses: actions/setup-node@v6
+      - name: Setup Vite+
+        uses: voidzero-dev/setup-vp@v1
         with:
           node-version-file: package.json
+          cache: true
+          run-install: true
 
       - name: Resolve version
         id: version
@@ -63,9 +60,6 @@ jobs:
           "tag=v$version" >> $env:GITHUB_OUTPUT
           "release_name=KamiCode v$version" >> $env:GITHUB_OUTPUT
           "prerelease=$prerelease" >> $env:GITHUB_OUTPUT
-
-      - name: Install dependencies
-        run: bun install --frozen-lockfile
 
       - name: Align package versions
         run: node scripts/update-release-package-versions.ts "${{ steps.version.outputs.version }}"
@@ -97,6 +91,7 @@ jobs:
       - name: Build Windows installer
         env:
           T3CODE_DESKTOP_UPDATE_REPOSITORY: ${{ github.repository }}
+          T3CODE_GITHUB_OAUTH_CLIENT_ID: ${{ secrets.T3CODE_GITHUB_OAUTH_CLIENT_ID }}
         run: |
           node scripts/build-desktop-artifact.ts `
             --platform win `

@@ -12,6 +12,8 @@ import * as Schema from "effect/Schema";
 import { Argument, Command, Flag } from "effect/unstable/cli";
 import { fromJsonStringPretty } from "@t3tools/shared/schemaJson";
 
+import { isDirectlyExecuted } from "./lib/node-main.ts";
+
 export const releasePackageFiles = [
   "apps/server/package.json",
   "apps/desktop/package.json",
@@ -86,7 +88,7 @@ export const updateReleasePackageVersionsCommand = Command.make(
     ),
 ).pipe(Command.withDescription("Update release package versions across the workspace."));
 
-if (import.meta.main) {
+if (isDirectlyExecuted(import.meta.url)) {
   Command.run(updateReleasePackageVersionsCommand, { version: "0.0.0" }).pipe(
     Effect.provide(NodeServices.layer),
     NodeRuntime.runMain,
