@@ -36,7 +36,6 @@ import {
   type ThreadTurnState,
   type TurnDiffSummary,
 } from "./types";
-import { resolveEnvironmentHttpUrl } from "./environments/runtime";
 import { sanitizeThreadErrorMessage } from "./rpc/transportError";
 import { getThreadFromEnvironmentState } from "./threadDerivation";
 const isProviderDriverKindValue = Schema.is(ProviderDriverKind);
@@ -183,10 +182,6 @@ function mapMessage(environmentId: EnvironmentId, message: OrchestrationMessage)
     name: attachment.name,
     mimeType: attachment.mimeType,
     sizeBytes: attachment.sizeBytes,
-    previewUrl: resolveEnvironmentHttpUrl({
-      environmentId,
-      pathname: attachmentPreviewRoutePath(attachment.id),
-    }),
   }));
 
   return {
@@ -1064,10 +1059,6 @@ function toLegacyProvider(providerName: string | null): ProviderDriverKind {
     return providerName;
   }
   return ProviderDriverKind.make("codex");
-}
-
-function attachmentPreviewRoutePath(attachmentId: string): string {
-  return `/attachments/${encodeURIComponent(attachmentId)}`;
 }
 
 function updateThreadState(

@@ -11,6 +11,7 @@ import * as DesktopAssets from "../app/DesktopAssets.ts";
 import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
 import * as DesktopObservability from "../app/DesktopObservability.ts";
 import * as DesktopState from "../app/DesktopState.ts";
+import * as PreviewManager from "../preview/Manager.ts";
 import * as ElectronMenu from "../electron/ElectronMenu.ts";
 import * as ElectronShell from "../electron/ElectronShell.ts";
 import * as ElectronTheme from "../electron/ElectronTheme.ts";
@@ -36,7 +37,8 @@ type DesktopWindowRuntimeServices =
   | ElectronMenu.ElectronMenu
   | ElectronShell.ElectronShell
   | ElectronTheme.ElectronTheme
-  | ElectronWindow.ElectronWindow;
+  | ElectronWindow.ElectronWindow
+  | PreviewManager.PreviewManager;
 
 export class DesktopWindowDevServerUrlMissingError extends Data.TaggedError(
   "DesktopWindowDevServerUrlMissingError",
@@ -48,7 +50,8 @@ export class DesktopWindowDevServerUrlMissingError extends Data.TaggedError(
 
 export type DesktopWindowError =
   | DesktopWindowDevServerUrlMissingError
-  | ElectronWindow.ElectronWindowCreateError;
+  | ElectronWindow.ElectronWindowCreateError
+  | PreviewManager.PreviewManagerError;
 
 export interface DesktopWindowShape {
   readonly createMain: Effect.Effect<Electron.BrowserWindow, DesktopWindowError>;
@@ -207,6 +210,7 @@ const make = Effect.gen(function* () {
   const electronShell = yield* ElectronShell.ElectronShell;
   const electronTheme = yield* ElectronTheme.ElectronTheme;
   const electronWindow = yield* ElectronWindow.ElectronWindow;
+  const previewManager = yield* PreviewManager.PreviewManager;
   const serverExposure = yield* DesktopServerExposure.DesktopServerExposure;
   const state = yield* DesktopState.DesktopState;
   const context = yield* Effect.context<DesktopWindowRuntimeServices>();
@@ -215,6 +219,7 @@ const make = Effect.gen(function* () {
   const createWindow = Effect.fn("desktop.window.createWindow")(function* (
     backendHttpUrl: URL,
   ): Effect.fn.Return<Electron.BrowserWindow, DesktopWindowError> {
+    yield* previewManager.getBrowserSession();
     const applicationUrl = environment.isDevelopment
       ? yield* resolveDesktopDevServerUrl(environment)
       : backendHttpUrl.href;
@@ -237,9 +242,25 @@ const make = Effect.gen(function* () {
         contextIsolation: true,
         nodeIntegration: false,
         sandbox: true,
+        webviewTag: true,
       },
     });
     yield* syncWindowIcon(window, iconOption);
+
+    yield* previewManager.setMainWindow(window);
+    window.webContents.on("will-attach-webview", (event, webPreferences, params) => {
+      if (
+        typeof params.partition !== "string" ||
+        !previewManager.isBrowserPartition(params.partition)
+      ) {
+        event.preventDefault();
+        return;
+      }
+      webPreferences.sandbox = true;
+      webPreferences.nodeIntegration = false;
+      webPreferences.nodeIntegrationInSubFrames = false;
+      webPreferences.contextIsolation = false;
+    });
 
     window.webContents.on("context-menu", (event, params) => {
       event.preventDefault();

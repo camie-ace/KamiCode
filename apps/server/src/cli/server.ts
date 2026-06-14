@@ -1,3 +1,4 @@
+// @effect-diagnostics anyUnknownInErrorContext:off - CLI handlers compose framework-provided command requirements.
 import * as Effect from "effect/Effect";
 import { Command, GlobalFlag } from "effect/unstable/cli";
 

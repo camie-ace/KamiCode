@@ -8,6 +8,17 @@ import * as Ref from "effect/Ref";
 import type * as Electron from "electron";
 import { vi } from "vite-plus/test";
 
+vi.mock("electron", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("electron")>()),
+  session: {
+    fromPartition: vi.fn(() => ({
+      getUserAgent: vi.fn(() => "Mozilla/5.0 Electron/41.5.0 t3code/1.2.3"),
+      setPermissionRequestHandler: vi.fn(),
+      setUserAgent: vi.fn(),
+    })),
+  },
+}));
+
 import * as DesktopAssets from "../app/DesktopAssets.ts";
 import * as DesktopConfig from "../app/DesktopConfig.ts";
 import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
@@ -18,6 +29,7 @@ import * as ElectronTheme from "../electron/ElectronTheme.ts";
 import * as ElectronWindow from "../electron/ElectronWindow.ts";
 import * as DesktopServerExposure from "../backend/DesktopServerExposure.ts";
 import * as DesktopWindow from "./DesktopWindow.ts";
+import * as PreviewManager from "../preview/Manager.ts";
 
 const environmentInput = {
   dirname: "/repo/apps/desktop/dist-electron",
@@ -183,6 +195,12 @@ function makeTestLayer(input: {
             } satisfies ElectronShell.ElectronShellShape),
         electronThemeLayer,
         electronWindowLayer,
+        Layer.mock(PreviewManager.PreviewManager)({
+          getBrowserSession: () => Effect.succeed({} as Electron.Session),
+          setMainWindow: () => Effect.void,
+          isBrowserPartition: (partition) => partition.startsWith("persist:t3code-preview-"),
+          getBrowserPartition: () => Effect.succeed("persist:t3code-preview-test"),
+        }),
       ),
     ),
   );

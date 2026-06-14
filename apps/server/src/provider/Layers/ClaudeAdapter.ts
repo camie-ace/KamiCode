@@ -77,6 +77,7 @@ import {
   KAMI_TEST_HARNESS_TOOL_NAMESPACE,
   runBrowserHarnessDynamicTool,
 } from "../../testing/browserHarnessDynamicTool.ts";
+import * as McpProviderSession from "../../mcp/McpProviderSession.ts";
 import { makeClaudeEnvironment } from "../Drivers/ClaudeHome.ts";
 import {
   getClaudeModelCapabilities,
@@ -3620,6 +3621,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
           ? { issueTestHarnessPairingCredential: options.issueTestHarnessPairingCredential }
           : {}),
       });
+      const mcpSession = McpProviderSession.readMcpProviderSession(input.threadId);
       const queryOptions: ClaudeQueryOptions = {
         ...(input.cwd ? { cwd: input.cwd } : {}),
         ...(apiModelId ? { model: apiModelId } : {}),
@@ -3644,6 +3646,17 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         canUseTool,
         mcpServers: {
           [KAMI_TEST_HARNESS_TOOL_NAMESPACE]: testHarnessMcpServer,
+          ...(mcpSession
+            ? {
+                "t3-code": {
+                  type: "http" as const,
+                  url: mcpSession.endpoint,
+                  headers: {
+                    Authorization: mcpSession.authorizationHeader,
+                  },
+                },
+              }
+            : {}),
         },
         env: claudeEnvironment,
         ...(input.cwd ? { additionalDirectories: [input.cwd] } : {}),

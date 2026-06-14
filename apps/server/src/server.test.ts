@@ -1,3 +1,4 @@
+// @effect-diagnostics anyUnknownInErrorContext:off - Server integration tests compose many route and service test layers.
 import * as NodeHttpServer from "@effect/platform-node/NodeHttpServer";
 import * as NodeSocket from "@effect/platform-node/NodeSocket";
 import * as NodeServices from "@effect/platform-node/NodeServices";
@@ -20,6 +21,7 @@ import {
   type OrchestrationCommand,
   type OrchestrationEvent,
   ORCHESTRATION_WS_METHODS,
+  type PreviewEvent,
   ProjectId,
   ProviderDriverKind,
   ProviderInstanceId,
@@ -48,6 +50,7 @@ import * as Layer from "effect/Layer";
 import * as ManagedRuntime from "effect/ManagedRuntime";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
+import * as PubSub from "effect/PubSub";
 import * as Stream from "effect/Stream";
 import { ChildProcessSpawner } from "effect/unstable/process";
 import {
@@ -69,7 +72,6 @@ const TEST_EPOCH = DateTime.makeUnsafe("1970-01-01T00:00:00.000Z");
 import type { ServerConfigShape } from "./config.ts";
 import { deriveServerPaths, ServerConfig } from "./config.ts";
 import { makeRoutesLayer } from "./server.ts";
-import { resolveAttachmentRelativePath } from "./attachmentPaths.ts";
 import {
   CheckpointDiffQuery,
   type CheckpointDiffQueryShape,
@@ -97,6 +99,8 @@ import { ServerLifecycleEvents, type ServerLifecycleEventsShape } from "./server
 import { ServerRuntimeStartup, type ServerRuntimeStartupShape } from "./serverRuntimeStartup.ts";
 import { ServerSettingsService, type ServerSettingsShape } from "./serverSettings.ts";
 import { TerminalManager, type TerminalManagerShape } from "./terminal/Services/Manager.ts";
+import * as PreviewManager from "./preview/Manager.ts";
+import * as PortScanner from "./preview/PortScanner.ts";
 import {
   BrowserTraceCollector,
   type BrowserTraceCollectorShape,
@@ -559,7 +563,7 @@ const buildAppUnderTest = (options?: {
         Layer.provide(WorkspacePathsLive),
         Layer.provide(workspaceEntriesLayer),
       ),
-      ProjectFaviconResolverLive,
+      ProjectFaviconResolverLive.pipe(Layer.provide(WorkspacePathsLive)),
     );
     const gitWorkflowLayer = GitWorkflowService.layer.pipe(
       Layer.provideMerge(vcsDriverRegistryLayer),
@@ -709,6 +713,29 @@ const buildAppUnderTest = (options?: {
         Layer.mock(TerminalManager)({
           ...options?.layers?.terminalManager,
         }),
+      ),
+      Layer.provide(
+        Layer.mergeAll(
+          Layer.mock(PreviewManager.PreviewManager)({
+            open: () => Effect.die("PreviewManager not stubbed in this test"),
+            navigate: () => Effect.die("PreviewManager not stubbed in this test"),
+            reportStatus: () => Effect.void,
+            refresh: () => Effect.void,
+            close: () => Effect.void,
+            list: () => Effect.succeed({ sessions: [] }),
+            events: Stream.empty,
+            subscribeEvents: Effect.flatMap(PubSub.unbounded<PreviewEvent>(), (pubsub) =>
+              PubSub.subscribe(pubsub),
+            ),
+          }),
+          Layer.mock(PortScanner.PortDiscovery)({
+            scan: () => Effect.succeed([]),
+            subscribe: () => Effect.void,
+            retain: Effect.void,
+            registerTerminalProcesses: () => Effect.void,
+            unregisterTerminal: () => Effect.void,
+          }),
+        ),
       ),
       Layer.provide(
         Layer.mock(OrchestrationEngineService)({
@@ -3235,28 +3262,10 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         },
       });
       const wsTicketBody = (yield* wsTicketResponse.json) as { readonly ticket: string };
-      const faviconResponse = yield* HttpClient.get("/api/project-favicon?cwd=/tmp", {
-        headers: {
-          authorization: `Bearer ${tokenBody.access_token ?? ""}`,
-        },
-      });
-      const faviconBody = (yield* faviconResponse.json) as {
-        readonly _tag: string;
-        readonly code: string;
-        readonly requiredScope: string;
-        readonly traceId: string;
-      };
-
       assert.equal(overbroadPairingResponse.status, 403);
       assert.equal(overbroadPairingBody.requiredScope, "orchestration:read");
       assert.equal(pairingResponse.status, 200);
       assert.equal(wsTicketResponse.status, 200);
-      assert.equal(faviconResponse.status, 403);
-      assert.equal(faviconBody._tag, "EnvironmentScopeRequiredError");
-      assert.equal(faviconBody.code, "insufficient_scope");
-      assert.equal(faviconBody.requiredScope, "orchestration:read");
-      assert.equal(typeof faviconBody.traceId, "string");
-
       const wsUrl = `${yield* getWsServerUrl("/ws", { authenticated: false })}?wsTicket=${encodeURIComponent(wsTicketBody.ticket)}`;
       const rpcError = yield* Effect.flip(
         Effect.scoped(withWsRpcClient(wsUrl, (client) => client[WS_METHODS.serverGetConfig]({}))),
@@ -3800,29 +3809,6 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
-  it.effect(
-    "does not accept session tokens via query parameters on authenticated HTTP routes",
-    () =>
-      Effect.gen(function* () {
-        const fileSystem = yield* FileSystem.FileSystem;
-        const projectDir = yield* fileSystem.makeTempDirectoryScoped({
-          prefix: "t3-router-project-favicon-query-token-",
-        });
-
-        yield* buildAppUnderTest();
-
-        const { cookie } = yield* bootstrapBrowserSession();
-        assert.isDefined(cookie);
-        const sessionToken = extractSessionTokenFromSetCookie(cookie ?? "");
-
-        const response = yield* HttpClient.get(
-          `/api/project-favicon?cwd=${encodeURIComponent(projectDir)}&token=${encodeURIComponent(sessionToken)}`,
-        );
-
-        assert.equal(response.status, 401);
-      }).pipe(Effect.provide(NodeHttpServer.layerTest)),
-  );
-
   it.effect("accepts websocket rpc handshake with a bootstrapped browser session cookie", () =>
     Effect.gen(function* () {
       yield* buildAppUnderTest();
@@ -3891,60 +3877,6 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         assert.equal(response.environment.environmentId, testEnvironmentDescriptor.environmentId);
         assert.equal(response.auth.policy, "desktop-managed-local");
       }).pipe(Effect.provide(NodeHttpServer.layerTest)),
-  );
-
-  it.effect("serves attachment files from state dir", () =>
-    Effect.gen(function* () {
-      const fileSystem = yield* FileSystem.FileSystem;
-      const path = yield* Path.Path;
-      const attachmentId = "thread-11111111-1111-4111-8111-111111111111";
-
-      const config = yield* buildAppUnderTest();
-      const attachmentPath = resolveAttachmentRelativePath({
-        attachmentsDir: config.attachmentsDir,
-        relativePath: `${attachmentId}.bin`,
-      });
-      assert.isNotNull(attachmentPath, "Attachment path should be resolvable");
-
-      yield* fileSystem.makeDirectory(path.dirname(attachmentPath), { recursive: true });
-      yield* fileSystem.writeFileString(attachmentPath, "attachment-ok");
-
-      const response = yield* HttpClient.get(`/attachments/${attachmentId}`, {
-        headers: {
-          cookie: yield* getAuthenticatedSessionCookieHeader(),
-        },
-      });
-      assert.equal(response.status, 200);
-      assert.equal(yield* response.text, "attachment-ok");
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
-  );
-
-  it.effect("serves attachment files for URL-encoded paths", () =>
-    Effect.gen(function* () {
-      const fileSystem = yield* FileSystem.FileSystem;
-      const path = yield* Path.Path;
-
-      const config = yield* buildAppUnderTest();
-      const attachmentPath = resolveAttachmentRelativePath({
-        attachmentsDir: config.attachmentsDir,
-        relativePath: "thread%20folder/message%20folder/file%20name.png",
-      });
-      assert.isNotNull(attachmentPath, "Attachment path should be resolvable");
-
-      yield* fileSystem.makeDirectory(path.dirname(attachmentPath), { recursive: true });
-      yield* fileSystem.writeFileString(attachmentPath, "attachment-encoded-ok");
-
-      const response = yield* HttpClient.get(
-        "/attachments/thread%20folder/message%20folder/file%20name.png",
-        {
-          headers: {
-            cookie: yield* getAuthenticatedSessionCookieHeader(),
-          },
-        },
-      );
-      assert.equal(response.status, 200);
-      assert.equal(yield* response.text, "attachment-encoded-ok");
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
   it.effect("proxies browser OTLP trace exports through the server", () =>
@@ -4234,22 +4166,6 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         assert.equal(record.resourceAttributes["service.name"], "t3-web");
         assert.equal(record.status?.code, String(span.status.code));
       }).pipe(Effect.provide(NodeHttpServer.layerTest)),
-  );
-
-  it.effect("returns 404 for missing attachment id lookups", () =>
-    Effect.gen(function* () {
-      yield* buildAppUnderTest();
-
-      const response = yield* HttpClient.get(
-        "/attachments/missing-11111111-1111-4111-8111-111111111111",
-        {
-          headers: {
-            cookie: yield* getAuthenticatedSessionCookieHeader(),
-          },
-        },
-      );
-      assert.equal(response.status, 404);
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
   it.effect("routes websocket rpc server.upsertKeybinding", () =>

@@ -71,6 +71,11 @@ const RECOVERABLE_THREAD_RESUME_ERROR_SNIPPETS = [
   "unknown thread",
   "does not exist",
 ];
+
+export function hasConfiguredMcpServer(appServerArgs: ReadonlyArray<string> | undefined): boolean {
+  return appServerArgs?.some((argument) => argument.includes("mcp_servers.")) === true;
+}
+
 export const CodexResumeCursorSchema = Schema.Struct({
   threadId: Schema.String,
 });
@@ -117,6 +122,7 @@ export interface CodexSessionRuntimeOptions {
   readonly serviceTier?: CodexServiceTier | undefined;
   readonly resumeCursor?: CodexResumeCursor;
   readonly issueTestHarnessPairingCredential?: (() => Effect.Effect<string, string>) | undefined;
+  readonly appServerArgs?: ReadonlyArray<string>;
 }
 
 export interface CodexSessionRuntimeSendTurnInput {
@@ -778,7 +784,7 @@ export const makeCodexSessionRuntime = (
     };
     const child = yield* spawner
       .spawn(
-        ChildProcess.make(options.binaryPath, ["app-server"], {
+        ChildProcess.make(options.binaryPath, ["app-server", ...(options.appServerArgs ?? [])], {
           cwd: options.cwd,
           env,
           forceKillAfter: CODEX_APP_SERVER_FORCE_KILL_AFTER,
@@ -1366,6 +1372,15 @@ export const makeCodexSessionRuntime = (
       sendTurn: (input) =>
         Effect.gen(function* () {
           const providerThreadId = yield* readProviderThreadId;
+          if (hasConfiguredMcpServer(options.appServerArgs)) {
+            yield* client.request("config/mcpServer/reload", undefined).pipe(
+              Effect.catch((cause) =>
+                Effect.logWarning("Failed to refresh Codex MCP tool catalog before turn.", {
+                  cause,
+                }),
+              ),
+            );
+          }
           const normalizedModel = normalizeCodexModelSlug(
             input.model ?? (yield* Ref.get(sessionRef)).model,
           );
