@@ -23,7 +23,10 @@ import * as DesktopShellEnvironment from "../shell/DesktopShellEnvironment.ts";
 import * as DesktopState from "./DesktopState.ts";
 import * as DesktopUpdates from "../updates/DesktopUpdates.ts";
 
-const DEFAULT_DESKTOP_BACKEND_PORT = 3773;
+// KamiCode-specific port: upstream T3 Code defaults to 3773. Running both
+// desktop apps at once made them fight over 3773 (EADDRINUSE), so KamiCode
+// scans from its own base. Keep distinct from upstream on future merges.
+const DEFAULT_DESKTOP_BACKEND_PORT = 3873;
 const MAX_TCP_PORT = 65_535;
 const DESKTOP_BACKEND_PORT_PROBE_HOSTS = ["127.0.0.1", "0.0.0.0", "::"] as const;
 
