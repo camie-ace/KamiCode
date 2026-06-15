@@ -1,6 +1,14 @@
 import type { PreviewSessionSnapshot } from "@t3tools/contracts";
 import { getTerminalLabel } from "@t3tools/shared/terminalLabels";
-import { ClipboardList, FileDiff, Globe2, Plus, TerminalSquare, X } from "lucide-react";
+import {
+  ClipboardList,
+  FileDiff,
+  Globe2,
+  HistoryIcon,
+  Plus,
+  TerminalSquare,
+  X,
+} from "lucide-react";
 import { type ReactNode, useState } from "react";
 
 import { isElectron } from "~/env";
@@ -23,8 +31,10 @@ interface RightPanelTabsProps {
   onAddBrowser: () => void;
   onAddTerminal: () => void;
   onAddDiff: () => void;
+  onAddTests: () => void;
   browserAvailable: boolean;
   diffAvailable: boolean;
+  testsAvailable: boolean;
   children: ReactNode;
 }
 
@@ -32,8 +42,10 @@ function RightPanelEmptyState(props: {
   onAddBrowser: () => void;
   onAddTerminal: () => void;
   onAddDiff: () => void;
+  onAddTests: () => void;
   browserAvailable: boolean;
   diffAvailable: boolean;
+  testsAvailable: boolean;
 }) {
   const actions = [
     {
@@ -57,6 +69,13 @@ function RightPanelEmptyState(props: {
       available: props.diffAvailable,
       onClick: props.onAddDiff,
     },
+    {
+      label: "Tests",
+      description: "Inspect visible harness evidence.",
+      icon: HistoryIcon,
+      available: props.testsAvailable,
+      onClick: props.onAddTests,
+    },
   ] as const;
 
   return (
@@ -68,7 +87,7 @@ function RightPanelEmptyState(props: {
             Choose what to show in the right panel.
           </p>
         </div>
-        <div className="grid gap-2 sm:grid-cols-3">
+        <div className="grid gap-2 sm:grid-cols-2">
           {actions.map((action) => {
             const Icon = action.icon;
             return (
@@ -108,6 +127,8 @@ function surfaceTitle(
       );
     case "plan":
       return "Plan";
+    case "tests":
+      return "Tests";
     case "preview": {
       const snapshot = surface.resourceId ? sessions[surface.resourceId] : null;
       if (!snapshot || snapshot.navStatus._tag === "Idle") return "Browser";
@@ -156,6 +177,8 @@ function SurfaceIcon({
       return <TerminalSquare className="size-3.5 shrink-0" />;
     case "plan":
       return <ClipboardList className="size-3.5 shrink-0" />;
+    case "tests":
+      return <HistoryIcon className="size-3.5 shrink-0" />;
   }
 }
 
@@ -233,6 +256,10 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
               <FileDiff />
               Diff
             </MenuItem>
+            <MenuItem onClick={props.onAddTests} disabled={!props.testsAvailable}>
+              <HistoryIcon />
+              Tests
+            </MenuItem>
           </MenuPopup>
         </Menu>
       </div>
@@ -242,8 +269,10 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
             onAddBrowser={props.onAddBrowser}
             onAddTerminal={props.onAddTerminal}
             onAddDiff={props.onAddDiff}
+            onAddTests={props.onAddTests}
             browserAvailable={props.browserAvailable}
             diffAvailable={props.diffAvailable}
+            testsAvailable={props.testsAvailable}
           />
         ) : (
           props.children

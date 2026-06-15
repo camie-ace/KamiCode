@@ -4,7 +4,7 @@
  * This is intentionally a shallow workspace model: it owns an ordered set of
  * surface descriptors and the active surface, while each feature continues to
  * own its durable resource state. Browser surfaces point at preview tab ids,
- * terminal surfaces point at terminal session ids, and diff/plan remain
+ * terminal surfaces point at terminal session ids, and diff/plan/tests remain
  * singleton surfaces.
  */
 import { scopedThreadKey } from "@t3tools/client-runtime";
@@ -14,7 +14,7 @@ import { createJSONStorage, persist } from "zustand/middleware";
 
 import { resolveStorage } from "./lib/storage";
 
-export const RIGHT_PANEL_KINDS = ["plan", "diff", "preview", "terminal"] as const;
+export const RIGHT_PANEL_KINDS = ["plan", "tests", "diff", "preview", "terminal"] as const;
 export type RightPanelKind = (typeof RIGHT_PANEL_KINDS)[number];
 
 export type RightPanelSurface =
@@ -29,7 +29,8 @@ export type RightPanelSurface =
       splitDirection?: "horizontal" | "vertical";
     }
   | { id: "diff"; kind: "diff" }
-  | { id: "plan"; kind: "plan" };
+  | { id: "plan"; kind: "plan" }
+  | { id: "tests"; kind: "tests" };
 
 const RIGHT_PANEL_STORAGE_KEY = "t3code:right-panel-state:v2";
 const RIGHT_PANEL_STORAGE_VERSION = 5;
@@ -77,6 +78,8 @@ const singletonSurface = (
       return { id: "diff", kind };
     case "plan":
       return { id: "plan", kind };
+    case "tests":
+      return { id: "tests", kind };
   }
 };
 

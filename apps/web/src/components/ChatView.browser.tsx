@@ -1228,6 +1228,46 @@ const worker = setupWorker(
       },
     }),
   ),
+  http.get("*/api/test-harness/runs", () =>
+    HttpResponse.json({
+      runs: [
+        {
+          runId: "run-browser-test",
+          status: "pass",
+          success: true,
+          goal: "Verify the Tests panel opens from the toolbar.",
+          url: "http://127.0.0.1:5173",
+          finalUrl: "http://127.0.0.1:5173/dashboard",
+          title: "Dashboard",
+          evidenceSummary: "Visible harness completed successfully.",
+          outputSummary: "The dashboard loaded and the expected controls were visible.",
+          artifactPaths: {
+            trace: "/repo/project/.t3/test-harness/run-browser-test/trace.zip",
+            summary: "/repo/project/.t3/test-harness/run-browser-test/summary.json",
+            markdown: "/repo/project/.t3/test-harness/run-browser-test/summary.md",
+          },
+          screenshots: [
+            {
+              label: "Final",
+              path: "/repo/project/.t3/test-harness/run-browser-test/screenshots/final.png",
+            },
+          ],
+          videos: [
+            {
+              label: "Recording",
+              path: "/repo/project/.t3/test-harness/run-browser-test/video.webm",
+            },
+          ],
+          consoleErrors: [],
+          networkFailures: [],
+          completedAt: NOW_ISO,
+          durationMs: 1240,
+          markdownPath: "/repo/project/.t3/test-harness/run-browser-test/summary.md",
+          summaryPath: "/repo/project/.t3/test-harness/run-browser-test/summary.json",
+        },
+      ],
+    }),
+  ),
 );
 
 async function nextFrame(): Promise<void> {
@@ -2353,10 +2393,48 @@ describe("ChatView timeline estimator parity (full app)", () => {
       expect(
         selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, THREAD_REF),
       ).toEqual({
-        isOpen: true,
+        isOpen: false,
         activeSurfaceId: null,
         surfaces: [],
       });
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("opens visible harness evidence in the Tests right panel", async () => {
+    const mounted = await mountChatView({
+      viewport: WIDE_FOOTER_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-open-tests-panel" as MessageId,
+        targetText: "open tests panel",
+      }),
+    });
+
+    try {
+      const testRunsButton = await waitForElement(
+        () =>
+          document.querySelector<HTMLButtonElement>('button[aria-label="Open test runs panel"]'),
+        "Unable to find Test runs panel button.",
+      );
+      testRunsButton.click();
+
+      await vi.waitFor(
+        () => {
+          expect(
+            selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, THREAD_REF),
+          ).toEqual({
+            isOpen: true,
+            activeSurfaceId: "tests",
+            surfaces: [{ id: "tests", kind: "tests" }],
+          });
+          expect(document.body.textContent).toContain("Tests");
+          expect(document.body.textContent).toContain(
+            "The dashboard loaded and the expected controls were visible.",
+          );
+        },
+        { timeout: 8_000, interval: 16 },
+      );
     } finally {
       await mounted.cleanup();
     }

@@ -129,6 +129,17 @@ describe("rightPanelStore", () => {
     expect(selectActiveRightPanel(useRightPanelStore.getState().byThreadKey, refA)).toBe("plan");
   });
 
+  it("opens tests as a singleton panel surface", () => {
+    useRightPanelStore.getState().open(refA, "tests");
+    useRightPanelStore.getState().open(refA, "tests");
+
+    expect(selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, refA)).toEqual({
+      isOpen: true,
+      activeSurfaceId: "tests",
+      surfaces: [{ id: "tests", kind: "tests" }],
+    });
+  });
+
   it("?diff=1 always wins over persisted state", () => {
     useRightPanelStore.getState().open(refA, "preview");
     expect(

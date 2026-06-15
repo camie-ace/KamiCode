@@ -176,6 +176,7 @@ import { MessagesTimeline } from "./chat/MessagesTimeline";
 import { ChatHeader } from "./chat/ChatHeader";
 import { type ExpandedImagePreview } from "./chat/ExpandedImagePreview";
 import { NoActiveThreadState } from "./NoActiveThreadState";
+import { TestHarnessRunsPanel } from "./TestHarnessRunsControl";
 import { resolveEffectiveEnvMode, resolveEnvironmentOptionLabel } from "./BranchToolbar.logic";
 import { ProviderStatusBanner } from "./chat/ProviderStatusBanner";
 import { ThreadErrorBanner } from "./chat/ThreadErrorBanner";
@@ -2446,6 +2447,18 @@ export default function ChatView(props: ChatViewProps) {
     onDiffPanelOpen,
     threadId,
   ]);
+  const openTestsPanel = useCallback(() => {
+    if (!activeThreadRef || !activeProject?.cwd) return;
+    useRightPanelStore.getState().open(activeThreadRef, "tests");
+    if (diffOpen) {
+      void navigate({
+        to: "/$environmentId/$threadId",
+        params: { environmentId, threadId },
+        replace: true,
+        search: (previous) => ({ ...stripDiffSearchParams(previous), diff: undefined }),
+      });
+    }
+  }, [activeProject?.cwd, activeThreadRef, diffOpen, environmentId, navigate, threadId]);
   // Right-panel arbitration:
   //   - The diff panel's openness is mirrored by the `?diff=1` URL search
   //     param so it deep-links cleanly. The store still records preview/plan
@@ -3299,6 +3312,9 @@ export default function ChatView(props: ChatViewProps) {
       if (surface.kind === "terminal") {
         setTerminalFocusRequestId((value) => value + 1);
       }
+      if (surface.kind === "plan") {
+        planSidebarDismissedForTurnRef.current = null;
+      }
       if (surface.kind === "diff" && !diffOpen) {
         onDiffPanelOpen?.();
         void navigate({
@@ -3343,6 +3359,9 @@ export default function ChatView(props: ChatViewProps) {
         useRightPanelStore.getState().byThreadKey,
         activeThreadRef,
       );
+      if (surface.kind === "plan" && nextActiveSurface === null) {
+        useRightPanelStore.getState().close(activeThreadRef);
+      }
       if (nextActiveSurface?.kind === "preview" && nextActiveSurface.resourceId) {
         usePreviewStateStore.getState().setActiveTab(activeThreadRef, nextActiveSurface.resourceId);
       }
@@ -4892,6 +4911,7 @@ export default function ChatView(props: ChatViewProps) {
             onUpdateProjectTestEnvironments={saveProjectTestEnvironments}
             onToggleTerminal={toggleTerminalVisibility}
             onToggleRightPanel={toggleRightPanel}
+            onOpenTestsPanel={openTestsPanel}
           />
         </header>
 
@@ -4930,6 +4950,7 @@ export default function ChatView(props: ChatViewProps) {
                 workspaceRoot={activeWorkspaceRoot}
                 skills={activeProviderStatus?.skills ?? EMPTY_PROVIDER_SKILLS}
                 onIsAtEndChange={onIsAtEndChange}
+                onOpenTestsPanel={openTestsPanel}
               />
 
               {/* scroll to bottom pill — shown when user has scrolled away from the bottom */}
@@ -5108,8 +5129,10 @@ export default function ChatView(props: ChatViewProps) {
           onAddBrowser={createBrowserSurface}
           onAddTerminal={addTerminalSurface}
           onAddDiff={addDiffSurface}
+          onAddTests={openTestsPanel}
           browserAvailable={isPreviewSupportedInRuntime()}
           diffAvailable={isServerThread && isGitRepo}
+          testsAvailable={Boolean(activeProject?.cwd)}
         >
           {activeRightPanelSurface?.kind === "preview" ? (
             <Suspense fallback={null}>
@@ -5145,6 +5168,21 @@ export default function ChatView(props: ChatViewProps) {
                 <DiffPanel mode="embedded" />
               </Suspense>
             </DiffWorkerPoolProvider>
+          ) : activeRightPanelSurface?.kind === "plan" ? (
+            <PlanSidebar
+              activePlan={activePlan}
+              activeProposedPlan={sidebarProposedPlan}
+              label={planSidebarLabel}
+              environmentId={environmentId}
+              threadRef={activeThreadRef}
+              markdownCwd={gitCwd ?? undefined}
+              workspaceRoot={activeWorkspaceRoot}
+              timestampFormat={timestampFormat}
+              mode="embedded"
+              onClose={closePlanSidebar}
+            />
+          ) : activeRightPanelSurface?.kind === "tests" ? (
+            <TestHarnessRunsPanel projectId={activeProject?.id} projectCwd={activeProject?.cwd} />
           ) : null}
         </RightPanelTabs>
       ) : null}
@@ -5162,8 +5200,10 @@ export default function ChatView(props: ChatViewProps) {
             onAddBrowser={createBrowserSurface}
             onAddTerminal={addTerminalSurface}
             onAddDiff={addDiffSurface}
+            onAddTests={openTestsPanel}
             browserAvailable={isPreviewSupportedInRuntime()}
             diffAvailable={isServerThread && isGitRepo}
+            testsAvailable={Boolean(activeProject?.cwd)}
           >
             {activeRightPanelSurface?.kind === "preview" ? (
               <Suspense fallback={null}>
@@ -5212,6 +5252,8 @@ export default function ChatView(props: ChatViewProps) {
                 mode="embedded"
                 onClose={closePlanSidebar}
               />
+            ) : activeRightPanelSurface?.kind === "tests" ? (
+              <TestHarnessRunsPanel projectId={activeProject?.id} projectCwd={activeProject?.cwd} />
             ) : null}
           </RightPanelTabs>
         </RightPanelSheet>

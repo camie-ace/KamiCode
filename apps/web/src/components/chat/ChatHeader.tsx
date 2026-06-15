@@ -48,6 +48,7 @@ interface ChatHeaderProps {
   onUpdateProjectTestEnvironments: (testEnvironments: ProjectTestEnvironment[]) => Promise<void>;
   onToggleTerminal: () => void;
   onToggleRightPanel: () => void;
+  onOpenTestsPanel: () => void;
 }
 
 export function shouldShowOpenInPicker(input: {
@@ -88,6 +89,7 @@ export const ChatHeader = memo(function ChatHeader({
   onUpdateProjectTestEnvironments,
   onToggleTerminal,
   onToggleRightPanel,
+  onOpenTestsPanel,
 }: ChatHeaderProps) {
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const showOpenInPicker = shouldShowOpenInPicker({
@@ -135,7 +137,11 @@ export const ChatHeader = memo(function ChatHeader({
           />
         )}
         {activeProjectName && (
-          <TestHarnessRunsControl projectId={activeProjectId} projectCwd={activeProjectCwd} />
+          <TestHarnessRunsControl
+            projectId={activeProjectId}
+            projectCwd={activeProjectCwd}
+            onOpenPanel={onOpenTestsPanel}
+          />
         )}
         {showOpenInPicker && (
           <OpenInPicker

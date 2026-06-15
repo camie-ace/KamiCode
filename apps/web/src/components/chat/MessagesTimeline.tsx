@@ -137,6 +137,7 @@ interface TimelineRowSharedState {
   onRevertUserMessage: (messageId: MessageId) => void;
   onImageExpand: (preview: ExpandedImagePreview) => void;
   onOpenTurnDiff: (turnId: TurnId, filePath?: string) => void;
+  onOpenTestsPanel?: ((runId: string) => void) | undefined;
   onToggleTurnFold: (turnId: TurnId) => void;
 }
 
@@ -177,6 +178,7 @@ interface MessagesTimelineProps {
   workspaceRoot: string | undefined;
   skills?: ReadonlyArray<Pick<ServerProviderSkill, "name" | "displayName">>;
   onIsAtEndChange: (isAtEnd: boolean) => void;
+  onOpenTestsPanel?: ((runId: string) => void) | undefined;
 }
 
 // ---------------------------------------------------------------------------
@@ -204,6 +206,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   workspaceRoot,
   skills = EMPTY_TIMELINE_SKILLS,
   onIsAtEndChange,
+  onOpenTestsPanel,
 }: MessagesTimelineProps) {
   const [expandedTurnIds, setExpandedTurnIds] = useState<ReadonlySet<TurnId>>(new Set());
 
@@ -334,6 +337,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       onRevertUserMessage,
       onImageExpand,
       onOpenTurnDiff,
+      onOpenTestsPanel,
       onToggleTurnFold,
     }),
     [
@@ -347,6 +351,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       onRevertUserMessage,
       onImageExpand,
       onOpenTurnDiff,
+      onOpenTestsPanel,
       onToggleTurnFold,
     ],
   );
@@ -1582,6 +1587,7 @@ function EvidenceArtifactLink(props: {
 }
 
 function EvidenceRunCard({ evidenceRun }: { evidenceRun: EvidenceRunWorkEntry }) {
+  const { onOpenTestsPanel } = use(TimelineRowCtx);
   const visibleScreenshots = evidenceRun.screenshots.slice(-6);
   const hiddenScreenshotCount = Math.max(
     0,
@@ -1620,6 +1626,11 @@ function EvidenceRunCard({ evidenceRun }: { evidenceRun: EvidenceRunWorkEntry })
           ) : null}
         </div>
         <div className="flex flex-wrap gap-1.5">
+          {onOpenTestsPanel ? (
+            <Button variant="outline" size="xs" onClick={() => onOpenTestsPanel(evidenceRun.runId)}>
+              Open Tests
+            </Button>
+          ) : null}
           <TestHarnessTraceViewer tracePath={evidenceRun.tracePath} compact />
           <EvidenceArtifactLink
             label="Summary"
