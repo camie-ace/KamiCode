@@ -3267,22 +3267,24 @@ export default function ChatView(props: ChatViewProps) {
       interactionMode === "default" ? "plan" : interactionMode === "plan" ? "test" : "default";
     handleInteractionModeChange(nextInteractionMode);
   }, [handleInteractionModeChange, interactionMode]);
+  const dismissPlanSidebarForCurrentTurn = useCallback(() => {
+    planSidebarDismissedForTurnRef.current =
+      activePlan?.turnId ?? sidebarProposedPlan?.turnId ?? "__dismissed__";
+  }, [activePlan?.turnId, sidebarProposedPlan?.turnId]);
   const togglePlanSidebar = useCallback(() => {
     if (!activeThreadRef) return;
     if (planSidebarOpen) {
-      planSidebarDismissedForTurnRef.current =
-        activePlan?.turnId ?? sidebarProposedPlan?.turnId ?? "__dismissed__";
+      dismissPlanSidebarForCurrentTurn();
     } else {
       planSidebarDismissedForTurnRef.current = null;
     }
     useRightPanelStore.getState().toggle(activeThreadRef, "plan");
-  }, [activePlan?.turnId, activeThreadRef, planSidebarOpen, sidebarProposedPlan?.turnId]);
+  }, [activeThreadRef, dismissPlanSidebarForCurrentTurn, planSidebarOpen]);
   const closePlanSidebar = useCallback(() => {
     if (!activeThreadRef) return;
     useRightPanelStore.getState().close(activeThreadRef);
-    planSidebarDismissedForTurnRef.current =
-      activePlan?.turnId ?? sidebarProposedPlan?.turnId ?? "__dismissed__";
-  }, [activePlan?.turnId, activeThreadRef, sidebarProposedPlan?.turnId]);
+    dismissPlanSidebarForCurrentTurn();
+  }, [activeThreadRef, dismissPlanSidebarForCurrentTurn]);
   const closePreviewPanel = useCallback(() => {
     if (!activeThreadRef) return;
     useRightPanelStore.getState().close(activeThreadRef);
@@ -3318,11 +3320,17 @@ export default function ChatView(props: ChatViewProps) {
   );
   const toggleRightPanel = useCallback(() => {
     if (!activeThreadRef) return;
+    if (planSidebarOpen) {
+      dismissPlanSidebarForCurrentTurn();
+    }
     useRightPanelStore.getState().toggleVisibility(activeThreadRef);
-  }, [activeThreadRef]);
+  }, [activeThreadRef, dismissPlanSidebarForCurrentTurn, planSidebarOpen]);
   const closeRightPanelSurface = useCallback(
     (surface: RightPanelSurface) => {
       if (!activeThreadRef) return;
+      if (surface.kind === "plan") {
+        dismissPlanSidebarForCurrentTurn();
+      }
       if (surface.kind === "preview" && surface.resourceId) {
         usePreviewStateStore.getState().removeSession(activeThreadRef, surface.resourceId);
         const api = readEnvironmentApi(activeThreadRef.environmentId);
@@ -3359,7 +3367,14 @@ export default function ChatView(props: ChatViewProps) {
         });
       }
     },
-    [activeThreadRef, diffOpen, environmentId, navigate, threadId],
+    [
+      activeThreadRef,
+      diffOpen,
+      dismissPlanSidebarForCurrentTurn,
+      environmentId,
+      navigate,
+      threadId,
+    ],
   );
   const persistThreadSettingsForNextTurn = useCallback(
     async (input: {

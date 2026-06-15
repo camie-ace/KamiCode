@@ -1035,6 +1035,58 @@ function createSnapshotWithPlanFollowUpPrompt(options?: {
   };
 }
 
+function createSnapshotWithActivePlan(): OrchestrationReadModel {
+  const snapshot = createSnapshotForTargetUser({
+    targetMessageId: "msg-user-active-plan-target" as MessageId,
+    targetText: "active plan thread",
+    sessionStatus: "running",
+  });
+  const activeTurnId = "turn-active-plan" as TurnId;
+
+  return {
+    ...snapshot,
+    threads: snapshot.threads.map((thread) =>
+      thread.id === THREAD_ID
+        ? Object.assign({}, thread, {
+            latestTurn: {
+              turnId: activeTurnId,
+              state: "running",
+              requestedAt: isoAt(1_000),
+              startedAt: isoAt(1_001),
+              completedAt: null,
+              assistantMessageId: null,
+            },
+            activities: [
+              {
+                id: EventId.make("activity-active-plan-updated"),
+                tone: "info",
+                kind: "turn.plan.updated",
+                summary: "Plan updated",
+                payload: {
+                  explanation: "Working through the release tasks.",
+                  plan: [
+                    { step: "Reproduce the panel bug", status: "completed" },
+                    { step: "Fix explicit dismissal", status: "inProgress" },
+                  ],
+                },
+                turnId: activeTurnId,
+                sequence: 1,
+                createdAt: isoAt(1_002),
+              },
+            ],
+            session: {
+              ...thread.session,
+              status: "running",
+              activeTurnId,
+              updatedAt: isoAt(1_002),
+            },
+            updatedAt: isoAt(1_002),
+          })
+        : thread,
+    ),
+  };
+}
+
 function resolveWsRpc(body: NormalizedWsRpcRequestBody): unknown {
   const customResult = customWsRpcResolver?.(body);
   if (customResult !== undefined) {
@@ -2226,6 +2278,84 @@ describe("ChatView timeline estimator parity (full app)", () => {
               request.terminalId === "term-3",
           ),
         ).toBe(true);
+      });
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("keeps an active plan panel dismissed from the right panel toggle", async () => {
+    const mounted = await mountChatView({
+      viewport: WIDE_FOOTER_VIEWPORT,
+      snapshot: createSnapshotWithActivePlan(),
+    });
+
+    try {
+      await vi.waitFor(
+        () => {
+          expect(
+            selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, THREAD_REF),
+          ).toEqual({
+            isOpen: true,
+            activeSurfaceId: "plan",
+            surfaces: [{ id: "plan", kind: "plan" }],
+          });
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+
+      const rightPanelToggle = await waitForElement(
+        () => document.querySelector<HTMLButtonElement>('button[aria-label="Toggle right panel"]'),
+        "Unable to find right panel toggle.",
+      );
+      rightPanelToggle.click();
+      await waitForLayout();
+
+      expect(
+        selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, THREAD_REF),
+      ).toEqual({
+        isOpen: false,
+        activeSurfaceId: "plan",
+        surfaces: [{ id: "plan", kind: "plan" }],
+      });
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("keeps an active plan panel dismissed from the Plan tab close button", async () => {
+    const mounted = await mountChatView({
+      viewport: WIDE_FOOTER_VIEWPORT,
+      snapshot: createSnapshotWithActivePlan(),
+    });
+
+    try {
+      await vi.waitFor(
+        () => {
+          expect(
+            selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, THREAD_REF),
+          ).toEqual({
+            isOpen: true,
+            activeSurfaceId: "plan",
+            surfaces: [{ id: "plan", kind: "plan" }],
+          });
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+
+      const closePlanButton = await waitForElement(
+        () => document.querySelector<HTMLButtonElement>('button[aria-label="Close Plan"]'),
+        "Unable to find Plan tab close button.",
+      );
+      closePlanButton.click();
+      await waitForLayout();
+
+      expect(
+        selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, THREAD_REF),
+      ).toEqual({
+        isOpen: true,
+        activeSurfaceId: null,
+        surfaces: [],
       });
     } finally {
       await mounted.cleanup();
