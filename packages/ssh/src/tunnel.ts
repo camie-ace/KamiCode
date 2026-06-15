@@ -34,9 +34,9 @@ import {
   collectProcessOutput,
   getLastNonEmptyOutputLine,
   remoteStateKey,
+  resolveSshCommand,
   resolveSshTarget,
   runSshCommand,
-  SSH_COMMAND,
   targetConnectionKey,
 } from "./command.ts";
 import {
@@ -49,7 +49,9 @@ import {
   SshReadinessError,
 } from "./errors.ts";
 
-export const DEFAULT_REMOTE_PORT = 3773;
+// Matches KamiCode's DEFAULT_PORT (upstream T3 Code uses 3773). Keep distinct
+// from upstream on future merges so remote KamiCode servers resolve correctly.
+export const DEFAULT_REMOTE_PORT = 3873;
 const REMOTE_PORT_SCAN_WINDOW = 200;
 const SSH_READY_TIMEOUT_MS = 20_000;
 const SSH_READY_PROBE_TIMEOUT_MS = 1_000;
@@ -1307,7 +1309,8 @@ const startSshTunnel = Effect.fn("ssh/tunnel.startSshTunnel")(function* (input: 
     `${input.localPort}:127.0.0.1:${input.remotePort}`,
     hostSpec,
   ];
-  const tunnelCommand = [SSH_COMMAND, ...args];
+  const sshCommand = yield* resolveSshCommand;
+  const tunnelCommand = [sshCommand, ...args];
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   const scope = yield* Scope.Scope;
   yield* Effect.logDebug("ssh.tunnel.spawn.start", {
@@ -1320,8 +1323,9 @@ const startSshTunnel = Effect.fn("ssh/tunnel.startSshTunnel")(function* (input: 
   });
   const child = yield* spawner
     .spawn(
-      ChildProcess.make(SSH_COMMAND, args, {
+      ChildProcess.make(sshCommand, args, {
         env: childEnvironment,
+        extendEnv: true,
         stdin: {
           stream: Stream.empty,
           endOnDone: true,

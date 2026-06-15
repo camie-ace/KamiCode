@@ -5,6 +5,7 @@ import {
   AuthOrchestrationReadScope,
   EnvironmentHttpApi,
 } from "@t3tools/contracts";
+import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
 import { decodeOtlpTraceRecords } from "@t3tools/shared/observability";
 import * as NodeFs from "node:fs/promises";
 import { createRequire } from "node:module";
@@ -35,6 +36,11 @@ import {
 } from "./attachmentPaths.ts";
 import { resolveAttachmentPathById } from "./attachmentStore.ts";
 import { resolveStaticDir, ServerConfig } from "./config.ts";
+import {
+  ASSET_ROUTE_PREFIX,
+  FALLBACK_PROJECT_FAVICON_SVG,
+  resolveAsset,
+} from "./assets/AssetAccess.ts";
 import { BrowserTraceCollector } from "./observability/Services/BrowserTraceCollector.ts";
 import { ProjectFaviconResolver } from "./project/Services/ProjectFaviconResolver.ts";
 import * as EnvironmentAuth from "./auth/EnvironmentAuth.ts";
@@ -60,7 +66,6 @@ import {
 } from "./testing/browserHarness.ts";
 
 const PROJECT_FAVICON_CACHE_CONTROL = "public, max-age=3600";
-const FALLBACK_PROJECT_FAVICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="#6b728080" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-fallback="project-favicon"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-8l-2-2H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2Z"/></svg>`;
 const OTLP_TRACES_PROXY_PATH = "/api/observability/v1/traces";
 export const TEST_HARNESS_ARTIFACT_ROUTE_PATH = "/api/test-harness/artifact";
 export const TEST_HARNESS_RUNS_ROUTE_PATH = "/api/test-harness/runs";
@@ -69,6 +74,7 @@ const LOOPBACK_HOSTNAMES = new Set(["127.0.0.1", "::1", "localhost"]);
 const DEFAULT_TEST_HARNESS_RUN_LIMIT = 12;
 const MAX_TEST_HARNESS_RUN_LIMIT = 50;
 const requireFromHttp = createRequire(import.meta.url);
+const hostProcessPlatform = Effect.runSync(HostProcessPlatform);
 let playwrightTraceViewerRoot: string | undefined;
 
 export const browserApiCorsLayer = Layer.unwrap(
@@ -112,7 +118,7 @@ function isDevProxyRequestPath(pathname: string): boolean {
 }
 
 function normalizePathForPlatform(value: string): string {
-  return process.platform === "win32" ? value.toLowerCase() : value;
+  return hostProcessPlatform === "win32" ? value.toLowerCase() : value;
 }
 
 export function resolveTestHarnessArtifactPath(input: {
@@ -450,6 +456,52 @@ export const otlpTracesProxyRouteLayer = HttpRouter.add(
       EnvironmentScopeRequiredError: HttpServerRespondable.toResponse,
     }),
   ),
+);
+
+export const assetRouteLayer = HttpRouter.add(
+  "GET",
+  `${ASSET_ROUTE_PREFIX}/*`,
+  Effect.gen(function* () {
+    const request = yield* HttpServerRequest.HttpServerRequest;
+    const url = HttpServerRequest.toURL(request);
+    if (Option.isNone(url)) {
+      return HttpServerResponse.text("Bad Request", { status: 400 });
+    }
+
+    const suffix = url.value.pathname.slice(`${ASSET_ROUTE_PREFIX}/`.length);
+    const separatorIndex = suffix.indexOf("/");
+    if (separatorIndex <= 0) {
+      return HttpServerResponse.text("Not Found", { status: 404 });
+    }
+
+    const asset = yield* resolveAsset(
+      suffix.slice(0, separatorIndex),
+      suffix.slice(separatorIndex + 1),
+    );
+    if (!asset) {
+      return HttpServerResponse.text("Not Found", { status: 404 });
+    }
+    if (asset.kind === "project-favicon-fallback") {
+      return HttpServerResponse.text(FALLBACK_PROJECT_FAVICON_SVG, {
+        status: 200,
+        contentType: "image/svg+xml",
+        headers: {
+          "Cache-Control": "private, max-age=3600",
+          "X-Content-Type-Options": "nosniff",
+        },
+      });
+    }
+
+    return yield* HttpServerResponse.file(asset.path, {
+      status: 200,
+      headers: {
+        "Cache-Control": "private, max-age=3600",
+        "X-Content-Type-Options": "nosniff",
+      },
+    }).pipe(
+      Effect.orElseSucceed(() => HttpServerResponse.text("Internal Server Error", { status: 500 })),
+    );
+  }),
 );
 
 export const attachmentsRouteLayer = HttpRouter.add(

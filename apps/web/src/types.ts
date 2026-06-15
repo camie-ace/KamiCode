@@ -33,6 +33,7 @@ export type ProjectTestEnvironment = ContractProjectTestEnvironment;
 export interface ThreadTerminalGroup {
   id: string;
   terminalIds: string[];
+  splitDirection?: "horizontal" | "vertical";
 }
 
 export interface ChatImageAttachment {

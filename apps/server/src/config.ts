@@ -14,7 +14,9 @@ import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 import * as Context from "effect/Context";
 
-export const DEFAULT_PORT = 3773;
+// KamiCode-specific default (upstream T3 Code uses 3773) so the two apps'
+// servers don't collide. Keep distinct from upstream on future merges.
+export const DEFAULT_PORT = 3873;
 
 export const RuntimeMode = Schema.Literals(["web", "desktop"]);
 export type RuntimeMode = typeof RuntimeMode.Type;

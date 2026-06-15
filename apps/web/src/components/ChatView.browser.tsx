@@ -65,6 +65,7 @@ import { AppAtomRegistryProvider } from "../rpc/atomRegistry";
 import { getServerConfig } from "../rpc/serverState";
 import { getRouter } from "../router";
 import { deriveLogicalProjectKeyFromSettings } from "../logicalProject";
+import { selectThreadRightPanelState, useRightPanelStore } from "../rightPanelStore";
 import { selectBootstrapCompleteForActiveEnvironment, useStore } from "../store";
 import { terminalSessionManager } from "../terminalSessionState";
 import { useTerminalUiStateStore } from "../terminalUiStateStore";
@@ -99,6 +100,7 @@ vi.mock("../lib/vcsStatusState", () => {
   };
 
   return {
+    getVcsStatusDataForTarget: (state: typeof status) => state.data,
     getVcsStatusSnapshot: () => status,
     useVcsStatus: () => status,
     useVcsStatuses: () => new Map(),
@@ -249,6 +251,18 @@ function createMockEnvironmentApi(input: {
     filesystem: {
       browse: input.browse,
     },
+    assets: {
+      createUrl: vi.fn(async ({ resource }) => ({
+        relativeUrl: `/api/assets/test/${encodeURIComponent(
+          resource._tag === "attachment"
+            ? resource.attachmentId
+            : resource._tag === "project-favicon"
+              ? "favicon.svg"
+              : (resource.path.split(/[\\/]/).at(-1) ?? "asset"),
+        )}`,
+        expiresAt: Date.now() + 60_000,
+      })),
+    },
     sourceControl: {} as EnvironmentApi["sourceControl"],
     vcs: {} as EnvironmentApi["vcs"],
     git: {} as EnvironmentApi["git"],
@@ -268,6 +282,32 @@ function createMockEnvironmentApi(input: {
       subscribeThread: (() => () =>
         undefined) as EnvironmentApi["orchestration"]["subscribeThread"],
     },
+    preview: {
+      open: () => {
+        throw new Error("Not implemented in browser test.");
+      },
+      navigate: () => {
+        throw new Error("Not implemented in browser test.");
+      },
+      refresh: () => {
+        throw new Error("Not implemented in browser test.");
+      },
+      close: () => {
+        throw new Error("Not implemented in browser test.");
+      },
+      list: () => Promise.resolve({ sessions: [] }),
+      reportStatus: () => {
+        throw new Error("Not implemented in browser test.");
+      },
+      automation: {
+        connect: () => () => undefined,
+        respond: () => Promise.resolve(),
+        reportOwner: () => Promise.resolve(),
+        clearOwner: () => Promise.resolve(),
+      },
+      onEvent: () => () => undefined,
+      subscribePorts: () => () => undefined,
+    } as EnvironmentApi["preview"],
   };
 }
 
@@ -346,7 +386,6 @@ function createSnapshotForTargetUser(options: {
             name: `attachment-${attachmentIndex + 1}.png`,
             mimeType: "image/png",
             sizeBytes: 128,
-            previewUrl: `/attachments/attachment-${attachmentIndex + 1}`,
           }))
         : undefined;
 
@@ -996,6 +1035,58 @@ function createSnapshotWithPlanFollowUpPrompt(options?: {
   };
 }
 
+function createSnapshotWithActivePlan(): OrchestrationReadModel {
+  const snapshot = createSnapshotForTargetUser({
+    targetMessageId: "msg-user-active-plan-target" as MessageId,
+    targetText: "active plan thread",
+    sessionStatus: "running",
+  });
+  const activeTurnId = "turn-active-plan" as TurnId;
+
+  return {
+    ...snapshot,
+    threads: snapshot.threads.map((thread) =>
+      thread.id === THREAD_ID
+        ? Object.assign({}, thread, {
+            latestTurn: {
+              turnId: activeTurnId,
+              state: "running",
+              requestedAt: isoAt(1_000),
+              startedAt: isoAt(1_001),
+              completedAt: null,
+              assistantMessageId: null,
+            },
+            activities: [
+              {
+                id: EventId.make("activity-active-plan-updated"),
+                tone: "info",
+                kind: "turn.plan.updated",
+                summary: "Plan updated",
+                payload: {
+                  explanation: "Working through the release tasks.",
+                  plan: [
+                    { step: "Reproduce the panel bug", status: "completed" },
+                    { step: "Fix explicit dismissal", status: "inProgress" },
+                  ],
+                },
+                turnId: activeTurnId,
+                sequence: 1,
+                createdAt: isoAt(1_002),
+              },
+            ],
+            session: {
+              ...thread.session,
+              status: "running",
+              activeTurnId,
+              updatedAt: isoAt(1_002),
+            },
+            updatedAt: isoAt(1_002),
+          })
+        : thread,
+    ),
+  };
+}
+
 function resolveWsRpc(body: NormalizedWsRpcRequestBody): unknown {
   const customResult = customWsRpcResolver?.(body);
   if (customResult !== undefined) {
@@ -1130,14 +1221,53 @@ const worker = setupWorker(
     });
   }),
   ...createAuthenticatedSessionHandlers(() => fixture.serverConfig.auth),
-  http.get("*/attachments/:attachmentId", () =>
+  http.get("*/api/assets/test/:assetName", () =>
     HttpResponse.text(ATTACHMENT_SVG, {
       headers: {
         "Content-Type": "image/svg+xml",
       },
     }),
   ),
-  http.get("*/api/project-favicon", () => new HttpResponse(null, { status: 204 })),
+  http.get("*/api/test-harness/runs", () =>
+    HttpResponse.json({
+      runs: [
+        {
+          runId: "run-browser-test",
+          status: "pass",
+          success: true,
+          goal: "Verify the Tests panel opens from the toolbar.",
+          url: "http://127.0.0.1:5173",
+          finalUrl: "http://127.0.0.1:5173/dashboard",
+          title: "Dashboard",
+          evidenceSummary: "Visible harness completed successfully.",
+          outputSummary: "The dashboard loaded and the expected controls were visible.",
+          artifactPaths: {
+            trace: "/repo/project/.t3/test-harness/run-browser-test/trace.zip",
+            summary: "/repo/project/.t3/test-harness/run-browser-test/summary.json",
+            markdown: "/repo/project/.t3/test-harness/run-browser-test/summary.md",
+          },
+          screenshots: [
+            {
+              label: "Final",
+              path: "/repo/project/.t3/test-harness/run-browser-test/screenshots/final.png",
+            },
+          ],
+          videos: [
+            {
+              label: "Recording",
+              path: "/repo/project/.t3/test-harness/run-browser-test/video.webm",
+            },
+          ],
+          consoleErrors: [],
+          networkFailures: [],
+          completedAt: NOW_ISO,
+          durationMs: 1240,
+          markdownPath: "/repo/project/.t3/test-harness/run-browser-test/summary.md",
+          summaryPath: "/repo/project/.t3/test-harness/run-browser-test/summary.json",
+        },
+      ],
+    }),
+  ),
 );
 
 async function nextFrame(): Promise<void> {
@@ -1512,6 +1642,18 @@ function dispatchChatNewShortcut(): void {
   );
 }
 
+function dispatchConfiguredDiffToggleShortcut(): void {
+  window.dispatchEvent(
+    new KeyboardEvent("keydown", {
+      key: "g",
+      shiftKey: true,
+      altKey: true,
+      bubbles: true,
+      cancelable: true,
+    }),
+  );
+}
+
 function releaseModShortcut(key?: string): void {
   window.dispatchEvent(
     new KeyboardEvent("keyup", {
@@ -1779,6 +1921,8 @@ describe("ChatView timeline estimator parity (full app)", () => {
     useTerminalUiStateStore.setState({
       terminalUiStateByThreadKey: {},
     });
+    useRightPanelStore.persist.clearStorage();
+    useRightPanelStore.setState({ byThreadKey: {} });
   });
 
   afterEach(() => {
@@ -2032,12 +2176,12 @@ describe("ChatView timeline estimator parity (full app)", () => {
     });
 
     try {
-      const toggle = await waitForElement(
+      const terminalToggle = await waitForElement(
         () =>
           document.querySelector<HTMLButtonElement>('button[aria-label="Toggle terminal drawer"]'),
         "Unable to find terminal drawer toggle.",
       );
-      toggle.click();
+      terminalToggle.click();
 
       await vi.waitFor(
         () => {
@@ -2050,6 +2194,244 @@ describe("ChatView timeline estimator parity (full app)", () => {
             terminalId: DEFAULT_TERMINAL_ID,
             cwd: "/repo/project",
           });
+          expect(
+            selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, THREAD_REF)
+              .isOpen,
+          ).toBe(false);
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("keeps multiple terminal panel surfaces separate from the bottom drawer", async () => {
+    const mounted = await mountChatView({
+      viewport: WIDE_FOOTER_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-open-inline-terminal-panel" as MessageId,
+        targetText: "open inline terminal panel",
+      }),
+    });
+
+    try {
+      const rightPanelToggle = await waitForElement(
+        () => document.querySelector<HTMLButtonElement>('button[aria-label="Toggle right panel"]'),
+        "Unable to find right panel toggle.",
+      );
+      rightPanelToggle.click();
+
+      const addSurface = await waitForElement(
+        () => document.querySelector<HTMLButtonElement>('button[aria-label="Add panel surface"]'),
+        "Unable to find add panel surface button.",
+      );
+      expect(document.body.textContent).toContain("Open a surface");
+      expect(
+        selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, THREAD_REF),
+      ).toEqual({
+        isOpen: true,
+        activeSurfaceId: null,
+        surfaces: [],
+      });
+      expect(wsRequests.some((request) => request._tag === WS_METHODS.terminalOpen)).toBe(false);
+
+      addSurface.click();
+
+      const terminalItem = await waitForElement(
+        () =>
+          Array.from(document.querySelectorAll<HTMLElement>('[role="menuitem"]')).find(
+            (item) => item.textContent?.trim() === "Terminal",
+          ) ?? null,
+        "Unable to find Terminal panel menu item.",
+      );
+      terminalItem.click();
+
+      await vi.waitFor(() => {
+        expect(
+          selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, THREAD_REF)
+            .surfaces.filter((surface) => surface.kind === "terminal")
+            .map((surface) => surface.resourceId),
+        ).toEqual(["term-1"]);
+      });
+
+      addSurface.click();
+      const secondTerminalItem = await waitForElement(
+        () =>
+          Array.from(document.querySelectorAll<HTMLElement>('[role="menuitem"]')).find(
+            (item) => item.textContent?.trim() === "Terminal",
+          ) ?? null,
+        "Unable to find Terminal panel menu item.",
+      );
+      secondTerminalItem.click();
+
+      await vi.waitFor(
+        () => {
+          expect(
+            selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, THREAD_REF)
+              .surfaces.filter((surface) => surface.kind === "terminal")
+              .map((surface) => surface.resourceId),
+          ).toEqual(["term-1", "term-2"]);
+          expect(
+            document.querySelector('[data-preview-panel-mode="inline"] .thread-terminal-drawer'),
+          ).not.toBeNull();
+          expect(
+            wsRequests
+              .filter((request) => request._tag === WS_METHODS.terminalOpen)
+              .map((request) => ("terminalId" in request ? request.terminalId : null)),
+          ).toEqual(expect.arrayContaining(["term-1", "term-2"]));
+          const attachRequest = wsRequests.find(
+            (request) =>
+              request._tag === WS_METHODS.terminalAttach &&
+              "terminalId" in request &&
+              request.terminalId === "term-2",
+          );
+          expect(attachRequest).toMatchObject({
+            _tag: WS_METHODS.terminalAttach,
+            threadId: THREAD_ID,
+            terminalId: "term-2",
+            cwd: "/repo/project",
+          });
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+
+      const drawerToggle = await waitForElement(
+        () =>
+          document.querySelector<HTMLButtonElement>('button[aria-label="Toggle terminal drawer"]'),
+        "Unable to find terminal drawer toggle.",
+      );
+      drawerToggle.click();
+
+      await vi.waitFor(() => {
+        expect(
+          useTerminalUiStateStore.getState().terminalUiStateByThreadKey[THREAD_KEY],
+        ).toMatchObject({
+          terminalOpen: true,
+          terminalIds: ["term-3"],
+        });
+        expect(
+          wsRequests.some(
+            (request) =>
+              request._tag === WS_METHODS.terminalAttach &&
+              "terminalId" in request &&
+              request.terminalId === "term-3",
+          ),
+        ).toBe(true);
+      });
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("keeps an active plan panel dismissed from the right panel toggle", async () => {
+    const mounted = await mountChatView({
+      viewport: WIDE_FOOTER_VIEWPORT,
+      snapshot: createSnapshotWithActivePlan(),
+    });
+
+    try {
+      await vi.waitFor(
+        () => {
+          expect(
+            selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, THREAD_REF),
+          ).toEqual({
+            isOpen: true,
+            activeSurfaceId: "plan",
+            surfaces: [{ id: "plan", kind: "plan" }],
+          });
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+
+      const rightPanelToggle = await waitForElement(
+        () => document.querySelector<HTMLButtonElement>('button[aria-label="Toggle right panel"]'),
+        "Unable to find right panel toggle.",
+      );
+      rightPanelToggle.click();
+      await waitForLayout();
+
+      expect(
+        selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, THREAD_REF),
+      ).toEqual({
+        isOpen: false,
+        activeSurfaceId: "plan",
+        surfaces: [{ id: "plan", kind: "plan" }],
+      });
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("keeps an active plan panel dismissed from the Plan tab close button", async () => {
+    const mounted = await mountChatView({
+      viewport: WIDE_FOOTER_VIEWPORT,
+      snapshot: createSnapshotWithActivePlan(),
+    });
+
+    try {
+      await vi.waitFor(
+        () => {
+          expect(
+            selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, THREAD_REF),
+          ).toEqual({
+            isOpen: true,
+            activeSurfaceId: "plan",
+            surfaces: [{ id: "plan", kind: "plan" }],
+          });
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+
+      const closePlanButton = await waitForElement(
+        () => document.querySelector<HTMLButtonElement>('button[aria-label="Close Plan"]'),
+        "Unable to find Plan tab close button.",
+      );
+      closePlanButton.click();
+      await waitForLayout();
+
+      expect(
+        selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, THREAD_REF),
+      ).toEqual({
+        isOpen: false,
+        activeSurfaceId: null,
+        surfaces: [],
+      });
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("opens visible harness evidence in the Tests right panel", async () => {
+    const mounted = await mountChatView({
+      viewport: WIDE_FOOTER_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-open-tests-panel" as MessageId,
+        targetText: "open tests panel",
+      }),
+    });
+
+    try {
+      const testRunsButton = await waitForElement(
+        () =>
+          document.querySelector<HTMLButtonElement>('button[aria-label="Open test runs panel"]'),
+        "Unable to find Test runs panel button.",
+      );
+      testRunsButton.click();
+
+      await vi.waitFor(
+        () => {
+          expect(
+            selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, THREAD_REF),
+          ).toEqual({
+            isOpen: true,
+            activeSurfaceId: "tests",
+            surfaces: [{ id: "tests", kind: "tests" }],
+          });
+          expect(document.body.textContent).toContain("Tests");
+          expect(document.body.textContent).toContain(
+            "The dashboard loaded and the expected controls were visible.",
+          );
         },
         { timeout: 8_000, interval: 16 },
       );
@@ -3238,6 +3620,76 @@ describe("ChatView timeline estimator parity (full app)", () => {
         },
         { timeout: 8_000, interval: 16 },
       );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("uses the configured diff toggle binding without discarding its surface", async () => {
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-target-diff-hotkey" as MessageId,
+        targetText: "diff hotkey target",
+      }),
+      configureFixture: (nextFixture) => {
+        nextFixture.serverConfig = {
+          ...nextFixture.serverConfig,
+          keybindings: [
+            {
+              command: "diff.toggle",
+              shortcut: {
+                key: "g",
+                metaKey: false,
+                ctrlKey: false,
+                shiftKey: true,
+                altKey: true,
+                modKey: false,
+              },
+              whenAst: {
+                type: "not",
+                node: { type: "identifier", name: "terminalFocus" },
+              },
+            },
+          ],
+        };
+      },
+    });
+
+    try {
+      await waitForServerConfigToApply();
+      dispatchConfiguredDiffToggleShortcut();
+      await vi.waitFor(() => {
+        expect(
+          selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, THREAD_REF),
+        ).toEqual({
+          isOpen: true,
+          activeSurfaceId: "diff",
+          surfaces: [{ id: "diff", kind: "diff" }],
+        });
+      });
+
+      dispatchConfiguredDiffToggleShortcut();
+      await vi.waitFor(() => {
+        expect(
+          selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, THREAD_REF),
+        ).toEqual({
+          isOpen: false,
+          activeSurfaceId: "diff",
+          surfaces: [{ id: "diff", kind: "diff" }],
+        });
+      });
+
+      dispatchConfiguredDiffToggleShortcut();
+      await vi.waitFor(() => {
+        expect(
+          selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, THREAD_REF),
+        ).toEqual({
+          isOpen: true,
+          activeSurfaceId: "diff",
+          surfaces: [{ id: "diff", kind: "diff" }],
+        });
+      });
     } finally {
       await mounted.cleanup();
     }

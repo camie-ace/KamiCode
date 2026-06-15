@@ -82,6 +82,7 @@ interface TestHarnessRunsResponse {
 interface TestHarnessRunsControlProps {
   readonly projectId: string | undefined;
   readonly projectCwd: string | undefined;
+  readonly onOpenPanel?: (() => void) | undefined;
 }
 
 const RUN_HISTORY_REFRESH_INTERVAL_MS = 5_000;
@@ -436,6 +437,7 @@ function RunHistoryList({
 export default function TestHarnessRunsControl({
   projectId,
   projectCwd,
+  onOpenPanel,
 }: TestHarnessRunsControlProps) {
   const [open, setOpen] = useState(false);
   const [sheetOpen, setSheetOpen] = useState(false);
@@ -541,6 +543,41 @@ export default function TestHarnessRunsControl({
       {runs.length > 0 ? <RunHistoryList runs={runs} dense /> : null}
     </>
   );
+
+  if (onOpenPanel) {
+    return (
+      <Button
+        variant="outline"
+        size="xs"
+        className={cn(
+          "gap-1.5",
+          latestRun &&
+            "border-border/80 bg-card/65 text-foreground hover:border-border hover:bg-card",
+        )}
+        disabled={!projectCwd}
+        aria-label="Open test runs panel"
+        title={latestRun ? `Latest test run: ${statusLabel(latestRun.status)}` : "Test run history"}
+        onClick={onOpenPanel}
+      >
+        <HistoryIcon className="size-3" />
+        <span className="hidden text-[11px] sm:inline">
+          {latestRun ? `Test ${statusLabel(latestRun.status)}` : "Test runs"}
+        </span>
+        {latestRun ? (
+          <span
+            className={cn(
+              "ml-0.5 size-1.5 rounded-full",
+              latestRun.status === "pass"
+                ? "bg-emerald-500"
+                : latestRun.status === "blocked"
+                  ? "bg-amber-500"
+                  : "bg-rose-500",
+            )}
+          />
+        ) : null}
+      </Button>
+    );
+  }
 
   return (
     <>
@@ -682,5 +719,152 @@ export default function TestHarnessRunsControl({
         </SheetPopup>
       </Sheet>
     </>
+  );
+}
+
+export function TestHarnessRunsPanel({
+  projectId,
+  projectCwd,
+}: Pick<TestHarnessRunsControlProps, "projectId" | "projectCwd">) {
+  const [runs, setRuns] = useState<ReadonlyArray<TestHarnessRunHistoryItem>>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [lastLoadedAt, setLastLoadedAt] = useState<string | null>(null);
+  const [refreshNonce, setRefreshNonce] = useState(0);
+  const latestRun = runs[0];
+
+  const refresh = useCallback(() => {
+    setRefreshNonce((value) => value + 1);
+  }, []);
+
+  useEffect(() => {
+    setRuns([]);
+    setError(null);
+    setLastLoadedAt(null);
+  }, [projectCwd, projectId]);
+
+  useEffect(() => {
+    if (!projectCwd) {
+      return;
+    }
+
+    const abortController = new AbortController();
+    setLoading(true);
+    setError(null);
+    void fetchTestHarnessRuns({
+      projectId,
+      projectCwd,
+      signal: abortController.signal,
+    })
+      .then((response) => {
+        setRuns(response.runs);
+        setLastLoadedAt(new Date().toISOString());
+      })
+      .catch((cause: unknown) => {
+        if (abortController.signal.aborted) {
+          return;
+        }
+        setError(cause instanceof Error ? cause.message : String(cause));
+      })
+      .finally(() => {
+        if (!abortController.signal.aborted) {
+          setLoading(false);
+        }
+      });
+
+    return () => {
+      abortController.abort();
+    };
+  }, [projectCwd, projectId, refreshNonce]);
+
+  useEffect(() => {
+    if (!projectCwd) {
+      return;
+    }
+
+    const intervalId = window.setInterval(() => {
+      setRefreshNonce((value) => value + 1);
+    }, RUN_HISTORY_REFRESH_INTERVAL_MS);
+
+    return () => {
+      window.clearInterval(intervalId);
+    };
+  }, [projectCwd]);
+
+  const headerMeta = useMemo(() => {
+    if (!projectCwd) {
+      return "Select a project to inspect visible test evidence.";
+    }
+    if (loading && runs.length === 0) {
+      return "Loading recent evidence...";
+    }
+    if (latestRun) {
+      return `${statusLabel(latestRun.status)} latest - ${formatRunTime(latestRun.completedAt)}`;
+    }
+    return "Recent visible harness evidence for this project.";
+  }, [latestRun, loading, projectCwd, runs.length]);
+
+  return (
+    <div className="flex min-h-0 flex-1 flex-col bg-background">
+      <div className="shrink-0 border-b border-border/60 px-4 py-3">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2">
+              <HistoryIcon className="size-4 text-muted-foreground" />
+              <div className="text-sm font-medium text-foreground">Tests</div>
+              {latestRun ? <StatusPill status={latestRun.status} /> : null}
+            </div>
+            <div className="mt-1 truncate text-xs text-muted-foreground">{headerMeta}</div>
+            <div className="mt-0.5 text-[10px] text-muted-foreground/70">
+              {formatLastUpdated(lastLoadedAt)}
+            </div>
+          </div>
+          <Button variant="outline" size="xs" onClick={refresh} disabled={loading || !projectCwd}>
+            {loading ? (
+              <Loader2Icon className="size-3 animate-spin" />
+            ) : (
+              <RefreshCwIcon className="size-3" />
+            )}
+            Refresh
+          </Button>
+        </div>
+      </div>
+      <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-3">
+        {!projectCwd ? (
+          <div className="rounded-xl border border-dashed border-border/70 bg-muted/15 p-5 text-center">
+            <div className="mx-auto flex size-9 items-center justify-center rounded-lg border border-border/70 bg-background/70 text-muted-foreground">
+              <HistoryIcon className="size-4" />
+            </div>
+            <div className="mt-3 text-sm font-medium text-foreground">No project selected</div>
+            <p className="mx-auto mt-1 max-w-xs text-xs leading-5 text-muted-foreground">
+              Test evidence is scoped to a project folder. Open a project thread to inspect harness
+              runs.
+            </p>
+          </div>
+        ) : null}
+
+        {error ? (
+          <RunHistoryErrorState
+            error={error}
+            hasStaleRuns={runs.length > 0}
+            loading={loading}
+            onRefresh={refresh}
+          />
+        ) : null}
+
+        {projectCwd && !loading && !error && runs.length === 0 ? (
+          <RunHistoryEmptyState loading={loading} onRefresh={refresh} />
+        ) : null}
+
+        {projectCwd && loading && runs.length === 0 ? (
+          <div className="rounded-xl border border-border/70 bg-muted/15 p-5 text-center text-xs text-muted-foreground">
+            <Loader2Icon className="mx-auto mb-2 size-4 animate-spin" />
+            Loading test runs...
+          </div>
+        ) : null}
+
+        {runs.length > 0 ? <RunHistoryList runs={runs} /> : null}
+      </div>
+    </div>
   );
 }

@@ -1,3 +1,4 @@
+// @effect-diagnostics anyUnknownInErrorContext:off missingEffectContext:off - CLI composition relies on framework-owned command requirements.
 import { pathToFileURL } from "node:url";
 
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime";

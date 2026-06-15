@@ -904,7 +904,6 @@ const runGit = Effect.fn("SharedProjects.runGit")(function* (
       command: "git",
       args: ["-C", cwd, ...args],
       timeoutBehavior: "timedOutResult",
-      shell: process.platform === "win32",
     })
     .pipe(Effect.option);
   if (result._tag === "None" || result.value.code !== 0) return null;
