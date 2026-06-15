@@ -5,6 +5,7 @@ import {
   AuthOrchestrationReadScope,
   EnvironmentHttpApi,
 } from "@t3tools/contracts";
+import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
 import { decodeOtlpTraceRecords } from "@t3tools/shared/observability";
 import * as NodeFs from "node:fs/promises";
 import { createRequire } from "node:module";
@@ -73,6 +74,7 @@ const LOOPBACK_HOSTNAMES = new Set(["127.0.0.1", "::1", "localhost"]);
 const DEFAULT_TEST_HARNESS_RUN_LIMIT = 12;
 const MAX_TEST_HARNESS_RUN_LIMIT = 50;
 const requireFromHttp = createRequire(import.meta.url);
+const hostProcessPlatform = Effect.runSync(HostProcessPlatform);
 let playwrightTraceViewerRoot: string | undefined;
 
 export const browserApiCorsLayer = Layer.unwrap(
@@ -116,7 +118,7 @@ function isDevProxyRequestPath(pathname: string): boolean {
 }
 
 function normalizePathForPlatform(value: string): string {
-  return process.platform === "win32" ? value.toLowerCase() : value;
+  return hostProcessPlatform === "win32" ? value.toLowerCase() : value;
 }
 
 export function resolveTestHarnessArtifactPath(input: {

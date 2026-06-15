@@ -1,4 +1,5 @@
 // @effect-diagnostics nodeBuiltinImport:off
+import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
 import { execFileSync } from "node:child_process";
 import {
   cpSync,
@@ -10,21 +11,22 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
+import * as NodeOS from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import * as Console from "effect/Console";
 import * as Effect from "effect/Effect";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const hostProcessPlatform = Effect.runSync(HostProcessPlatform);
 
 function resolveSmokeTempParent(): string {
   const configured = process.env.KAMICODE_RELEASE_SMOKE_TMPDIR?.trim();
   if (configured) return configured;
-  if (process.platform === "win32") {
+  if (hostProcessPlatform === "win32") {
     return join(process.env.SystemDrive ?? "C:", "kamicode-release-smoke");
   }
-  return tmpdir();
+  return NodeOS.tmpdir();
 }
 
 const workspaceFiles = [
@@ -229,7 +231,7 @@ try {
     cwd: tempRoot,
     stdio: "inherit",
     // Windows needs shell mode to resolve .cmd shims (e.g. vp.cmd).
-    shell: process.platform === "win32",
+    shell: hostProcessPlatform === "win32",
   });
 
   const lockfile = readFileSync(resolve(tempRoot, "pnpm-lock.yaml"), "utf8");

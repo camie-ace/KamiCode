@@ -83,7 +83,7 @@ function resolveDesktopDevServerUrl(
 function getIconOption(
   iconPaths: DesktopAssets.DesktopIconPaths,
   platform: NodeJS.Platform,
-): Pick<Electron.BrowserWindowConstructorOptions, "icon"> {
+): { icon: string } | Record<string, never> {
   if (platform === "darwin") return {}; // macOS uses .icns from app bundle
   const ext = platform === "win32" ? "ico" : "png";
   return Option.match(iconPaths[ext], {
@@ -94,7 +94,7 @@ function getIconOption(
 
 function syncWindowIcon(
   window: Electron.BrowserWindow,
-  iconOption: Pick<Electron.BrowserWindowConstructorOptions, "icon">,
+  iconOption: { icon: string } | Record<string, never>,
 ): Effect.Effect<void> {
   const icon = iconOption.icon;
   if (!icon) {
@@ -125,8 +125,11 @@ export function isSameOriginRendererNavigation(input: {
   }
 }
 
-function getWindowTitleBarOptions(shouldUseDarkColors: boolean): WindowTitleBarOptions {
-  if (process.platform === "darwin") {
+function getWindowTitleBarOptions(
+  shouldUseDarkColors: boolean,
+  platform: NodeJS.Platform,
+): WindowTitleBarOptions {
+  if (platform === "darwin") {
     return {
       titleBarStyle: "hiddenInset",
       trafficLightPosition: { x: 16, y: 18 },
@@ -146,6 +149,7 @@ function getWindowTitleBarOptions(shouldUseDarkColors: boolean): WindowTitleBarO
 function syncWindowAppearance(
   window: Electron.BrowserWindow,
   shouldUseDarkColors: boolean,
+  platform: NodeJS.Platform,
 ): Effect.Effect<void> {
   return Effect.sync(() => {
     if (window.isDestroyed()) {
@@ -153,7 +157,7 @@ function syncWindowAppearance(
     }
 
     window.setBackgroundColor(getInitialWindowBackgroundColor(shouldUseDarkColors));
-    const { titleBarOverlay } = getWindowTitleBarOptions(shouldUseDarkColors);
+    const { titleBarOverlay } = getWindowTitleBarOptions(shouldUseDarkColors, platform);
     if (typeof titleBarOverlay === "object") {
       window.setTitleBarOverlay(titleBarOverlay);
     }
@@ -236,7 +240,7 @@ const make = Effect.gen(function* () {
       backgroundColor: getInitialWindowBackgroundColor(shouldUseDarkColors),
       ...iconOption,
       title: environment.displayName,
-      ...getWindowTitleBarOptions(shouldUseDarkColors),
+      ...getWindowTitleBarOptions(shouldUseDarkColors, environment.platform),
       webPreferences: {
         preload: environment.preloadPath,
         contextIsolation: true,
@@ -331,7 +335,7 @@ const make = Effect.gen(function* () {
             backgroundColor: getInitialWindowBackgroundColor(shouldUseDarkColors),
             ...iconOption,
             title: environment.displayName,
-            ...getWindowTitleBarOptions(shouldUseDarkColors),
+            ...getWindowTitleBarOptions(shouldUseDarkColors, environment.platform),
             webPreferences: {
               preload: environment.preloadPath,
               contextIsolation: true,
@@ -399,7 +403,7 @@ const make = Effect.gen(function* () {
     });
 
     const revealSubscribers: RevealSubscription[] = [(fire) => window.once("ready-to-show", fire)];
-    if (process.platform === "linux") {
+    if (environment.platform === "linux") {
       revealSubscribers.push((fire) => window.webContents.once("did-finish-load", fire));
     }
     bindFirstRevealTrigger(revealSubscribers, () => {
@@ -489,7 +493,7 @@ const make = Effect.gen(function* () {
     syncAppearance: Effect.gen(function* () {
       const shouldUseDarkColors = yield* electronTheme.shouldUseDarkColors;
       yield* electronWindow.syncAllAppearance((window) =>
-        syncWindowAppearance(window, shouldUseDarkColors),
+        syncWindowAppearance(window, shouldUseDarkColors, environment.platform),
       );
     }).pipe(Effect.withSpan("desktop.window.syncAppearance")),
   });

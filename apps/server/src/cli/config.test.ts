@@ -1,6 +1,5 @@
-// @effect-diagnostics nodeBuiltinImport:off
-import NodeOS from "node:os";
 import * as NodeFS from "node:fs";
+import * as NodeOS from "node:os";
 
 import { assert, expect, it } from "@effect/vitest";
 import * as ConfigProvider from "effect/ConfigProvider";

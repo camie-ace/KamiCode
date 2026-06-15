@@ -58,6 +58,7 @@ import {
   type SharedThread,
   type UpsertSharedSshCredentialInput,
 } from "@t3tools/contracts";
+import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
 import { createCipheriv, createDecipheriv, randomBytes, randomUUID } from "node:crypto";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -899,12 +900,13 @@ const runGit = Effect.fn("SharedProjects.runGit")(function* (
   cwd: string,
   args: ReadonlyArray<string>,
 ) {
+  const platform = yield* HostProcessPlatform;
   const result = yield* processRunner
     .run({
       command: "git",
       args: ["-C", cwd, ...args],
       timeoutBehavior: "timedOutResult",
-      shell: process.platform === "win32",
+      shell: platform === "win32",
     })
     .pipe(Effect.option);
   if (result._tag === "None" || result.value.code !== 0) return null;

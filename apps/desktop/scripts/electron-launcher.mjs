@@ -15,6 +15,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { createRequire } from "node:module";
+import * as NodeOS from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ensureElectronRuntime } from "./ensure-electron-runtime.mjs";
@@ -35,6 +36,8 @@ const LAUNCHER_VERSION = 11;
 const defaultIconPath = join(desktopDir, "resources", "icon.icns");
 const windowsIconPath = join(desktopDir, "resources", "icon.ico");
 const developmentMacIconPngPath = join(repoRoot, "assets", "dev", "blueprint-macos-1024.png");
+// oxlint-disable-next-line t3code/no-global-process-runtime -- Standalone launcher script has no Effect runtime.
+const hostPlatform = NodeOS.platform();
 
 function resolveDevelopmentProtocolCallbackPort() {
   const configuredPort = Number.parseInt(process.env.T3CODE_PORT ?? "", 10);
@@ -429,7 +432,7 @@ function buildMacLauncher(electronBinaryPath) {
 }
 
 function isLinuxSetuidSandboxConfigured(electronBinaryPath) {
-  if (process.platform !== "linux") {
+  if (hostPlatform !== "linux") {
     return true;
   }
 
@@ -459,11 +462,11 @@ export function resolveElectronPath() {
   const require = createRequire(import.meta.url);
   const electronBinaryPath = require("electron");
 
-  if (process.platform === "win32") {
+  if (hostPlatform === "win32") {
     return buildWindowsLauncher(electronBinaryPath);
   }
 
-  if (process.platform !== "darwin") {
+  if (hostPlatform !== "darwin") {
     return electronBinaryPath;
   }
 
@@ -479,7 +482,7 @@ export function resolveElectronLaunchCommand(args = []) {
 }
 
 export function resolveDevProtocolClient() {
-  if (process.platform !== "darwin" || !isDevelopment) {
+  if (hostPlatform !== "darwin" || !isDevelopment) {
     return null;
   }
 
