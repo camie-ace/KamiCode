@@ -396,15 +396,10 @@ interface DevRunnerCliInput {
 
 export function runDevRunnerWithInput(input: DevRunnerCliInput) {
   return Effect.gen(function* () {
-    const { portOffset, devInstance } = yield* OffsetConfig.pipe(
-      Effect.mapError(
-        (cause) =>
-          new DevRunnerError({
-            message: "Failed to read T3CODE_PORT_OFFSET/T3CODE_DEV_INSTANCE configuration.",
-            cause,
-          }),
-      ),
-    );
+    // Don't pipe Effect operators (e.g. Effect.mapError) directly onto a Config
+    // value here — doing so silently crashes the process under this Effect
+    // version. Read it raw and let the outer mapError below wrap failures.
+    const { portOffset, devInstance } = yield* OffsetConfig;
 
     const { offset, source } = yield* Effect.try({
       try: () => resolveOffset({ portOffset, devInstance }),
