@@ -134,7 +134,7 @@ import {
   nextProjectScriptId,
   projectScriptIdFromCommand,
 } from "~/projectScripts";
-import { newCommandId, newDraftId, newMessageId, newThreadId } from "~/lib/utils";
+import { newCommandId, newDraftId, newEventId, newMessageId, newThreadId } from "~/lib/utils";
 import { getProviderModelCapabilities, resolveSelectableProvider } from "../providerModels";
 import { useSettings } from "../hooks/useSettings";
 import { resolveAppModelSelectionForInstance } from "../modelSelection";
@@ -227,6 +227,47 @@ const EMPTY_PROPOSED_PLANS: Thread["proposedPlans"] = [];
 const EMPTY_PROVIDERS: ServerProvider[] = [];
 const EMPTY_PROVIDER_SKILLS: ServerProvider["skills"] = [];
 const EMPTY_PENDING_USER_INPUT_ANSWERS: Record<string, PendingUserInputDraftAnswer> = {};
+
+function inferWorkflowInitialLanes(text: string): string[] {
+  const lower = text.toLowerCase();
+  const lanes = ["Lead", "Planner", "Builder", "Verifier"];
+  if (/\b(doc|document|readme|notes?|memory)\b/.test(lower)) {
+    lanes.push("Documenter");
+  }
+  if (/\b(research|inspect|explore|compare|investigate)\b/.test(lower)) {
+    lanes.splice(2, 0, "Researcher");
+  }
+  if (/\b(red[- ]?team|critic|critique|risk|security|review)\b/.test(lower)) {
+    lanes.push("Critic");
+  }
+  return [...new Set(lanes)];
+}
+
+function inferWorkflowPattern(text: string): string {
+  const lower = text.toLowerCase();
+  if (/\b(research|inspect|investigate)\b/.test(lower)) return "Research -> Build -> Test";
+  if (/\b(compare|alternatives|options|approaches)\b/.test(lower)) return "Parallel Exploration";
+  if (/\b(red[- ]?team|critic|critique|risk|security)\b/.test(lower)) return "Red Team";
+  if (/\b(plan only|planning only|do not build)\b/.test(lower)) return "Planning Only";
+  return "Build + Review";
+}
+
+function defaultWorkflowAcceptanceCriteria(text: string): string[] {
+  const lower = text.toLowerCase();
+  const criteria = [
+    "Implementation matches the requested outcome.",
+    "Verifier records pass/fail evidence before final completion.",
+    "Open objections are clearly labeled before the workflow completes.",
+  ];
+  if (/\b(test|verify|browser|preview|url)\b/.test(lower)) {
+    criteria.push("Relevant test or browser evidence is captured.");
+  }
+  if (/\b(doc|document|readme|memory|notes?)\b/.test(lower)) {
+    criteria.push("User-facing docs or durable notes are updated when needed.");
+  }
+  return criteria;
+}
+
 const TYPE_TO_FOCUS_EDITABLE_SELECTOR = [
   "input",
   "textarea",
@@ -1920,7 +1961,12 @@ export default function ChatView(props: ChatViewProps) {
     () => deriveActivePlanState(threadActivities, activeLatestTurn?.turnId ?? undefined),
     [activeLatestTurn?.turnId, threadActivities],
   );
-  const planSidebarLabel = sidebarProposedPlan || interactionMode === "plan" ? "Plan" : "Tasks";
+  const workflowSidebarActive = interactionMode === "workflow";
+  const planSidebarLabel = workflowSidebarActive
+    ? "Workflow"
+    : sidebarProposedPlan || interactionMode === "plan"
+      ? "Plan"
+      : "Tasks";
   const showPlanFollowUpPrompt =
     pendingUserInputs.length === 0 &&
     interactionMode === "plan" &&
@@ -3277,7 +3323,13 @@ export default function ChatView(props: ChatViewProps) {
   );
   const toggleInteractionMode = useCallback(() => {
     const nextInteractionMode: ProviderInteractionMode =
-      interactionMode === "default" ? "plan" : interactionMode === "plan" ? "test" : "default";
+      interactionMode === "default"
+        ? "plan"
+        : interactionMode === "plan"
+          ? "test"
+          : interactionMode === "test"
+            ? "workflow"
+            : "default";
     handleInteractionModeChange(nextInteractionMode);
   }, [handleInteractionModeChange, interactionMode]);
   const dismissPlanSidebarForCurrentTurn = useCallback(() => {
@@ -3450,6 +3502,39 @@ export default function ChatView(props: ChatViewProps) {
   );
 
   // Scroll helpers — LegendList handles auto-scroll via maintainScrollAtEnd.
+  const appendWorkflowActivity = useCallback(
+    async (input: {
+      threadId: ThreadId;
+      kind: string;
+      summary: string;
+      payload: Record<string, unknown>;
+      turnId?: TurnId | null;
+      createdAt?: string;
+    }) => {
+      const api = readEnvironmentApi(environmentId);
+      if (!api) {
+        return;
+      }
+      const createdAt = input.createdAt ?? new Date().toISOString();
+      await api.orchestration.dispatchCommand({
+        type: "thread.activity.append",
+        commandId: newCommandId(),
+        threadId: input.threadId,
+        activity: {
+          id: newEventId(),
+          tone: "info",
+          kind: input.kind,
+          summary: input.summary,
+          payload: input.payload,
+          turnId: input.turnId ?? null,
+          createdAt,
+        },
+        createdAt,
+      });
+    },
+    [environmentId],
+  );
+
   const scrollToEnd = useCallback((animated = false) => {
     legendListRef.current?.scrollToEnd?.({ animated });
   }, []);
@@ -3506,6 +3591,152 @@ export default function ChatView(props: ChatViewProps) {
     autoOpenPlanSidebar,
     planSidebarOpen,
     sidebarProposedPlan?.turnId,
+  ]);
+
+  useEffect(() => {
+    if (!activeThread || !activeLatestTurn || !latestTurnSettled) return;
+    if (activeThread.interactionMode !== "workflow") return;
+    if (activeLatestTurn.state !== "completed") return;
+    const turnId = activeLatestTurn.turnId;
+    const hasWorkflowStart = activeThread.activities.some(
+      (activity) => activity.kind === "workflow.started",
+    );
+    if (!hasWorkflowStart) return;
+    const alreadyCompleted = activeThread.activities.some((activity) => {
+      if (activity.kind !== "workflow.completed") return false;
+      const payload =
+        activity.payload && typeof activity.payload === "object"
+          ? (activity.payload as Record<string, unknown>)
+          : null;
+      return payload?.turnId === turnId;
+    });
+    if (alreadyCompleted) return;
+
+    const completedSteps = activePlan?.steps.filter((step) => step.status === "completed") ?? [];
+    const verifierStep = completedSteps.find((step) =>
+      /test|verify|check|coverage/i.test(step.step),
+    );
+    const builderStep = completedSteps.find((step) =>
+      /implement|build|engine|core|package/i.test(step.step),
+    );
+    const documenterStep = completedSteps.find((step) =>
+      /document|readme|memory|note/i.test(step.step),
+    );
+    const createdAt = activeLatestTurn.completedAt ?? new Date().toISOString();
+
+    const writes: Array<Parameters<typeof appendWorkflowActivity>[0]> = [];
+    if (builderStep) {
+      writes.push({
+        threadId: activeThread.id,
+        kind: "workflow.handoff",
+        summary: "Builder handoff recorded",
+        payload: {
+          turnId,
+          laneRole: "Builder",
+          title: builderStep.step,
+          detail: "Implementation work was handed to verification.",
+        },
+        turnId,
+        createdAt,
+      });
+    }
+    if (verifierStep) {
+      writes.push({
+        threadId: activeThread.id,
+        kind: "workflow.evidence",
+        summary: "Verifier evidence captured",
+        payload: {
+          turnId,
+          laneRole: "Verifier",
+          status: "captured",
+          title: verifierStep.step,
+          detail: "Verification completed as part of the workflow turn.",
+        },
+        turnId,
+        createdAt,
+      });
+      writes.push({
+        threadId: activeThread.id,
+        kind: "workflow.verifier.result",
+        summary: "Verifier passed the completed workflow turn",
+        payload: {
+          turnId,
+          status: "pass",
+          detail: verifierStep.step,
+        },
+        turnId,
+        createdAt,
+      });
+    } else {
+      writes.push({
+        threadId: activeThread.id,
+        kind: "workflow.objection",
+        summary: "Verifier evidence was not captured",
+        payload: {
+          turnId,
+          severity: "non-blocking concern",
+          title: "No verifier evidence step was detected",
+          detail:
+            "The workflow completed, but no completed test or verification step was found in the task checklist.",
+        },
+        turnId,
+        createdAt,
+      });
+      writes.push({
+        threadId: activeThread.id,
+        kind: "workflow.verifier.result",
+        summary: "Verifier evidence missing",
+        payload: {
+          turnId,
+          status: "reviewed",
+          detail: "No completed verifier step was detected.",
+        },
+        turnId,
+        createdAt,
+      });
+    }
+    if (documenterStep) {
+      writes.push({
+        threadId: activeThread.id,
+        kind: "workflow.handoff",
+        summary: "Documenter handoff recorded",
+        payload: {
+          turnId,
+          laneRole: "Documenter",
+          title: documenterStep.step,
+          detail: "Documentation or durable project notes were included in the workflow outcome.",
+        },
+        turnId,
+        createdAt,
+      });
+    }
+    writes.push({
+      threadId: activeThread.id,
+      kind: "workflow.completed",
+      summary: "Workflow completed with structured outcome records",
+      payload: {
+        turnId,
+        status: verifierStep ? "verified" : "completed-with-concern",
+        detail:
+          completedSteps.length > 0
+            ? `Completed ${completedSteps.length} checklist item(s).`
+            : "The provider turn completed; no checklist steps were available.",
+      },
+      turnId,
+      createdAt,
+    });
+
+    void (async () => {
+      for (const write of writes) {
+        await appendWorkflowActivity(write).catch(() => undefined);
+      }
+    })();
+  }, [
+    activeLatestTurn,
+    activePlan?.steps,
+    activeThread,
+    appendWorkflowActivity,
+    latestTurnSettled,
   ]);
 
   useEffect(() => {
@@ -4193,6 +4424,20 @@ export default function ChatView(props: ChatViewProps) {
         ...(bootstrap ? { bootstrap } : {}),
         createdAt: messageCreatedAt,
       });
+      if (interactionMode === "workflow") {
+        await appendWorkflowActivity({
+          threadId: threadIdForSend,
+          kind: "workflow.started",
+          summary: "Workflow started",
+          payload: {
+            goal: trimmed || title,
+            workflowPattern: inferWorkflowPattern(trimmed || title),
+            initialLanes: inferWorkflowInitialLanes(trimmed || title),
+            acceptanceCriteria: defaultWorkflowAcceptanceCriteria(trimmed || title),
+          },
+          createdAt: messageCreatedAt,
+        }).catch(() => undefined);
+      }
       turnStartSucceeded = true;
       if (
         isQueuedDispatch &&
@@ -4572,6 +4817,99 @@ export default function ChatView(props: ChatViewProps) {
       environmentId,
       composerRef,
     ],
+  );
+
+  const onSubmitWorkflowGuidance = useCallback(
+    (laneRole: string, guidance: string) => {
+      if (activeThread) {
+        void appendWorkflowActivity({
+          threadId: activeThread.id,
+          kind: "workflow.lane.guidance",
+          summary: `Guidance added to ${laneRole}`,
+          payload: {
+            laneRole,
+            guidance,
+          },
+        }).catch(() => undefined);
+      }
+      void onSubmitPlanFollowUp({
+        interactionMode: "workflow",
+        text: [
+          `Workflow guidance for ${laneRole}:`,
+          guidance,
+          "",
+          "Keep this guidance Lead-visible, route it only to the named lane unless it affects the whole workflow, and summarize any workflow changes back in the main thread.",
+        ].join("\n"),
+      });
+    },
+    [activeThread, appendWorkflowActivity, onSubmitPlanFollowUp],
+  );
+
+  const onStopWorkflowLane = useCallback(
+    (laneRole: string) => {
+      if (activeThread) {
+        void appendWorkflowActivity({
+          threadId: activeThread.id,
+          kind: "workflow.lane.stopped",
+          summary: `${laneRole} lane stopped`,
+          payload: {
+            laneRole,
+            preserved: true,
+          },
+        }).catch(() => undefined);
+      }
+      void onSubmitPlanFollowUp({
+        interactionMode: "workflow",
+        text: [
+          `Stop the ${laneRole} workflow lane.`,
+          "Preserve its partial findings, artifacts, open questions, and unfinished status. The Lead should explain what remains usable and what was not completed.",
+        ].join("\n"),
+      });
+    },
+    [activeThread, appendWorkflowActivity, onSubmitPlanFollowUp],
+  );
+
+  const onStopWorkflow = useCallback(() => {
+    if (activeThread) {
+      void appendWorkflowActivity({
+        threadId: activeThread.id,
+        kind: "workflow.stopped",
+        summary: "Workflow stopped",
+        payload: {
+          preserved: true,
+        },
+      }).catch(() => undefined);
+    }
+    void onInterrupt();
+  }, [activeThread, appendWorkflowActivity, onInterrupt]);
+
+  const onCustomizeWorkflow = useCallback(
+    (input: { acceptanceCriteria: ReadonlyArray<string>; lanes: ReadonlyArray<string> }) => {
+      if (activeThread) {
+        void appendWorkflowActivity({
+          threadId: activeThread.id,
+          kind: "workflow.customized",
+          summary: "Workflow customized",
+          payload: {
+            acceptanceCriteria: input.acceptanceCriteria,
+            lanes: input.lanes,
+          },
+        }).catch(() => undefined);
+      }
+      const lines = [
+        "Workflow customization updated.",
+        input.acceptanceCriteria.length > 0
+          ? `Acceptance criteria:\n${input.acceptanceCriteria.map((entry) => `- ${entry}`).join("\n")}`
+          : "",
+        input.lanes.length > 0 ? `Requested lanes: ${input.lanes.join(", ")}` : "",
+        "Keep these constraints Lead-visible and apply them to the remaining workflow.",
+      ].filter(Boolean);
+      void onSubmitPlanFollowUp({
+        interactionMode: "workflow",
+        text: lines.join("\n\n"),
+      });
+    },
+    [activeThread, appendWorkflowActivity, onSubmitPlanFollowUp],
   );
 
   const onImplementPlanInNewThread = useCallback(async () => {
@@ -5172,13 +5510,19 @@ export default function ChatView(props: ChatViewProps) {
             <PlanSidebar
               activePlan={activePlan}
               activeProposedPlan={sidebarProposedPlan}
+              activities={threadActivities}
               label={planSidebarLabel}
+              workflowActive={workflowSidebarActive}
               environmentId={environmentId}
               threadRef={activeThreadRef}
               markdownCwd={gitCwd ?? undefined}
               workspaceRoot={activeWorkspaceRoot}
               timestampFormat={timestampFormat}
               mode="embedded"
+              onSubmitWorkflowGuidance={onSubmitWorkflowGuidance}
+              onStopWorkflowLane={onStopWorkflowLane}
+              onStopWorkflow={onStopWorkflow}
+              onCustomizeWorkflow={onCustomizeWorkflow}
               onClose={closePlanSidebar}
             />
           ) : activeRightPanelSurface?.kind === "tests" ? (
@@ -5243,13 +5587,19 @@ export default function ChatView(props: ChatViewProps) {
               <PlanSidebar
                 activePlan={activePlan}
                 activeProposedPlan={sidebarProposedPlan}
+                activities={threadActivities}
                 label={planSidebarLabel}
+                workflowActive={workflowSidebarActive}
                 environmentId={environmentId}
                 threadRef={activeThreadRef}
                 markdownCwd={gitCwd ?? undefined}
                 workspaceRoot={activeWorkspaceRoot}
                 timestampFormat={timestampFormat}
                 mode="embedded"
+                onSubmitWorkflowGuidance={onSubmitWorkflowGuidance}
+                onStopWorkflowLane={onStopWorkflowLane}
+                onStopWorkflow={onStopWorkflow}
+                onCustomizeWorkflow={onCustomizeWorkflow}
                 onClose={closePlanSidebar}
               />
             ) : activeRightPanelSurface?.kind === "tests" ? (

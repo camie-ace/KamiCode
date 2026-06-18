@@ -1529,10 +1529,10 @@ async function waitForComposerMenuItem(itemId: string): Promise<HTMLElement> {
     `Unable to find composer menu item "${itemId}".`,
   );
 }
-async function waitForSendButton(): Promise<HTMLButtonElement> {
+async function waitForSendButton(label = "Send message"): Promise<HTMLButtonElement> {
   return waitForElement(
-    () => document.querySelector<HTMLButtonElement>('button[aria-label="Send message"]'),
-    "Unable to find send button.",
+    () => document.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`),
+    `Unable to find ${label} button.`,
   );
 }
 
@@ -1605,7 +1605,7 @@ async function expectComposerActionsContained(): Promise<void> {
 }
 
 async function waitForInteractionModeButton(
-  expectedLabel: "Build" | "Plan" | "Test",
+  expectedLabel: "Build" | "Plan" | "Test" | "Workflow",
 ): Promise<HTMLButtonElement> {
   return waitForElement(
     () =>
@@ -3597,8 +3597,26 @@ describe("ChatView timeline estimator parity (full app)", () => {
       await vi.waitFor(
         async () => {
           expect((await waitForInteractionModeButton("Test")).getAttribute("aria-label")).toContain(
-            "switch to Build mode",
+            "switch to Workflow mode",
           );
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+
+      composerEditor.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          key: "Tab",
+          shiftKey: true,
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+
+      await vi.waitFor(
+        async () => {
+          expect(
+            (await waitForInteractionModeButton("Workflow")).getAttribute("aria-label"),
+          ).toContain("switch to Build mode");
         },
         { timeout: 8_000, interval: 16 },
       );
@@ -3617,6 +3635,67 @@ describe("ChatView timeline estimator parity (full app)", () => {
           expect(
             (await waitForInteractionModeButton("Build")).getAttribute("aria-label"),
           ).toContain("switch to Plan mode");
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("submits workflow interaction mode with Start Workflow composer copy", async () => {
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-target-workflow-mode" as MessageId,
+        targetText: "workflow target",
+      }),
+    });
+
+    try {
+      const composerEditor = await waitForComposerEditor();
+      composerEditor.focus();
+      await (await waitForInteractionModeButton("Build")).click();
+      await (await waitForInteractionModeButton("Plan")).click();
+      await (await waitForInteractionModeButton("Test")).click();
+
+      await vi.waitFor(
+        async () => {
+          expect(
+            (await waitForInteractionModeButton("Workflow")).getAttribute("aria-label"),
+          ).toContain("switch to Build mode");
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+
+      expect(
+        document.querySelector(
+          '[aria-placeholder="Describe the outcome you want. KamiCode will coordinate planning, execution, review, and verification."]',
+        ),
+      ).toBeTruthy();
+
+      useComposerDraftStore
+        .getState()
+        .setPrompt(THREAD_REF, "Coordinate a focused implementation and verification pass");
+      await waitForLayout();
+
+      const startWorkflowButton = await waitForSendButton("Start Workflow");
+      expect(startWorkflowButton.disabled).toBe(false);
+      startWorkflowButton.click();
+
+      await vi.waitFor(
+        () => {
+          const turnStartRequest = wsRequests.find(
+            (request) =>
+              request._tag === ORCHESTRATION_WS_METHODS.dispatchCommand &&
+              request.type === "thread.turn.start",
+          ) as
+            | {
+                interactionMode?: string;
+              }
+            | undefined;
+
+          expect(turnStartRequest?.interactionMode).toBe("workflow");
         },
         { timeout: 8_000, interval: 16 },
       );

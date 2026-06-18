@@ -11,6 +11,7 @@ import {
   CODEX_DEFAULT_MODE_DEVELOPER_INSTRUCTIONS,
   CODEX_PLAN_MODE_DEVELOPER_INSTRUCTIONS,
   CODEX_TEST_MODE_DEVELOPER_INSTRUCTIONS,
+  CODEX_WORKFLOW_MODE_DEVELOPER_INSTRUCTIONS,
 } from "../CodexDeveloperInstructions.ts";
 import {
   buildTurnStartParams,
@@ -182,6 +183,44 @@ describe("buildTurnStartParams", () => {
     });
   });
 
+  it("maps workflow mode onto Codex default collaboration mode with workflow instructions", () => {
+    const params = Effect.runSync(
+      buildTurnStartParams({
+        threadId: "provider-thread-1",
+        runtimeMode: "full-access",
+        prompt: "Build and verify the feature",
+        model: "gpt-5.3-codex",
+        interactionMode: "workflow",
+      }),
+    );
+
+    assert.deepStrictEqual(params, {
+      threadId: "provider-thread-1",
+      approvalPolicy: "never",
+      sandboxPolicy: {
+        type: "dangerFullAccess",
+      },
+      input: [
+        {
+          type: "text",
+          text: "Build and verify the feature",
+        },
+      ],
+      model: "gpt-5.3-codex",
+      collaborationMode: {
+        mode: "default",
+        settings: {
+          model: "gpt-5.3-codex",
+          reasoning_effort: "medium",
+          developer_instructions: appendProjectMemoryInstructions(
+            CODEX_WORKFLOW_MODE_DEVELOPER_INSTRUCTIONS,
+            undefined,
+          ),
+        },
+      },
+    });
+  });
+
   it("injects project memory into collaboration developer instructions", () => {
     const params = Effect.runSync(
       buildTurnStartParams({
@@ -333,8 +372,10 @@ describe("openCodexThread", () => {
     const started = makeThreadOpenResponse("fresh-thread");
     const client = {
       raw: {
-        request: (method: "thread/start", payload: unknown) => {
-          calls.push({ method, payload });
+        request: (method: "thread/start" | "thread/resume", payload: unknown) => {
+          if (method === "thread/start") {
+            calls.push({ method, payload });
+          }
           return Effect.succeed(started as unknown);
         },
       },
@@ -368,6 +409,43 @@ describe("openCodexThread", () => {
       dynamicTools: [KAMI_TEST_HARNESS_DYNAMIC_TOOL_SPEC],
       model: "gpt-5.3-codex",
     });
+  });
+
+  it("accepts newer thread/start responses that omit thread sessionId", async () => {
+    const started = makeThreadOpenResponse("fresh-thread");
+    const { sessionId: _sessionId, ...threadWithoutSessionId } = started.thread;
+    const rawStarted = {
+      ...started,
+      thread: threadWithoutSessionId,
+    };
+    const client = {
+      raw: {
+        request: (_method: "thread/start" | "thread/resume", _payload: unknown) =>
+          Effect.succeed(rawStarted),
+      },
+      request: <M extends "thread/start" | "thread/resume">(
+        _method: M,
+        _payload: CodexRpc.ClientRequestParamsByMethod[M],
+      ) =>
+        Effect.fail(
+          CodexErrors.CodexAppServerRequestError.internalError("typed request was not expected"),
+        ),
+    };
+
+    const opened = await Effect.runPromise(
+      openCodexThread({
+        client,
+        threadId: ThreadId.make("thread-1"),
+        runtimeMode: "full-access",
+        cwd: "/tmp/project",
+        requestedModel: "gpt-5.3-codex",
+        serviceTier: undefined,
+        resumeThreadId: undefined,
+      }),
+    );
+
+    assert.equal(opened.thread.id, "fresh-thread");
+    assert.equal(opened.thread.sessionId, "fresh-thread");
   });
 
   it("falls back to thread/start when resume fails recoverably", async () => {
@@ -408,6 +486,56 @@ describe("openCodexThread", () => {
       calls.map((call) => call.method),
       ["thread/resume", "thread/start"],
     );
+  });
+
+  it("accepts newer thread/resume responses that omit thread sessionId", async () => {
+    const resumed = makeThreadOpenResponse("resumed-thread");
+    const { sessionId: _sessionId, ...threadWithoutSessionId } = resumed.thread;
+    const rawResumed = {
+      ...resumed,
+      thread: threadWithoutSessionId,
+    };
+    const calls: Array<{ method: "thread/resume"; payload: unknown }> = [];
+    const client = {
+      raw: {
+        request: (method: "thread/start" | "thread/resume", payload: unknown) => {
+          if (method === "thread/resume") {
+            calls.push({ method, payload });
+          }
+          return Effect.succeed(rawResumed);
+        },
+      },
+      request: <M extends "thread/start" | "thread/resume">(
+        _method: M,
+        _payload: CodexRpc.ClientRequestParamsByMethod[M],
+      ) =>
+        Effect.fail(
+          CodexErrors.CodexAppServerRequestError.internalError("typed request was not expected"),
+        ),
+    };
+
+    const opened = await Effect.runPromise(
+      openCodexThread({
+        client,
+        threadId: ThreadId.make("thread-1"),
+        runtimeMode: "full-access",
+        cwd: "/tmp/project",
+        requestedModel: "gpt-5.3-codex",
+        serviceTier: undefined,
+        resumeThreadId: "resumed-thread",
+      }),
+    );
+
+    assert.equal(opened.thread.id, "resumed-thread");
+    assert.equal(opened.thread.sessionId, "resumed-thread");
+    assert.deepStrictEqual(calls[0]?.payload, {
+      threadId: "resumed-thread",
+      cwd: "/tmp/project",
+      approvalPolicy: "never",
+      sandbox: "danger-full-access",
+      dynamicTools: [KAMI_TEST_HARNESS_DYNAMIC_TOOL_SPEC],
+      model: "gpt-5.3-codex",
+    });
   });
 
   it("propagates non-recoverable resume failures", async () => {

@@ -187,7 +187,90 @@ it.layer(NodeServices.layer)("decider project scripts", (it) => {
           { id: "fastMode", value: true },
         ]),
         runtimeMode: "approval-required",
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
       });
+    }),
+  );
+
+  it.effect("uses the submitted interaction mode when starting a turn", () =>
+    Effect.gen(function* () {
+      const now = "2026-01-01T00:00:00.000Z";
+      const initial = createEmptyReadModel(now);
+      const withProject = yield* projectEvent(initial, {
+        sequence: 1,
+        eventId: asEventId("evt-project-create"),
+        aggregateKind: "project",
+        aggregateId: asProjectId("project-1"),
+        type: "project.created",
+        occurredAt: now,
+        commandId: CommandId.make("cmd-project-create"),
+        causationEventId: null,
+        correlationId: CommandId.make("cmd-project-create"),
+        metadata: {},
+        payload: {
+          projectId: asProjectId("project-1"),
+          title: "Project",
+          workspaceRoot: "/tmp/project",
+          defaultModelSelection: null,
+          scripts: [],
+          createdAt: now,
+          updatedAt: now,
+        },
+      });
+      const readModel = yield* projectEvent(withProject, {
+        sequence: 2,
+        eventId: asEventId("evt-thread-create"),
+        aggregateKind: "thread",
+        aggregateId: ThreadId.make("thread-1"),
+        type: "thread.created",
+        occurredAt: now,
+        commandId: CommandId.make("cmd-thread-create"),
+        causationEventId: null,
+        correlationId: CommandId.make("cmd-thread-create"),
+        metadata: {},
+        payload: {
+          threadId: ThreadId.make("thread-1"),
+          projectId: asProjectId("project-1"),
+          title: "Thread",
+          modelSelection: {
+            instanceId: ProviderInstanceId.make("codex"),
+            model: "gpt-5-codex",
+          },
+          interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+          runtimeMode: "approval-required",
+          branch: null,
+          worktreePath: null,
+          createdAt: now,
+          updatedAt: now,
+        },
+      });
+
+      const result = yield* decideOrchestrationCommand({
+        command: {
+          type: "thread.turn.start",
+          commandId: CommandId.make("cmd-turn-start-workflow"),
+          threadId: ThreadId.make("thread-1"),
+          message: {
+            messageId: asMessageId("message-user-workflow"),
+            role: "user",
+            text: "coordinate this",
+            attachments: [],
+          },
+          interactionMode: "workflow",
+          runtimeMode: "full-access",
+          createdAt: now,
+        },
+        readModel,
+      });
+
+      const events = Array.isArray(result) ? result : [result];
+      const turnStartEvent = events.find((event) => event.type === "thread.turn-start-requested");
+      expect(turnStartEvent?.type).toBe("thread.turn-start-requested");
+      if (turnStartEvent?.type !== "thread.turn-start-requested") {
+        return;
+      }
+      expect(turnStartEvent.payload.interactionMode).toBe("workflow");
+      expect(turnStartEvent.payload.runtimeMode).toBe("full-access");
     }),
   );
 

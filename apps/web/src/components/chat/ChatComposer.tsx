@@ -160,6 +160,11 @@ const interactionModeConfig: Record<
     label: "Test",
     description: "Test mode asks the agent to validate behavior with evidence.",
   },
+  workflow: {
+    label: "Workflow",
+    description:
+      "Workflow mode lets KamiCode coordinate planning, execution, review, and verification.",
+  },
 };
 const COMPOSER_FLOATING_LAYER_SELECTOR = [
   '[data-slot="popover-popup"]',
@@ -220,7 +225,9 @@ const ComposerFooterModeControls = memo(function ComposerFooterModeControls(prop
       ? "plan"
       : props.interactionMode === "plan"
         ? "test"
-        : "default";
+        : props.interactionMode === "test"
+          ? "workflow"
+          : "default";
   const interactionModeTooltip = `${interactionModeOption.description} Click to switch to ${interactionModeConfig[nextInteractionMode].label} mode.`;
   const planSidebarTooltip = props.planSidebarOpen
     ? `Hide ${props.planSidebarLabel.toLowerCase()} sidebar`
@@ -240,7 +247,9 @@ const ComposerFooterModeControls = memo(function ComposerFooterModeControls(prop
                   ? "bg-blue-500/10 text-blue-400 hover:bg-blue-500/15 hover:text-blue-300"
                   : props.interactionMode === "test"
                     ? "bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/15 hover:text-emerald-300"
-                    : "text-muted-foreground/70 hover:text-foreground/80",
+                    : props.interactionMode === "workflow"
+                      ? "bg-amber-500/10 text-amber-400 hover:bg-amber-500/15 hover:text-amber-300"
+                      : "text-muted-foreground/70 hover:text-foreground/80",
               )}
               size="sm"
               type="button"
@@ -253,6 +262,8 @@ const ComposerFooterModeControls = memo(function ComposerFooterModeControls(prop
             <PencilRulerIcon className="text-current opacity-100" />
           ) : props.interactionMode === "test" ? (
             <FlaskConicalIcon className="text-current opacity-100" />
+          ) : props.interactionMode === "workflow" ? (
+            <ListTodoIcon className="text-current opacity-100" />
           ) : (
             <BotIcon />
           )}
@@ -363,6 +374,7 @@ const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryActions(
   isConnecting: boolean;
   isEnvironmentUnavailable: boolean;
   hasSendableContent: boolean;
+  sendLabel?: string;
   queueShortcutLabel: string | null | undefined;
   preserveComposerFocusOnPointerDown?: boolean;
   onPreviousPendingQuestion: () => void;
@@ -392,6 +404,7 @@ const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryActions(
         isEnvironmentUnavailable={props.isEnvironmentUnavailable}
         isPreparingWorktree={props.isPreparingWorktree}
         hasSendableContent={props.hasSendableContent}
+        {...(props.sendLabel ? { sendLabel: props.sendLabel } : {})}
         queueShortcutLabel={props.queueShortcutLabel}
         preserveComposerFocusOnPointerDown={props.preserveComposerFocusOnPointerDown ?? false}
         onPreviousPendingQuestion={props.onPreviousPendingQuestion}
@@ -962,6 +975,13 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           description: "Switch this thread into test mode",
         },
         {
+          id: "slash:workflow",
+          type: "slash-command",
+          command: "workflow",
+          label: "/workflow",
+          description: "Switch this thread into workflow mode",
+        },
+        {
           id: "slash:default",
           type: "slash-command",
           command: "default",
@@ -1133,7 +1153,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   );
   const collapsedComposerPrimaryActionDisabled =
     phase === "running" || isSendBusy || isConnecting || !composerSendState.hasSendableContent;
-  const collapsedComposerPrimaryActionLabel = "Send message";
+  const workflowSendLabel = interactionMode === "workflow" ? "Start Workflow" : undefined;
+  const collapsedComposerPrimaryActionLabel = workflowSendLabel ?? "Send message";
   const showMobilePendingAnswerActions =
     isMobileViewport && !isComposerCollapsedMobile && pendingPrimaryAction !== null;
 
@@ -1597,7 +1618,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           return;
         }
         const nextInteractionMode =
-          item.command === "plan" || item.command === "test" ? item.command : "default";
+          item.command === "plan" || item.command === "test" || item.command === "workflow"
+            ? item.command
+            : "default";
         void handleInteractionModeChange(nextInteractionMode);
         const applied = applyPromptReplacement(trigger.rangeStart, trigger.rangeEnd, "", {
           expectedText: snapshot.value.slice(trigger.rangeStart, trigger.rangeEnd),
@@ -2433,15 +2456,17 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                       ? "Type your own answer, or leave this blank to use the selected option"
                       : showPlanFollowUpPrompt && activeProposedPlan
                         ? "Add feedback to refine the plan, or leave this blank to implement it"
-                        : environmentUnavailable
-                          ? `${environmentUnavailable.label} is ${
-                              environmentUnavailable.connectionState === "connecting"
-                                ? "connecting"
-                                : "disconnected"
-                            }`
-                          : phase === "disconnected"
-                            ? "Ask for follow-up changes or attach images"
-                            : "Ask anything, @tag files/folders, $use skills, or / for commands"
+                        : interactionMode === "workflow"
+                          ? "Describe the outcome you want. KamiCode will coordinate planning, execution, review, and verification."
+                          : environmentUnavailable
+                            ? `${environmentUnavailable.label} is ${
+                                environmentUnavailable.connectionState === "connecting"
+                                  ? "connecting"
+                                  : "disconnected"
+                              }`
+                            : phase === "disconnected"
+                              ? "Ask for follow-up changes or attach images"
+                              : "Ask anything, @tag files/folders, $use skills, or / for commands"
                 }
                 disabled={
                   isConnecting ||
@@ -2577,6 +2602,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                   isEnvironmentUnavailable={environmentUnavailable !== null}
                   isPreparingWorktree={isPreparingWorktree}
                   hasSendableContent={composerSendState.hasSendableContent}
+                  {...(workflowSendLabel ? { sendLabel: workflowSendLabel } : {})}
                   queueShortcutLabel={queueShortcutLabel}
                   preserveComposerFocusOnPointerDown={isMobileViewport}
                   onPreviousPendingQuestion={onPreviousActivePendingUserInputQuestion}

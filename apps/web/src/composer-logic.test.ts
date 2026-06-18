@@ -348,6 +348,10 @@ describe("parseStandaloneComposerSlashCommand", () => {
     expect(parseStandaloneComposerSlashCommand("/test")).toBe("test");
   });
 
+  it("parses standalone /workflow command", () => {
+    expect(parseStandaloneComposerSlashCommand("/workflow")).toBe("workflow");
+  });
+
   it("ignores slash commands with extra message text", () => {
     expect(parseStandaloneComposerSlashCommand("/plan explain this")).toBeNull();
   });

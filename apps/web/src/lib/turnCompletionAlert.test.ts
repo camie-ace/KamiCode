@@ -76,6 +76,7 @@ function makeEnvironmentState(input: {
     },
     messageIdsByThreadId: {},
     messageByThreadId: {},
+    queuedTurnsByThreadId: {},
     activityIdsByThreadId: {},
     activityByThreadId: {},
     proposedPlanIdsByThreadId: {},

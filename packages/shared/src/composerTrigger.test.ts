@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { serializeComposerFileLink, serializeComposerMentionPath } from "./composerTrigger.ts";
+import {
+  parseStandaloneComposerSlashCommand,
+  serializeComposerFileLink,
+  serializeComposerMentionPath,
+} from "./composerTrigger.ts";
 
 describe("serializeComposerMentionPath", () => {
   it("keeps simple mention paths unquoted", () => {
@@ -39,5 +43,15 @@ describe("serializeComposerFileLink", () => {
     expect(serializeComposerFileLink("@scope/package.json")).toBe(
       "[package.json](@scope/package.json)",
     );
+  });
+});
+
+describe("parseStandaloneComposerSlashCommand", () => {
+  it("accepts workflow mode commands", () => {
+    expect(parseStandaloneComposerSlashCommand("/workflow")).toBe("workflow");
+  });
+
+  it("keeps slash commands with message text as normal prompts", () => {
+    expect(parseStandaloneComposerSlashCommand("/workflow build this")).toBeNull();
   });
 });

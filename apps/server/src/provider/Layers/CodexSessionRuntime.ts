@@ -42,6 +42,7 @@ import {
   CODEX_DEFAULT_MODE_DEVELOPER_INSTRUCTIONS,
   CODEX_PLAN_MODE_DEVELOPER_INSTRUCTIONS,
   CODEX_TEST_MODE_DEVELOPER_INSTRUCTIONS,
+  CODEX_WORKFLOW_MODE_DEVELOPER_INSTRUCTIONS,
 } from "../CodexDeveloperInstructions.ts";
 import { appendProjectMemoryInstructions, readProjectMemory } from "../ProjectMemory.ts";
 import {
@@ -52,6 +53,9 @@ import {
 const decodeV2TurnStartResponse = Schema.decodeUnknownEffect(EffectCodexSchema.V2TurnStartResponse);
 const decodeV2ThreadStartResponse = Schema.decodeUnknownEffect(
   EffectCodexSchema.V2ThreadStartResponse,
+);
+const decodeV2ThreadResumeResponse = Schema.decodeUnknownEffect(
+  EffectCodexSchema.V2ThreadResumeResponse,
 );
 
 const PROVIDER = ProviderDriverKind.make("codex");
@@ -357,7 +361,9 @@ function buildCodexCollaborationMode(input: {
       ? CODEX_PLAN_MODE_DEVELOPER_INSTRUCTIONS
       : interactionMode === "test"
         ? CODEX_TEST_MODE_DEVELOPER_INSTRUCTIONS
-        : CODEX_DEFAULT_MODE_DEVELOPER_INSTRUCTIONS;
+        : interactionMode === "workflow"
+          ? CODEX_WORKFLOW_MODE_DEVELOPER_INSTRUCTIONS
+          : CODEX_DEFAULT_MODE_DEVELOPER_INSTRUCTIONS;
   return {
     mode,
     settings: {
@@ -455,10 +461,34 @@ type CodexThreadOpenResponse =
 
 type CodexThreadOpenMethod = "thread/start" | "thread/resume";
 
+function withCodexThreadSessionIdCompat(rawResponse: unknown): unknown {
+  if (typeof rawResponse !== "object" || rawResponse === null) {
+    return rawResponse;
+  }
+  const response = rawResponse as { readonly thread?: unknown };
+  if (typeof response.thread !== "object" || response.thread === null) {
+    return rawResponse;
+  }
+  const thread = response.thread as {
+    readonly id?: unknown;
+    readonly sessionId?: unknown;
+  };
+  if (typeof thread.sessionId === "string" || typeof thread.id !== "string") {
+    return rawResponse;
+  }
+  return {
+    ...response,
+    thread: {
+      ...thread,
+      sessionId: thread.id,
+    },
+  };
+}
+
 interface CodexThreadOpenClient {
   readonly raw?: {
-    readonly request: (
-      method: "thread/start",
+    readonly request: <M extends CodexThreadOpenMethod>(
+      method: M,
       payload: unknown,
     ) => Effect.Effect<unknown, CodexErrors.CodexAppServerError>;
   };
@@ -480,7 +510,7 @@ function requestCodexThreadStart(
       .request("thread/start", payload)
       .pipe(
         Effect.flatMap((rawResponse) =>
-          decodeV2ThreadStartResponse(rawResponse).pipe(
+          decodeV2ThreadStartResponse(withCodexThreadSessionIdCompat(rawResponse)).pipe(
             Effect.mapError((error) =>
               toProtocolParseError("Invalid thread/start response payload", error),
             ),
@@ -490,6 +520,30 @@ function requestCodexThreadStart(
   }
 
   return client.request("thread/start", payload);
+}
+
+function requestCodexThreadResume(
+  client: CodexThreadOpenClient,
+  payload: CodexRpc.ClientRequestParamsByMethod["thread/resume"],
+): Effect.Effect<
+  CodexRpc.ClientRequestResponsesByMethod["thread/resume"],
+  CodexErrors.CodexAppServerError
+> {
+  if (client.raw) {
+    return client.raw
+      .request("thread/resume", payload)
+      .pipe(
+        Effect.flatMap((rawResponse) =>
+          decodeV2ThreadResumeResponse(withCodexThreadSessionIdCompat(rawResponse)).pipe(
+            Effect.mapError((error) =>
+              toProtocolParseError("Invalid thread/resume payload", error),
+            ),
+          ),
+        ),
+      );
+  }
+
+  return client.request("thread/resume", payload);
 }
 
 export const openCodexThread = (input: {
@@ -513,22 +567,20 @@ export const openCodexThread = (input: {
     return requestCodexThreadStart(input.client, startParams);
   }
 
-  return input.client
-    .request("thread/resume", {
-      threadId: resumeThreadId,
-      ...startParams,
-    })
-    .pipe(
-      Effect.catchIf(isRecoverableThreadResumeError, (error) =>
-        Effect.logWarning("codex app-server thread resume fell back to fresh start", {
-          threadId: input.threadId,
-          requestedRuntimeMode: input.runtimeMode,
-          resumeThreadId,
-          recoverable: true,
-          cause: error.message,
-        }).pipe(Effect.andThen(requestCodexThreadStart(input.client, startParams))),
-      ),
-    );
+  return requestCodexThreadResume(input.client, {
+    threadId: resumeThreadId,
+    ...startParams,
+  }).pipe(
+    Effect.catchIf(isRecoverableThreadResumeError, (error) =>
+      Effect.logWarning("codex app-server thread resume fell back to fresh start", {
+        threadId: input.threadId,
+        requestedRuntimeMode: input.runtimeMode,
+        resumeThreadId,
+        recoverable: true,
+        cause: error.message,
+      }).pipe(Effect.andThen(requestCodexThreadStart(input.client, startParams))),
+    ),
+  );
 };
 
 function readNotificationThreadId(notification: CodexServerNotification): string | undefined {
@@ -1205,7 +1257,9 @@ export const makeCodexSessionRuntime = (
           cwd: options.cwd,
           ...(options.stateDir ? { stateDir: options.stateDir } : {}),
           ...(options.issueTestHarnessPairingCredential
-            ? { issueKamiCodePairingCredential: options.issueTestHarnessPairingCredential }
+            ? {
+                issueKamiCodePairingCredential: options.issueTestHarnessPairingCredential,
+              }
             : {}),
         });
 
@@ -1366,7 +1420,9 @@ export const makeCodexSessionRuntime = (
       });
       yield* emitSessionEvent("session/closed", "Session stopped").pipe(
         Effect.catch((cause) =>
-          Effect.logError("Failed to emit Codex session closed event.", { cause }),
+          Effect.logError("Failed to emit Codex session closed event.", {
+            cause,
+          }),
         ),
       );
       yield* Scope.close(runtimeScope, Exit.void);

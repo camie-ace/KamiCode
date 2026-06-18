@@ -121,7 +121,7 @@ export const RuntimeMode = Schema.Literals([
 ]);
 export type RuntimeMode = typeof RuntimeMode.Type;
 export const DEFAULT_RUNTIME_MODE: RuntimeMode = "full-access";
-export const ProviderInteractionMode = Schema.Literals(["default", "plan", "test"]);
+export const ProviderInteractionMode = Schema.Literals(["default", "plan", "test", "workflow"]);
 export type ProviderInteractionMode = typeof ProviderInteractionMode.Type;
 export const DEFAULT_PROVIDER_INTERACTION_MODE: ProviderInteractionMode = "default";
 export const TurnDispatchPolicy = Schema.Literals(["immediate", "queue"]);
@@ -646,6 +646,14 @@ export const ThreadTurnStartCommand = Schema.Struct({
   createdAt: IsoDateTime,
 });
 
+const ThreadActivityAppendCommand = Schema.Struct({
+  type: Schema.Literal("thread.activity.append"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  activity: OrchestrationThreadActivity,
+  createdAt: IsoDateTime,
+});
+
 const ClientThreadTurnStartCommand = Schema.Struct({
   type: Schema.Literal("thread.turn.start"),
   commandId: CommandId,
@@ -725,6 +733,7 @@ const DispatchableClientOrchestrationCommand = Schema.Union([
   ThreadUserInputRespondCommand,
   ThreadCheckpointRevertCommand,
   ThreadSessionStopCommand,
+  ThreadActivityAppendCommand,
 ]);
 export type DispatchableClientOrchestrationCommand =
   typeof DispatchableClientOrchestrationCommand.Type;
@@ -747,6 +756,7 @@ export const ClientOrchestrationCommand = Schema.Union([
   ThreadUserInputRespondCommand,
   ThreadCheckpointRevertCommand,
   ThreadSessionStopCommand,
+  ThreadActivityAppendCommand,
 ]);
 export type ClientOrchestrationCommand = typeof ClientOrchestrationCommand.Type;
 
@@ -809,14 +819,6 @@ const ThreadTurnDiffCompleteCommand = Schema.Struct({
   files: Schema.Array(OrchestrationCheckpointFile),
   assistantMessageId: Schema.optional(MessageId),
   checkpointTurnCount: NonNegativeInt,
-  createdAt: IsoDateTime,
-});
-
-const ThreadActivityAppendCommand = Schema.Struct({
-  type: Schema.Literal("thread.activity.append"),
-  commandId: CommandId,
-  threadId: ThreadId,
-  activity: OrchestrationThreadActivity,
   createdAt: IsoDateTime,
 });
 

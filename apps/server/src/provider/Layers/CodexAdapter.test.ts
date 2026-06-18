@@ -288,6 +288,32 @@ validationLayer("CodexAdapterLive validation", (it) => {
       });
     }),
   );
+
+  it.effect("omits the standard codex service tier sentinel before starting a session", () =>
+    Effect.gen(function* () {
+      validationRuntimeFactory.factory.mockClear();
+      const adapter = yield* CodexAdapter;
+
+      yield* adapter.startSession({
+        provider: ProviderDriverKind.make("codex"),
+        threadId: asThreadId("thread-standard-tier"),
+        modelSelection: createModelSelection(ProviderInstanceId.make("codex"), "gpt-5.3-codex", [
+          { id: "serviceTier", value: "default" },
+        ]),
+        runtimeMode: "full-access",
+      });
+
+      assert.deepStrictEqual(validationRuntimeFactory.factory.mock.calls[0]?.[0], {
+        binaryPath: "codex",
+        cwd: process.cwd(),
+        model: "gpt-5.3-codex",
+        providerInstanceId: ProviderInstanceId.make("codex"),
+        stateDir: path.join(process.cwd(), "userdata"),
+        threadId: asThreadId("thread-standard-tier"),
+        runtimeMode: "full-access",
+      });
+    }),
+  );
 });
 
 const sessionRuntimeFactory = makeRuntimeFactory();
@@ -356,6 +382,38 @@ sessionErrorLayer("CodexAdapterLive session errors", (it) => {
         model: "gpt-5.3-codex",
         effort: "high",
         serviceTier: "priority",
+      });
+    }),
+  );
+
+  it.effect("omits the standard codex service tier sentinel before sending a turn", () =>
+    Effect.gen(function* () {
+      const adapter = yield* CodexAdapter;
+      yield* adapter.startSession({
+        provider: ProviderDriverKind.make("codex"),
+        threadId: asThreadId("sess-standard-tier"),
+        runtimeMode: "full-access",
+      });
+      const runtime = sessionRuntimeFactory.lastRuntime;
+      assert.ok(runtime);
+      runtime.sendTurnImpl.mockClear();
+
+      yield* Effect.ignore(
+        adapter.sendTurn({
+          threadId: asThreadId("sess-standard-tier"),
+          input: "hello",
+          modelSelection: createModelSelection(ProviderInstanceId.make("codex"), "gpt-5.3-codex", [
+            { id: "reasoningEffort", value: "high" },
+            { id: "serviceTier", value: "default" },
+          ]),
+          attachments: [],
+        }),
+      );
+
+      assert.deepStrictEqual(runtime.sendTurnImpl.mock.calls[0]?.[0], {
+        input: "hello",
+        model: "gpt-5.3-codex",
+        effort: "high",
       });
     }),
   );

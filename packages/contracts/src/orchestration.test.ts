@@ -5,6 +5,7 @@ import * as Schema from "effect/Schema";
 import {
   DEFAULT_PROVIDER_INTERACTION_MODE,
   DEFAULT_RUNTIME_MODE,
+  ClientOrchestrationCommand,
   ModelSelection,
   OrchestrationCommand,
   OrchestrationEvent,
@@ -46,6 +47,7 @@ function getOptionValue(
   return options?.find((option) => option.id === id)?.value;
 }
 const decodeThreadCreatedPayload = Schema.decodeUnknownEffect(ThreadCreatedPayload);
+const decodeClientOrchestrationCommand = Schema.decodeUnknownEffect(ClientOrchestrationCommand);
 const decodeOrchestrationCommand = Schema.decodeUnknownEffect(OrchestrationCommand);
 const decodeOrchestrationEvent = Schema.decodeUnknownEffect(OrchestrationEvent);
 const decodeThreadMetaUpdatedPayload = Schema.decodeUnknownEffect(ThreadMetaUpdatedPayload);
@@ -291,6 +293,54 @@ it.effect("accepts test interaction mode in thread.turn.start", () =>
       createdAt: "2026-01-01T00:00:00.000Z",
     });
     assert.strictEqual(parsed.interactionMode, "test");
+  }),
+);
+
+it.effect("accepts client-dispatched thread activity append commands", () =>
+  Effect.gen(function* () {
+    const parsed = yield* decodeClientOrchestrationCommand({
+      type: "thread.activity.append",
+      commandId: "cmd-workflow-activity",
+      threadId: "thread-workflow",
+      activity: {
+        id: "activity-workflow-guidance",
+        tone: "info",
+        kind: "workflow.lane.guidance",
+        summary: "Guidance added to Builder",
+        payload: {
+          laneRole: "Builder",
+          guidance: "Use the existing API boundary.",
+        },
+        turnId: null,
+        createdAt: "2026-01-01T00:00:00.000Z",
+      },
+      createdAt: "2026-01-01T00:00:00.000Z",
+    });
+
+    assert.strictEqual(parsed.type, "thread.activity.append");
+    if (parsed.type !== "thread.activity.append") {
+      return;
+    }
+    assert.strictEqual(parsed.activity.kind, "workflow.lane.guidance");
+  }),
+);
+
+it.effect("accepts workflow interaction mode in thread.turn.start", () =>
+  Effect.gen(function* () {
+    const parsed = yield* decodeThreadTurnStartCommand({
+      type: "thread.turn.start",
+      commandId: "cmd-turn-workflow",
+      threadId: "thread-1",
+      message: {
+        messageId: "msg-workflow",
+        role: "user",
+        text: "coordinate implementation and verification",
+        attachments: [],
+      },
+      interactionMode: "workflow",
+      createdAt: "2026-01-01T00:00:00.000Z",
+    });
+    assert.strictEqual(parsed.interactionMode, "workflow");
   }),
 );
 

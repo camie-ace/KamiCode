@@ -197,6 +197,21 @@ describe("CompactComposerControlsMenu", () => {
     });
   });
 
+  it("shows workflow in the interaction mode section", async () => {
+    await using _ = await mountMenu();
+
+    await page.getByLabelText("More composer controls").click();
+
+    await vi.waitFor(() => {
+      const text = document.body.textContent ?? "";
+      expect(text).toContain("Mode");
+      expect(text).toContain("Build");
+      expect(text).toContain("Plan");
+      expect(text).toContain("Test");
+      expect(text).toContain("Workflow");
+    });
+  });
+
   it("hides fast mode controls for non-Opus Claude models", async () => {
     await using _ = await mountMenu({
       modelSelection: createModelSelection(
@@ -315,6 +330,7 @@ describe("CompactComposerControlsMenu", () => {
       expect(text).not.toContain("Mode");
       expect(text).not.toContain("Chat");
       expect(text).not.toContain("Plan");
+      expect(text).not.toContain("Workflow");
       expect(text).toContain("Access");
       expect(text).toContain("Supervised");
       expect(text).toContain("Full access");
