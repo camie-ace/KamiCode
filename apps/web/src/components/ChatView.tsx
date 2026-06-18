@@ -110,7 +110,9 @@ import { getConfiguredPreviewUrls } from "./preview/previewEmptyStateLogic";
 // Lazy: keeps the entire preview component graph (webview host, favicon
 // helper, Chromium error icon) out of the web bundle until first open.
 const PreviewPanel = lazy(() =>
-  import("./preview/PreviewPanel").then((mod) => ({ default: mod.PreviewPanel })),
+  import("./preview/PreviewPanel").then((mod) => ({
+    default: mod.PreviewPanel,
+  })),
 );
 const DiffPanel = lazy(() => import("./DiffPanel"));
 import { BranchToolbar } from "./BranchToolbar";
@@ -228,46 +230,6 @@ const EMPTY_PROPOSED_PLANS: Thread["proposedPlans"] = [];
 const EMPTY_PROVIDERS: ServerProvider[] = [];
 const EMPTY_PROVIDER_SKILLS: ServerProvider["skills"] = [];
 const EMPTY_PENDING_USER_INPUT_ANSWERS: Record<string, PendingUserInputDraftAnswer> = {};
-
-function inferWorkflowInitialLanes(text: string): string[] {
-  const lower = text.toLowerCase();
-  const lanes = ["Lead", "Planner", "Builder", "Verifier"];
-  if (/\b(doc|document|readme|notes?|memory)\b/.test(lower)) {
-    lanes.push("Documenter");
-  }
-  if (/\b(research|inspect|explore|compare|investigate)\b/.test(lower)) {
-    lanes.splice(2, 0, "Researcher");
-  }
-  if (/\b(red[- ]?team|critic|critique|risk|security|review)\b/.test(lower)) {
-    lanes.push("Critic");
-  }
-  return [...new Set(lanes)];
-}
-
-function inferWorkflowPattern(text: string): string {
-  const lower = text.toLowerCase();
-  if (/\b(research|inspect|investigate)\b/.test(lower)) return "Research -> Build -> Test";
-  if (/\b(compare|alternatives|options|approaches)\b/.test(lower)) return "Parallel Exploration";
-  if (/\b(red[- ]?team|critic|critique|risk|security)\b/.test(lower)) return "Red Team";
-  if (/\b(plan only|planning only|do not build)\b/.test(lower)) return "Planning Only";
-  return "Build + Review";
-}
-
-function defaultWorkflowAcceptanceCriteria(text: string): string[] {
-  const lower = text.toLowerCase();
-  const criteria = [
-    "Implementation matches the requested outcome.",
-    "Verifier records pass/fail evidence before final completion.",
-    "Open objections are clearly labeled before the workflow completes.",
-  ];
-  if (/\b(test|verify|browser|preview|url)\b/.test(lower)) {
-    criteria.push("Relevant test or browser evidence is captured.");
-  }
-  if (/\b(doc|document|readme|memory|notes?)\b/.test(lower)) {
-    criteria.push("User-facing docs or durable notes are updated when needed.");
-  }
-  return criteria;
-}
 
 function workflowActionLabel(action: string): string {
   switch (action) {
@@ -2116,7 +2078,10 @@ export default function ChatView(props: ChatViewProps) {
     )
       .then((entries) => {
         if (!cancelled) {
-          setAttachmentAssetUrlById((current) => ({ ...current, ...Object.fromEntries(entries) }));
+          setAttachmentAssetUrlById((current) => ({
+            ...current,
+            ...Object.fromEntries(entries),
+          }));
         }
       })
       .catch(() => undefined);
@@ -2533,7 +2498,10 @@ export default function ChatView(props: ChatViewProps) {
         to: "/$environmentId/$threadId",
         params: { environmentId, threadId },
         replace: true,
-        search: (previous) => ({ ...stripDiffSearchParams(previous), diff: undefined }),
+        search: (previous) => ({
+          ...stripDiffSearchParams(previous),
+          diff: undefined,
+        }),
       });
     }
   }, [activeProject?.cwd, activeThreadRef, diffOpen, environmentId, navigate, threadId]);
@@ -2557,7 +2525,10 @@ export default function ChatView(props: ChatViewProps) {
         to: "/$environmentId/$threadId",
         params: { environmentId, threadId },
         replace: true,
-        search: (previous) => ({ ...stripDiffSearchParams(previous), diff: undefined }),
+        search: (previous) => ({
+          ...stripDiffSearchParams(previous),
+          diff: undefined,
+        }),
       });
     }
     const activeTabId = activePreviewState.activeTabId;
@@ -2748,7 +2719,10 @@ export default function ChatView(props: ChatViewProps) {
         });
         return;
       }
-      dispatchQueuedMessageDelete({ queueId: item.queueId, messageId: item.id });
+      dispatchQueuedMessageDelete({
+        queueId: item.queueId,
+        messageId: item.id,
+      });
     },
     [dispatchQueuedMessageDelete],
   );
@@ -2766,7 +2740,10 @@ export default function ChatView(props: ChatViewProps) {
       ) {
         continue;
       }
-      dispatchQueuedMessageDelete({ queueId: turn.queueId, messageId: turn.messageId });
+      dispatchQueuedMessageDelete({
+        queueId: turn.queueId,
+        messageId: turn.messageId,
+      });
     }
   }, [
     activeQueuedTurns,
@@ -3405,14 +3382,20 @@ export default function ChatView(props: ChatViewProps) {
           to: "/$environmentId/$threadId",
           params: { environmentId, threadId },
           replace: true,
-          search: (previous) => ({ ...stripDiffSearchParams(previous), diff: "1" }),
+          search: (previous) => ({
+            ...stripDiffSearchParams(previous),
+            diff: "1",
+          }),
         });
       } else if (surface.kind !== "diff" && diffOpen) {
         void navigate({
           to: "/$environmentId/$threadId",
           params: { environmentId, threadId },
           replace: true,
-          search: (previous) => ({ ...stripDiffSearchParams(previous), diff: undefined }),
+          search: (previous) => ({
+            ...stripDiffSearchParams(previous),
+            diff: undefined,
+          }),
         });
       }
     },
@@ -3435,7 +3418,10 @@ export default function ChatView(props: ChatViewProps) {
         usePreviewStateStore.getState().removeSession(activeThreadRef, surface.resourceId);
         const api = readEnvironmentApi(activeThreadRef.environmentId);
         void api?.preview
-          .close({ threadId: activeThreadRef.threadId, tabId: surface.resourceId })
+          .close({
+            threadId: activeThreadRef.threadId,
+            tabId: surface.resourceId,
+          })
           .catch(() => undefined);
       }
       useRightPanelStore.getState().closeSurface(activeThreadRef, surface.id);
@@ -3466,7 +3452,10 @@ export default function ChatView(props: ChatViewProps) {
           to: "/$environmentId/$threadId",
           params: { environmentId, threadId },
           replace: true,
-          search: (previous) => ({ ...stripDiffSearchParams(previous), diff: undefined }),
+          search: (previous) => ({
+            ...stripDiffSearchParams(previous),
+            diff: undefined,
+          }),
         });
       }
     },
@@ -3629,15 +3618,17 @@ export default function ChatView(props: ChatViewProps) {
       (activity) => activity.kind === "workflow.started",
     );
     if (!hasWorkflowStart) return;
-    const alreadyCompleted = activeThread.activities.some((activity) => {
-      if (activity.kind !== "workflow.completed") return false;
+    const alreadyFinalized = activeThread.activities.some((activity) => {
+      if (activity.kind !== "workflow.completed" && activity.kind !== "workflow.blocked") {
+        return false;
+      }
       const payload =
         activity.payload && typeof activity.payload === "object"
           ? (activity.payload as Record<string, unknown>)
           : null;
       return payload?.turnId === turnId;
     });
-    if (alreadyCompleted) return;
+    if (alreadyFinalized) return;
 
     const completedSteps = activePlan?.steps.filter((step) => step.status === "completed") ?? [];
     const verifierStep = completedSteps.find((step) =>
@@ -3667,6 +3658,23 @@ export default function ChatView(props: ChatViewProps) {
             ? value.filter((entry): entry is string => typeof entry === "string")
             : [];
         }) ?? [];
+    const workflowConfigPayloads = activeThread.activities
+      .filter(
+        (activity) =>
+          activity.kind === "workflow.started" || activity.kind === "workflow.customized",
+      )
+      .toSorted((left, right) => right.createdAt.localeCompare(left.createdAt))
+      .map((activity) =>
+        activity.payload && typeof activity.payload === "object"
+          ? (activity.payload as Record<string, unknown>)
+          : null,
+      )
+      .filter((payload): payload is Record<string, unknown> => payload !== null);
+    const workflowConfigPayload = workflowConfigPayloads[0];
+    const verifierApprovalRequired = workflowConfigPayload?.requireVerifierApproval !== false;
+    const testsRequiredBeforeFinal = workflowConfigPayload?.requireTestsBeforeFinal === true;
+    const verificationRequired = verifierApprovalRequired || testsRequiredBeforeFinal;
+    const missingRequiredVerifierEvidence = !verifierStep && verificationRequired;
 
     const writes: Array<Parameters<typeof appendWorkflowActivity>[0]> = [];
     if (builderStep) {
@@ -3732,10 +3740,11 @@ export default function ChatView(props: ChatViewProps) {
         summary: "Verifier evidence was not captured",
         payload: {
           turnId,
-          severity: "non-blocking concern",
+          severity: missingRequiredVerifierEvidence ? "blocking objection" : "non-blocking concern",
           title: "No verifier evidence step was detected",
-          detail:
-            "The workflow completed, but no completed test or verification step was found in the task checklist.",
+          detail: missingRequiredVerifierEvidence
+            ? "Verifier approval is required before this workflow can be marked complete, but no completed test or verification step was found."
+            : "The workflow completed, but no completed test or verification step was found in the task checklist.",
         },
         turnId,
         createdAt,
@@ -3746,7 +3755,7 @@ export default function ChatView(props: ChatViewProps) {
         summary: "Verifier evidence missing",
         payload: {
           turnId,
-          status: "reviewed",
+          status: missingRequiredVerifierEvidence ? "fail" : "reviewed",
           detail: "No completed verifier step was detected.",
           passed: [],
           failed: ["Verifier evidence was not found in the completed checklist."],
@@ -3756,6 +3765,27 @@ export default function ChatView(props: ChatViewProps) {
         turnId,
         createdAt,
       });
+      if (missingRequiredVerifierEvidence) {
+        writes.push({
+          threadId: activeThread.id,
+          kind: "workflow.route-back",
+          summary: "Builder route-back required",
+          payload: {
+            turnId,
+            laneRole: "Builder",
+            title: "Verification evidence required",
+            detail:
+              "The Lead must route this back to Builder or Verifier before final completion because required verification evidence is missing.",
+            requiredFix:
+              "Add a verification step, run the relevant check, and record the verifier result before completing the workflow.",
+            filesTouched,
+            testsRun: testSteps,
+            knownRisks: ["Completion is blocked until verifier evidence exists."],
+          },
+          turnId,
+          createdAt,
+        });
+      }
     }
     if (documenterStep) {
       writes.push({
@@ -3804,33 +3834,61 @@ export default function ChatView(props: ChatViewProps) {
             : "Reviewed against the workflow task checklist.",
         decision: verifierStep
           ? "Complete with verifier evidence."
-          : "Complete with a visible verification concern.",
-        concerns: verifierStep ? [] : ["Verifier evidence was missing."],
+          : missingRequiredVerifierEvidence
+            ? "Not complete. Builder or Verifier must provide required verification evidence."
+            : "Complete with a visible verification concern.",
+        concerns: verifierStep
+          ? []
+          : missingRequiredVerifierEvidence
+            ? ["Required verifier evidence is missing and blocks completion."]
+            : ["Verifier evidence was missing."],
         alternatives: [],
         overrides: [],
       },
       turnId,
       createdAt,
     });
-    writes.push({
-      threadId: activeThread.id,
-      kind: "workflow.completed",
-      summary: "Workflow completed with structured outcome records",
-      payload: {
-        turnId,
-        status: verifierStep ? "verified" : "completed-with-concern",
-        implementationStatus: builderStep ? "done" : "not-detected",
-        verificationStatus: verifierStep ? "passed" : "missing",
-        openObjections: verifierStep ? 0 : 1,
-        memoryUpdates: documenterStep ? 1 : 0,
-        detail:
-          completedSteps.length > 0
-            ? `Completed ${completedSteps.length} checklist item(s).`
-            : "The provider turn completed; no checklist steps were available.",
-      },
-      turnId,
-      createdAt,
-    });
+    writes.push(
+      missingRequiredVerifierEvidence
+        ? {
+            threadId: activeThread.id,
+            kind: "workflow.blocked",
+            summary: "Workflow blocked by required verifier evidence",
+            payload: {
+              turnId,
+              status: "blocked",
+              implementationStatus: builderStep ? "done" : "not-detected",
+              verificationStatus: "missing",
+              openObjections: 1,
+              memoryUpdates: documenterStep ? 1 : 0,
+              detail:
+                "The provider turn ended, but Workflow Mode did not mark the workflow complete because verifier evidence is required.",
+              requiredFix:
+                "Route back to Builder or Verifier, run the required verification, then record a passing verifier result.",
+            },
+            turnId,
+            createdAt,
+          }
+        : {
+            threadId: activeThread.id,
+            kind: "workflow.completed",
+            summary: "Workflow completed with structured outcome records",
+            payload: {
+              turnId,
+              status: verifierStep ? "verified" : "completed-with-concern",
+              implementationStatus: builderStep ? "done" : "not-detected",
+              verificationStatus: verifierStep ? "passed" : "missing",
+              openObjections: verifierStep ? 0 : 1,
+              memoryUpdates: documenterStep ? 1 : 0,
+              detail:
+                completedSteps.length > 0
+                  ? `Completed ${completedSteps.length} checklist item(s).`
+                  : "The provider turn completed; no checklist steps were available.",
+            },
+            turnId,
+            createdAt,
+          },
+    );
 
     void (async () => {
       for (const write of writes) {
@@ -4531,34 +4589,6 @@ export default function ChatView(props: ChatViewProps) {
         ...(bootstrap ? { bootstrap } : {}),
         createdAt: messageCreatedAt,
       });
-      if (interactionMode === "workflow") {
-        await appendWorkflowActivity({
-          threadId: threadIdForSend,
-          kind: "workflow.started",
-          summary: "Workflow started",
-          payload: {
-            goal: trimmed || title,
-            workflowPattern: inferWorkflowPattern(trimmed || title),
-            initialLanes: inferWorkflowInitialLanes(trimmed || title),
-            acceptanceCriteria: defaultWorkflowAcceptanceCriteria(trimmed || title),
-            requireVerifierApproval: true,
-            addRedTeamCritique: /\b(red[- ]?team|critic|critique|risk|security|review)\b/i.test(
-              trimmed || title,
-            ),
-            requireTestsBeforeFinal: /\b(test|verify|browser|preview|url)\b/i.test(
-              trimmed || title,
-            ),
-            showMemoryAuditNotes: true,
-            exploreParallelApproaches: /\b(compare|alternatives|options|approaches)\b/i.test(
-              trimmed || title,
-            ),
-            stopAfterPlanningForApproval: /\b(plan only|planning only|approval)\b/i.test(
-              trimmed || title,
-            ),
-          },
-          createdAt: messageCreatedAt,
-        }).catch(() => undefined);
-      }
       turnStartSucceeded = true;
       if (
         isQueuedDispatch &&
@@ -4566,7 +4596,10 @@ export default function ChatView(props: ChatViewProps) {
           queuedMessageDeleteKey(environmentId, threadIdForSend, messageIdForSend),
         )
       ) {
-        dispatchQueuedMessageDelete({ queueId: null, messageId: messageIdForSend });
+        dispatchQueuedMessageDelete({
+          queueId: null,
+          messageId: messageIdForSend,
+        });
       }
     })().catch(async (err: unknown) => {
       if (

@@ -264,6 +264,7 @@ it.layer(NodeServices.layer)("decider project scripts", (it) => {
       });
 
       const events = Array.isArray(result) ? result : [result];
+      expect(events).toHaveLength(3);
       const turnStartEvent = events.find((event) => event.type === "thread.turn-start-requested");
       expect(turnStartEvent?.type).toBe("thread.turn-start-requested");
       if (turnStartEvent?.type !== "thread.turn-start-requested") {
@@ -271,6 +272,23 @@ it.layer(NodeServices.layer)("decider project scripts", (it) => {
       }
       expect(turnStartEvent.payload.interactionMode).toBe("workflow");
       expect(turnStartEvent.payload.runtimeMode).toBe("full-access");
+      const workflowStartedEvent = events.find(
+        (event) => event.type === "thread.activity-appended",
+      );
+      expect(workflowStartedEvent?.type).toBe("thread.activity-appended");
+      if (workflowStartedEvent?.type !== "thread.activity-appended") {
+        return;
+      }
+      expect(workflowStartedEvent.causationEventId).toBe(turnStartEvent.eventId);
+      expect(workflowStartedEvent.payload.activity.kind).toBe("workflow.started");
+      expect(workflowStartedEvent.payload.activity.summary).toBe("Workflow started");
+      expect(workflowStartedEvent.payload.activity.payload).toMatchObject({
+        goal: "coordinate this",
+        workflowPattern: "Build + Review",
+        initialLanes: ["Lead", "Planner", "Builder", "Verifier"],
+        requireVerifierApproval: true,
+        showMemoryAuditNotes: true,
+      });
     }),
   );
 

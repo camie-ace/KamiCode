@@ -60,6 +60,46 @@ type DecideOrchestrationCommandResult =
   | PlannedOrchestrationEvent
   | ReadonlyArray<PlannedOrchestrationEvent>;
 
+function inferWorkflowInitialLanes(text: string): ReadonlyArray<string> {
+  const lower = text.toLowerCase();
+  const lanes = ["Lead", "Planner", "Builder", "Verifier"];
+  if (/\b(doc|document|readme|notes?|memory)\b/.test(lower)) {
+    lanes.push("Documenter");
+  }
+  if (/\b(research|inspect|explore|compare|investigate)\b/.test(lower)) {
+    lanes.splice(2, 0, "Researcher");
+  }
+  if (/\b(red[- ]?team|critic|critique|risk|security|review)\b/.test(lower)) {
+    lanes.push("Critic");
+  }
+  return [...new Set(lanes)];
+}
+
+function inferWorkflowPattern(text: string): string {
+  const lower = text.toLowerCase();
+  if (/\b(research|inspect|investigate)\b/.test(lower)) return "Research -> Build -> Test";
+  if (/\b(compare|alternatives|options|approaches)\b/.test(lower)) return "Parallel Exploration";
+  if (/\b(red[- ]?team|critic|critique|risk|security)\b/.test(lower)) return "Red Team";
+  if (/\b(plan only|planning only|do not build)\b/.test(lower)) return "Planning Only";
+  return "Build + Review";
+}
+
+function workflowAcceptanceCriteria(text: string): ReadonlyArray<string> {
+  const lower = text.toLowerCase();
+  const criteria = [
+    "Implementation matches the requested outcome.",
+    "Verifier records pass/fail evidence before final completion.",
+    "Open objections are clearly labeled before the workflow completes.",
+  ];
+  if (/\b(test|verify|browser|preview|url)\b/.test(lower)) {
+    criteria.push("Relevant test or browser evidence is captured.");
+  }
+  if (/\b(doc|document|readme|memory|notes?)\b/.test(lower)) {
+    criteria.push("User-facing docs or durable notes are updated when needed.");
+  }
+  return criteria;
+}
+
 const decideCommandSequence = Effect.fn("decideCommandSequence")(function* ({
   commands,
   readModel,
@@ -498,7 +538,55 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           createdAt: command.createdAt,
         },
       };
-      return [userMessageEvent, turnStartRequestedEvent];
+      if (command.interactionMode !== "workflow") {
+        return [userMessageEvent, turnStartRequestedEvent];
+      }
+
+      const activityId = yield* Crypto.Crypto.pipe(
+        Effect.flatMap((crypto) => crypto.randomUUIDv4),
+        Effect.map(EventId.make),
+      );
+      const workflowGoal = command.message.text.trim() || command.titleSeed || "Workflow";
+      const workflowStartedEvent: Omit<OrchestrationEvent, "sequence"> = {
+        ...(yield* withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        causationEventId: turnStartRequestedEvent.eventId,
+        type: "thread.activity-appended",
+        payload: {
+          threadId: command.threadId,
+          activity: {
+            id: activityId,
+            tone: "info",
+            kind: "workflow.started",
+            summary: "Workflow started",
+            payload: {
+              goal: workflowGoal,
+              workflowPattern: inferWorkflowPattern(workflowGoal),
+              initialLanes: inferWorkflowInitialLanes(workflowGoal),
+              acceptanceCriteria: workflowAcceptanceCriteria(workflowGoal),
+              requireVerifierApproval: true,
+              addRedTeamCritique: /\b(red[- ]?team|critic|critique|risk|security|review)\b/i.test(
+                workflowGoal,
+              ),
+              requireTestsBeforeFinal: /\b(test|verify|browser|preview|url)\b/i.test(workflowGoal),
+              showMemoryAuditNotes: true,
+              exploreParallelApproaches: /\b(compare|alternatives|options|approaches)\b/i.test(
+                workflowGoal,
+              ),
+              stopAfterPlanningForApproval: /\b(plan only|planning only|approval)\b/i.test(
+                workflowGoal,
+              ),
+            },
+            turnId: null,
+            createdAt: command.createdAt,
+          },
+        },
+      };
+      return [userMessageEvent, turnStartRequestedEvent, workflowStartedEvent];
     }
 
     case "thread.turn.interrupt": {

@@ -665,8 +665,10 @@ export const WorkflowRecordKind = Schema.Literals([
   "workflow.evidence",
   "workflow.verifier.result",
   "workflow.objection",
+  "workflow.route-back",
   "workflow.lead.synthesis",
   "workflow.memory.update",
+  "workflow.blocked",
   "workflow.completed",
   "workflow.stopped",
 ]);

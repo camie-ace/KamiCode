@@ -57,7 +57,7 @@ function stepStatusIcon(status: string): React.ReactNode {
   );
 }
 
-type WorkflowLaneStatus = "Running" | "Waiting" | "Done" | "Stopped";
+type WorkflowLaneStatus = "Running" | "Waiting" | "Needs you" | "Done" | "Stopped" | "Failed";
 type WorkflowLaneControlAction = "pause" | "replace" | "freeze" | "continue-manually";
 type WorkflowControlAction = "pause" | "freeze" | "continue-manually";
 
@@ -209,6 +209,50 @@ function enrichWorkflowLane(
   const control = latestWorkflowLaneActivity(activities, lane.role, "workflow.lane.control");
   const guidance = latestWorkflowLaneActivity(activities, lane.role, "workflow.lane.guidance");
   const handoff = latestWorkflowLaneActivity(activities, lane.role, "workflow.handoff");
+  const routeBack =
+    lane.role === "Builder"
+      ? latestWorkflowLaneActivity(activities, lane.role, "workflow.route-back")
+      : undefined;
+  const verifierResult =
+    lane.role === "Verifier"
+      ? latestWorkflowActivity(activities, "workflow.verifier.result")
+      : undefined;
+  const verifierPayload = verifierResult ? workflowActivityPayload(verifierResult) : null;
+  if (routeBack) {
+    const payload = workflowActivityPayload(routeBack);
+    return {
+      ...lane,
+      status: "Needs you",
+      latestOutput:
+        typeof payload?.detail === "string"
+          ? payload.detail
+          : "Required fix routed back to Builder.",
+      nextNeed:
+        typeof payload?.requiredFix === "string"
+          ? payload.requiredFix
+          : "Address the verifier route-back before completion.",
+      artifacts: [...lane.artifacts, "Required fix handoff"],
+      openQuestions: [...lane.openQuestions, "Verifier evidence is required before completion."],
+      activityLog: [...lane.activityLog, routeBack.summary],
+    };
+  }
+  if (verifierPayload?.status === "fail") {
+    return {
+      ...lane,
+      status: "Failed",
+      latestOutput:
+        typeof verifierPayload.detail === "string"
+          ? verifierPayload.detail
+          : "Verifier blocked completion.",
+      nextNeed:
+        typeof verifierPayload.requiredFix === "string"
+          ? verifierPayload.requiredFix
+          : "Route the required fix back to Builder.",
+      artifacts: [...lane.artifacts, "Verifier rejection"],
+      openQuestions: [...lane.openQuestions, "Required verifier fix is still open."],
+      activityLog: [...lane.activityLog, verifierResult?.summary ?? "Verifier failed"],
+    };
+  }
   const output = handoff ?? guidance ?? control;
   const payload = output ? workflowActivityPayload(output) : null;
   const latestOutput =
@@ -437,6 +481,7 @@ const PlanSidebar = memo(function PlanSidebar({
     ]),
   ];
   const handoffs = workflowRecords(activities, "workflow.handoff");
+  const routeBacks = workflowRecords(activities, "workflow.route-back");
   const objections = workflowRecords(activities, "workflow.objection");
   const evidence = workflowRecords(activities, "workflow.evidence");
   const verifierResult = latestWorkflowActivity(activities, "workflow.verifier.result");
@@ -449,6 +494,8 @@ const PlanSidebar = memo(function PlanSidebar({
   const workflowCompletedPayload = workflowCompleted
     ? workflowActivityPayload(workflowCompleted)
     : null;
+  const workflowBlocked = latestWorkflowActivity(activities, "workflow.blocked");
+  const workflowBlockedPayload = workflowBlocked ? workflowActivityPayload(workflowBlocked) : null;
 
   const handleCopyPlan = useCallback(() => {
     if (!planMarkdown) return;
@@ -886,8 +933,10 @@ const PlanSidebar = memo(function PlanSidebar({
                         "mt-2.5 mr-2.5 shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold",
                         lane.status === "Done" && "bg-emerald-500/10 text-emerald-400",
                         lane.status === "Running" && "bg-blue-500/10 text-blue-400",
+                        lane.status === "Needs you" && "bg-amber-500/10 text-amber-300",
                         lane.status === "Waiting" && "bg-muted/40 text-muted-foreground",
                         lane.status === "Stopped" && "bg-destructive/10 text-destructive",
+                        lane.status === "Failed" && "bg-destructive/10 text-destructive",
                       )}
                     >
                       {lane.status}
@@ -1016,6 +1065,33 @@ const PlanSidebar = memo(function PlanSidebar({
                           Required fix: {record.requiredFix}
                         </p>
                       ) : null}
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+              {routeBacks.length > 0 ? (
+                <div className="space-y-1.5 rounded-lg border border-destructive/20 bg-destructive/5 p-2.5">
+                  <p className="text-[10px] font-semibold tracking-widest text-destructive/80 uppercase">
+                    Route back
+                  </p>
+                  {routeBacks.map((record) => (
+                    <div
+                      key={record.id}
+                      className="text-[11px] leading-snug text-muted-foreground/75"
+                    >
+                      <span className="font-medium text-foreground/75">
+                        {record.laneRole ?? "Builder"}:
+                      </span>{" "}
+                      {record.title ?? record.summary}
+                      {record.detail ? (
+                        <p className="mt-0.5 text-muted-foreground/50">{record.detail}</p>
+                      ) : null}
+                      {record.requiredFix ? (
+                        <p className="mt-1.5 rounded-md border border-destructive/20 bg-destructive/5 px-2 py-1 text-destructive">
+                          Required fix: {record.requiredFix}
+                        </p>
+                      ) : null}
+                      {renderStringList("Known risks", record.knownRisks)}
                     </div>
                   ))}
                 </div>
@@ -1168,6 +1244,35 @@ const PlanSidebar = memo(function PlanSidebar({
                       {record.summary}
                     </div>
                   ))}
+                </div>
+              ) : null}
+              {workflowBlocked ? (
+                <div className="rounded-lg border border-destructive/20 bg-destructive/5 p-2.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-[13px] font-semibold text-foreground/90">
+                      Workflow blocked
+                    </span>
+                    <Badge
+                      variant="secondary"
+                      size="sm"
+                      className="rounded-md px-1.5 py-0 text-[10px] text-destructive"
+                    >
+                      Blocked
+                    </Badge>
+                  </div>
+                  <p className="mt-1 text-[12px] leading-snug text-muted-foreground/75">
+                    {workflowBlocked.summary}
+                  </p>
+                  {typeof workflowBlockedPayload?.detail === "string" ? (
+                    <p className="mt-1 text-[11px] leading-snug text-muted-foreground/50">
+                      {workflowBlockedPayload.detail}
+                    </p>
+                  ) : null}
+                  {typeof workflowBlockedPayload?.requiredFix === "string" ? (
+                    <p className="mt-1.5 rounded-md border border-destructive/20 bg-destructive/5 px-2 py-1 text-[11px] text-destructive">
+                      Required fix: {workflowBlockedPayload.requiredFix}
+                    </p>
+                  ) : null}
                 </div>
               ) : null}
               {workflowCompleted ? (
