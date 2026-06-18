@@ -7,6 +7,7 @@ import type {
 import { type TimestampFormat } from "@t3tools/contracts/settings";
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
+import { Checkbox } from "./ui/checkbox";
 import { ScrollArea } from "./ui/scroll-area";
 import { Textarea } from "./ui/textarea";
 import ChatMarkdown from "./ChatMarkdown";
@@ -57,6 +58,8 @@ function stepStatusIcon(status: string): React.ReactNode {
 }
 
 type WorkflowLaneStatus = "Running" | "Waiting" | "Done" | "Stopped";
+type WorkflowLaneControlAction = "pause" | "replace" | "freeze" | "continue-manually";
+type WorkflowControlAction = "pause" | "freeze" | "continue-manually";
 
 interface WorkflowLane {
   readonly role: string;
@@ -65,6 +68,9 @@ interface WorkflowLane {
   readonly brief: string;
   readonly nextNeed: string;
   readonly latestOutput?: string;
+  readonly artifacts: ReadonlyArray<string>;
+  readonly openQuestions: ReadonlyArray<string>;
+  readonly activityLog: ReadonlyArray<string>;
 }
 
 interface WorkflowRecord {
@@ -77,6 +83,21 @@ interface WorkflowRecord {
   readonly detail?: string;
   readonly status?: string;
   readonly severity?: string;
+  readonly cardType?: string;
+  readonly result?: string;
+  readonly decision?: string;
+  readonly memoryText?: string;
+  readonly requiredFix?: string;
+  readonly filesTouched: ReadonlyArray<string>;
+  readonly testsRun: ReadonlyArray<string>;
+  readonly knownRisks: ReadonlyArray<string>;
+  readonly passed: ReadonlyArray<string>;
+  readonly failed: ReadonlyArray<string>;
+  readonly checksRun: ReadonlyArray<string>;
+  readonly artifacts: ReadonlyArray<string>;
+  readonly concerns: ReadonlyArray<string>;
+  readonly alternatives: ReadonlyArray<string>;
+  readonly overrides: ReadonlyArray<string>;
 }
 
 function laneStatusFromStep(status: string | undefined): WorkflowLaneStatus {
@@ -140,6 +161,21 @@ function workflowRecords(
         ...(typeof payload?.detail === "string" ? { detail: payload.detail } : {}),
         ...(typeof payload?.status === "string" ? { status: payload.status } : {}),
         ...(typeof payload?.severity === "string" ? { severity: payload.severity } : {}),
+        ...(typeof payload?.cardType === "string" ? { cardType: payload.cardType } : {}),
+        ...(typeof payload?.result === "string" ? { result: payload.result } : {}),
+        ...(typeof payload?.decision === "string" ? { decision: payload.decision } : {}),
+        ...(typeof payload?.memoryText === "string" ? { memoryText: payload.memoryText } : {}),
+        ...(typeof payload?.requiredFix === "string" ? { requiredFix: payload.requiredFix } : {}),
+        filesTouched: payloadStringList(payload, "filesTouched"),
+        testsRun: payloadStringList(payload, "testsRun"),
+        knownRisks: payloadStringList(payload, "knownRisks"),
+        passed: payloadStringList(payload, "passed"),
+        failed: payloadStringList(payload, "failed"),
+        checksRun: payloadStringList(payload, "checksRun"),
+        artifacts: payloadStringList(payload, "artifacts"),
+        concerns: payloadStringList(payload, "concerns"),
+        alternatives: payloadStringList(payload, "alternatives"),
+        overrides: payloadStringList(payload, "overrides"),
       };
     })
     .toSorted((left, right) => left.createdAt.localeCompare(right.createdAt));
@@ -166,26 +202,53 @@ function enrichWorkflowLane(
       status: "Stopped",
       latestOutput: stopped.summary,
       nextNeed: "Partial findings are preserved for Lead synthesis.",
+      artifacts: [...lane.artifacts, "Preserved lane findings"],
+      activityLog: [...lane.activityLog, stopped.summary],
     };
   }
+  const control = latestWorkflowLaneActivity(activities, lane.role, "workflow.lane.control");
   const guidance = latestWorkflowLaneActivity(activities, lane.role, "workflow.lane.guidance");
+  const handoff = latestWorkflowLaneActivity(activities, lane.role, "workflow.handoff");
+  const output = handoff ?? guidance ?? control;
+  const payload = output ? workflowActivityPayload(output) : null;
+  const latestOutput =
+    typeof payload?.detail === "string"
+      ? payload.detail
+      : typeof payload?.guidance === "string"
+        ? payload.guidance
+        : output?.summary;
   if (guidance) {
-    const payload = workflowActivityPayload(guidance);
-    const guidanceText =
-      typeof payload?.guidance === "string" ? payload.guidance : guidance.summary;
     return {
       ...lane,
-      latestOutput: guidanceText,
+      latestOutput: latestOutput ?? guidance.summary,
       nextNeed: "Apply the latest user guidance and report any changes.",
+      activityLog: [...lane.activityLog, guidance.summary],
     };
   }
-  return lane;
+  return output
+    ? {
+        ...lane,
+        latestOutput: latestOutput ?? output.summary,
+        activityLog: [...lane.activityLog, output.summary],
+      }
+    : lane;
 }
 
 function buildWorkflowLanes(
   activePlan: ActivePlanState | null,
   activities: ReadonlyArray<OrchestrationThreadActivity>,
 ): WorkflowLane[] {
+  const startedPayload = workflowActivityPayload(
+    latestWorkflowActivity(activities, "workflow.started") ?? ({} as OrchestrationThreadActivity),
+  );
+  const customizedPayload = workflowActivityPayload(
+    latestWorkflowActivity(activities, "workflow.customized") ??
+      ({} as OrchestrationThreadActivity),
+  );
+  const requestedRoles = [
+    ...payloadStringList(startedPayload, "initialLanes"),
+    ...payloadStringList(customizedPayload, "lanes"),
+  ];
   const steps = activePlan?.steps ?? [];
   const allDone = steps.length > 0 && steps.every((step) => step.status === "completed");
   const anyRunning = steps.some((step) => step.status === "inProgress");
@@ -201,6 +264,9 @@ function buildWorkflowLanes(
       summary: "Owns synthesis",
       brief: activePlan?.explanation ?? "Interprets the goal and coordinates the workflow lanes.",
       nextNeed: allDone ? "Prepare final summary" : "Keep lanes aligned and report decisions.",
+      artifacts: ["Lead synthesis", "Workflow decision log"],
+      openQuestions: [],
+      activityLog: [],
     },
     {
       role: "Planner",
@@ -209,6 +275,9 @@ function buildWorkflowLanes(
       brief: planner?.step ?? "Create the build plan and acceptance criteria.",
       nextNeed:
         planner?.status === "completed" ? "Hand off plan to Builder" : "Finish concrete plan.",
+      artifacts: ["Implementation plan", "Acceptance criteria"],
+      openQuestions: planner?.status === "completed" ? [] : ["Confirm scope is concrete enough."],
+      activityLog: [],
     },
     {
       role: "Builder",
@@ -219,6 +288,9 @@ function buildWorkflowLanes(
         builder?.status === "completed"
           ? "Hand off implementation to Verifier"
           : "Complete build work.",
+      artifacts: ["Files touched", "Builder handoff"],
+      openQuestions: builder?.status === "completed" ? [] : ["Finish implementation handoff."],
+      activityLog: [],
     },
     {
       role: "Verifier",
@@ -227,6 +299,9 @@ function buildWorkflowLanes(
       brief: verifier?.step ?? "Run tests and capture verification evidence.",
       nextNeed:
         verifier?.status === "completed" ? "Report pass/fail evidence" : "Run verification checks.",
+      artifacts: ["Verifier feedback", "Test Mode evidence"],
+      openQuestions: verifier?.status === "completed" ? [] : ["Capture pass/fail evidence."],
+      activityLog: [],
     },
     {
       role: "Documenter",
@@ -235,8 +310,29 @@ function buildWorkflowLanes(
       brief: documenter?.step ?? "Document usage notes and durable project context.",
       nextNeed:
         documenter?.status === "completed" ? "Confirm notes are preserved" : "Write concise notes.",
+      artifacts: ["Memory candidates", "Documentation notes"],
+      openQuestions: documenter?.status === "completed" ? [] : ["Record durable outcome notes."],
+      activityLog: [],
     },
   ];
+
+  for (const role of requestedRoles) {
+    if (lanes.some((lane) => lane.role.toLowerCase() === role.toLowerCase())) continue;
+    lanes.push({
+      role,
+      status: allDone ? "Done" : "Waiting",
+      summary: role.toLowerCase().includes("critic") ? "Reviews risks" : "Supports workflow",
+      brief: role.toLowerCase().includes("research")
+        ? "Gather context and report useful findings to the Lead."
+        : role.toLowerCase().includes("critic")
+          ? "Look for flaws, weak assumptions, and non-blocking concerns."
+          : "Handle the assigned workflow responsibility and report through the Lead.",
+      nextNeed: allDone ? "Confirm final synthesis" : "Wait for Lead routing or lane handoff.",
+      artifacts: ["Lane findings", "Handoff notes"],
+      openQuestions: allDone ? [] : ["Awaiting Lead routing."],
+      activityLog: [],
+    });
+  }
 
   return lanes.map((lane) => enrichWorkflowLane(lane, activities));
 }
@@ -256,9 +352,17 @@ interface PlanSidebarProps {
   onSubmitWorkflowGuidance?: (laneRole: string, guidance: string) => void;
   onStopWorkflowLane?: (laneRole: string) => void;
   onStopWorkflow?: () => void;
+  onWorkflowLaneControl?: (laneRole: string, action: WorkflowLaneControlAction) => void;
+  onWorkflowControl?: (action: WorkflowControlAction) => void;
   onCustomizeWorkflow?: (input: {
     acceptanceCriteria: ReadonlyArray<string>;
     lanes: ReadonlyArray<string>;
+    requireVerifierApproval: boolean;
+    addRedTeamCritique: boolean;
+    requireTestsBeforeFinal: boolean;
+    showMemoryAuditNotes: boolean;
+    exploreParallelApproaches: boolean;
+    stopAfterPlanningForApproval: boolean;
   }) => void;
   onClose: () => void;
 }
@@ -278,6 +382,8 @@ const PlanSidebar = memo(function PlanSidebar({
   onSubmitWorkflowGuidance,
   onStopWorkflowLane,
   onStopWorkflow,
+  onWorkflowLaneControl,
+  onWorkflowControl,
   onCustomizeWorkflow,
   onClose,
 }: PlanSidebarProps) {
@@ -289,6 +395,13 @@ const PlanSidebar = memo(function PlanSidebar({
   const [customizeOpen, setCustomizeOpen] = useState(false);
   const [customCriteriaText, setCustomCriteriaText] = useState("");
   const [customLanesText, setCustomLanesText] = useState("");
+  const [customRequireVerifierApproval, setCustomRequireVerifierApproval] = useState(true);
+  const [customAddRedTeamCritique, setCustomAddRedTeamCritique] = useState(false);
+  const [customRequireTestsBeforeFinal, setCustomRequireTestsBeforeFinal] = useState(false);
+  const [customShowMemoryAuditNotes, setCustomShowMemoryAuditNotes] = useState(true);
+  const [customExploreParallelApproaches, setCustomExploreParallelApproaches] = useState(false);
+  const [customStopAfterPlanningForApproval, setCustomStopAfterPlanningForApproval] =
+    useState(false);
   const { copyToClipboard, isCopied } = useCopyToClipboard();
 
   const planMarkdown = activeProposedPlan?.planMarkdown ?? null;
@@ -303,6 +416,10 @@ const PlanSidebar = memo(function PlanSidebar({
     : null;
   const workflowGoal =
     typeof workflowStartedPayload?.goal === "string" ? workflowStartedPayload.goal : null;
+  const workflowPattern =
+    typeof workflowStartedPayload?.workflowPattern === "string"
+      ? workflowStartedPayload.workflowPattern
+      : null;
   const customizedActivity = workflowActive
     ? latestWorkflowActivity(activities, "workflow.customized")
     : undefined;
@@ -324,6 +441,10 @@ const PlanSidebar = memo(function PlanSidebar({
   const evidence = workflowRecords(activities, "workflow.evidence");
   const verifierResult = latestWorkflowActivity(activities, "workflow.verifier.result");
   const verifierPayload = verifierResult ? workflowActivityPayload(verifierResult) : null;
+  const synthesis = workflowRecords(activities, "workflow.lead.synthesis");
+  const memoryUpdates = workflowRecords(activities, "workflow.memory.update");
+  const laneControls = workflowRecords(activities, "workflow.lane.control");
+  const workflowControls = workflowRecords(activities, "workflow.control");
   const workflowCompleted = latestWorkflowActivity(activities, "workflow.completed");
   const workflowCompletedPayload = workflowCompleted
     ? workflowActivityPayload(workflowCompleted)
@@ -411,9 +532,57 @@ const PlanSidebar = memo(function PlanSidebar({
     onCustomizeWorkflow?.({
       acceptanceCriteria: criteria,
       lanes,
+      requireVerifierApproval: customRequireVerifierApproval,
+      addRedTeamCritique: customAddRedTeamCritique,
+      requireTestsBeforeFinal: customRequireTestsBeforeFinal,
+      showMemoryAuditNotes: customShowMemoryAuditNotes,
+      exploreParallelApproaches: customExploreParallelApproaches,
+      stopAfterPlanningForApproval: customStopAfterPlanningForApproval,
     });
     setCustomizeOpen(false);
-  }, [customCriteriaText, customLanesText, onCustomizeWorkflow]);
+  }, [
+    customAddRedTeamCritique,
+    customCriteriaText,
+    customExploreParallelApproaches,
+    customLanesText,
+    customRequireTestsBeforeFinal,
+    customRequireVerifierApproval,
+    customShowMemoryAuditNotes,
+    customStopAfterPlanningForApproval,
+    onCustomizeWorkflow,
+  ]);
+
+  const renderStringList = useCallback(
+    (label: string, entries: ReadonlyArray<string>) =>
+      entries.length > 0 ? (
+        <div className="mt-1.5">
+          <p className="text-[10px] font-semibold text-foreground/60">{label}</p>
+          <ul className="mt-0.5 space-y-0.5 text-[11px] leading-snug text-muted-foreground/60">
+            {entries.map((entry) => (
+              <li key={entry} className="flex gap-1.5">
+                <span>-</span>
+                <span>{entry}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null,
+    [],
+  );
+
+  const renderCustomizeCheckbox = useCallback(
+    (label: string, checked: boolean, onCheckedChange: (value: boolean) => void) => (
+      <label className="flex items-start gap-2 rounded-md border border-border/40 bg-background/35 px-2 py-1.5 text-[11px] leading-snug text-muted-foreground/75">
+        <Checkbox
+          checked={checked}
+          onCheckedChange={(value) => onCheckedChange(value === true)}
+          className="mt-0.5"
+        />
+        <span>{label}</span>
+      </label>
+    ),
+    [],
+  );
 
   return (
     <div
@@ -450,6 +619,29 @@ const PlanSidebar = memo(function PlanSidebar({
             >
               Stop workflow
             </Button>
+          ) : null}
+          {workflowActive && onWorkflowControl ? (
+            <Menu>
+              <MenuTrigger
+                render={
+                  <Button
+                    size="icon-xs"
+                    variant="ghost"
+                    className="text-muted-foreground/50 hover:text-foreground/70"
+                    aria-label="Workflow controls"
+                  />
+                }
+              >
+                <EllipsisIcon className="size-3.5" />
+              </MenuTrigger>
+              <MenuPopup align="end">
+                <MenuItem onClick={() => onWorkflowControl("pause")}>Pause workflow</MenuItem>
+                <MenuItem onClick={() => onWorkflowControl("freeze")}>Freeze result</MenuItem>
+                <MenuItem onClick={() => onWorkflowControl("continue-manually")}>
+                  Continue manually
+                </MenuItem>
+              </MenuPopup>
+            </Menu>
           ) : null}
           {planMarkdown ? (
             <Menu>
@@ -526,6 +718,11 @@ const PlanSidebar = memo(function PlanSidebar({
                     Initial lanes: {workflowInitialLanes.join(", ")}
                   </p>
                 ) : null}
+                {workflowPattern ? (
+                  <p className="mt-1 text-[11px] leading-snug text-muted-foreground/50">
+                    Pattern: {workflowPattern}
+                  </p>
+                ) : null}
                 {acceptanceCriteria.length > 0 ? (
                   <div className="mt-2 border-t border-primary/10 pt-2">
                     <p className="text-[10px] font-semibold tracking-widest text-muted-foreground/40 uppercase">
@@ -557,6 +754,47 @@ const PlanSidebar = memo(function PlanSidebar({
                           placeholder="Lanes, comma-separated"
                           className="min-h-16 text-xs"
                         />
+                        <div className="grid gap-1.5">
+                          <p className="text-[10px] font-semibold tracking-widest text-muted-foreground/40 uppercase">
+                            Verification
+                          </p>
+                          {renderCustomizeCheckbox(
+                            "Require verifier approval",
+                            customRequireVerifierApproval,
+                            setCustomRequireVerifierApproval,
+                          )}
+                          {renderCustomizeCheckbox(
+                            "Add red-team critique",
+                            customAddRedTeamCritique,
+                            setCustomAddRedTeamCritique,
+                          )}
+                          {renderCustomizeCheckbox(
+                            "Require tests or evidence before final",
+                            customRequireTestsBeforeFinal,
+                            setCustomRequireTestsBeforeFinal,
+                          )}
+                          <p className="pt-1 text-[10px] font-semibold tracking-widest text-muted-foreground/40 uppercase">
+                            Memory
+                          </p>
+                          {renderCustomizeCheckbox(
+                            "Show memory write audit notes",
+                            customShowMemoryAuditNotes,
+                            setCustomShowMemoryAuditNotes,
+                          )}
+                          <p className="pt-1 text-[10px] font-semibold tracking-widest text-muted-foreground/40 uppercase">
+                            Execution
+                          </p>
+                          {renderCustomizeCheckbox(
+                            "Explore multiple approaches in parallel",
+                            customExploreParallelApproaches,
+                            setCustomExploreParallelApproaches,
+                          )}
+                          {renderCustomizeCheckbox(
+                            "Stop after planning for approval",
+                            customStopAfterPlanningForApproval,
+                            setCustomStopAfterPlanningForApproval,
+                          )}
+                        </div>
                         <div className="flex justify-end gap-1.5">
                           <Button size="xs" variant="ghost" onClick={() => setCustomizeOpen(false)}>
                             Cancel
@@ -577,6 +815,26 @@ const PlanSidebar = memo(function PlanSidebar({
                         onClick={() => {
                           setCustomCriteriaText(acceptanceCriteria.join("\n"));
                           setCustomLanesText(workflowInitialLanes.join(", "));
+                          if (customizedPayload) {
+                            setCustomRequireVerifierApproval(
+                              customizedPayload.requireVerifierApproval !== false,
+                            );
+                            setCustomAddRedTeamCritique(
+                              customizedPayload.addRedTeamCritique === true,
+                            );
+                            setCustomRequireTestsBeforeFinal(
+                              customizedPayload.requireTestsBeforeFinal === true,
+                            );
+                            setCustomShowMemoryAuditNotes(
+                              customizedPayload.showMemoryAuditNotes !== false,
+                            );
+                            setCustomExploreParallelApproaches(
+                              customizedPayload.exploreParallelApproaches === true,
+                            );
+                            setCustomStopAfterPlanningForApproval(
+                              customizedPayload.stopAfterPlanningForApproval === true,
+                            );
+                          }
                           setCustomizeOpen(true);
                         }}
                       >
@@ -645,6 +903,9 @@ const PlanSidebar = memo(function PlanSidebar({
                         <span className="font-medium text-foreground/70">Open need:</span>{" "}
                         {lane.nextNeed}
                       </p>
+                      {renderStringList("Artifacts", lane.artifacts)}
+                      {renderStringList("Open questions", lane.openQuestions)}
+                      {renderStringList("Activity log", lane.activityLog)}
                     </div>
                   ) : null}
                   {guidanceLaneRole === lane.role ? (
@@ -696,6 +957,37 @@ const PlanSidebar = memo(function PlanSidebar({
                     >
                       Stop
                     </Button>
+                    {onWorkflowLaneControl ? (
+                      <Menu>
+                        <MenuTrigger
+                          render={
+                            <Button
+                              size="icon-xs"
+                              variant="ghost"
+                              aria-label={`${lane.role} advanced controls`}
+                            />
+                          }
+                        >
+                          <EllipsisIcon className="size-3.5" />
+                        </MenuTrigger>
+                        <MenuPopup align="end">
+                          <MenuItem onClick={() => onWorkflowLaneControl(lane.role, "pause")}>
+                            Pause lane
+                          </MenuItem>
+                          <MenuItem onClick={() => onWorkflowLaneControl(lane.role, "replace")}>
+                            Replace lane
+                          </MenuItem>
+                          <MenuItem onClick={() => onWorkflowLaneControl(lane.role, "freeze")}>
+                            Freeze result
+                          </MenuItem>
+                          <MenuItem
+                            onClick={() => onWorkflowLaneControl(lane.role, "continue-manually")}
+                          >
+                            Continue manually
+                          </MenuItem>
+                        </MenuPopup>
+                      </Menu>
+                    ) : null}
                   </div>
                 </div>
               ))}
@@ -715,6 +1007,14 @@ const PlanSidebar = memo(function PlanSidebar({
                       {record.title ?? record.summary}
                       {record.detail ? (
                         <p className="mt-0.5 text-muted-foreground/50">{record.detail}</p>
+                      ) : null}
+                      {renderStringList("Files touched", record.filesTouched)}
+                      {renderStringList("Tests run", record.testsRun)}
+                      {renderStringList("Known risks", record.knownRisks)}
+                      {record.requiredFix ? (
+                        <p className="mt-1.5 rounded-md border border-destructive/20 bg-destructive/5 px-2 py-1 text-destructive">
+                          Required fix: {record.requiredFix}
+                        </p>
                       ) : null}
                     </div>
                   ))}
@@ -748,6 +1048,41 @@ const PlanSidebar = memo(function PlanSidebar({
                       {verifierPayload.detail}
                     </p>
                   ) : null}
+                  {renderStringList("Passed", payloadStringList(verifierPayload, "passed"))}
+                  {renderStringList("Failed", payloadStringList(verifierPayload, "failed"))}
+                  {typeof verifierPayload?.requiredFix === "string" ? (
+                    <p className="mt-1.5 rounded-md border border-destructive/20 bg-destructive/5 px-2 py-1 text-[11px] text-destructive">
+                      Required fix: {verifierPayload.requiredFix}
+                    </p>
+                  ) : null}
+                </div>
+              ) : null}
+              {synthesis.length > 0 ? (
+                <div className="space-y-1.5 rounded-lg border border-border/50 bg-background/35 p-2.5">
+                  <p className="text-[10px] font-semibold tracking-widest text-muted-foreground/40 uppercase">
+                    Lead synthesis
+                  </p>
+                  {synthesis.map((record) => (
+                    <div
+                      key={record.id}
+                      className="text-[11px] leading-snug text-muted-foreground/70"
+                    >
+                      <span className="font-medium text-foreground/75">
+                        {record.title ?? record.summary}
+                      </span>
+                      {record.decision ? (
+                        <p className="mt-0.5 text-muted-foreground/60">
+                          Decision: {record.decision}
+                        </p>
+                      ) : null}
+                      {record.detail ? (
+                        <p className="mt-0.5 text-muted-foreground/50">{record.detail}</p>
+                      ) : null}
+                      {renderStringList("Concerns", record.concerns)}
+                      {renderStringList("Alternatives", record.alternatives)}
+                      {renderStringList("Overrides", record.overrides)}
+                    </div>
+                  ))}
                 </div>
               ) : null}
               {objections.length > 0 ? (
@@ -788,6 +1123,49 @@ const PlanSidebar = memo(function PlanSidebar({
                       {record.detail ? (
                         <p className="mt-0.5 text-muted-foreground/50">{record.detail}</p>
                       ) : null}
+                      {renderStringList("Checks run", record.checksRun)}
+                      {renderStringList("Artifacts", record.artifacts)}
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+              {memoryUpdates.length > 0 ? (
+                <div className="space-y-1.5 rounded-lg border border-sky-500/20 bg-sky-500/5 p-2.5">
+                  <p className="text-[10px] font-semibold tracking-widest text-sky-400/80 uppercase">
+                    Memory updates
+                  </p>
+                  {memoryUpdates.map((record) => (
+                    <div
+                      key={record.id}
+                      className="text-[11px] leading-snug text-muted-foreground/75"
+                    >
+                      <span className="font-medium text-foreground/75">
+                        {record.title ?? "Memory update recorded"}
+                      </span>
+                      {record.memoryText ? (
+                        <p className="mt-0.5 text-muted-foreground/60">{record.memoryText}</p>
+                      ) : null}
+                      {record.detail ? (
+                        <p className="mt-0.5 text-muted-foreground/50">Source: {record.detail}</p>
+                      ) : null}
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+              {laneControls.length > 0 || workflowControls.length > 0 ? (
+                <div className="space-y-1.5 rounded-lg border border-border/50 bg-background/35 p-2.5">
+                  <p className="text-[10px] font-semibold tracking-widest text-muted-foreground/40 uppercase">
+                    Control log
+                  </p>
+                  {[...workflowControls, ...laneControls].map((record) => (
+                    <div
+                      key={record.id}
+                      className="text-[11px] leading-snug text-muted-foreground/70"
+                    >
+                      <span className="font-medium text-foreground/75">
+                        {record.laneRole ?? "Workflow"}:
+                      </span>{" "}
+                      {record.summary}
                     </div>
                   ))}
                 </div>

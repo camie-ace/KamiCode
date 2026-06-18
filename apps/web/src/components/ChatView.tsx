@@ -268,6 +268,37 @@ function defaultWorkflowAcceptanceCriteria(text: string): string[] {
   return criteria;
 }
 
+function workflowActionLabel(action: string): string {
+  switch (action) {
+    case "pause":
+      return "Pause";
+    case "replace":
+      return "Replace";
+    case "freeze":
+      return "Freeze result";
+    case "continue-manually":
+      return "Continue manually";
+    default:
+      return action;
+  }
+}
+
+function workflowActionInstruction(action: string, laneRole?: string): string {
+  const target = laneRole ? `${laneRole} lane` : "workflow";
+  switch (action) {
+    case "pause":
+      return `Pause the ${target} at the next safe point. Preserve current state, findings, artifacts, and open questions.`;
+    case "replace":
+      return `Replace the ${target} with a fresh lane using the same brief plus current workflow context. Preserve the old lane history and explain what carries forward.`;
+    case "freeze":
+      return `Freeze the ${target} result. Do not keep changing artifacts for this target; allow review, verification, and Lead synthesis only.`;
+    case "continue-manually":
+      return `Collapse the ${target} back into normal Lead-owned continuation. Summarize preserved work, unfinished items, and the next manual step.`;
+    default:
+      return `Apply workflow control "${action}" to the ${target} and preserve the audit trail.`;
+  }
+}
+
 const TYPE_TO_FOCUS_EDITABLE_SELECTOR = [
   "input",
   "textarea",
@@ -3623,6 +3654,23 @@ export default function ChatView(props: ChatViewProps) {
       /document|readme|memory|note/i.test(step.step),
     );
     const createdAt = activeLatestTurn.completedAt ?? new Date().toISOString();
+    const filesTouched: string[] = [];
+    const testSteps = completedSteps
+      .filter((step) => /test|verify|check|coverage|lint|typecheck|build/i.test(step.step))
+      .map((step) => step.step);
+    const criteria =
+      activeThread.activities
+        .filter((activity) => activity.kind === "workflow.started")
+        .flatMap((activity) => {
+          const payload =
+            activity.payload && typeof activity.payload === "object"
+              ? (activity.payload as Record<string, unknown>)
+              : null;
+          const value = payload?.acceptanceCriteria;
+          return Array.isArray(value)
+            ? value.filter((entry): entry is string => typeof entry === "string")
+            : [];
+        }) ?? [];
 
     const writes: Array<Parameters<typeof appendWorkflowActivity>[0]> = [];
     if (builderStep) {
@@ -3633,8 +3681,15 @@ export default function ChatView(props: ChatViewProps) {
         payload: {
           turnId,
           laneRole: "Builder",
+          cardType: "builder-handoff",
           title: builderStep.step,
-          detail: "Implementation work was handed to verification.",
+          detail: "Implementation work was handed to verification with changed-file context.",
+          filesTouched,
+          testsRun: testSteps,
+          knownRisks:
+            verifierStep || testSteps.length > 0
+              ? []
+              : ["No explicit verifier or test checklist item was detected."],
         },
         turnId,
         createdAt,
@@ -3648,9 +3703,13 @@ export default function ChatView(props: ChatViewProps) {
         payload: {
           turnId,
           laneRole: "Verifier",
+          cardType: "test-mode-evidence",
           status: "captured",
           title: verifierStep.step,
           detail: "Verification completed as part of the workflow turn.",
+          checksRun: testSteps.length > 0 ? testSteps : [verifierStep.step],
+          artifacts: filesTouched.length > 0 ? filesTouched : ["Workflow verification log"],
+          result: "Passed, no blocking failures detected in the completed checklist.",
         },
         turnId,
         createdAt,
@@ -3663,6 +3722,9 @@ export default function ChatView(props: ChatViewProps) {
           turnId,
           status: "pass",
           detail: verifierStep.step,
+          passed: [verifierStep.step],
+          failed: [],
+          requiredFix: "",
         },
         turnId,
         createdAt,
@@ -3690,6 +3752,10 @@ export default function ChatView(props: ChatViewProps) {
           turnId,
           status: "reviewed",
           detail: "No completed verifier step was detected.",
+          passed: [],
+          failed: ["Verifier evidence was not found in the completed checklist."],
+          requiredFix:
+            "Run or record verification evidence before treating this workflow as fully verified.",
         },
         turnId,
         createdAt,
@@ -3703,8 +3769,26 @@ export default function ChatView(props: ChatViewProps) {
         payload: {
           turnId,
           laneRole: "Documenter",
+          cardType: "memory-update",
           title: documenterStep.step,
           detail: "Documentation or durable project notes were included in the workflow outcome.",
+          filesTouched,
+          testsRun: [],
+          knownRisks: [],
+        },
+        turnId,
+        createdAt,
+      });
+      writes.push({
+        threadId: activeThread.id,
+        kind: "workflow.memory.update",
+        summary: "Memory update audit note recorded",
+        payload: {
+          turnId,
+          title: "Memory update recorded",
+          memoryText:
+            "Workflow outcome included documentation or durable notes that should remain visible to future work.",
+          detail: "Workflow completion audit",
         },
         turnId,
         createdAt,
@@ -3712,11 +3796,37 @@ export default function ChatView(props: ChatViewProps) {
     }
     writes.push({
       threadId: activeThread.id,
+      kind: "workflow.lead.synthesis",
+      summary: "Lead synthesis recorded",
+      payload: {
+        turnId,
+        cardType: "lead-synthesis",
+        title: "Lead synthesis",
+        detail:
+          criteria.length > 0
+            ? `Reviewed against ${criteria.length} acceptance criterion/criteria.`
+            : "Reviewed against the workflow task checklist.",
+        decision: verifierStep
+          ? "Complete with verifier evidence."
+          : "Complete with a visible verification concern.",
+        concerns: verifierStep ? [] : ["Verifier evidence was missing."],
+        alternatives: [],
+        overrides: [],
+      },
+      turnId,
+      createdAt,
+    });
+    writes.push({
+      threadId: activeThread.id,
       kind: "workflow.completed",
       summary: "Workflow completed with structured outcome records",
       payload: {
         turnId,
         status: verifierStep ? "verified" : "completed-with-concern",
+        implementationStatus: builderStep ? "done" : "not-detected",
+        verificationStatus: verifierStep ? "passed" : "missing",
+        openObjections: verifierStep ? 0 : 1,
+        memoryUpdates: documenterStep ? 1 : 0,
         detail:
           completedSteps.length > 0
             ? `Completed ${completedSteps.length} checklist item(s).`
@@ -3733,6 +3843,7 @@ export default function ChatView(props: ChatViewProps) {
     })();
   }, [
     activeLatestTurn,
+    activeThread?.activities,
     activePlan?.steps,
     activeThread,
     appendWorkflowActivity,
@@ -4434,6 +4545,20 @@ export default function ChatView(props: ChatViewProps) {
             workflowPattern: inferWorkflowPattern(trimmed || title),
             initialLanes: inferWorkflowInitialLanes(trimmed || title),
             acceptanceCriteria: defaultWorkflowAcceptanceCriteria(trimmed || title),
+            requireVerifierApproval: true,
+            addRedTeamCritique: /\b(red[- ]?team|critic|critique|risk|security|review)\b/i.test(
+              trimmed || title,
+            ),
+            requireTestsBeforeFinal: /\b(test|verify|browser|preview|url)\b/i.test(
+              trimmed || title,
+            ),
+            showMemoryAuditNotes: true,
+            exploreParallelApproaches: /\b(compare|alternatives|options|approaches)\b/i.test(
+              trimmed || title,
+            ),
+            stopAfterPlanningForApproval: /\b(plan only|planning only|approval)\b/i.test(
+              trimmed || title,
+            ),
           },
           createdAt: messageCreatedAt,
         }).catch(() => undefined);
@@ -4883,8 +5008,68 @@ export default function ChatView(props: ChatViewProps) {
     void onInterrupt();
   }, [activeThread, appendWorkflowActivity, onInterrupt]);
 
+  const onWorkflowLaneControl = useCallback(
+    (laneRole: string, action: "pause" | "replace" | "freeze" | "continue-manually") => {
+      const label = workflowActionLabel(action);
+      if (activeThread) {
+        void appendWorkflowActivity({
+          threadId: activeThread.id,
+          kind: "workflow.lane.control",
+          summary: `${label} requested for ${laneRole}`,
+          payload: {
+            laneRole,
+            action,
+            preserved: true,
+          },
+        }).catch(() => undefined);
+      }
+      void onSubmitPlanFollowUp({
+        interactionMode: "workflow",
+        text: [
+          workflowActionInstruction(action, laneRole),
+          "Keep the instruction Lead-visible, preserve the lane history, and update the workflow panel with the result.",
+        ].join("\n"),
+      });
+    },
+    [activeThread, appendWorkflowActivity, onSubmitPlanFollowUp],
+  );
+
+  const onWorkflowControl = useCallback(
+    (action: "pause" | "freeze" | "continue-manually") => {
+      const label = workflowActionLabel(action);
+      if (activeThread) {
+        void appendWorkflowActivity({
+          threadId: activeThread.id,
+          kind: "workflow.control",
+          summary: `${label} requested for workflow`,
+          payload: {
+            action,
+            preserved: true,
+          },
+        }).catch(() => undefined);
+      }
+      void onSubmitPlanFollowUp({
+        interactionMode: "workflow",
+        text: [
+          workflowActionInstruction(action),
+          "The Lead should summarize preserved work, unfinished work, verifier status, and any user action needed.",
+        ].join("\n"),
+      });
+    },
+    [activeThread, appendWorkflowActivity, onSubmitPlanFollowUp],
+  );
+
   const onCustomizeWorkflow = useCallback(
-    (input: { acceptanceCriteria: ReadonlyArray<string>; lanes: ReadonlyArray<string> }) => {
+    (input: {
+      acceptanceCriteria: ReadonlyArray<string>;
+      lanes: ReadonlyArray<string>;
+      requireVerifierApproval: boolean;
+      addRedTeamCritique: boolean;
+      requireTestsBeforeFinal: boolean;
+      showMemoryAuditNotes: boolean;
+      exploreParallelApproaches: boolean;
+      stopAfterPlanningForApproval: boolean;
+    }) => {
       if (activeThread) {
         void appendWorkflowActivity({
           threadId: activeThread.id,
@@ -4893,6 +5078,12 @@ export default function ChatView(props: ChatViewProps) {
           payload: {
             acceptanceCriteria: input.acceptanceCriteria,
             lanes: input.lanes,
+            requireVerifierApproval: input.requireVerifierApproval,
+            addRedTeamCritique: input.addRedTeamCritique,
+            requireTestsBeforeFinal: input.requireTestsBeforeFinal,
+            showMemoryAuditNotes: input.showMemoryAuditNotes,
+            exploreParallelApproaches: input.exploreParallelApproaches,
+            stopAfterPlanningForApproval: input.stopAfterPlanningForApproval,
           },
         }).catch(() => undefined);
       }
@@ -4902,6 +5093,18 @@ export default function ChatView(props: ChatViewProps) {
           ? `Acceptance criteria:\n${input.acceptanceCriteria.map((entry) => `- ${entry}`).join("\n")}`
           : "",
         input.lanes.length > 0 ? `Requested lanes: ${input.lanes.join(", ")}` : "",
+        [
+          "Verification:",
+          `- Require verifier approval: ${input.requireVerifierApproval ? "yes" : "no"}`,
+          `- Add red-team critique: ${input.addRedTeamCritique ? "yes" : "no"}`,
+          `- Require tests or evidence before final: ${input.requireTestsBeforeFinal ? "yes" : "no"}`,
+        ].join("\n"),
+        `Memory:\n- Show memory write audit notes: ${input.showMemoryAuditNotes ? "yes" : "no"}`,
+        [
+          "Execution:",
+          `- Explore multiple approaches in parallel: ${input.exploreParallelApproaches ? "yes" : "no"}`,
+          `- Stop after planning for approval: ${input.stopAfterPlanningForApproval ? "yes" : "no"}`,
+        ].join("\n"),
         "Keep these constraints Lead-visible and apply them to the remaining workflow.",
       ].filter(Boolean);
       void onSubmitPlanFollowUp({
@@ -5522,6 +5725,8 @@ export default function ChatView(props: ChatViewProps) {
               onSubmitWorkflowGuidance={onSubmitWorkflowGuidance}
               onStopWorkflowLane={onStopWorkflowLane}
               onStopWorkflow={onStopWorkflow}
+              onWorkflowLaneControl={onWorkflowLaneControl}
+              onWorkflowControl={onWorkflowControl}
               onCustomizeWorkflow={onCustomizeWorkflow}
               onClose={closePlanSidebar}
             />
@@ -5599,6 +5804,8 @@ export default function ChatView(props: ChatViewProps) {
                 onSubmitWorkflowGuidance={onSubmitWorkflowGuidance}
                 onStopWorkflowLane={onStopWorkflowLane}
                 onStopWorkflow={onStopWorkflow}
+                onWorkflowLaneControl={onWorkflowLaneControl}
+                onWorkflowControl={onWorkflowControl}
                 onCustomizeWorkflow={onCustomizeWorkflow}
                 onClose={closePlanSidebar}
               />
