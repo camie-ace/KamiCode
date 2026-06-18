@@ -325,6 +325,30 @@ it.effect("accepts client-dispatched thread activity append commands", () =>
   }),
 );
 
+it.effect("accepts client-dispatched workflow record commands", () =>
+  Effect.gen(function* () {
+    const parsed = yield* decodeClientOrchestrationCommand({
+      type: "thread.workflow.record",
+      commandId: "cmd-workflow-record",
+      threadId: "thread-workflow",
+      kind: "workflow.lane.control",
+      summary: "Pause requested for Builder",
+      payload: {
+        laneRole: "Builder",
+        action: "pause",
+        preserved: true,
+      },
+      createdAt: "2026-01-01T00:00:00.000Z",
+    });
+
+    assert.strictEqual(parsed.type, "thread.workflow.record");
+    if (parsed.type !== "thread.workflow.record") {
+      return;
+    }
+    assert.strictEqual(parsed.kind, "workflow.lane.control");
+  }),
+);
+
 it.effect("accepts workflow interaction mode in thread.turn.start", () =>
   Effect.gen(function* () {
     const parsed = yield* decodeThreadTurnStartCommand({

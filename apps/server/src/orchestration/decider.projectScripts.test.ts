@@ -274,6 +274,95 @@ it.layer(NodeServices.layer)("decider project scripts", (it) => {
     }),
   );
 
+  it.effect("records workflow lifecycle commands as durable thread activities", () =>
+    Effect.gen(function* () {
+      const now = "2026-01-01T00:00:00.000Z";
+      const initial = createEmptyReadModel(now);
+      const withProject = yield* projectEvent(initial, {
+        sequence: 1,
+        eventId: asEventId("evt-project-create"),
+        aggregateKind: "project",
+        aggregateId: asProjectId("project-1"),
+        type: "project.created",
+        occurredAt: now,
+        commandId: CommandId.make("cmd-project-create"),
+        causationEventId: null,
+        correlationId: CommandId.make("cmd-project-create"),
+        metadata: {},
+        payload: {
+          projectId: asProjectId("project-1"),
+          title: "Project",
+          workspaceRoot: "/tmp/project",
+          defaultModelSelection: null,
+          scripts: [],
+          createdAt: now,
+          updatedAt: now,
+        },
+      });
+      const readModel = yield* projectEvent(withProject, {
+        sequence: 2,
+        eventId: asEventId("evt-thread-create"),
+        aggregateKind: "thread",
+        aggregateId: ThreadId.make("thread-1"),
+        type: "thread.created",
+        occurredAt: now,
+        commandId: CommandId.make("cmd-thread-create"),
+        causationEventId: null,
+        correlationId: CommandId.make("cmd-thread-create"),
+        metadata: {},
+        payload: {
+          threadId: ThreadId.make("thread-1"),
+          projectId: asProjectId("project-1"),
+          title: "Thread",
+          modelSelection: {
+            instanceId: ProviderInstanceId.make("codex"),
+            model: "gpt-5-codex",
+          },
+          interactionMode: "workflow",
+          runtimeMode: "full-access",
+          branch: null,
+          worktreePath: null,
+          createdAt: now,
+          updatedAt: now,
+        },
+      });
+
+      const result = yield* decideOrchestrationCommand({
+        command: {
+          type: "thread.workflow.record",
+          commandId: CommandId.make("cmd-workflow-record"),
+          threadId: ThreadId.make("thread-1"),
+          kind: "workflow.lane.control",
+          summary: "Pause requested for Builder",
+          payload: {
+            laneRole: "Builder",
+            action: "pause",
+            preserved: true,
+          },
+          createdAt: now,
+        },
+        readModel,
+      });
+
+      const events = Array.isArray(result) ? result : [result];
+      if (events.length !== 1) {
+        throw new Error("Expected a single workflow activity event.");
+      }
+      const event = events[0];
+      expect(event?.type).toBe("thread.activity-appended");
+      if (event?.type !== "thread.activity-appended") {
+        return;
+      }
+      expect(event.payload.activity.kind).toBe("workflow.lane.control");
+      expect(event.payload.activity.summary).toBe("Pause requested for Builder");
+      expect(event.payload.activity.payload).toMatchObject({
+        laneRole: "Builder",
+        action: "pause",
+        preserved: true,
+      });
+    }),
+  );
+
   it.effect("emits thread.runtime-mode-set from thread.runtime-mode.set", () =>
     Effect.gen(function* () {
       const now = "2026-01-01T00:00:00.000Z";

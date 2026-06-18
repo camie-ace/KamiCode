@@ -21,6 +21,7 @@ import {
   ProviderDriverKind,
   RuntimeMode,
   TerminalOpenInput,
+  type WorkflowRecordKind,
 } from "@t3tools/contracts";
 import { scopedThreadKey, scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime";
 import {
@@ -134,7 +135,7 @@ import {
   nextProjectScriptId,
   projectScriptIdFromCommand,
 } from "~/projectScripts";
-import { newCommandId, newDraftId, newEventId, newMessageId, newThreadId } from "~/lib/utils";
+import { newCommandId, newDraftId, newMessageId, newThreadId } from "~/lib/utils";
 import { getProviderModelCapabilities, resolveSelectableProvider } from "../providerModels";
 import { useSettings } from "../hooks/useSettings";
 import { resolveAppModelSelectionForInstance } from "../modelSelection";
@@ -3536,7 +3537,7 @@ export default function ChatView(props: ChatViewProps) {
   const appendWorkflowActivity = useCallback(
     async (input: {
       threadId: ThreadId;
-      kind: string;
+      kind: WorkflowRecordKind;
       summary: string;
       payload: Record<string, unknown>;
       turnId?: TurnId | null;
@@ -3548,18 +3549,13 @@ export default function ChatView(props: ChatViewProps) {
       }
       const createdAt = input.createdAt ?? new Date().toISOString();
       await api.orchestration.dispatchCommand({
-        type: "thread.activity.append",
+        type: "thread.workflow.record",
         commandId: newCommandId(),
         threadId: input.threadId,
-        activity: {
-          id: newEventId(),
-          tone: "info",
-          kind: input.kind,
-          summary: input.summary,
-          payload: input.payload,
-          turnId: input.turnId ?? null,
-          createdAt,
-        },
+        kind: input.kind,
+        summary: input.summary,
+        payload: input.payload,
+        turnId: input.turnId ?? null,
         createdAt,
       });
     },

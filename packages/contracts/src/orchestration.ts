@@ -654,6 +654,35 @@ const ThreadActivityAppendCommand = Schema.Struct({
   createdAt: IsoDateTime,
 });
 
+export const WorkflowRecordKind = Schema.Literals([
+  "workflow.started",
+  "workflow.customized",
+  "workflow.lane.guidance",
+  "workflow.lane.stopped",
+  "workflow.lane.control",
+  "workflow.control",
+  "workflow.handoff",
+  "workflow.evidence",
+  "workflow.verifier.result",
+  "workflow.objection",
+  "workflow.lead.synthesis",
+  "workflow.memory.update",
+  "workflow.completed",
+  "workflow.stopped",
+]);
+export type WorkflowRecordKind = typeof WorkflowRecordKind.Type;
+
+const ThreadWorkflowRecordCommand = Schema.Struct({
+  type: Schema.Literal("thread.workflow.record"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  kind: WorkflowRecordKind,
+  summary: TrimmedNonEmptyString,
+  payload: Schema.Record(Schema.String, Schema.Unknown),
+  turnId: Schema.optional(Schema.NullOr(TurnId)),
+  createdAt: IsoDateTime,
+});
+
 const ClientThreadTurnStartCommand = Schema.Struct({
   type: Schema.Literal("thread.turn.start"),
   commandId: CommandId,
@@ -733,6 +762,7 @@ const DispatchableClientOrchestrationCommand = Schema.Union([
   ThreadUserInputRespondCommand,
   ThreadCheckpointRevertCommand,
   ThreadSessionStopCommand,
+  ThreadWorkflowRecordCommand,
   ThreadActivityAppendCommand,
 ]);
 export type DispatchableClientOrchestrationCommand =
@@ -756,6 +786,7 @@ export const ClientOrchestrationCommand = Schema.Union([
   ThreadUserInputRespondCommand,
   ThreadCheckpointRevertCommand,
   ThreadSessionStopCommand,
+  ThreadWorkflowRecordCommand,
   ThreadActivityAppendCommand,
 ]);
 export type ClientOrchestrationCommand = typeof ClientOrchestrationCommand.Type;
