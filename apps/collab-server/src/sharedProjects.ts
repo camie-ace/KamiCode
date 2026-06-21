@@ -32,7 +32,7 @@ import type {
   SharedThreadMessage,
   ThreadId,
 } from "@t3tools/contracts";
-import { randomUUID } from "node:crypto";
+import * as NodeCrypto from "node:crypto";
 import type { Pool } from "pg";
 
 import type { AuthenticatedUser } from "./auth.ts";
@@ -219,11 +219,11 @@ function iso(value: Date | string | null): string | null {
 }
 
 function newId(prefix: string): string {
-  return `${prefix}_${randomUUID()}`;
+  return `${prefix}_${NodeCrypto.randomUUID()}`;
 }
 
 function newInviteCode(): SharedProjectInviteCode {
-  return `spc_${randomUUID().replaceAll("-", "").slice(0, 24)}` as SharedProjectInviteCode;
+  return `spc_${NodeCrypto.randomUUID().replaceAll("-", "").slice(0, 24)}` as SharedProjectInviteCode;
 }
 
 function normalizeGitHubLogin(login: string): string {

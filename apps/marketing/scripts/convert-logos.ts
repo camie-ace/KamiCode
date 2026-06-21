@@ -1,11 +1,14 @@
 import sharp from "sharp";
 import toIco from "to-ico";
-import { writeFile } from "node:fs/promises";
-import { dirname, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import * as NodeFSP from "node:fs/promises";
+import * as NodePath from "node:path";
+import * as NodeURL from "node:url";
 
 const DL = "C:/Users/THIS PC/Downloads";
-const PUBLIC = resolve(dirname(fileURLToPath(import.meta.url)), "../public");
+const PUBLIC = NodePath.resolve(
+  NodePath.dirname(NodeURL.fileURLToPath(import.meta.url)),
+  "../public",
+);
 
 const SRC = {
   wordmark: `${DL}/ChatGPT Image May 26, 2026, 09_04_24 PM.png`,
@@ -80,7 +83,7 @@ async function run() {
     ),
   );
   const icoBuf = await toIco(icoBuffers);
-  await writeFile(`${PUBLIC}/favicon.ico`, icoBuf);
+  await NodeFSP.writeFile(`${PUBLIC}/favicon.ico`, icoBuf);
   console.log("Wrote favicon.ico (16/32/48)");
 
   console.log("\nDone.");

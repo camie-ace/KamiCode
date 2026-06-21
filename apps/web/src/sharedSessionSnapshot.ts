@@ -5,10 +5,12 @@ import type {
   SharedSessionSnapshotMessage,
   SharedThreadMessage,
 } from "@t3tools/contracts";
+import { mergeEnvironmentThread } from "@t3tools/client-runtime/state/threads";
 
-import { selectThreadByRef, useStore } from "./store";
+import { appAtomRegistry } from "./rpc/atomRegistry";
+import { readThreadDetail, readThreadShell } from "./state/entities";
+import { environmentThreadDetails } from "./state/threads";
 import type { Thread } from "./types";
-import { retainThreadDetailSubscription } from "./environments/runtime/service";
 
 const THREAD_DETAIL_SHARE_WAIT_MS = 4_000;
 const THREAD_DETAIL_SHARE_POLL_MS = 100;
@@ -20,14 +22,17 @@ function waitForThreadSharePoll(delayMs: number): Promise<void> {
 }
 
 export async function loadThreadDetailForSharing(threadRef: ScopedThreadRef): Promise<Thread> {
-  const readThread = () => selectThreadByRef(useStore.getState(), threadRef) ?? null;
+  const readThread = () =>
+    mergeEnvironmentThread(readThreadDetail(threadRef), readThreadShell(threadRef)) ?? null;
   const existing = readThread();
   if (existing) {
     return existing;
   }
 
-  const release = retainThreadDetailSubscription(threadRef.environmentId, threadRef.threadId);
+  const detailAtom = environmentThreadDetails.detailAtom(threadRef);
+  const release = appAtomRegistry.subscribe(detailAtom, () => undefined);
   try {
+    appAtomRegistry.refresh(detailAtom);
     const startedAt = Date.now();
     while (Date.now() - startedAt < THREAD_DETAIL_SHARE_WAIT_MS) {
       const thread = readThread();
@@ -64,10 +69,7 @@ function toSharedSessionSnapshotMessages(thread: Thread): SharedSessionSnapshotM
         ? null
         : (message.turnId as unknown as SharedSessionSnapshotMessage["turnId"]),
     createdAt: message.createdAt as SharedSessionSnapshotMessage["createdAt"],
-    completedAt:
-      message.completedAt === undefined
-        ? null
-        : (message.completedAt as SharedSessionSnapshotMessage["completedAt"]),
+    completedAt: null,
     attachments: (message.attachments ?? []).map((attachment) => ({
       id: attachment.id as SharedSessionSnapshotMessage["attachments"][number]["id"],
       type: attachment.type,
@@ -99,7 +101,7 @@ export function toSharedSessionSnapshot(
       thread.archivedAt === null
         ? null
         : (thread.archivedAt as SharedSessionSnapshot["threadArchivedAt"]),
-    error: thread.error,
+    error: thread.session?.lastError ?? null,
     repository,
     branch: thread.branch,
     modelSelection: thread.modelSelection,
@@ -120,7 +122,7 @@ export function toSharedSessionSnapshot(
       createdAt: activity.createdAt as SharedSessionSnapshot["activities"][number]["createdAt"],
     })),
     proposedPlans: thread.proposedPlans,
-    checkpoints: thread.turnDiffSummaries.map((checkpoint) => ({
+    checkpoints: thread.checkpoints.map((checkpoint) => ({
       turnId:
         checkpoint.turnId as unknown as SharedSessionSnapshot["checkpoints"][number]["turnId"],
       checkpointTurnCount: checkpoint.checkpointTurnCount ?? 0,
@@ -132,9 +134,7 @@ export function toSharedSessionSnapshot(
           ? null
           : (checkpoint.assistantMessageId as unknown as SharedSessionSnapshot["checkpoints"][number]["assistantMessageId"]),
       completedAt:
-        checkpoint.completedAt === null || checkpoint.completedAt === undefined
-          ? null
-          : (checkpoint.completedAt as SharedSessionSnapshot["checkpoints"][number]["completedAt"]),
+        checkpoint.completedAt as SharedSessionSnapshot["checkpoints"][number]["completedAt"],
     })),
     latestTurn: thread.latestTurn,
     queuedTurns: thread.queuedTurns ?? [],

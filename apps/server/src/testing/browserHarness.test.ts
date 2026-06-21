@@ -1,9 +1,15 @@
 // @effect-diagnostics nodeBuiltinImport:off globalDate:off
-import * as Fs from "node:fs/promises";
-import http from "node:http";
-import os from "node:os";
-import type { AddressInfo } from "node:net";
-import path from "node:path";
+import * as NodeFSP from "node:fs/promises";
+import * as NodeHttp from "node:http";
+import type * as NodeNet from "node:net";
+import * as NodeOS from "node:os";
+import * as NodePath from "node:path";
+
+const Fs = NodeFSP;
+const http = NodeHttp;
+const os = NodeOS;
+const path = NodePath;
+type AddressInfo = NodeNet.AddressInfo;
 
 import { describe, expect, it } from "vite-plus/test";
 
@@ -20,7 +26,7 @@ import {
   type BrowserHarnessRunResult,
 } from "./browserHarness.ts";
 
-async function readRequestBody(request: http.IncomingMessage): Promise<string> {
+async function readRequestBody(request: NodeHttp.IncomingMessage): Promise<string> {
   let body = "";
   for await (const chunk of request) {
     body += String(chunk);

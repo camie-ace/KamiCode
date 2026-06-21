@@ -47,14 +47,14 @@ const electronAppLayer = Layer.succeed(ElectronApp.ElectronApp, {
   setDockIcon: () => Effect.void,
   appendCommandLineSwitch: () => Effect.void,
   on: () => Effect.void,
-} satisfies ElectronApp.ElectronAppShape);
+} satisfies ElectronApp.ElectronApp["Service"]);
 
 const electronDialogShape = {
   pickFolder: () => Effect.succeed(Option.none()),
   confirm: () => Effect.succeed(false),
   showMessageBox: () => Effect.succeed({ response: 0, checkboxChecked: false }),
   showErrorBox: () => Effect.void,
-} satisfies ElectronDialog.ElectronDialogShape;
+} satisfies ElectronDialog.ElectronDialog["Service"];
 
 const electronDialogLayer = Layer.succeed(ElectronDialog.ElectronDialog, electronDialogShape);
 
@@ -84,7 +84,7 @@ const desktopUpdatesShape = {
   check: () => Effect.die("unexpected check"),
   download: Effect.die("unexpected download"),
   install: Effect.die("unexpected install"),
-} satisfies DesktopUpdates.DesktopUpdatesShape;
+} satisfies DesktopUpdates.DesktopUpdates["Service"];
 
 const desktopUpdatesLayer = Layer.succeed(DesktopUpdates.DesktopUpdates, desktopUpdatesShape);
 
@@ -98,7 +98,7 @@ const makeDesktopWindowLayer = (selectedAction: Deferred.Deferred<string>) =>
     handleBackendReady: Effect.void,
     dispatchMenuAction: (action) => Deferred.succeed(selectedAction, action).pipe(Effect.asVoid),
     syncAppearance: Effect.void,
-  } satisfies DesktopWindow.DesktopWindowShape);
+  } satisfies DesktopWindow.DesktopWindow["Service"]);
 
 const makeElectronMenuLayer = (
   applicationMenuTemplate: Deferred.Deferred<readonly Electron.MenuItemConstructorOptions[]>,
@@ -108,7 +108,7 @@ const makeElectronMenuLayer = (
       Deferred.succeed(applicationMenuTemplate, template).pipe(Effect.asVoid),
     popupTemplate: () => Effect.void,
     showContextMenu: () => Effect.succeed(Option.none()),
-  } satisfies ElectronMenu.ElectronMenuShape);
+  } satisfies ElectronMenu.ElectronMenu["Service"]);
 
 const findMenuItem = (
   template: readonly Electron.MenuItemConstructorOptions[],
@@ -205,7 +205,7 @@ describe("DesktopApplicationMenu", () => {
             install: Deferred.succeed(installRequested, undefined).pipe(
               Effect.as({ accepted: true, completed: false, state: downloadedState }),
             ),
-          } satisfies DesktopUpdates.DesktopUpdatesShape),
+          } satisfies DesktopUpdates.DesktopUpdates["Service"]),
         ),
         Layer.provideMerge(
           Layer.succeed(ElectronDialog.ElectronDialog, {
@@ -215,7 +215,7 @@ describe("DesktopApplicationMenu", () => {
                 dialogTitles.push(String(options.title));
                 return { response: 1, checkboxChecked: false };
               }),
-          } satisfies ElectronDialog.ElectronDialogShape),
+          } satisfies ElectronDialog.ElectronDialog["Service"]),
         ),
         Layer.provideMerge(electronAppLayer),
         Layer.provideMerge(
@@ -277,7 +277,7 @@ describe("DesktopApplicationMenu", () => {
                 install: Deferred.succeed(installRequested, undefined).pipe(
                   Effect.as({ accepted: true, completed: false, state: downloadedState }),
                 ),
-              } satisfies DesktopUpdates.DesktopUpdatesShape),
+              } satisfies DesktopUpdates.DesktopUpdates["Service"]),
             ),
             Layer.provideMerge(
               Layer.succeed(ElectronDialog.ElectronDialog, {
@@ -285,7 +285,7 @@ describe("DesktopApplicationMenu", () => {
                 confirm: () => Effect.succeed(false),
                 showMessageBox: () => Effect.succeed({ response: 1, checkboxChecked: false }),
                 showErrorBox: () => Effect.void,
-              } satisfies ElectronDialog.ElectronDialogShape),
+              } satisfies ElectronDialog.ElectronDialog["Service"]),
             ),
             Layer.provideMerge(electronAppLayer),
             Layer.provideMerge(

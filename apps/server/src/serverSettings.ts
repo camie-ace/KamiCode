@@ -23,28 +23,29 @@ import {
   ProviderInstanceId,
   ServerSettings,
   ServerSettingsError,
+  type ServerSettingsOperation,
   type ServerSettingsPatch,
 } from "@t3tools/contracts";
 import * as Cache from "effect/Cache";
+import * as Cause from "effect/Cause";
+import * as Context from "effect/Context";
 import * as Deferred from "effect/Deferred";
 import * as Duration from "effect/Duration";
+import * as Equal from "effect/Equal";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Path from "effect/Path";
-import * as Equal from "effect/Equal";
 import * as PubSub from "effect/PubSub";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
-import * as SchemaIssue from "effect/SchemaIssue";
-import * as Scope from "effect/Scope";
-import * as Context from "effect/Context";
-import * as Stream from "effect/Stream";
-import * as Cause from "effect/Cause";
 import * as Semaphore from "effect/Semaphore";
+import * as Scope from "effect/Scope";
+import * as Stream from "effect/Stream";
 import { writeFileStringAtomically } from "./atomicWrite.ts";
-import { ServerConfig } from "./config.ts";
+import * as ServerConfig from "./config.ts";
 import { type DeepPartial, deepMerge } from "@t3tools/shared/Struct";
 import { fromJsonStringPretty, fromLenientJson } from "@t3tools/shared/schemaJson";
 import { applyServerSettingsPatch } from "@t3tools/shared/serverSettings";
@@ -68,7 +69,7 @@ const normalizeServerSettings = (
       (cause) =>
         new ServerSettingsError({
           settingsPath: "<memory>",
-          detail: `failed to normalize server settings: ${SchemaIssue.makeFormatterDefault()(cause.issue)}`,
+          operation: "normalize",
           cause,
         }),
     ),
@@ -114,58 +115,59 @@ export function redactServerSettingsForClient(settings: ServerSettings): ServerS
   return { ...settings, providerInstances, hostedCollaboration };
 }
 
-export interface ServerSettingsShape {
-  /** Start the settings runtime and attach file watching. */
-  readonly start: Effect.Effect<void, ServerSettingsError>;
-
-  /** Await settings runtime readiness. */
-  readonly ready: Effect.Effect<void, ServerSettingsError>;
-
-  /** Read the current settings. */
-  readonly getSettings: Effect.Effect<ServerSettings, ServerSettingsError>;
-
-  /** Patch settings and persist. Returns the new full settings object. */
-  readonly updateSettings: (
-    patch: ServerSettingsPatch,
-  ) => Effect.Effect<ServerSettings, ServerSettingsError>;
-
-  /** Stream of settings change events. */
-  readonly streamChanges: Stream.Stream<ServerSettings>;
-}
-
 export class ServerSettingsService extends Context.Service<
   ServerSettingsService,
-  ServerSettingsShape
->()("t3/serverSettings/ServerSettingsService") {
-  static readonly layerTest = (overrides: DeepPartial<ServerSettings> = {}) =>
-    Layer.effect(
-      ServerSettingsService,
-      Effect.gen(function* () {
-        const { automaticGitFetchInterval, ...overridesForMerge } = overrides;
-        const merged = deepMerge(DEFAULT_SERVER_SETTINGS, overridesForMerge);
-        const initialSettings = yield* normalizeServerSettings({
-          ...merged,
-          ...(automaticGitFetchInterval !== undefined
-            ? { automaticGitFetchInterval: automaticGitFetchInterval as Duration.Duration }
-            : {}),
-        });
-        const currentSettingsRef = yield* Ref.make<ServerSettings>(initialSettings);
+  {
+    /** Start the settings runtime and attach file watching. */
+    readonly start: Effect.Effect<void, ServerSettingsError>;
 
-        return {
-          start: Effect.void,
-          ready: Effect.void,
-          getSettings: Ref.get(currentSettingsRef),
-          updateSettings: (patch) =>
-            Ref.get(currentSettingsRef).pipe(
-              Effect.map((currentSettings) => applyServerSettingsPatch(currentSettings, patch)),
-              Effect.flatMap(normalizeServerSettings),
-              Effect.tap((nextSettings) => Ref.set(currentSettingsRef, nextSettings)),
-            ),
-          streamChanges: Stream.empty,
-        } satisfies ServerSettingsShape;
-      }),
-    );
+    /** Await settings runtime readiness. */
+    readonly ready: Effect.Effect<void, ServerSettingsError>;
+
+    /** Read the current settings. */
+    readonly getSettings: Effect.Effect<ServerSettings, ServerSettingsError>;
+
+    /** Patch settings and persist. Returns the new full settings object. */
+    readonly updateSettings: (
+      patch: ServerSettingsPatch,
+    ) => Effect.Effect<ServerSettings, ServerSettingsError>;
+
+    /** Stream of settings change events. */
+    readonly streamChanges: Stream.Stream<ServerSettings>;
+  }
+>()("t3/serverSettings/ServerSettingsService") {
+  /** @deprecated Import and use `layerTest` from this module. */
+  static readonly layerTest = (overrides: DeepPartial<ServerSettings> = {}) => layerTest(overrides);
 }
+
+const makeTest = (overrides: DeepPartial<ServerSettings> = {}) =>
+  Effect.gen(function* () {
+    const { automaticGitFetchInterval, ...overridesForMerge } = overrides;
+    const merged = deepMerge(DEFAULT_SERVER_SETTINGS, overridesForMerge);
+    const initialSettings = yield* normalizeServerSettings({
+      ...merged,
+      ...(automaticGitFetchInterval !== undefined
+        ? { automaticGitFetchInterval: automaticGitFetchInterval as Duration.Duration }
+        : {}),
+    });
+    const currentSettingsRef = yield* Ref.make<ServerSettings>(initialSettings);
+
+    return {
+      start: Effect.void,
+      ready: Effect.void,
+      getSettings: Ref.get(currentSettingsRef),
+      updateSettings: (patch) =>
+        Ref.get(currentSettingsRef).pipe(
+          Effect.map((currentSettings) => applyServerSettingsPatch(currentSettings, patch)),
+          Effect.flatMap(normalizeServerSettings),
+          Effect.tap((nextSettings) => Ref.set(currentSettingsRef, nextSettings)),
+        ),
+      streamChanges: Stream.empty,
+    } satisfies ServerSettingsService["Service"];
+  });
+
+export const layerTest = (overrides: DeepPartial<ServerSettings> = {}) =>
+  Layer.effect(ServerSettingsService, makeTest(overrides));
 
 const ServerSettingsJson = fromLenientJson(ServerSettings);
 const decodeServerSettingsJsonExit = Schema.decodeUnknownExit(ServerSettingsJson);
@@ -260,8 +262,8 @@ function stripDefaultServerSettings(current: unknown, defaults: unknown): unknow
   return Object.is(current, defaults) ? undefined : current;
 }
 
-const makeServerSettings = Effect.gen(function* () {
-  const { settingsPath } = yield* ServerConfig;
+const make = Effect.gen(function* () {
+  const { settingsPath } = yield* ServerConfig.ServerConfig;
   const fs = yield* FileSystem.FileSystem;
   const pathService = yield* Path.Path;
   const secretStore = yield* ServerSecretStore.ServerSecretStore;
@@ -276,12 +278,19 @@ const makeServerSettings = Effect.gen(function* () {
   const emitChange = (settings: ServerSettings) =>
     PubSub.publish(changesPubSub, settings).pipe(Effect.asVoid);
 
+  const toSecretSettingsError = (operation: ServerSettingsOperation, cause: unknown) =>
+    new ServerSettingsError({
+      settingsPath,
+      operation,
+      cause,
+    });
+
   const readConfigExists = fs.exists(settingsPath).pipe(
     Effect.mapError(
       (cause) =>
         new ServerSettingsError({
           settingsPath,
-          detail: "failed to check settings file existence",
+          operation: "check-exists",
           cause,
         }),
     ),
@@ -292,7 +301,7 @@ const makeServerSettings = Effect.gen(function* () {
       (cause) =>
         new ServerSettingsError({
           settingsPath,
-          detail: "failed to read settings file",
+          operation: "read-file",
           cause,
         }),
     ),
@@ -309,6 +318,7 @@ const makeServerSettings = Effect.gen(function* () {
       yield* Effect.logWarning("failed to parse settings.json, using defaults", {
         path: settingsPath,
         issues: Cause.pretty(decoded.cause),
+        cause: decoded.cause,
       });
       return DEFAULT_SERVER_SETTINGS;
     }
@@ -321,13 +331,6 @@ const makeServerSettings = Effect.gen(function* () {
   });
 
   const getSettingsFromCache = Cache.get(settingsCache, cacheKey);
-
-  const toSettingsError = (detail: string, cause: unknown) =>
-    new ServerSettingsError({
-      settingsPath,
-      detail,
-      cause,
-    });
 
   const materializeProviderEnvironmentSecrets = (
     settings: ServerSettings,
@@ -347,16 +350,20 @@ const makeServerSettings = Effect.gen(function* () {
           const secret = yield* secretStore
             .get(providerEnvironmentSecretName({ instanceId, name: variable.name }))
             .pipe(
-              Effect.mapError((cause) =>
-                toSettingsError(
-                  `failed to read sensitive environment variable ${variable.name}`,
-                  cause,
-                ),
+              Effect.mapError(
+                (cause) =>
+                  new ServerSettingsError({
+                    settingsPath,
+                    operation: "read-secret",
+                    providerInstanceId: instanceId,
+                    environmentVariable: variable.name,
+                    cause,
+                  }),
               ),
             );
           environment.push({
             ...variable,
-            value: secret ? textDecoder.decode(secret) : "",
+            value: Option.isSome(secret) ? textDecoder.decode(secret.value) : "",
           });
         }
         providerInstances[instanceId] = {
@@ -379,17 +386,13 @@ const makeServerSettings = Effect.gen(function* () {
       }
       const secret = yield* secretStore
         .get(HOSTED_COLLABORATION_TOKEN_SECRET_NAME)
-        .pipe(
-          Effect.mapError((cause) =>
-            toSettingsError("failed to read hosted collaboration server token", cause),
-          ),
-        );
+        .pipe(Effect.mapError((cause) => toSecretSettingsError("read-secret", cause)));
       return {
         ...settings,
         hostedCollaboration: {
           ...settings.hostedCollaboration,
-          token: secret ? textDecoder.decode(secret) : "",
-          tokenRedacted: Boolean(secret),
+          token: Option.isSome(secret) ? textDecoder.decode(secret.value) : "",
+          tokenRedacted: Option.isSome(secret),
         },
       };
     });
@@ -410,13 +413,18 @@ const makeServerSettings = Effect.gen(function* () {
         for (const variable of instance.environment) {
           const secretName = providerEnvironmentSecretName({ instanceId, name: variable.name });
           if (!variable.sensitive) {
-            yield* secretStore
-              .remove(secretName)
-              .pipe(
-                Effect.mapError((cause) =>
-                  toSettingsError(`failed to remove environment secret ${variable.name}`, cause),
-                ),
-              );
+            yield* secretStore.remove(secretName).pipe(
+              Effect.mapError(
+                (cause) =>
+                  new ServerSettingsError({
+                    settingsPath,
+                    operation: "remove-secret",
+                    providerInstanceId: instanceId,
+                    environmentVariable: variable.name,
+                    cause,
+                  }),
+              ),
+            );
             environment.push(redactProviderEnvironmentVariable(variable));
             continue;
           }
@@ -424,22 +432,32 @@ const makeServerSettings = Effect.gen(function* () {
           nextSecretKeys.add(secretName);
           if (!variable.valueRedacted) {
             if (variable.value.length > 0) {
-              yield* secretStore
-                .set(secretName, textEncoder.encode(variable.value))
-                .pipe(
-                  Effect.mapError((cause) =>
-                    toSettingsError(`failed to persist environment secret ${variable.name}`, cause),
-                  ),
-                );
+              yield* secretStore.set(secretName, textEncoder.encode(variable.value)).pipe(
+                Effect.mapError(
+                  (cause) =>
+                    new ServerSettingsError({
+                      settingsPath,
+                      operation: "write-secret",
+                      providerInstanceId: instanceId,
+                      environmentVariable: variable.name,
+                      cause,
+                    }),
+                ),
+              );
               environment.push({ ...variable, value: "", valueRedacted: true });
             } else {
-              yield* secretStore
-                .remove(secretName)
-                .pipe(
-                  Effect.mapError((cause) =>
-                    toSettingsError(`failed to remove environment secret ${variable.name}`, cause),
-                  ),
-                );
+              yield* secretStore.remove(secretName).pipe(
+                Effect.mapError(
+                  (cause) =>
+                    new ServerSettingsError({
+                      settingsPath,
+                      operation: "remove-secret",
+                      providerInstanceId: instanceId,
+                      environmentVariable: variable.name,
+                      cause,
+                    }),
+                ),
+              );
               const { valueRedacted: _omit, ...rest } = variable;
               environment.push(rest);
             }
@@ -459,16 +477,18 @@ const makeServerSettings = Effect.gen(function* () {
           if (!variable.sensitive) continue;
           const secretName = providerEnvironmentSecretName({ instanceId, name: variable.name });
           if (nextSecretKeys.has(secretName)) continue;
-          yield* secretStore
-            .remove(secretName)
-            .pipe(
-              Effect.mapError((cause) =>
-                toSettingsError(
-                  `failed to remove stale environment secret ${variable.name}`,
+          yield* secretStore.remove(secretName).pipe(
+            Effect.mapError(
+              (cause) =>
+                new ServerSettingsError({
+                  settingsPath,
+                  operation: "remove-stale-secret",
+                  providerInstanceId: instanceId,
+                  environmentVariable: variable.name,
                   cause,
-                ),
-              ),
-            );
+                }),
+            ),
+          );
         }
       }
 
@@ -496,11 +516,7 @@ const makeServerSettings = Effect.gen(function* () {
       if (token.length === 0) {
         yield* secretStore
           .remove(HOSTED_COLLABORATION_TOKEN_SECRET_NAME)
-          .pipe(
-            Effect.mapError((cause) =>
-              toSettingsError("failed to remove hosted collaboration server token", cause),
-            ),
-          );
+          .pipe(Effect.mapError((cause) => toSecretSettingsError("remove-secret", cause)));
         return {
           ...next,
           hostedCollaboration: {
@@ -512,11 +528,7 @@ const makeServerSettings = Effect.gen(function* () {
       }
       yield* secretStore
         .set(HOSTED_COLLABORATION_TOKEN_SECRET_NAME, textEncoder.encode(token))
-        .pipe(
-          Effect.mapError((cause) =>
-            toSettingsError("failed to persist hosted collaboration server token", cause),
-          ),
-        );
+        .pipe(Effect.mapError((cause) => toSecretSettingsError("write-secret", cause)));
       return {
         ...next,
         hostedCollaboration: {
@@ -545,7 +557,7 @@ const makeServerSettings = Effect.gen(function* () {
       (cause) =>
         new ServerSettingsError({
           settingsPath,
-          detail: "failed to write settings file",
+          operation: "write-file",
           cause,
         }),
     ),
@@ -569,7 +581,7 @@ const makeServerSettings = Effect.gen(function* () {
         (cause) =>
           new ServerSettingsError({
             settingsPath,
-            detail: "failed to prepare settings directory",
+            operation: "prepare-directory",
             cause,
           }),
       ),
@@ -652,7 +664,8 @@ const makeServerSettings = Effect.gen(function* () {
             Effect.flatMap(materializeHostedCollaborationToken),
             Effect.catch((error: ServerSettingsError) =>
               Effect.logWarning("failed to materialize server settings secrets", {
-                detail: error.detail,
+                message: error.message,
+                cause: error.cause,
               }).pipe(Effect.as(settings)),
             ),
           ),
@@ -660,9 +673,7 @@ const makeServerSettings = Effect.gen(function* () {
         Stream.map(resolveTextGenerationProvider),
       );
     },
-  } satisfies ServerSettingsShape;
+  } satisfies ServerSettingsService["Service"];
 });
 
-export const ServerSettingsLive = Layer.effect(ServerSettingsService, makeServerSettings).pipe(
-  Layer.provide(ServerSecretStore.layer),
-);
+export const layer = Layer.effect(ServerSettingsService, make);

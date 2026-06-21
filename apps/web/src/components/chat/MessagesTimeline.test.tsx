@@ -128,7 +128,9 @@ function buildUserTimelineEntry(text: string) {
       id: MessageId.make("message-1"),
       role: "user" as const,
       text,
+      turnId: null,
       createdAt: MESSAGE_CREATED_AT,
+      updatedAt: MESSAGE_CREATED_AT,
       streaming: false,
     },
   };
@@ -227,7 +229,7 @@ describe("MessagesTimeline", () => {
     );
 
     expect(markup).toContain("Context compacted");
-    expect(markup).toContain("work log");
+    expect(markup).toContain("Work Log");
   });
 
   it("formats changed file paths from the workspace root", async () => {
@@ -336,7 +338,9 @@ describe("MessagesTimeline", () => {
                 "```",
                 "</review_comment>",
               ].join("\n"),
+              turnId: null,
               createdAt: "2026-03-17T19:12:28.000Z",
+              updatedAt: "2026-03-17T19:12:28.000Z",
               streaming: false,
             },
           },
@@ -374,7 +378,9 @@ describe("MessagesTimeline", () => {
                 "```",
                 "</review_comment>",
               ].join("\n"),
+              turnId: null,
               createdAt: "2026-03-17T19:12:28.000Z",
+              updatedAt: "2026-03-17T19:12:28.000Z",
               streaming: false,
             },
           },

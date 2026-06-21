@@ -4,18 +4,22 @@ import type {
   ResolvedKeybindingsConfig,
   ScopedThreadRef,
 } from "@t3tools/contracts";
-import type { SelectedLineRange } from "@pierre/diffs";
+import { VirtualizedFile, type SelectedLineRange } from "@pierre/diffs";
 import { Editor } from "@pierre/diffs/editor";
-import { EditorProvider, File, Virtualizer } from "@pierre/diffs/react";
+import { EditorProvider, File, type FileOptions, Virtualizer } from "@pierre/diffs/react";
+import {
+  isAtomCommandInterrupted,
+  squashAtomCommandFailure,
+} from "@t3tools/client-runtime/state/runtime";
 import { ChevronRight, Code2, Eye, FolderTree, Globe2, LoaderCircle } from "lucide-react";
+import * as Schema from "effect/Schema";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { isBrowserPreviewFile, openFileInPreview } from "~/browser/openFileInPreview";
 import ChatMarkdown from "~/components/ChatMarkdown";
 import { OpenInPicker } from "~/components/chat/OpenInPicker";
-import { ensureEnvironmentApi } from "~/environmentApi";
-import { usePrimaryEnvironmentId } from "~/environments/primary/context";
 import { useTheme } from "~/hooks/useTheme";
+import { getLocalStorageItem, setLocalStorageItem } from "~/hooks/useLocalStorage";
 import { resolveDiffThemeName } from "~/lib/diffRendering";
 import { cn } from "~/lib/utils";
 import { isPreviewSupportedInRuntime } from "~/previewStateStore";
@@ -26,6 +30,12 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "~/components/ui/tooltip";
 import { stackedThreadToast, toastManager } from "~/components/ui/toast";
 import { type DraftId, useComposerDraftStore } from "~/composerDraftStore";
 import { buildFileReviewComment } from "~/reviewCommentContext";
+import { assetEnvironment } from "~/state/assets";
+import { useEnvironmentHttpBaseUrl, usePrimaryEnvironmentId } from "~/state/environments";
+import { previewEnvironment } from "~/state/preview";
+import { projectEnvironment } from "~/state/projects";
+import { useAtomCommand } from "~/state/use-atom-command";
+import { useAtomQueryRunner } from "~/state/use-atom-query-runner";
 
 import FileBrowserPanel from "./FileBrowserPanel";
 import {
@@ -59,12 +69,176 @@ interface FilePreviewPanelProps {
   composerDraftTarget: ScopedThreadRef | DraftId;
   keybindings: ResolvedKeybindingsConfig;
   availableEditors: ReadonlyArray<EditorId>;
+  revealLine: number | null;
+  revealRequestId: number;
   onOpenFile: (relativePath: string) => void;
   onPendingChange: (relativePath: string, pending: boolean) => void;
 }
 
 const FILE_EXPLORER_STORAGE_KEY = "t3code.fileExplorerOpen";
 const FILE_SAVE_DEBOUNCE_MS = 500;
+const FILE_LINK_REVEAL_ATTRIBUTE = "data-file-link-reveal";
+const FILE_LINK_REVEAL_UNSAFE_CSS = `
+  [${FILE_LINK_REVEAL_ATTRIBUTE}][data-line] {
+    background-color: light-dark(
+      color-mix(
+        in lab,
+        var(--diffs-computed-diff-line-bg) 82%,
+        var(--diffs-bg-selection-override, var(--diffs-selection-base))
+      ),
+      color-mix(
+        in lab,
+        var(--diffs-computed-diff-line-bg) 75%,
+        var(--diffs-bg-selection-override, var(--diffs-selection-base))
+      )
+    ) !important;
+  }
+
+  [${FILE_LINK_REVEAL_ATTRIBUTE}][data-column-number] {
+    background-color: light-dark(
+      color-mix(
+        in lab,
+        var(--diffs-computed-diff-line-bg) 75%,
+        var(--diffs-bg-selection-number-override, var(--diffs-selection-base))
+      ),
+      color-mix(
+        in lab,
+        var(--diffs-computed-diff-line-bg) 60%,
+        var(--diffs-bg-selection-number-override, var(--diffs-selection-base))
+      )
+    ) !important;
+    color: var(--diffs-selection-number-fg) !important;
+  }
+`;
+type FilePostRender = NonNullable<FileOptions<unknown>["onPostRender"]>;
+
+function clampFileLine(contents: string, requestedLine: number): number {
+  let lineCount = 1;
+  for (let index = 0; index < contents.length; index += 1) {
+    const character = contents.charCodeAt(index);
+    if (character === 10) {
+      lineCount += 1;
+    } else if (character === 13) {
+      lineCount += 1;
+      if (contents.charCodeAt(index + 1) === 10) index += 1;
+    }
+  }
+  return Math.min(Math.max(1, requestedLine), lineCount);
+}
+
+function updateFileLinkReveal(fileContainer: HTMLElement, line: number | null): void {
+  const root = fileContainer.shadowRoot ?? fileContainer;
+  for (const element of root.querySelectorAll<HTMLElement>(`[${FILE_LINK_REVEAL_ATTRIBUTE}]`)) {
+    element.removeAttribute(FILE_LINK_REVEAL_ATTRIBUTE);
+  }
+  if (line === null) return;
+
+  root
+    .querySelector<HTMLElement>(`[data-line="${line}"]`)
+    ?.setAttribute(FILE_LINK_REVEAL_ATTRIBUTE, "");
+  root
+    .querySelector<HTMLElement>(`[data-column-number="${line}"]`)
+    ?.setAttribute(FILE_LINK_REVEAL_ATTRIBUTE, "");
+}
+
+function useFileLineReveal(
+  relativePath: string | null,
+  revealLine: number | null,
+  revealRequestId: number,
+): FilePostRender {
+  const [handledRequestIdsByPath] = useState(() => new Map<string, number>());
+  const [latestRequestIdsByPath] = useState(() => new Map<string, number>());
+  const [pendingFramesByPath] = useState(() => new Map<string, number>());
+
+  return useCallback<FilePostRender>(
+    (fileContainer, instance, phase) => {
+      if (relativePath === null) return;
+
+      const cancelPendingReveal = () => {
+        const frameId = pendingFramesByPath.get(relativePath);
+        if (frameId !== undefined) {
+          cancelAnimationFrame(frameId);
+          pendingFramesByPath.delete(relativePath);
+        }
+      };
+
+      if (phase === "unmount") {
+        cancelPendingReveal();
+        return;
+      }
+
+      const targetLine =
+        revealLine === null ? null : clampFileLine(instance.file?.contents ?? "", revealLine);
+      updateFileLinkReveal(fileContainer, targetLine);
+
+      if (!(instance instanceof VirtualizedFile)) return;
+
+      if (latestRequestIdsByPath.get(relativePath) !== revealRequestId) {
+        cancelPendingReveal();
+        latestRequestIdsByPath.set(relativePath, revealRequestId);
+      }
+
+      if (targetLine === null) {
+        fileContainer.style.minHeight = "";
+        return;
+      }
+
+      const scrollContainer = fileContainer.closest<HTMLElement>(".file-preview-virtualizer");
+      if (!scrollContainer) return;
+      fileContainer.style.minHeight = `${Math.ceil(
+        Math.max(instance.height, scrollContainer.clientHeight),
+      )}px`;
+
+      if (
+        handledRequestIdsByPath.get(relativePath) === revealRequestId ||
+        pendingFramesByPath.has(relativePath)
+      ) {
+        return;
+      }
+
+      const reveal = () => {
+        pendingFramesByPath.delete(relativePath);
+        if (
+          latestRequestIdsByPath.get(relativePath) !== revealRequestId ||
+          !fileContainer.isConnected
+        ) {
+          return;
+        }
+
+        const linePosition = instance.getLinePosition(targetLine);
+        if (!linePosition) return;
+
+        const fileTop =
+          scrollContainer.scrollTop +
+          fileContainer.getBoundingClientRect().top -
+          scrollContainer.getBoundingClientRect().top;
+        const centeredTop = Math.max(
+          0,
+          fileTop +
+            linePosition.top -
+            Math.max(0, (scrollContainer.clientHeight - linePosition.height) / 2),
+        );
+        const maxScrollTop = Math.max(
+          0,
+          scrollContainer.scrollHeight - scrollContainer.clientHeight,
+        );
+
+        scrollContainer.scrollTop = Math.min(centeredTop, maxScrollTop);
+        handledRequestIdsByPath.set(relativePath, revealRequestId);
+      };
+
+      pendingFramesByPath.set(relativePath, requestAnimationFrame(reveal));
+    },
+    [
+      handledRequestIdsByPath,
+      latestRequestIdsByPath,
+      pendingFramesByPath,
+      relativePath,
+      revealLine,
+      revealRequestId,
+    ],
+  );
+}
 
 interface EditableFileSurfaceProps {
   environmentId: EnvironmentId;
@@ -73,7 +247,14 @@ interface EditableFileSurfaceProps {
   composerDraftTarget: ScopedThreadRef | DraftId;
   contents: string;
   resolvedTheme: "light" | "dark";
+  revealRequestId: number;
+  onPostRender: FilePostRender;
   onPendingChange: (relativePath: string, pending: boolean) => void;
+}
+
+interface FileSelectionOverride {
+  revealRequestId: number;
+  range: SelectedLineRange | null;
 }
 
 function useFileSaveCoordinator({
@@ -85,23 +266,22 @@ function useFileSaveCoordinator({
   EditableFileSurfaceProps,
   "environmentId" | "cwd" | "relativePath" | "onPendingChange"
 >): FileSaveCoordinator {
+  const writeFile = useAtomCommand(projectEnvironment.writeFile);
   const coordinator = useMemo(
     () =>
       new FileSaveCoordinator({
         debounceMs: FILE_SAVE_DEBOUNCE_MS,
         onPendingChange: (pending) => onPendingChange(relativePath, pending),
-        persist: async (nextContents) => {
-          await ensureEnvironmentApi(environmentId).projects.writeFile({
-            cwd,
-            relativePath,
-            contents: nextContents,
-          });
-        },
+        persist: (nextContents) =>
+          writeFile({
+            environmentId,
+            input: { cwd, relativePath, contents: nextContents },
+          }),
         onConfirmed: (confirmedContents) => {
           confirmProjectFileQueryData(environmentId, cwd, relativePath, confirmedContents);
         },
       }),
-    [cwd, environmentId, onPendingChange, relativePath],
+    [cwd, environmentId, onPendingChange, relativePath, writeFile],
   );
 
   useEffect(() => () => coordinator.dispose(), [coordinator]);
@@ -115,13 +295,24 @@ function EditableFileSurface({
   composerDraftTarget,
   contents,
   resolvedTheme,
+  revealRequestId,
+  onPostRender,
   onPendingChange,
 }: EditableFileSurfaceProps) {
   const addReviewComment = useComposerDraftStore((store) => store.addReviewComment);
   const removeReviewComment = useComposerDraftStore((store) => store.removeReviewComment);
   const [lineAnnotations, setLineAnnotations] = useState<FileCommentLineAnnotation[]>([]);
-  const [selectedRange, setSelectedRange] = useState<SelectedLineRange | null>(null);
+  const [selectionOverride, setSelectionOverride] = useState<FileSelectionOverride | null>(null);
+  const selectedRange =
+    selectionOverride?.revealRequestId === revealRequestId ? selectionOverride.range : null;
+  const setSelectedRange = useCallback(
+    (range: SelectedLineRange | null) => {
+      setSelectionOverride({ revealRequestId, range });
+    },
+    [revealRequestId],
+  );
   const surfaceRef = useRef<HTMLDivElement>(null);
+  const selectionFrameRef = useRef<number | null>(null);
   const saveCoordinator = useFileSaveCoordinator({
     environmentId,
     cwd,
@@ -179,7 +370,7 @@ function EditableFileSurface({
         });
       });
     },
-    [composerDraftTarget, removeReviewComment],
+    [composerDraftTarget, removeReviewComment, setSelectedRange],
   );
 
   const submitAnnotationEntry = useCallback(
@@ -214,7 +405,14 @@ function EditableFileSurface({
         })),
       );
     },
-    [addReviewComment, composerDraftTarget, contents, lineAnnotations, relativePath],
+    [
+      addReviewComment,
+      composerDraftTarget,
+      contents,
+      lineAnnotations,
+      relativePath,
+      setSelectedRange,
+    ],
   );
 
   const beginComment = useCallback((range: SelectedLineRange) => {
@@ -265,7 +463,7 @@ function EditableFileSurface({
       isBlocked: () => hasOpenCommentForm,
       onDismiss: () => setSelectedRange(null),
     });
-  }, [editor, hasOpenCommentForm]);
+  }, [editor, hasOpenCommentForm, setSelectedRange]);
   const handleLineSelectionEnd = useCallback(
     (range: SelectedLineRange | null) => {
       setSelectedRange(range);
@@ -273,7 +471,26 @@ function EditableFileSurface({
         beginComment(range);
       }
     },
-    [beginComment],
+    [beginComment, setSelectedRange],
+  );
+
+  const handlePostRender = useCallback<FilePostRender>(
+    (fileContainer, instance, phase) => {
+      onPostRender(fileContainer, instance, phase);
+
+      if (selectionFrameRef.current !== null) {
+        cancelAnimationFrame(selectionFrameRef.current);
+        selectionFrameRef.current = null;
+      }
+      if (phase === "unmount") return;
+
+      selectionFrameRef.current = requestAnimationFrame(() => {
+        selectionFrameRef.current = null;
+        if (!fileContainer.isConnected) return;
+        instance.setSelectedLines(selectedRange, { notify: false });
+      });
+    },
+    [onPostRender, selectedRange],
   );
 
   return (
@@ -302,6 +519,8 @@ function EditableFileSurface({
               overflow: "scroll",
               theme: resolveDiffThemeName(resolvedTheme),
               themeType: resolvedTheme,
+              unsafeCSS: FILE_LINK_REVEAL_UNSAFE_CSS,
+              onPostRender: handlePostRender,
             }}
             selectedLines={selectedRange}
             lineAnnotations={lineAnnotations}
@@ -336,7 +555,10 @@ function RenderedMarkdownSurface({
   contents,
   threadRef,
   onPendingChange,
-}: Omit<EditableFileSurfaceProps, "resolvedTheme" | "composerDraftTarget"> & {
+}: Omit<
+  EditableFileSurfaceProps,
+  "resolvedTheme" | "composerDraftTarget" | "revealLine" | "revealRequestId" | "onPostRender"
+> & {
   threadRef: ScopedThreadRef;
 }) {
   const saveCoordinator = useFileSaveCoordinator({
@@ -369,8 +591,9 @@ function RenderedMarkdownSurface({
 
 function initialExplorerOpen(): boolean {
   try {
-    return window.localStorage.getItem(FILE_EXPLORER_STORAGE_KEY) !== "false";
-  } catch {
+    return getLocalStorageItem(FILE_EXPLORER_STORAGE_KEY, Schema.Boolean) ?? true;
+  } catch (error) {
+    console.error(error);
     return true;
   }
 }
@@ -384,17 +607,32 @@ export default function FilePreviewPanel({
   composerDraftTarget,
   keybindings,
   availableEditors,
+  revealLine,
+  revealRequestId,
   onOpenFile,
   onPendingChange,
 }: FilePreviewPanelProps) {
   const { resolvedTheme } = useTheme();
   const primaryEnvironmentId = usePrimaryEnvironmentId();
+  const environmentHttpBaseUrl = useEnvironmentHttpBaseUrl(environmentId);
+  const createAssetUrl = useAtomQueryRunner(assetEnvironment.createUrl, {
+    reportFailure: false,
+  });
+  const openPreview = useAtomCommand(previewEnvironment.open, {
+    reportFailure: false,
+  });
   const file = useProjectFileQuery(environmentId, cwd, relativePath);
   const [explorerOpen, setExplorerOpen] = useState(initialExplorerOpen);
-  const [renderedMarkdownPath, setRenderedMarkdownPath] = useState<string | null>(null);
+  const [markdownView, setMarkdownView] = useState<{
+    path: string | null;
+    revealRequestId: number | null;
+  }>({ path: null, revealRequestId: null });
   const breadcrumbRef = useRef<HTMLDivElement>(null);
   const isMarkdown = relativePath ? isMarkdownPreviewFile(relativePath) : false;
-  const renderMarkdown = isMarkdown && renderedMarkdownPath === relativePath;
+  const renderMarkdown =
+    isMarkdown &&
+    markdownView.path === relativePath &&
+    (revealLine === null || markdownView.revealRequestId === revealRequestId);
   const canOpenInBrowser =
     relativePath !== null && isPreviewSupportedInRuntime() && isBrowserPreviewFile(relativePath);
   const absolutePath = relativePath ? resolvePathLinkTarget(relativePath, cwd) : null;
@@ -402,6 +640,7 @@ export default function FilePreviewPanel({
     () => (relativePath ? fileBreadcrumbs(projectName, relativePath) : []),
     [projectName, relativePath],
   );
+  const onFilePostRender = useFileLineReveal(relativePath, revealLine, revealRequestId);
 
   useEffect(() => {
     const currentCrumb = breadcrumbRef.current?.querySelector<HTMLElement>(
@@ -414,15 +653,28 @@ export default function FilePreviewPanel({
     setExplorerOpen((current) => {
       const next = !current;
       try {
-        window.localStorage.setItem(FILE_EXPLORER_STORAGE_KEY, String(next));
-      } catch {}
+        setLocalStorageItem(FILE_EXPLORER_STORAGE_KEY, next, Schema.Boolean);
+      } catch (error) {
+        console.error(error);
+      }
       return next;
     });
   };
 
-  const handleOpenInBrowser = () => {
-    if (!absolutePath) return;
-    void openFileInPreview(threadRef, absolutePath).catch((error) => {
+  const handleOpenInBrowser = useCallback(() => {
+    if (!absolutePath || !environmentHttpBaseUrl) return;
+    void (async () => {
+      const result = await openFileInPreview({
+        threadRef,
+        filePath: absolutePath,
+        httpBaseUrl: environmentHttpBaseUrl,
+        createAssetUrl,
+        openPreview,
+      });
+      if (result._tag === "Success" || isAtomCommandInterrupted(result)) {
+        return;
+      }
+      const error = squashAtomCommandFailure(result);
       toastManager.add(
         stackedThreadToast({
           type: "error",
@@ -430,8 +682,8 @@ export default function FilePreviewPanel({
           description: error instanceof Error ? error.message : "An error occurred.",
         }),
       );
-    });
-  };
+    })();
+  }, [absolutePath, createAssetUrl, environmentHttpBaseUrl, openPreview, threadRef]);
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-background">
@@ -471,6 +723,7 @@ export default function FilePreviewPanel({
           </ScrollArea>
           {absolutePath && environmentId === primaryEnvironmentId ? (
             <OpenInPicker
+              environmentId={environmentId}
               keybindings={keybindings}
               availableEditors={availableEditors}
               openInCwd={absolutePath}
@@ -485,9 +738,12 @@ export default function FilePreviewPanel({
                   <Toggle
                     className="shrink-0"
                     pressed={renderMarkdown}
-                    onPressedChange={(pressed) =>
-                      setRenderedMarkdownPath(pressed ? relativePath : null)
-                    }
+                    onPressedChange={(pressed) => {
+                      setMarkdownView({
+                        path: pressed ? relativePath : null,
+                        revealRequestId: pressed ? revealRequestId : null,
+                      });
+                    }}
                     aria-label={renderMarkdown ? "Show markdown source" : "Show rendered markdown"}
                     variant="ghost"
                     size="sm"
@@ -591,6 +847,8 @@ export default function FilePreviewPanel({
                     overflow: "scroll",
                     theme: resolveDiffThemeName(resolvedTheme),
                     themeType: resolvedTheme,
+                    unsafeCSS: FILE_LINK_REVEAL_UNSAFE_CSS,
+                    onPostRender: onFilePostRender,
                   }}
                   className="min-h-full"
                 />
@@ -604,6 +862,8 @@ export default function FilePreviewPanel({
                 composerDraftTarget={composerDraftTarget}
                 contents={file.data.contents}
                 resolvedTheme={resolvedTheme}
+                revealRequestId={revealRequestId}
+                onPostRender={onFilePostRender}
                 onPendingChange={onPendingChange}
               />
             )

@@ -42,7 +42,7 @@ function readLocalCollabServerBundleBase64(): Effect.Effect<
     for (const candidate of candidates) {
       const content = yield* fs
         .readFileString(candidate)
-        .pipe(Effect.catch(() => Effect.succeed<string | null>(null)));
+        .pipe(Effect.orElseSucceed((): string | null => null));
       if (content !== null) {
         return Buffer.from(content).toString("base64");
       }
@@ -360,7 +360,7 @@ printf '{"baseUrl":"%s","token":"%s","service":"%s","targetKey":"%s"}\n' "$PUBLI
 }
 
 function makePasswordPrompt(
-  prompts: DesktopSshPasswordPrompts.DesktopSshPasswordPromptsShape,
+  prompts: DesktopSshPasswordPrompts.DesktopSshPasswordPrompts["Service"],
   initialPassword?: string | null,
 ): SshPasswordPromptShape {
   let pendingInitialPassword = initialPassword ?? null;
@@ -376,7 +376,10 @@ function makePasswordPrompt(
         Effect.mapError(
           (cause) =>
             new SshPasswordPromptError({
-              message: cause.message,
+              message:
+                cause instanceof Error && cause.message.trim().length > 0
+                  ? cause.message
+                  : "SSH password prompt failed.",
               cause,
             }),
         ),

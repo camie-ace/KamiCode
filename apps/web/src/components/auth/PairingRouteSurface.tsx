@@ -1,22 +1,23 @@
 import type { AuthSessionState } from "@t3tools/contracts";
-import { CheckIcon, CopyIcon, GithubIcon, Loader2Icon } from "lucide-react";
+import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 import React, { startTransition, useEffect, useRef, useState, useCallback } from "react";
 
 import { APP_DISPLAY_NAME } from "../../branding";
-import { addSavedEnvironment } from "../../environments/runtime";
+import { connectPairing } from "../../connection/onboarding";
 import {
   peekPairingTokenFromUrl,
-  startGitHubUserLogin,
   stripPairingTokenFromUrl,
+  startGitHubUserLogin,
   submitServerAuthCredential,
 } from "../../environments/primary";
 import { readHostedPairingRequest } from "../../hostedPairing";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
+import { useAtomCommand } from "../../state/use-atom-command";
 
 export function PairingPendingSurface() {
   return (
-    <div className="drag-region relative flex min-h-screen items-center justify-center overflow-hidden bg-background px-4 py-10 text-foreground sm:px-6">
+    <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-background px-4 py-10 text-foreground sm:px-6">
       <div className="pointer-events-none absolute inset-0 opacity-80">
         <div className="absolute inset-x-0 top-0 h-44 bg-[radial-gradient(44rem_16rem_at_top,color-mix(in_srgb,var(--color-emerald-500)_14%,transparent),transparent)]" />
         <div className="absolute inset-y-0 left-0 w-72 bg-[radial-gradient(28rem_18rem_at_left,color-mix(in_srgb,var(--color-sky-500)_10%,transparent),transparent)]" />
@@ -97,7 +98,7 @@ export function PairingRouteSurface({
   }, [submitCredential]);
 
   return (
-    <div className="drag-region relative flex min-h-screen items-center justify-center overflow-hidden bg-background px-4 py-10 text-foreground sm:px-6">
+    <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-background px-4 py-10 text-foreground sm:px-6">
       <div className="pointer-events-none absolute inset-0 opacity-80">
         <div className="absolute inset-x-0 top-0 h-44 bg-[radial-gradient(44rem_16rem_at_top,color-mix(in_srgb,var(--color-emerald-500)_14%,transparent),transparent)]" />
         <div className="absolute inset-y-0 left-0 w-72 bg-[radial-gradient(28rem_18rem_at_left,color-mix(in_srgb,var(--color-sky-500)_10%,transparent),transparent)]" />
@@ -164,6 +165,9 @@ export function PairingRouteSurface({
 }
 
 export function HostedPairingRouteSurface() {
+  const connectPairingEnvironment = useAtomCommand(connectPairing, {
+    reportFailure: false,
+  });
   const hostedPairingRequestRef = useRef(readHostedPairingRequest());
   const [status, setStatus] = useState<"pairing" | "paired" | "error">(() =>
     hostedPairingRequestRef.current ? "pairing" : "error",
@@ -199,23 +203,23 @@ export function HostedPairingRouteSurface() {
     setCanRetry(false);
     tokenSubmittedRef.current = true;
 
-    try {
-      const record = await addSavedEnvironment({
-        label: request.label,
-        host: request.host,
-        pairingCode: request.token,
-      });
+    const result = await connectPairingEnvironment({
+      host: request.host,
+      pairingCode: request.token,
+    });
+    if (result._tag === "Success") {
       setStatus("paired");
-      setMessage(`${record.label} is saved in this browser.`);
-    } catch (error) {
-      tokenSubmittedRef.current = false;
-      setStatus("error");
-      setCanRetry(true);
-      setMessage(
-        `${errorMessageFromUnknown(error)} If the backend accepted this one-time token, request a new pairing link before retrying.`,
-      );
+      setMessage(`${request.label || "The environment"} is saved in this browser.`);
+      return;
     }
-  }, []);
+
+    tokenSubmittedRef.current = false;
+    setStatus("error");
+    setCanRetry(true);
+    setMessage(
+      `${errorMessageFromUnknown(squashAtomCommandFailure(result))} If the backend accepted this one-time token, request a new pairing link before retrying.`,
+    );
+  }, [connectPairingEnvironment]);
 
   useEffect(() => {
     if (submitAttemptedRef.current) {
@@ -230,7 +234,7 @@ export function HostedPairingRouteSurface() {
   const request = hostedPairingRequestRef.current;
 
   return (
-    <div className="drag-region relative flex min-h-screen items-center justify-center overflow-hidden bg-background px-4 py-10 text-foreground sm:px-6">
+    <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-background px-4 py-10 text-foreground sm:px-6">
       <div className="pointer-events-none absolute inset-0 opacity-80">
         <div className="absolute inset-x-0 top-0 h-44 bg-[radial-gradient(44rem_16rem_at_top,color-mix(in_srgb,var(--color-emerald-500)_14%,transparent),transparent)]" />
         <div className="absolute inset-y-0 left-0 w-72 bg-[radial-gradient(28rem_18rem_at_left,color-mix(in_srgb,var(--color-sky-500)_10%,transparent),transparent)]" />
@@ -285,45 +289,30 @@ export function HostedPairingRouteSurface() {
 }
 
 export function GitHubLoginSurface({ errorMessage }: { errorMessage?: string }) {
-  const [isStarting, setIsStarting] = useState(false);
-  const [startErrorMessage, setStartErrorMessage] = useState("");
-  const [codeCopied, setCodeCopied] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [loginError, setLoginError] = useState(errorMessage ?? "");
   const [desktopDeviceCode, setDesktopDeviceCode] = useState<{
     readonly userCode: string;
     readonly verificationUri: string;
   } | null>(null);
 
-  const handleStart = useCallback(() => {
-    setIsStarting(true);
-    setStartErrorMessage("");
-    setCodeCopied(false);
+  const handleLogin = useCallback(async () => {
+    setIsSubmitting(true);
+    setLoginError("");
     setDesktopDeviceCode(null);
-    void startGitHubUserLogin({
-      onDesktopDeviceCode: setDesktopDeviceCode,
-    }).catch((error: unknown) => {
-      setStartErrorMessage(errorMessageFromUnknown(error));
-      setIsStarting(false);
-    });
+
+    try {
+      await startGitHubUserLogin({
+        onDesktopDeviceCode: (input) => setDesktopDeviceCode(input),
+      });
+    } catch (error) {
+      setLoginError(errorMessageFromUnknown(error));
+      setIsSubmitting(false);
+    }
   }, []);
 
-  const copyDesktopDeviceCode = useCallback(() => {
-    if (!desktopDeviceCode) {
-      return;
-    }
-
-    void navigator.clipboard
-      .writeText(desktopDeviceCode.userCode)
-      .then(() => {
-        setCodeCopied(true);
-        window.setTimeout(() => setCodeCopied(false), 1_500);
-      })
-      .catch((error: unknown) => {
-        setStartErrorMessage(errorMessageFromUnknown(error));
-      });
-  }, [desktopDeviceCode]);
-
   return (
-    <div className="drag-region relative flex min-h-screen items-center justify-center overflow-hidden bg-background px-4 py-10 text-foreground sm:px-6">
+    <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-background px-4 py-10 text-foreground sm:px-6">
       <div className="pointer-events-none absolute inset-0 opacity-80">
         <div className="absolute inset-x-0 top-0 h-44 bg-[radial-gradient(44rem_16rem_at_top,color-mix(in_srgb,var(--color-emerald-500)_14%,transparent),transparent)]" />
         <div className="absolute inset-y-0 left-0 w-72 bg-[radial-gradient(28rem_18rem_at_left,color-mix(in_srgb,var(--color-sky-500)_10%,transparent),transparent)]" />
@@ -335,55 +324,36 @@ export function GitHubLoginSurface({ errorMessage }: { errorMessage?: string }) 
           {APP_DISPLAY_NAME}
         </p>
         <h1 className="mt-3 text-2xl font-semibold tracking-tight sm:text-3xl">
-          Sign in to KamiCode
+          Sign in with GitHub
         </h1>
         <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
-          Continue with GitHub to access this workspace.
+          GitHub login is required before using shared KamiCode sessions on this server.
         </p>
 
-        {errorMessage || startErrorMessage ? (
-          <div className="mt-5 rounded-lg border border-destructive/30 bg-destructive/6 px-3 py-2 text-sm text-destructive">
-            {startErrorMessage || errorMessage}
+        {desktopDeviceCode ? (
+          <div className="mt-5 rounded-lg border border-border/70 bg-background/55 px-3 py-3 text-sm leading-relaxed">
+            <p className="text-muted-foreground">Enter this code in the GitHub browser window.</p>
+            <p className="mt-2 font-mono text-lg font-semibold tracking-[0.14em]">
+              {desktopDeviceCode.userCode}
+            </p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              {desktopDeviceCode.verificationUri}
+            </p>
           </div>
         ) : null}
 
-        {desktopDeviceCode ? (
-          <div className="mt-5 rounded-lg border border-border/70 bg-background/55 px-3 py-3 text-sm text-muted-foreground">
-            <div>Enter this code on GitHub:</div>
-            <div className="mt-2 flex flex-wrap items-center gap-2">
-              <div className="font-mono text-xl font-semibold tracking-widest text-foreground">
-                {desktopDeviceCode.userCode}
-              </div>
-              <Button
-                size="xs"
-                variant="outline"
-                type="button"
-                onClick={copyDesktopDeviceCode}
-                title="Copy code"
-              >
-                {codeCopied ? (
-                  <CheckIcon className="size-3.5" />
-                ) : (
-                  <CopyIcon className="size-3.5" />
-                )}
-                {codeCopied ? "Copied" : "Copy"}
-              </Button>
-            </div>
-            <div className="mt-2 break-all text-xs">{desktopDeviceCode.verificationUri}</div>
+        {loginError ? (
+          <div className="mt-5 rounded-lg border border-destructive/30 bg-destructive/6 px-3 py-2 text-sm text-destructive">
+            {loginError}
           </div>
         ) : null}
 
         <div className="mt-6 flex flex-wrap gap-2">
-          <Button disabled={isStarting} size="sm" onClick={handleStart}>
-            {isStarting ? (
-              <Loader2Icon className="size-4 animate-spin" />
-            ) : (
-              <GithubIcon className="size-4" />
-            )}
-            Continue with GitHub
+          <Button disabled={isSubmitting} onClick={() => void handleLogin()} size="sm">
+            {isSubmitting ? "Opening GitHub..." : "Continue with GitHub"}
           </Button>
           <Button
-            disabled={isStarting}
+            disabled={isSubmitting}
             onClick={() => window.location.reload()}
             size="sm"
             variant="outline"

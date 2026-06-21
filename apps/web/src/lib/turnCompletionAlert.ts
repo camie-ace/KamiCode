@@ -1,7 +1,10 @@
-import type { EnvironmentId, ThreadId, TurnId } from "@t3tools/contracts";
-
-import type { AppState, EnvironmentState } from "../store";
-import type { ThreadSession } from "../types";
+import type {
+  EnvironmentId,
+  OrchestrationLatestTurn,
+  OrchestrationSession,
+  ThreadId,
+  TurnId,
+} from "@t3tools/contracts";
 
 export const TURN_COMPLETION_ALERT_DURATION_MS = 10_000;
 export const TURN_COMPLETION_ALERT_INITIAL_VOLUME = 0.35;
@@ -24,16 +27,17 @@ type ComparableLatestTurn = {
   readonly completedAt: string | null;
 } | null;
 
-type ComparableThreadSession = Pick<
-  ThreadSession,
-  "status" | "orchestrationStatus" | "activeTurnId"
-> | null;
+type ComparableThreadSession = Pick<OrchestrationSession, "status" | "activeTurnId"> | null;
 
-function getComparableLatestTurn(
-  environmentState: EnvironmentState | undefined,
-  threadId: ThreadId,
-): ComparableLatestTurn {
-  const latestTurn = environmentState?.threadTurnStateById[threadId]?.latestTurn;
+export interface CompletionAlertThread {
+  readonly environmentId: EnvironmentId;
+  readonly id: ThreadId;
+  readonly latestTurn: OrchestrationLatestTurn | null;
+  readonly session: OrchestrationSession | null;
+}
+
+function getComparableLatestTurn(thread: CompletionAlertThread): ComparableLatestTurn {
+  const latestTurn = thread.latestTurn;
   if (!latestTurn) {
     return null;
   }
@@ -44,17 +48,13 @@ function getComparableLatestTurn(
   };
 }
 
-function getComparableThreadSession(
-  environmentState: EnvironmentState | undefined,
-  threadId: ThreadId,
-): ComparableThreadSession {
-  const session = environmentState?.threadSessionById[threadId] ?? null;
+function getComparableThreadSession(thread: CompletionAlertThread): ComparableThreadSession {
+  const session = thread.session ?? null;
   if (!session) {
     return null;
   }
   return {
     status: session.status,
-    orchestrationStatus: session.orchestrationStatus,
     activeTurnId: session.activeTurnId,
   };
 }
@@ -73,23 +73,18 @@ function isThreadSessionWorking(session: ComparableThreadSession): boolean {
     return false;
   }
   return (
-    session.activeTurnId !== undefined ||
-    session.status === "connecting" ||
-    session.status === "running" ||
-    session.orchestrationStatus === "starting" ||
-    session.orchestrationStatus === "running"
+    (session.activeTurnId !== null && session.activeTurnId !== undefined) ||
+    session.status === "starting" ||
+    session.status === "running"
   );
 }
 
-function getSettledCompletedLatestTurn(
-  environmentState: EnvironmentState | undefined,
-  threadId: ThreadId,
-) {
-  const turn = getComparableLatestTurn(environmentState, threadId);
+function getSettledCompletedLatestTurn(thread: CompletionAlertThread) {
+  const turn = getComparableLatestTurn(thread);
   if (!isCompletedLatestTurn(turn)) {
     return null;
   }
-  if (isThreadSessionWorking(getComparableThreadSession(environmentState, threadId))) {
+  if (isThreadSessionWorking(getComparableThreadSession(thread))) {
     return null;
   }
   return turn;
@@ -111,27 +106,25 @@ export function turnCompletionAlertKey(alert: CompletedTurnAlert): string {
 }
 
 export function collectSettledCompletedTurns(
-  state: AppState,
+  threads: ReadonlyArray<CompletionAlertThread>,
   options: CollectSettledCompletedTurnOptions = {},
 ): CompletedTurnAlert[] {
   const alerts: CompletedTurnAlert[] = [];
-  for (const [environmentId, environmentState] of Object.entries(state.environmentStateById)) {
-    for (const threadId of Object.keys(environmentState.threadTurnStateById) as ThreadId[]) {
-      const turn = getSettledCompletedLatestTurn(environmentState, threadId);
-      if (!turn) {
-        continue;
-      }
-      if (!isCompletedAfterThreshold(turn.completedAt, options.completedAfterEpochMs)) {
-        continue;
-      }
-
-      alerts.push({
-        environmentId: environmentId as EnvironmentId,
-        threadId,
-        turnId: turn.turnId,
-        completedAt: turn.completedAt,
-      });
+  for (const thread of threads) {
+    const turn = getSettledCompletedLatestTurn(thread);
+    if (!turn) {
+      continue;
     }
+    if (!isCompletedAfterThreshold(turn.completedAt, options.completedAfterEpochMs)) {
+      continue;
+    }
+
+    alerts.push({
+      environmentId: thread.environmentId,
+      threadId: thread.id,
+      turnId: turn.turnId,
+      completedAt: turn.completedAt,
+    });
   }
   return alerts;
 }

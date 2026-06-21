@@ -1,12 +1,12 @@
 // @effect-diagnostics nodeBuiltinImport:off
-import * as fs from "node:fs";
-import * as path from "node:path";
+import * as NodeFS from "node:fs";
+import * as NodePath from "node:path";
 
 export const PROJECT_MEMORY_DIRECTORY = ".camie";
 export const PROJECT_MEMORY_FILENAME = "project-memory.md";
 export const PROJECT_MEMORY_RELATIVE_PATH = `${PROJECT_MEMORY_DIRECTORY}/${PROJECT_MEMORY_FILENAME}`;
 
-const PROJECT_MEMORY_FILE = path.join(PROJECT_MEMORY_DIRECTORY, PROJECT_MEMORY_FILENAME);
+const PROJECT_MEMORY_FILE = NodePath.join(PROJECT_MEMORY_DIRECTORY, PROJECT_MEMORY_FILENAME);
 const PROJECT_MEMORY_MAX_CHARS = 40_000;
 
 export function findProjectMemoryPath(cwd: string | undefined): string | undefined {
@@ -14,15 +14,15 @@ export function findProjectMemoryPath(cwd: string | undefined): string | undefin
     return undefined;
   }
 
-  let current = path.resolve(cwd);
+  let current = NodePath.resolve(cwd);
 
   while (true) {
-    const candidate = path.join(current, PROJECT_MEMORY_FILE);
-    if (fs.existsSync(candidate)) {
+    const candidate = NodePath.join(current, PROJECT_MEMORY_FILE);
+    if (NodeFS.existsSync(candidate)) {
       return candidate;
     }
 
-    const parent = path.dirname(current);
+    const parent = NodePath.dirname(current);
     if (parent === current) {
       return undefined;
     }
@@ -37,12 +37,12 @@ export function readProjectMemory(cwd: string | undefined): string | undefined {
   }
 
   try {
-    const stat = fs.statSync(memoryPath);
+    const stat = NodeFS.statSync(memoryPath);
     if (!stat.isFile()) {
       return undefined;
     }
 
-    const memory = fs.readFileSync(memoryPath, "utf8").trim();
+    const memory = NodeFS.readFileSync(memoryPath, "utf8").trim();
     if (!memory) {
       return undefined;
     }

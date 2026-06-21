@@ -1,4 +1,4 @@
-import assert from "node:assert/strict";
+import * as NodeAssert from "node:assert/strict";
 
 import * as Effect from "effect/Effect";
 import { describe, it } from "vite-plus/test";
@@ -84,28 +84,28 @@ function makeRunResult(input: BrowserHarnessRunInput): BrowserHarnessRunResult {
 
 function readInputText(response: ReturnType<typeof formatBrowserHarnessDynamicToolResult>): string {
   const item = response.contentItems[0];
-  assert.ok(item);
-  assert.equal(item.type, "inputText");
+  NodeAssert.ok(item);
+  NodeAssert.equal(item.type, "inputText");
   return item.text;
 }
 
 describe("runBrowserHarnessDynamicTool", () => {
   it("detects local KamiCode targets for automatic pairing auth", () => {
-    assert.equal(
+    NodeAssert.equal(
       shouldAutoUseKamiCodePairingAuth({
         url: "http://127.0.0.1:5733",
         canIssuePairingCredential: true,
       }),
       true,
     );
-    assert.equal(
+    NodeAssert.equal(
       shouldAutoUseKamiCodePairingAuth({
         url: "http://localhost:3000",
         canIssuePairingCredential: true,
       }),
       false,
     );
-    assert.equal(
+    NodeAssert.equal(
       shouldAutoUseKamiCodePairingAuth({
         url: "http://127.0.0.1:5733",
         auth: { type: "kamicode-pairing" },
@@ -142,9 +142,9 @@ describe("runBrowserHarnessDynamicTool", () => {
       }),
     );
 
-    assert.equal(response.success, true);
-    assert.equal(calls.length, 1);
-    assert.deepStrictEqual(calls[0], {
+    NodeAssert.equal(response.success, true);
+    NodeAssert.equal(calls.length, 1);
+    NodeAssert.deepStrictEqual(calls[0], {
       url: "http://localhost:3000",
       cwd: "C:\\project",
       stateDir: "C:\\state",
@@ -164,9 +164,9 @@ describe("runBrowserHarnessDynamicTool", () => {
       readonly artifactPaths: { readonly trace: string };
       readonly observations: ReadonlyArray<{ readonly stepId: string }>;
     };
-    assert.equal(body.status, "pass");
-    assert.equal(body.artifactPaths.trace.endsWith("trace.zip"), true);
-    assert.equal(body.observations[0]?.stepId, "open-target-url");
+    NodeAssert.equal(body.status, "pass");
+    NodeAssert.equal(body.artifactPaths.trace.endsWith("trace.zip"), true);
+    NodeAssert.equal(body.observations[0]?.stepId, "open-target-url");
   });
 
   it("returns a failed tool response for invalid arguments", async () => {
@@ -186,9 +186,9 @@ describe("runBrowserHarnessDynamicTool", () => {
       }),
     );
 
-    assert.equal(response.success, false);
-    assert.equal(called, false);
-    assert.match(readInputText(response), /Invalid kami_test_harness arguments/);
+    NodeAssert.equal(response.success, false);
+    NodeAssert.equal(called, false);
+    NodeAssert.match(readInputText(response), /Invalid kami_test_harness arguments/);
   });
 
   it("requests a runtime-issued KamiCode pairing credential when auth is requested", async () => {
@@ -216,14 +216,14 @@ describe("runBrowserHarnessDynamicTool", () => {
       }),
     );
 
-    assert.equal(response.success, true);
-    assert.equal(issued, 1);
-    assert.deepStrictEqual(calls[0]?.auth, {
+    NodeAssert.equal(response.success, true);
+    NodeAssert.equal(issued, 1);
+    NodeAssert.deepStrictEqual(calls[0]?.auth, {
       type: "kamicode-pairing",
       credential: "issued-harness-token",
       required: true,
     });
-    assert.equal(calls[0]?.timeoutMs, 60_000);
+    NodeAssert.equal(calls[0]?.timeoutMs, 60_000);
   });
 
   it("automatically requests KamiCode pairing auth for the local KamiCode dev URL", async () => {
@@ -250,14 +250,14 @@ describe("runBrowserHarnessDynamicTool", () => {
       }),
     );
 
-    assert.equal(response.success, true);
-    assert.equal(issued, 1);
-    assert.deepStrictEqual(calls[0]?.auth, {
+    NodeAssert.equal(response.success, true);
+    NodeAssert.equal(issued, 1);
+    NodeAssert.deepStrictEqual(calls[0]?.auth, {
       type: "kamicode-pairing",
       credential: "auto-issued-harness-token",
       required: true,
     });
-    assert.equal(calls[0]?.timeoutMs, 60_000);
+    NodeAssert.equal(calls[0]?.timeoutMs, 60_000);
   });
 
   it("returns a friendly error when the model omits the URL", async () => {
@@ -271,8 +271,8 @@ describe("runBrowserHarnessDynamicTool", () => {
       }),
     );
 
-    assert.equal(response.success, false);
-    assert.match(readInputText(response), /Missing test URL/);
+    NodeAssert.equal(response.success, false);
+    NodeAssert.match(readInputText(response), /Missing test URL/);
   });
 
   it("does not let the model request KamiCode auth when the runtime cannot issue it", async () => {
@@ -294,8 +294,8 @@ describe("runBrowserHarnessDynamicTool", () => {
       }),
     );
 
-    assert.equal(response.success, false);
-    assert.equal(called, false);
-    assert.match(readInputText(response), /cannot issue a harness credential/);
+    NodeAssert.equal(response.success, false);
+    NodeAssert.equal(called, false);
+    NodeAssert.match(readInputText(response), /cannot issue a harness credential/);
   });
 });

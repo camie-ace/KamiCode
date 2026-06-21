@@ -1,7 +1,7 @@
 // @effect-diagnostics nodeBuiltinImport:off
-import * as fs from "node:fs/promises";
-import os from "node:os";
-import path from "node:path";
+import * as NodeFSP from "node:fs/promises";
+import * as NodeOS from "node:os";
+import * as NodePath from "node:path";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
@@ -39,8 +39,8 @@ describe("http dev routing", () => {
 
 describe("test harness artifact routing", () => {
   it("allows artifact files under the state test-harness directory", () => {
-    const stateDir = path.resolve("state");
-    const artifactPath = path.join(
+    const stateDir = NodePath.resolve("state");
+    const artifactPath = NodePath.join(
       stateDir,
       "test-harness",
       "projects",
@@ -56,8 +56,8 @@ describe("test harness artifact routing", () => {
   it("rejects files outside the test-harness directory", () => {
     expect(
       resolveTestHarnessArtifactPath({
-        stateDir: path.resolve("state"),
-        artifactPath: path.resolve("state", "secrets", "session.json"),
+        stateDir: NodePath.resolve("state"),
+        artifactPath: NodePath.resolve("state", "secrets", "session.json"),
       }),
     ).toBeNull();
   });
@@ -77,15 +77,15 @@ describe("test harness trace viewer routing", () => {
 
 describe("test harness run history", () => {
   it("lists recent project runs from app state summaries", async () => {
-    const stateDir = await fs.mkdtemp(path.join(os.tmpdir(), "kamicode-runs-test-"));
-    const cwd = path.join(os.tmpdir(), "kami-project");
+    const stateDir = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "kamicode-runs-test-"));
+    const cwd = NodePath.join(NodeOS.tmpdir(), "kami-project");
     const projectKey = createBrowserHarnessProjectKey({ cwd });
-    const runDir = path.join(stateDir, "test-harness", "projects", projectKey, "runs", "run-1");
-    const screenshotPath = path.join(runDir, "screenshots", "01-final.png");
-    await fs.mkdir(path.dirname(screenshotPath), { recursive: true });
-    await fs.writeFile(screenshotPath, "");
-    await fs.writeFile(
-      path.join(runDir, "summary.json"),
+    const runDir = NodePath.join(stateDir, "test-harness", "projects", projectKey, "runs", "run-1");
+    const screenshotPath = NodePath.join(runDir, "screenshots", "01-final.png");
+    await NodeFSP.mkdir(NodePath.dirname(screenshotPath), { recursive: true });
+    await NodeFSP.writeFile(screenshotPath, "");
+    await NodeFSP.writeFile(
+      NodePath.join(runDir, "summary.json"),
       JSON.stringify({
         runId: "run-1",
         projectId: projectKey,
@@ -97,12 +97,12 @@ describe("test harness run history", () => {
         title: "KamiCode (Dev)",
         goal: "Validate chat UI",
         artifactsDir: runDir,
-        summaryPath: path.join(runDir, "summary.json"),
-        markdownPath: path.join(runDir, "summary.md"),
-        tracePath: path.join(runDir, "trace.zip"),
-        consolePath: path.join(runDir, "console.json"),
-        networkPath: path.join(runDir, "network.json"),
-        storageStatePath: path.join(
+        summaryPath: NodePath.join(runDir, "summary.json"),
+        markdownPath: NodePath.join(runDir, "summary.md"),
+        tracePath: NodePath.join(runDir, "trace.zip"),
+        consolePath: NodePath.join(runDir, "console.json"),
+        networkPath: NodePath.join(runDir, "network.json"),
+        storageStatePath: NodePath.join(
           stateDir,
           "test-harness",
           "projects",
@@ -110,19 +110,19 @@ describe("test harness run history", () => {
           "default.storageState.json",
         ),
         artifactPaths: {
-          trace: path.join(runDir, "trace.zip"),
+          trace: NodePath.join(runDir, "trace.zip"),
           screenshots: [screenshotPath],
-          consoleLog: path.join(runDir, "console.json"),
-          networkLog: path.join(runDir, "network.json"),
-          storageState: path.join(
+          consoleLog: NodePath.join(runDir, "console.json"),
+          networkLog: NodePath.join(runDir, "network.json"),
+          storageState: NodePath.join(
             stateDir,
             "test-harness",
             "projects",
             projectKey,
             "default.storageState.json",
           ),
-          summary: path.join(runDir, "summary.json"),
-          markdown: path.join(runDir, "summary.md"),
+          summary: NodePath.join(runDir, "summary.json"),
+          markdown: NodePath.join(runDir, "summary.md"),
         },
         evidenceSummary: "Pairing screen was visible.",
         doneSummary: "Chat UI was blocked by pairing.",
@@ -155,12 +155,14 @@ describe("test harness run history", () => {
   });
 
   it("returns an empty run list when a project has no test harness state", async () => {
-    const stateDir = await fs.mkdtemp(path.join(os.tmpdir(), "kamicode-runs-empty-test-"));
+    const stateDir = await NodeFSP.mkdtemp(
+      NodePath.join(NodeOS.tmpdir(), "kamicode-runs-empty-test-"),
+    );
 
     await expect(
       listTestHarnessRuns({
         stateDir,
-        cwd: path.join(os.tmpdir(), "missing-project"),
+        cwd: NodePath.join(NodeOS.tmpdir(), "missing-project"),
       }),
     ).resolves.toEqual({ runs: [] });
   });

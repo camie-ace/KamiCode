@@ -7,8 +7,8 @@ import {
 } from "@t3tools/contracts";
 import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
 import { decodeOtlpTraceRecords } from "@t3tools/shared/observability";
-import * as NodeFs from "node:fs/promises";
-import { createRequire } from "node:module";
+import * as NodeFSP from "node:fs/promises";
+import * as NodeModule from "node:module";
 import * as NodePath from "node:path";
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
@@ -35,22 +35,22 @@ import {
   resolveAttachmentRelativePath,
 } from "./attachmentPaths.ts";
 import { resolveAttachmentPathById } from "./attachmentStore.ts";
-import { resolveStaticDir, ServerConfig } from "./config.ts";
+import * as ServerConfig from "./config.ts";
 import {
   ASSET_ROUTE_PREFIX,
   FALLBACK_PROJECT_FAVICON_SVG,
   resolveAsset,
 } from "./assets/AssetAccess.ts";
-import { BrowserTraceCollector } from "./observability/Services/BrowserTraceCollector.ts";
-import { ProjectFaviconResolver } from "./project/Services/ProjectFaviconResolver.ts";
+import * as BrowserTraceCollector from "./observability/BrowserTraceCollector.ts";
+import { ProjectFaviconResolver } from "./project/ProjectFaviconResolver.ts";
 import * as EnvironmentAuth from "./auth/EnvironmentAuth.ts";
+import { traceRelayRequest } from "./cloud/traceRelayRequest.ts";
 import {
   annotateEnvironmentRequest,
   failEnvironmentScopeRequired,
   failEnvironmentAuthInvalid,
   failEnvironmentInternal,
 } from "./auth/http.ts";
-import { ServerEnvironment } from "./environment/Services/ServerEnvironment.ts";
 import {
   browserApiCorsAllowedHeaders,
   browserApiCorsAllowedMethods,
@@ -64,6 +64,7 @@ import {
   type BrowserHarnessStatus,
   type BrowserHarnessVideo,
 } from "./testing/browserHarness.ts";
+import * as ServerEnvironment from "./environment/ServerEnvironment.ts";
 
 const PROJECT_FAVICON_CACHE_CONTROL = "public, max-age=3600";
 const OTLP_TRACES_PROXY_PATH = "/api/observability/v1/traces";
@@ -73,13 +74,13 @@ export const TEST_HARNESS_TRACE_VIEWER_ROUTE_PREFIX = "/api/test-harness/trace-v
 const LOOPBACK_HOSTNAMES = new Set(["127.0.0.1", "::1", "localhost"]);
 const DEFAULT_TEST_HARNESS_RUN_LIMIT = 12;
 const MAX_TEST_HARNESS_RUN_LIMIT = 50;
-const requireFromHttp = createRequire(import.meta.url);
+const requireFromHttp = NodeModule.createRequire(import.meta.url);
 const hostProcessPlatform = Effect.runSync(HostProcessPlatform);
 let playwrightTraceViewerRoot: string | undefined;
 
 export const browserApiCorsLayer = Layer.unwrap(
   Effect.gen(function* () {
-    const config = yield* ServerConfig;
+    const config = yield* ServerConfig.ServerConfig;
     const devOrigin = config.devUrl?.origin;
     return HttpRouter.cors({
       ...(devOrigin ? { allowedOrigins: [devOrigin], credentials: true } : {}),
@@ -149,7 +150,7 @@ function resolvePlaywrightTraceViewerRoot(): string {
     return playwrightTraceViewerRoot;
   }
 
-  const requireFromPlaywright = createRequire(requireFromHttp.resolve("playwright"));
+  const requireFromPlaywright = NodeModule.createRequire(requireFromHttp.resolve("playwright"));
   const playwrightCorePackageJson = requireFromPlaywright.resolve("playwright-core/package.json");
   playwrightTraceViewerRoot = NodePath.join(
     NodePath.dirname(playwrightCorePackageJson),
@@ -263,7 +264,7 @@ function collectTestHarnessConsoleErrors(
 async function readTestHarnessRunSummary(
   summaryPath: string,
 ): Promise<TestHarnessRunListItem | null> {
-  const raw = await NodeFs.readFile(summaryPath, "utf8").catch(() => null);
+  const raw = await NodeFSP.readFile(summaryPath, "utf8").catch(() => null);
   if (!raw) {
     return null;
   }
@@ -341,7 +342,7 @@ export async function listTestHarnessRuns(input: {
 
   for (const projectKey of projectKeys) {
     const runsDir = NodePath.join(input.stateDir, "test-harness", "projects", projectKey, "runs");
-    const entries = await NodeFs.readdir(runsDir, { withFileTypes: true }).catch((error) => {
+    const entries = await NodeFSP.readdir(runsDir, { withFileTypes: true }).catch((error) => {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") {
         return [];
       }
@@ -369,10 +370,12 @@ const authenticateRawRouteWithScope = (
     const request = yield* HttpServerRequest.HttpServerRequest;
     const serverAuth = yield* EnvironmentAuth.EnvironmentAuth;
     const session = yield* serverAuth.authenticateHttpRequest(request).pipe(
-      Effect.catchTags({
-        ServerAuthInvalidCredentialError: (error) => failEnvironmentAuthInvalid(error.reason),
-        ServerAuthInternalError: (error) => failEnvironmentInternal("internal_error", error),
-      }),
+      Effect.catchIf(EnvironmentAuth.isServerAuthCredentialError, (error) =>
+        failEnvironmentAuthInvalid(EnvironmentAuth.serverAuthCredentialReason(error)),
+      ),
+      Effect.catchIf(EnvironmentAuth.isServerAuthInternalError, (error) =>
+        failEnvironmentInternal("internal_error", error),
+      ),
     );
     if (!session.scopes.includes(scope)) {
       return yield* failEnvironmentScopeRequired(scope);
@@ -383,13 +386,13 @@ export const serverEnvironmentHttpApiLayer = HttpApiBuilder.group(
   EnvironmentHttpApi,
   "metadata",
   Effect.fnUntraced(function* (handlers) {
-    const serverEnvironment = yield* ServerEnvironment;
+    const serverEnvironment = yield* ServerEnvironment.ServerEnvironment;
     return handlers.handle(
       "descriptor",
       Effect.fn("environment.metadata.descriptor")(function* (args) {
         yield* annotateEnvironmentRequest(args.endpoint.name);
         return yield* serverEnvironment.getDescriptor;
-      }),
+      }, traceRelayRequest),
     );
   }),
 );
@@ -409,9 +412,9 @@ export const otlpTracesProxyRouteLayer = HttpRouter.add(
   Effect.gen(function* () {
     yield* authenticateRawRouteWithScope(AuthOrchestrationOperateScope);
     const request = yield* HttpServerRequest.HttpServerRequest;
-    const config = yield* ServerConfig;
+    const config = yield* ServerConfig.ServerConfig;
     const otlpTracesUrl = config.otlpTracesUrl;
-    const browserTraceCollector = yield* BrowserTraceCollector;
+    const browserTraceCollector = yield* BrowserTraceCollector.BrowserTraceCollector;
     const httpClient = yield* HttpClient.HttpClient;
     const bodyJson = cast<unknown, OtlpTracer.TraceData>(yield* request.json);
 
@@ -515,7 +518,7 @@ export const attachmentsRouteLayer = HttpRouter.add(
       return HttpServerResponse.text("Bad Request", { status: 400 });
     }
 
-    const config = yield* ServerConfig;
+    const config = yield* ServerConfig.ServerConfig;
     const rawRelativePath = url.value.pathname.slice(ATTACHMENTS_ROUTE_PREFIX.length);
     const normalizedRelativePath = normalizeAttachmentRelativePath(rawRelativePath);
     if (!normalizedRelativePath) {
@@ -620,7 +623,7 @@ export const testHarnessArtifactRouteLayer = HttpRouter.add(
       return HttpServerResponse.text("Missing path parameter", { status: 400 });
     }
 
-    const config = yield* ServerConfig;
+    const config = yield* ServerConfig.ServerConfig;
     const filePath = resolveTestHarnessArtifactPath({
       stateDir: config.stateDir,
       artifactPath: requestedPath,
@@ -672,7 +675,7 @@ export const testHarnessRunsRouteLayer = HttpRouter.add(
       return HttpServerResponse.text("Missing cwd parameter", { status: 400 });
     }
 
-    const config = yield* ServerConfig;
+    const config = yield* ServerConfig.ServerConfig;
     const response = yield* Effect.tryPromise({
       try: () =>
         listTestHarnessRuns({
@@ -756,7 +759,7 @@ export const staticAndDevRouteLayer = HttpRouter.add(
       return HttpServerResponse.text("Bad Request", { status: 400 });
     }
 
-    const config = yield* ServerConfig;
+    const config = yield* ServerConfig.ServerConfig;
     if (config.devUrl && isLoopbackHostname(url.value.hostname)) {
       if (isDevProxyRequestPath(url.value.pathname)) {
         return HttpServerResponse.jsonUnsafe(
@@ -772,7 +775,8 @@ export const staticAndDevRouteLayer = HttpRouter.add(
       });
     }
 
-    const staticDir = config.staticDir ?? (config.devUrl ? yield* resolveStaticDir() : undefined);
+    const staticDir =
+      config.staticDir ?? (config.devUrl ? yield* ServerConfig.resolveStaticDir() : undefined);
     if (!staticDir) {
       return HttpServerResponse.text("No static directory configured and no dev URL set.", {
         status: 503,

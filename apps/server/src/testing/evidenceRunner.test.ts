@@ -1,4 +1,4 @@
-import assert from "node:assert/strict";
+import * as NodeAssert from "node:assert/strict";
 
 import { describe, it } from "vite-plus/test";
 
@@ -70,10 +70,10 @@ function makeBrowserHarnessResult(input: BrowserHarnessRunInput): BrowserHarness
 
 describe("evidenceRunner", () => {
   it("normalizes browser harness statuses", () => {
-    assert.equal(browserHarnessStatusToEvidenceStatus("passed"), "pass");
-    assert.equal(browserHarnessStatusToEvidenceStatus("failed"), "fail");
-    assert.equal(browserHarnessStatusToEvidenceStatus("blocked"), "blocked");
-    assert.equal(browserHarnessStatusToEvidenceStatus("error"), "error");
+    NodeAssert.equal(browserHarnessStatusToEvidenceStatus("passed"), "pass");
+    NodeAssert.equal(browserHarnessStatusToEvidenceStatus("failed"), "fail");
+    NodeAssert.equal(browserHarnessStatusToEvidenceStatus("blocked"), "blocked");
+    NodeAssert.equal(browserHarnessStatusToEvidenceStatus("error"), "error");
   });
 
   it("maps Playwright browser harness results to generic evidence results", () => {
@@ -84,15 +84,15 @@ describe("evidenceRunner", () => {
       }),
     );
 
-    assert.equal(result.runner, "playwright");
-    assert.equal(result.status, "pass");
-    assert.equal(result.outputSummary, "Feature works.");
-    assert.equal(result.artifactPaths.trace?.endsWith("trace.zip"), true);
-    assert.equal(result.artifactPaths.video, undefined);
-    assert.equal(result.videos.length, 0);
-    assert.equal(result.consoleErrors.length, 2);
-    assert.equal(result.networkFailures[0], "GET http://localhost:3000/missing 404");
-    assert.equal(result.observations[0]?.screenshotPath?.endsWith("01.png"), true);
+    NodeAssert.equal(result.runner, "playwright");
+    NodeAssert.equal(result.status, "pass");
+    NodeAssert.equal(result.outputSummary, "Feature works.");
+    NodeAssert.equal(result.artifactPaths.trace?.endsWith("trace.zip"), true);
+    NodeAssert.equal(result.artifactPaths.video, undefined);
+    NodeAssert.equal(result.videos.length, 0);
+    NodeAssert.equal(result.consoleErrors.length, 2);
+    NodeAssert.equal(result.networkFailures[0], "GET http://localhost:3000/missing 404");
+    NodeAssert.equal(result.observations[0]?.screenshotPath?.endsWith("01.png"), true);
   });
 
   it("keeps the current Playwright harness behind a runner boundary", async () => {
@@ -108,9 +108,9 @@ describe("evidenceRunner", () => {
       projectId: "project-1",
     });
 
-    assert.equal(runner.kind, "playwright");
-    assert.equal(calls.length, 1);
-    assert.equal(calls[0]?.projectId, "project-1");
-    assert.equal(result.runner, "playwright");
+    NodeAssert.equal(runner.kind, "playwright");
+    NodeAssert.equal(calls.length, 1);
+    NodeAssert.equal(calls[0]?.projectId, "project-1");
+    NodeAssert.equal(result.runner, "playwright");
   });
 });

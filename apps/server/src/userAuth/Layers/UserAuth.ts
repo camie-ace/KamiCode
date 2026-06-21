@@ -1,4 +1,4 @@
-import * as Crypto from "node:crypto";
+import * as NodeCrypto from "node:crypto";
 
 import {
   KamiUserId,
@@ -150,7 +150,7 @@ function makeDisabledState(): UserAuthSessionState {
 }
 
 function randomBase64Url(bytes: number): string {
-  return Crypto.randomBytes(bytes).toString("base64url");
+  return NodeCrypto.randomBytes(bytes).toString("base64url");
 }
 
 function parseDesktopGitHubLoginHandoffId(state: string): string | null {
@@ -257,7 +257,7 @@ export const makeUserAuth = Effect.gen(function* () {
       const expiresAt = DateTime.add(issuedAt, {
         milliseconds: Duration.toMillis(DEFAULT_SESSION_TTL),
       });
-      const sessionId = UserAuthSessionId.make(Crypto.randomUUID());
+      const sessionId = UserAuthSessionId.make(NodeCrypto.randomUUID());
       const claims: UserSessionClaims = {
         v: 1,
         kind: "user-session",
@@ -488,7 +488,7 @@ export const makeUserAuth = Effect.gen(function* () {
       const now = yield* DateTime.now;
       const user = yield* userAuthRepository
         .upsertGitHubUser({
-          userId: KamiUserId.make(Crypto.randomUUID()),
+          userId: KamiUserId.make(NodeCrypto.randomUUID()),
           githubId: githubUser.githubId,
           githubLogin: githubUser.login,
           displayName: normalizeOptionalString(githubUser.displayName),

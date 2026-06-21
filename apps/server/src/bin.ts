@@ -1,5 +1,5 @@
 // @effect-diagnostics anyUnknownInErrorContext:off missingEffectContext:off - CLI composition relies on framework-owned command requirements.
-import { pathToFileURL } from "node:url";
+import * as NodeURL from "node:url";
 
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
 import * as NodeServices from "@effect/platform-node/NodeServices";
@@ -60,12 +60,12 @@ export const cli = makeCli();
 
 const isDirectlyExecuted =
   import.meta.main ||
-  (process.argv[1] ? import.meta.url === pathToFileURL(process.argv[1]).href : false);
+  (process.argv[1] ? import.meta.url === NodeURL.pathToFileURL(process.argv[1]).href : false);
 
 if (isDirectlyExecuted) {
-  Command.run(cli, { version: packageJson.version }).pipe(
+  const mainEffect = Command.run(cli, { version: packageJson.version }).pipe(
     Effect.scoped,
     Effect.provide(CliRuntimeLayer),
-    NodeRuntime.runMain,
   );
+  NodeRuntime.runMain(mainEffect);
 }

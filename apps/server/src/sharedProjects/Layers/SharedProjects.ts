@@ -58,7 +58,7 @@ import {
   type SharedThread,
   type UpsertSharedSshCredentialInput,
 } from "@t3tools/contracts";
-import { createCipheriv, createDecipheriv, randomBytes, randomUUID } from "node:crypto";
+import * as NodeCrypto from "node:crypto";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -70,10 +70,7 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { ServerSecretStore } from "../../auth/ServerSecretStore.ts";
 import { OrchestrationEngineService } from "../../orchestration/Services/OrchestrationEngine.ts";
 import * as ProcessRunner from "../../processRunner.ts";
-import {
-  RepositoryIdentityResolver,
-  type RepositoryIdentityResolverShape,
-} from "../../project/Services/RepositoryIdentityResolver.ts";
+import { RepositoryIdentityResolver } from "../../project/RepositoryIdentityResolver.ts";
 import type { AuthenticatedUser } from "../../userAuth/Services/UserAuth.ts";
 import {
   canEditSharedWork,
@@ -91,6 +88,7 @@ import {
 } from "../Services/SharedProjects.ts";
 
 const INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+const { createCipheriv, createDecipheriv, randomBytes, randomUUID } = NodeCrypto;
 const MAX_CONTEXT_FILE_BYTES = 40_000;
 const MAX_CONTEXT_ITEMS = 80;
 const SSH_SECRET_KEY_NAME = "shared-project-ssh-credentials";
@@ -895,7 +893,7 @@ function buildContextBundle(fileSystem: FileSystem.FileSystem, path: Path.Path, 
 }
 
 const runGit = Effect.fn("SharedProjects.runGit")(function* (
-  processRunner: ProcessRunner.ProcessRunnerShape,
+  processRunner: ProcessRunner.ProcessRunner["Service"],
   cwd: string,
   args: ReadonlyArray<string>,
 ) {
@@ -912,8 +910,8 @@ const runGit = Effect.fn("SharedProjects.runGit")(function* (
 });
 
 const resolveRepositoryState = Effect.fn("SharedProjects.resolveRepositoryState")(function* (
-  processRunner: ProcessRunner.ProcessRunnerShape,
-  repositoryIdentityResolver: RepositoryIdentityResolverShape,
+  processRunner: ProcessRunner.ProcessRunner["Service"],
+  repositoryIdentityResolver: RepositoryIdentityResolver["Service"],
   cwd: string,
 ) {
   const repositoryIdentity = yield* repositoryIdentityResolver

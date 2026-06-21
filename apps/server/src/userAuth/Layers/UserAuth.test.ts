@@ -4,7 +4,6 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import type * as HttpServerRequest from "effect/unstable/http/HttpServerRequest";
 
-import type { ServerConfigShape } from "../../config.ts";
 import { ServerConfig } from "../../config.ts";
 import * as ServerSecretStore from "../../auth/ServerSecretStore.ts";
 import { SqlitePersistenceMemory } from "../../persistence/Layers/Sqlite.ts";
@@ -12,6 +11,8 @@ import { GitHubOAuthClient } from "../Services/GitHubOAuthClient.ts";
 import type { GitHubOAuthClientShape } from "../Services/GitHubOAuthClient.ts";
 import { UserAuth } from "../Services/UserAuth.ts";
 import { UserAuthLive } from "./UserAuth.ts";
+
+type ServerConfigShape = ServerConfig["Service"];
 
 const makeServerConfigLayer = (overrides?: Partial<ServerConfigShape>) =>
   Layer.effect(

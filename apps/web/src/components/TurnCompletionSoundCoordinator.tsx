@@ -1,6 +1,5 @@
 import { useEffect, useRef } from "react";
 
-import { useStore } from "../store";
 import {
   collectSettledCompletedTurns,
   isApplicationInFocus,
@@ -9,6 +8,8 @@ import {
   TURN_COMPLETION_ALERT_MAX_VOLUME,
   turnCompletionAlertKey,
 } from "../lib/turnCompletionAlert";
+import { appAtomRegistry } from "../rpc/atomRegistry";
+import { environmentThreadShells } from "../state/threads";
 
 const COMPLETION_ALERT_MOUNT_GRACE_MS = 2_500;
 
@@ -102,7 +103,11 @@ export function TurnCompletionSoundCoordinator() {
   const audioContextRef = useRef<AudioContext | null>(null);
   const mountedAtEpochMsRef = useRef(Date.now());
   const alertedTurnKeysRef = useRef(
-    new Set(collectSettledCompletedTurns(useStore.getState()).map(turnCompletionAlertKey)),
+    new Set(
+      collectSettledCompletedTurns(
+        appAtomRegistry.get(environmentThreadShells.threadShellsAtom),
+      ).map(turnCompletionAlertKey),
+    ),
   );
   const stopAlertRef = useRef<(() => void) | null>(null);
 
@@ -185,10 +190,13 @@ export function TurnCompletionSoundCoordinator() {
       void ensureAudioReady();
     };
 
-    const unsubscribe = useStore.subscribe((nextState) => {
-      const nextAlerts = collectSettledCompletedTurns(nextState, {
-        completedAfterEpochMs: mountedAtEpochMsRef.current - COMPLETION_ALERT_MOUNT_GRACE_MS,
-      });
+    const unsubscribe = appAtomRegistry.subscribe(environmentThreadShells.threadShellsAtom, () => {
+      const nextAlerts = collectSettledCompletedTurns(
+        appAtomRegistry.get(environmentThreadShells.threadShellsAtom),
+        {
+          completedAfterEpochMs: mountedAtEpochMsRef.current - COMPLETION_ALERT_MOUNT_GRACE_MS,
+        },
+      );
       const unannouncedAlerts = nextAlerts.filter((alert) => {
         const key = turnCompletionAlertKey(alert);
         if (alertedTurnKeysRef.current.has(key)) {

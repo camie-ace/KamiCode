@@ -1,6 +1,6 @@
 ﻿// @effect-diagnostics nodeBuiltinImport:off - standalone non-Effect service; uses node:http types directly.
 import type { SharedProjectId } from "@t3tools/contracts";
-import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import * as NodeHttp from "node:http";
 import type { Pool } from "pg";
 
 import { authenticateRequest } from "./auth.ts";
@@ -8,7 +8,11 @@ import type { CollabServerConfig } from "./config.ts";
 import { asHttpError, HttpError } from "./errors.ts";
 import { SharedProjectsStore } from "./sharedProjects.ts";
 
-type Handler = (request: IncomingMessage, url: URL, body: unknown) => Promise<unknown> | unknown;
+type Handler = (
+  request: NodeHttp.IncomingMessage,
+  url: URL,
+  body: unknown,
+) => Promise<unknown> | unknown;
 
 function corsHeaders(config: CollabServerConfig): Record<string, string> {
   return {
@@ -22,7 +26,7 @@ function corsHeaders(config: CollabServerConfig): Record<string, string> {
 
 function sendJson(
   config: CollabServerConfig,
-  response: ServerResponse,
+  response: NodeHttp.ServerResponse,
   status: number,
   body: unknown,
 ): void {
@@ -33,7 +37,7 @@ function sendJson(
   response.end(JSON.stringify(body));
 }
 
-async function readJsonBody(request: IncomingMessage): Promise<unknown> {
+async function readJsonBody(request: NodeHttp.IncomingMessage): Promise<unknown> {
   if (request.method === "GET" || request.method === "OPTIONS") return null;
   const chunks: Buffer[] = [];
   for await (const chunk of request) {
@@ -214,7 +218,7 @@ export function createCollabHttpServer(config: CollabServerConfig, pool: Pool) {
     ],
   ]);
 
-  return createServer(async (request, response) => {
+  return NodeHttp.createServer(async (request, response) => {
     try {
       if (request.method === "OPTIONS") {
         response.writeHead(204, corsHeaders(config));

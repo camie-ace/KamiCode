@@ -1,6 +1,6 @@
 ﻿// @effect-diagnostics nodeBuiltinImport:off - standalone non-Effect service; uses node:http types directly.
 import type { KamiUser } from "@t3tools/contracts";
-import type { IncomingMessage } from "node:http";
+import type * as NodeHttp from "node:http";
 
 import type { CollabServerConfig } from "./config.ts";
 import { HttpError } from "./errors.ts";
@@ -14,7 +14,7 @@ function firstHeader(value: string | string[] | undefined): string | null {
   return value?.trim() || null;
 }
 
-function requiredHeader(request: IncomingMessage, name: string): string {
+function requiredHeader(request: NodeHttp.IncomingMessage, name: string): string {
   const value = firstHeader(request.headers[name]);
   if (!value) {
     throw new HttpError(401, `Missing ${name} header.`);
@@ -24,7 +24,7 @@ function requiredHeader(request: IncomingMessage, name: string): string {
 
 export function authenticateRequest(
   config: CollabServerConfig,
-  request: IncomingMessage,
+  request: NodeHttp.IncomingMessage,
 ): AuthenticatedUser {
   const authorization = firstHeader(request.headers.authorization);
   const expected = `Bearer ${config.serverToken}`;

@@ -12,6 +12,7 @@ import type {
   SharedSshAuthType,
   SharedThread,
   SharedThreadVisibility,
+  PersistedSavedEnvironmentRecord,
 } from "@t3tools/contracts";
 import {
   DEFAULT_MODEL,
@@ -22,7 +23,7 @@ import {
   SharedProjectInviteCode,
   SharedSshCredentialId,
 } from "@t3tools/contracts";
-import { scopeThreadRef } from "@t3tools/client-runtime";
+import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { useNavigate } from "@tanstack/react-router";
 import {
   CloudIcon,
@@ -41,7 +42,6 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
-import { useShallow } from "zustand/react/shallow";
 
 import {
   claimSharedProjectInvite,
@@ -66,27 +66,19 @@ import {
   upsertSharedSshCredential,
 } from "../../sharedProjectsApi";
 import { buildThreadRouteParams } from "../../threadRoutes";
-import {
-  selectProjectsAcrossEnvironments,
-  selectThreadShellsAcrossEnvironments,
-  useStore,
-} from "../../store";
+import { useProjects, useThreadShells } from "../../state/entities";
 import {
   loadThreadDetailForSharing,
   toSharedSessionSnapshot,
   toSharedThreadMessages,
 } from "../../sharedSessionSnapshot";
-import {
-  useSavedEnvironmentRegistryStore,
-  waitForSavedEnvironmentRegistryHydration,
-  type SavedEnvironmentRecord,
-} from "../../environments/runtime";
-import { readEnvironmentApi } from "../../environmentApi";
-import { ensureLocalApi, readLocalApi } from "../../localApi";
+import { readLocalApi } from "../../localApi";
 import { resolveInitialPrimaryEnvironmentDescriptor } from "../../environments/primary";
-import { useSettings } from "../../hooks/useSettings";
-import { newCommandId, newMessageId, newProjectId, newThreadId } from "../../lib/utils";
-import { applySettingsUpdated } from "../../rpc/serverState";
+import { usePrimarySettings, useUpdatePrimarySettings } from "../../hooks/useSettings";
+import { newMessageId, newProjectId, newThreadId } from "../../lib/utils";
+import { projectEnvironment } from "../../state/projects";
+import { threadEnvironment } from "../../state/threads";
+import { useAtomCommand } from "../../state/use-atom-command";
 import type { Project, ThreadShell } from "../../types";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
@@ -122,6 +114,7 @@ const runtimeTypes: readonly SharedRuntimeType[] = ["local", "ssh-vps", "hosted-
 const runtimeHealthOptions: readonly SharedRuntimeHealth[] = ["healthy", "unknown", "unavailable"];
 const sshAuthTypes: readonly SharedSshAuthType[] = ["agent", "password", "private-key"];
 const COLLAB_DEPLOY_REPAIR_PROJECT_TITLE = "KamiCode deploy repair";
+type SavedEnvironmentRecord = PersistedSavedEnvironmentRecord;
 
 function isSharedProjectNotFoundError(error: unknown): boolean {
   return error instanceof Error && /\b404\b|not found/i.test(error.message);
@@ -275,7 +268,7 @@ function buildCollabDeployAiRepairPrompt(input: {
     ? `${target.username ? `${target.username}@` : ""}${target.hostname || target.alias}:${target.port ?? 22}`
     : "Unknown";
   const projectLabel = input.project
-    ? `${input.project.name} (${input.project.cwd})`
+    ? `${input.project.title} (${input.project.workspaceRoot})`
     : "No local project selected";
   const repairAttempted =
     input.failure.mode === "install-docker"
@@ -354,10 +347,14 @@ function EmptyRow({ children }: { readonly children: ReactNode }) {
 
 export function SharedProjectsSettings() {
   const navigate = useNavigate();
-  const hostedCollaboration = useSettings((settings) => settings.hostedCollaboration);
-  const localProjects = useStore(useShallow(selectProjectsAcrossEnvironments));
-  const localThreads = useStore(useShallow(selectThreadShellsAcrossEnvironments));
-  const savedEnvironmentById = useSavedEnvironmentRegistryStore((state) => state.byId);
+  const hostedCollaboration = usePrimarySettings((settings) => settings.hostedCollaboration);
+  const updatePrimarySettings = useUpdatePrimarySettings();
+  const createProject = useAtomCommand(projectEnvironment.create, { reportFailure: false });
+  const createThread = useAtomCommand(threadEnvironment.create, { reportFailure: false });
+  const startThreadTurn = useAtomCommand(threadEnvironment.startTurn, { reportFailure: false });
+  const localProjects = useProjects();
+  const localThreads = useThreadShells();
+  const savedEnvironmentById = useMemo<Record<string, SavedEnvironmentRecord>>(() => ({}), []);
   const [currentUser, setCurrentUser] = useState<CurrentSharedUser | null>(null);
   const [sharedProjects, setSharedProjects] = useState<
     ReadonlyArray<SharedProjectDetail["project"]>
@@ -566,10 +563,6 @@ export function SharedProjectsSettings() {
   }, [load]);
 
   useEffect(() => {
-    void waitForSavedEnvironmentRegistryHydration();
-  }, []);
-
-  useEffect(() => {
     setCollabServerForm((current) => ({
       ...current,
       url: hostedCollaboration.url,
@@ -645,12 +638,14 @@ export function SharedProjectsSettings() {
 
   const updateHostedCollaborationSettings = useCallback(
     async (hostedCollaborationPatch: NonNullable<ServerSettingsPatch["hostedCollaboration"]>) => {
-      const nextSettings = await ensureLocalApi().server.updateSettings({
-        hostedCollaboration: hostedCollaborationPatch,
+      updatePrimarySettings({
+        hostedCollaboration: {
+          ...hostedCollaboration,
+          ...hostedCollaborationPatch,
+        },
       });
-      applySettingsUpdated(nextSettings);
     },
-    [],
+    [hostedCollaboration, updatePrimarySettings],
   );
 
   const publishProject = useCallback(
@@ -658,8 +653,8 @@ export function SharedProjectsSettings() {
       runAction(`publish:${project.id}`, async () => {
         const nextDetail = await publishLocalProject({
           sourceProjectId: project.id,
-          name: project.name,
-          cwd: project.cwd,
+          name: project.title,
+          cwd: project.workspaceRoot,
         });
         commitDetail(nextDetail);
       }),
@@ -827,15 +822,11 @@ export function SharedProjectsSettings() {
         const serverConfig =
           workspaceProject || !localApi ? null : await localApi.server.getConfig();
         const environmentId = workspaceProject?.environmentId ?? descriptor?.environmentId ?? null;
-        const workspaceRoot = workspaceProject?.cwd ?? serverConfig?.cwd ?? null;
+        const workspaceRoot = workspaceProject?.workspaceRoot ?? serverConfig?.cwd ?? null;
         if (!environmentId || !workspaceRoot) {
           throw new Error(
             "Cannot find a workspace for the AI repair thread. Open any local project once, then click Ask AI to repair again.",
           );
-        }
-        const api = readEnvironmentApi(environmentId);
-        if (!api) {
-          throw new Error("The local environment is not connected.");
         }
         const threadId = newThreadId();
         const createdAt = new Date().toISOString();
@@ -848,51 +839,63 @@ export function SharedProjectsSettings() {
           localProjects.find(
             (project) =>
               project.environmentId === environmentId &&
-              project.name === COLLAB_DEPLOY_REPAIR_PROJECT_TITLE &&
-              project.cwd === workspaceRoot,
+              project.title === COLLAB_DEPLOY_REPAIR_PROJECT_TITLE &&
+              project.workspaceRoot === workspaceRoot,
           ) ?? null;
         const repairProjectId = standaloneProject?.id ?? newProjectId();
         if (!standaloneProject) {
-          await api.orchestration.dispatchCommand({
-            type: "project.create",
-            commandId: newCommandId(),
-            projectId: repairProjectId,
-            title: COLLAB_DEPLOY_REPAIR_PROJECT_TITLE,
-            workspaceRoot,
-            createWorkspaceRootIfMissing: false,
-            defaultModelSelection: modelSelection,
-            createdAt,
+          const createProjectResult = await createProject({
+            environmentId,
+            input: {
+              projectId: repairProjectId,
+              title: COLLAB_DEPLOY_REPAIR_PROJECT_TITLE,
+              workspaceRoot,
+              createWorkspaceRootIfMissing: false,
+              defaultModelSelection: modelSelection,
+              createdAt,
+            },
           });
+          if (createProjectResult._tag === "Failure") {
+            throw new Error("Could not create the AI repair project.");
+          }
         }
-        await api.orchestration.dispatchCommand({
-          type: "thread.create",
-          commandId: newCommandId(),
-          threadId,
-          projectId: repairProjectId,
-          title,
-          modelSelection,
-          runtimeMode: DEFAULT_RUNTIME_MODE,
-          interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
-          branch: null,
-          worktreePath: null,
-          createdAt,
-        });
-        await api.orchestration.dispatchCommand({
-          type: "thread.turn.start",
-          commandId: newCommandId(),
-          threadId,
-          message: {
-            messageId: newMessageId(),
-            role: "user",
-            text: collabDeployAiRepairPrompt,
-            attachments: [],
+        const createThreadResult = await createThread({
+          environmentId,
+          input: {
+            threadId,
+            projectId: repairProjectId,
+            title,
+            modelSelection,
+            runtimeMode: DEFAULT_RUNTIME_MODE,
+            interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+            branch: null,
+            worktreePath: null,
+            createdAt,
           },
-          modelSelection,
-          titleSeed: title,
-          runtimeMode: DEFAULT_RUNTIME_MODE,
-          interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
-          createdAt,
         });
+        if (createThreadResult._tag === "Failure") {
+          throw new Error("Could not create the AI repair thread.");
+        }
+        const startThreadResult = await startThreadTurn({
+          environmentId,
+          input: {
+            threadId,
+            message: {
+              messageId: newMessageId(),
+              role: "user",
+              text: collabDeployAiRepairPrompt,
+              attachments: [],
+            },
+            modelSelection,
+            titleSeed: title,
+            runtimeMode: DEFAULT_RUNTIME_MODE,
+            interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+            createdAt,
+          },
+        });
+        if (startThreadResult._tag === "Failure") {
+          throw new Error("Could not start the AI repair thread.");
+        }
         await navigate({
           to: "/$environmentId/$threadId",
           params: buildThreadRouteParams(scopeThreadRef(environmentId, threadId)),
@@ -901,10 +904,13 @@ export function SharedProjectsSettings() {
     [
       collabDeployAiRepairProject,
       collabDeployAiRepairPrompt,
+      createProject,
+      createThread,
       lastCollabDeployFailure,
       localProjects,
       navigate,
       runAction,
+      startThreadTurn,
     ],
   );
 
@@ -943,7 +949,7 @@ export function SharedProjectsSettings() {
             commitDetail(
               await syncSharedProjectContext({
                 projectId: detail.project.id,
-                cwd: selectedLocalProject.cwd,
+                cwd: selectedLocalProject.workspaceRoot,
               }),
             );
           })
@@ -1512,8 +1518,8 @@ export function SharedProjectsSettings() {
           return (
             <SettingsRow
               key={`${project.environmentId}:${project.id}`}
-              title={project.name}
-              description={project.cwd}
+              title={project.title}
+              description={project.workspaceRoot}
               status={
                 shared ? (
                   <span className="text-success-foreground">
@@ -1768,7 +1774,7 @@ export function SharedProjectsSettings() {
                     ) : null}
                     {localProjects.map((project) => (
                       <option key={`${project.environmentId}:${project.id}`} value={project.id}>
-                        {project.name}
+                        {project.title}
                       </option>
                     ))}
                   </select>

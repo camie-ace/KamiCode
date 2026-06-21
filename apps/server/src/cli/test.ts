@@ -1,6 +1,6 @@
 // @effect-diagnostics nodeBuiltinImport:off
-import * as Fs from "node:fs/promises";
-import path from "node:path";
+import * as NodeFSP from "node:fs/promises";
+import * as NodePath from "node:path";
 
 import * as Console from "effect/Console";
 import * as Data from "effect/Data";
@@ -79,7 +79,9 @@ interface BrowserCommandFlags {
 }
 
 function resolveFromCwd(cwd: string, pathname: string): string {
-  return path.isAbsolute(pathname) ? path.normalize(pathname) : path.resolve(cwd, pathname);
+  return NodePath.isAbsolute(pathname)
+    ? NodePath.normalize(pathname)
+    : NodePath.resolve(cwd, pathname);
 }
 
 function parseOptionalUrl(value: string | undefined): URL | undefined {
@@ -130,7 +132,7 @@ const readHarnessActions = (actionsPath: string, cwd: string) =>
   Effect.tryPromise({
     try: async () => {
       const resolvedPath = resolveFromCwd(cwd, actionsPath);
-      const raw = await Fs.readFile(resolvedPath, "utf8");
+      const raw = await NodeFSP.readFile(resolvedPath, "utf8");
       return parseHarnessActions(raw, resolvedPath);
     },
     catch: (cause) => new TestCommandError({ message: errorMessage(cause), cause }),
@@ -278,7 +280,7 @@ const browserCommand = Command.make("browser", {
   Command.withDescription(
     "Run a headless recorded Playwright browser test harness and write artifacts.",
   ),
-  Command.withHandler((flags) => runBrowserCommand(flags)),
+  Command.withHandler((flags) => runBrowserCommand(flags).pipe(Effect.asVoid)),
 );
 
 export const testCommand = Command.make("test").pipe(

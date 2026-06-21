@@ -1,9 +1,15 @@
 // @effect-diagnostics nodeBuiltinImport:off cryptoRandomUUID:off globalDate:off globalTimers:off
-import crypto from "node:crypto";
-import * as Fs from "node:fs/promises";
-import os from "node:os";
-import path from "node:path";
-import { pathToFileURL } from "node:url";
+import * as NodeCrypto from "node:crypto";
+import * as NodeFSP from "node:fs/promises";
+import * as NodeOS from "node:os";
+import * as NodePath from "node:path";
+import * as NodeURL from "node:url";
+
+const crypto = NodeCrypto;
+const Fs = NodeFSP;
+const os = NodeOS;
+const path = NodePath;
+const pathToFileURL = NodeURL.pathToFileURL;
 
 export type BrowserHarnessBrowser = "chromium" | "firefox" | "webkit";
 export type BrowserHarnessStatus = "passed" | "failed" | "blocked" | "error";

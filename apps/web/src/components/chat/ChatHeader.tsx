@@ -7,17 +7,20 @@ import {
   type ResolvedKeybindingsConfig,
   type ThreadId,
 } from "@t3tools/contracts";
-import { scopeThreadRef } from "@t3tools/client-runtime";
+import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { memo } from "react";
 import GitActionsControl from "../GitActionsControl";
 import { type DraftId } from "~/composerDraftStore";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
-import ProjectScriptsControl, { type NewProjectScriptInput } from "../ProjectScriptsControl";
+import ProjectScriptsControl, {
+  type NewProjectScriptInput,
+  type ProjectScriptActionResult,
+} from "../ProjectScriptsControl";
 import ProjectTestEnvironmentControl from "../ProjectTestEnvironmentControl";
 import TestHarnessRunsControl from "../TestHarnessRunsControl";
 import { SidebarTrigger } from "../ui/sidebar";
 import { OpenInPicker } from "./OpenInPicker";
-import { usePrimaryEnvironmentId } from "../../environments/primary/context";
+import { usePrimaryEnvironmentId } from "../../state/environments";
 import { cn } from "~/lib/utils";
 
 interface ChatHeaderProps {
@@ -29,19 +32,22 @@ interface ChatHeaderProps {
   activeProjectName: string | undefined;
   activeProjectCwd: string | undefined;
   openInCwd: string | null;
-  activeProjectScripts: ProjectScript[] | undefined;
+  activeProjectScripts: ReadonlyArray<ProjectScript> | undefined;
   preferredScriptId: string | null;
   keybindings: ResolvedKeybindingsConfig;
   availableEditors: ReadonlyArray<EditorId>;
+  rightPanelOpen: boolean;
   gitCwd: string | null;
-  activeProjectTestEnvironments: ProjectTestEnvironment[] | undefined;
+  activeProjectTestEnvironments: ReadonlyArray<ProjectTestEnvironment> | undefined;
   onRunProjectScript: (script: ProjectScript) => void;
-  onAddProjectScript: (input: NewProjectScriptInput) => Promise<void>;
-  onUpdateProjectScript: (scriptId: string, input: NewProjectScriptInput) => Promise<void>;
-  onDeleteProjectScript: (scriptId: string) => Promise<void>;
+  onAddProjectScript: (input: NewProjectScriptInput) => Promise<ProjectScriptActionResult>;
+  onUpdateProjectScript: (
+    scriptId: string,
+    input: NewProjectScriptInput,
+  ) => Promise<ProjectScriptActionResult>;
+  onDeleteProjectScript: (scriptId: string) => Promise<ProjectScriptActionResult>;
   onUpdateProjectTestEnvironments: (testEnvironments: ProjectTestEnvironment[]) => Promise<void>;
   onOpenTestsPanel: () => void;
-  rightPanelOpen: boolean;
 }
 
 export function shouldShowOpenInPicker(input: {
@@ -69,6 +75,7 @@ export const ChatHeader = memo(function ChatHeader({
   preferredScriptId,
   keybindings,
   availableEditors,
+  rightPanelOpen,
   gitCwd,
   activeProjectTestEnvironments,
   onRunProjectScript,
@@ -77,7 +84,6 @@ export const ChatHeader = memo(function ChatHeader({
   onDeleteProjectScript,
   onUpdateProjectTestEnvironments,
   onOpenTestsPanel,
-  rightPanelOpen,
 }: ChatHeaderProps) {
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const showOpenInPicker = shouldShowOpenInPicker({
@@ -136,6 +142,7 @@ export const ChatHeader = memo(function ChatHeader({
         )}
         {showOpenInPicker && (
           <OpenInPicker
+            environmentId={activeThreadEnvironmentId}
             keybindings={keybindings}
             availableEditors={availableEditors}
             openInCwd={openInCwd}

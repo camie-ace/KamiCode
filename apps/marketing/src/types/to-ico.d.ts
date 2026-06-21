@@ -1,5 +1,5 @@
 declare module "to-ico" {
-  import type { Buffer } from "node:buffer";
+  import type * as NodeBuffer from "node:buffer";
 
-  export default function toIco(input: readonly Buffer[]): Promise<Buffer>;
+  export default function toIco(input: readonly NodeBuffer.Buffer[]): Promise<NodeBuffer.Buffer>;
 }

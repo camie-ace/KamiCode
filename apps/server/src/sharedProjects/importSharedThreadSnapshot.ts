@@ -24,7 +24,7 @@ import {
   type RuntimeMode,
   type SharedSessionSnapshot,
 } from "@t3tools/contracts";
-import { randomUUID } from "node:crypto";
+import * as NodeCrypto from "node:crypto";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
@@ -33,6 +33,7 @@ import { OrchestrationEngineService } from "../orchestration/Services/Orchestrat
 import { SharedProjectsError } from "./Services/SharedProjects.ts";
 
 const IMPORTED_SHARED_SESSION_TITLE_PREFIX = "Imported: ";
+const { randomUUID } = NodeCrypto;
 
 const decodeChatAttachment = Schema.decodeUnknownSync(ChatAttachmentSchema);
 const decodeModelSelection = Schema.decodeUnknownSync(ModelSelectionSchema);

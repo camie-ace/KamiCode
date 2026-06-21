@@ -1,9 +1,8 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vite-plus/test";
 
-import type { AppState, EnvironmentState } from "../store";
-import type { ThreadSession } from "../types";
 import {
   collectSettledCompletedTurns,
+  type CompletionAlertThread,
   getTurnCompletionAlertVolume,
   isApplicationInFocus,
   TURN_COMPLETION_ALERT_DURATION_MS,
@@ -12,7 +11,7 @@ import {
   turnCompletionAlertKey,
 } from "./turnCompletionAlert";
 
-function makeEnvironmentState(input: {
+function makeThread(input: {
   threadId: string;
   turn: {
     turnId: string;
@@ -20,87 +19,51 @@ function makeEnvironmentState(input: {
     completedAt: string | null;
   } | null;
   session?: {
-    status?: "disconnected" | "connecting" | "ready" | "running" | "error" | "closed";
-    orchestrationStatus?:
-      | "idle"
-      | "starting"
-      | "running"
-      | "ready"
-      | "interrupted"
-      | "stopped"
-      | "error";
+    status?: "idle" | "starting" | "running" | "ready" | "interrupted" | "stopped" | "error";
     activeTurnId?: string | undefined;
   } | null;
-}): EnvironmentState {
-  const threadId = input.threadId as never;
+}): CompletionAlertThread {
+  const threadId = input.threadId as CompletionAlertThread["id"];
   const session =
     input.session === undefined
       ? {
           status: "ready" as const,
-          orchestrationStatus: "idle" as const,
           activeTurnId: undefined,
         }
       : input.session;
 
   return {
-    projectIds: [],
-    projectById: {},
-    threadIds: [threadId],
-    threadIdsByProjectId: {},
-    threadShellById: {},
-    threadSessionById: session
+    environmentId: "env-1" as CompletionAlertThread["environmentId"],
+    id: threadId,
+    latestTurn: input.turn
       ? {
-          [threadId]: {
-            provider: "codex" as ThreadSession["provider"],
-            status: session.status ?? "ready",
-            orchestrationStatus: session.orchestrationStatus ?? "idle",
-            activeTurnId: session.activeTurnId as never,
-            createdAt: "2026-06-03T10:00:00.000Z",
-            updatedAt: "2026-06-03T10:01:00.000Z",
-          } satisfies ThreadSession,
+          turnId: input.turn.turnId as never,
+          state: input.turn.state,
+          requestedAt: "2026-06-03T10:00:00.000Z",
+          startedAt: "2026-06-03T10:00:01.000Z",
+          completedAt: input.turn.completedAt,
+          assistantMessageId: null,
         }
-      : {},
-    threadTurnStateById: {
-      [input.threadId]: {
-        latestTurn: input.turn
-          ? {
-              turnId: input.turn.turnId as never,
-              state: input.turn.state,
-              requestedAt: "2026-06-03T10:00:00.000Z",
-              startedAt: "2026-06-03T10:00:01.000Z",
-              completedAt: input.turn.completedAt,
-              assistantMessageId: null,
-            }
-          : null,
-      },
-    },
-    messageIdsByThreadId: {},
-    messageByThreadId: {},
-    queuedTurnsByThreadId: {},
-    activityIdsByThreadId: {},
-    activityByThreadId: {},
-    proposedPlanIdsByThreadId: {},
-    proposedPlanByThreadId: {},
-    turnDiffIdsByThreadId: {},
-    turnDiffSummaryByThreadId: {},
-    sidebarThreadSummaryById: {},
-    bootstrapComplete: true,
-  };
-}
-
-function makeState(environmentState: EnvironmentState): AppState {
-  return {
-    activeEnvironmentId: "env-1" as never,
-    environmentStateById: {
-      "env-1": environmentState,
-    },
+      : null,
+    session: session
+      ? {
+          threadId,
+          status: session.status ?? "ready",
+          providerName: "codex",
+          providerInstanceId: "codex" as never,
+          runtimeMode: "full-access",
+          activeTurnId: session.activeTurnId as never,
+          lastError: null,
+          updatedAt: "2026-06-03T10:01:00.000Z",
+        }
+      : null,
   };
 }
 
 describe("collectSettledCompletedTurns", () => {
   it("detects a settled completed turn from the current snapshot", () => {
-    const state = makeState(
-      makeEnvironmentState({
+    const threads = [
+      makeThread({
         threadId: "thread-1",
         turn: {
           turnId: "turn-1",
@@ -108,9 +71,9 @@ describe("collectSettledCompletedTurns", () => {
           completedAt: "2026-06-03T10:01:00.000Z",
         },
       }),
-    );
+    ];
 
-    expect(collectSettledCompletedTurns(state)).toEqual([
+    expect(collectSettledCompletedTurns(threads)).toEqual([
       {
         environmentId: "env-1",
         threadId: "thread-1",
@@ -121,8 +84,8 @@ describe("collectSettledCompletedTurns", () => {
   });
 
   it("does not report a completed turn while its session is still working", () => {
-    const state = makeState(
-      makeEnvironmentState({
+    const threads = [
+      makeThread({
         threadId: "thread-1",
         turn: {
           turnId: "turn-1",
@@ -131,18 +94,17 @@ describe("collectSettledCompletedTurns", () => {
         },
         session: {
           status: "running",
-          orchestrationStatus: "running",
           activeTurnId: "turn-1",
         },
       }),
-    );
+    ];
 
-    expect(collectSettledCompletedTurns(state)).toEqual([]);
+    expect(collectSettledCompletedTurns(threads)).toEqual([]);
   });
 
   it("can filter out historical completions by completion timestamp", () => {
-    const state = makeState(
-      makeEnvironmentState({
+    const threads = [
+      makeThread({
         threadId: "thread-1",
         turn: {
           turnId: "turn-1",
@@ -150,15 +112,15 @@ describe("collectSettledCompletedTurns", () => {
           completedAt: "2026-06-03T10:01:00.000Z",
         },
       }),
-    );
+    ];
 
     expect(
-      collectSettledCompletedTurns(state, {
+      collectSettledCompletedTurns(threads, {
         completedAfterEpochMs: Date.parse("2026-06-03T10:01:01.000Z"),
       }),
     ).toEqual([]);
     expect(
-      collectSettledCompletedTurns(state, {
+      collectSettledCompletedTurns(threads, {
         completedAfterEpochMs: Date.parse("2026-06-03T10:01:00.000Z"),
       }),
     ).toEqual([
