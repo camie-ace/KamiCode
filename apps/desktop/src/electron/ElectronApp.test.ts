@@ -100,6 +100,27 @@ describe("ElectronApp", () => {
     }).pipe(Effect.provide(ElectronApp.layer)),
   );
 
+  it.effect("treats t3code dev root launches as unpackaged metadata", () =>
+    Effect.gen(function* () {
+      const previousArgv = process.argv;
+      process.argv = ["electron", "--t3code-dev-root=C:\\repo\\apps\\desktop", "main.cjs"];
+      try {
+        const electronApp = yield* ElectronApp.ElectronApp;
+        const metadata = yield* electronApp.metadata;
+
+        assert.deepEqual(metadata, {
+          appVersion: "1.2.3",
+          appPath: "C:\\repo\\apps\\desktop",
+          isPackaged: false,
+          resourcesPath: process.resourcesPath,
+          runningUnderArm64Translation: false,
+        });
+      } finally {
+        process.argv = previousArgv;
+      }
+    }).pipe(Effect.provide(ElectronApp.layer)),
+  );
+
   it.effect("scopes app event listeners", () =>
     Effect.gen(function* () {
       const listener = vi.fn();

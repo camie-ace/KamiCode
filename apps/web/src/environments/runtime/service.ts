@@ -371,6 +371,10 @@ function isNonIdleThreadDetailSubscription(entry: ThreadDetailSubscriptionEntry)
     if (sidebarThread.latestTurn?.state === "running") {
       return true;
     }
+
+    if ((sidebarThread.queuedTurnCount ?? 0) > 0) {
+      return true;
+    }
   }
 
   const thread = selectThreadByRef(state, threadRef);
@@ -384,6 +388,9 @@ function isNonIdleThreadDetailSubscription(entry: ThreadDetailSubscriptionEntry)
       orchestrationStatus && orchestrationStatus !== "idle" && orchestrationStatus !== "stopped",
     ) ||
     thread.latestTurn?.state === "running" ||
+    (thread.queuedTurns ?? []).some(
+      (turn) => turn.status === "queued" || turn.status === "dispatching",
+    ) ||
     thread.pendingSourceProposedPlan !== undefined
   );
 }

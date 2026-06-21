@@ -200,6 +200,7 @@ function makeThreadShellSnapshot(params: {
   readonly hasPendingApprovals?: boolean;
   readonly hasPendingUserInput?: boolean;
   readonly hasActionableProposedPlan?: boolean;
+  readonly queuedTurnCount?: number;
 }): OrchestrationShellSnapshot {
   const projectId = ProjectId.make("project-1");
   const turnId = TurnId.make("turn-1");
@@ -232,7 +233,7 @@ function makeThreadShellSnapshot(params: {
                 assistantMessageId: null,
               }
             : null,
-        queuedTurnCount: 0,
+        queuedTurnCount: params.queuedTurnCount ?? 0,
         createdAt: "2026-04-13T00:00:00.000Z",
         updatedAt: "2026-04-13T00:00:00.000Z",
         archivedAt: null,
@@ -439,6 +440,56 @@ describe("retainThreadDetailSubscription", () => {
         thread: makeThreadShellSnapshot({
           threadId,
           sessionStatus: "idle",
+        }).threads[0]!,
+      },
+      environmentId,
+    );
+
+    await vi.advanceTimersByTimeAsync(30 * 60 * 1000);
+    expect(mockThreadUnsubscribe).toHaveBeenCalledTimes(1);
+
+    stop();
+    await resetEnvironmentServiceForTests();
+  });
+
+  it("keeps queued thread detail subscriptions attached until queued work clears", async () => {
+    const {
+      retainThreadDetailSubscription,
+      startEnvironmentConnectionService,
+      resetEnvironmentServiceForTests,
+    } = await import("./service");
+
+    const stop = startEnvironmentConnectionService(new QueryClient());
+    const environmentId = EnvironmentId.make("env-1");
+    const threadId = ThreadId.make("thread-queued");
+
+    const connectionInput = mockCreateEnvironmentConnection.mock.calls[0]?.[0];
+    expect(connectionInput).toBeDefined();
+
+    connectionInput.syncShellSnapshot(
+      makeThreadShellSnapshot({
+        threadId,
+        sessionStatus: "idle",
+        queuedTurnCount: 1,
+      }),
+      environmentId,
+    );
+
+    const release = retainThreadDetailSubscription(environmentId, threadId);
+    expect(mockSubscribeThread).toHaveBeenCalledTimes(1);
+
+    release();
+    await vi.advanceTimersByTimeAsync(30 * 60 * 1000);
+    expect(mockThreadUnsubscribe).not.toHaveBeenCalled();
+
+    connectionInput.applyShellEvent(
+      {
+        kind: "thread-upserted",
+        sequence: 2,
+        thread: makeThreadShellSnapshot({
+          threadId,
+          sessionStatus: "idle",
+          queuedTurnCount: 0,
         }).threads[0]!,
       },
       environmentId,

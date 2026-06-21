@@ -24,16 +24,6 @@ import { LATEST_WINDOWS_DOWNLOAD_URL, REPOSITORY_URL } from "../lib/releases";
     </div>
 
     <div class="container hero-inner">
-      <a
-        class="hero-fork-badge"
-        href="https://github.com/pingdotgg/t3code"
-        target="_blank"
-        rel="noopener noreferrer"
-      >
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6" cy="5" r="2.2"/><circle cx="18" cy="5" r="2.2"/><circle cx="12" cy="19" r="2.2"/><path d="M6 7.2v2A3 3 0 009 12.2h6A3 3 0 0018 9.2v-2M12 14v2.8"/></svg>
-        A fork of <strong>T3 Code</strong> · with agentic testing &amp; team collaboration
-      </a>
-
       <img
         class="hero-wordmark"
         src="/kamicode-wordmark.webp"
@@ -582,38 +572,6 @@ import { LATEST_WINDOWS_DOWNLOAD_URL, REPOSITORY_URL } from "../lib/releases";
     text-align: center;
   }
 
-  .hero-fork-badge {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    padding: 6px 14px;
-    margin: 0 auto 28px;
-    border: 1px solid var(--border);
-    border-radius: 999px;
-    background: rgba(255, 255, 255, 0.02);
-    color: var(--fg-muted);
-    font-family: var(--font-mono);
-    font-size: 11.5px;
-    letter-spacing: 0.01em;
-    transition: color 0.2s ease, border-color 0.2s ease, background 0.2s ease;
-  }
-
-  .hero-fork-badge strong {
-    color: var(--fg);
-    font-weight: 600;
-  }
-
-  .hero-fork-badge svg {
-    color: var(--accent);
-    flex-shrink: 0;
-  }
-
-  .hero-fork-badge:hover {
-    color: var(--fg);
-    border-color: var(--border-strong);
-    background: rgba(255, 255, 255, 0.04);
-  }
-
   .hero-wordmark {
     display: block;
     width: min(187px, 40vw);
@@ -715,12 +673,18 @@ import { LATEST_WINDOWS_DOWNLOAD_URL, REPOSITORY_URL } from "../lib/releases";
     }
 
     .hero-title {
-      font-size: clamp(40px, 11vw, 56px);
+      font-size: clamp(32px, 9.5vw, 44px);
       margin-top: 14px;
     }
 
     .hero-actions {
-      margin-bottom: 96px;
+      align-items: center;
+      flex-direction: column;
+      margin-bottom: 56px;
+    }
+
+    .hero-actions .btn {
+      width: min(100%, 280px);
     }
 
     .hero-float {
@@ -741,7 +705,6 @@ import { LATEST_WINDOWS_DOWNLOAD_URL, REPOSITORY_URL } from "../lib/releases";
       height: 44px;
     }
 
-    /* Two above the title, two flanking the call-to-action area. */
     .hero-float-mark.hf-claude {
       top: 44px;
       left: 10px;
@@ -754,18 +717,9 @@ import { LATEST_WINDOWS_DOWNLOAD_URL, REPOSITORY_URL } from "../lib/releases";
       transform: rotate(8deg);
     }
 
-    .hero-float-mark.hf-opencode {
-      top: 474px;
-      left: 4px;
-      right: auto;
-      transform: rotate(-6deg);
-    }
-
+    .hero-float-mark.hf-opencode,
     .hero-float-mark.hf-cursor {
-      top: 474px;
-      right: 4px;
-      left: auto;
-      transform: rotate(7deg);
+      display: none;
     }
   }
 

@@ -293,6 +293,7 @@ function mapThreadShell(
     updatedAt: thread.updatedAt,
     branch: thread.branch,
     worktreePath: thread.worktreePath,
+    queuedTurnCount: thread.queuedTurnCount,
   };
   const session = thread.session ? mapSession(thread.session) : null;
   const turnState: ThreadTurnState = {
@@ -313,6 +314,7 @@ function mapThreadShell(
     branch: thread.branch,
     worktreePath: thread.worktreePath,
     latestUserMessageAt: thread.latestUserMessageAt,
+    queuedTurnCount: thread.queuedTurnCount,
     hasPendingApprovals: thread.hasPendingApprovals,
     hasPendingUserInput: thread.hasPendingUserInput,
     hasActionableProposedPlan: thread.hasActionableProposedPlan,
@@ -323,6 +325,12 @@ function mapThreadShell(
     turnState,
     summary,
   };
+}
+
+function countActiveQueuedTurns(queuedTurns: Thread["queuedTurns"]): number {
+  return (queuedTurns ?? []).filter(
+    (turn) => turn.status === "queued" || turn.status === "dispatching",
+  ).length;
 }
 
 function toThreadShell(thread: Thread): ThreadShell {
@@ -341,6 +349,7 @@ function toThreadShell(thread: Thread): ThreadShell {
     updatedAt: thread.updatedAt,
     branch: thread.branch,
     worktreePath: thread.worktreePath,
+    queuedTurnCount: countActiveQueuedTurns(thread.queuedTurns),
   };
 }
 
@@ -414,6 +423,7 @@ function sidebarThreadSummariesEqual(
     left.branch === right.branch &&
     left.worktreePath === right.worktreePath &&
     left.latestUserMessageAt === right.latestUserMessageAt &&
+    left.queuedTurnCount === right.queuedTurnCount &&
     left.hasPendingApprovals === right.hasPendingApprovals &&
     left.hasPendingUserInput === right.hasPendingUserInput &&
     left.hasActionableProposedPlan === right.hasActionableProposedPlan
@@ -436,7 +446,8 @@ function threadShellsEqual(left: ThreadShell | undefined, right: ThreadShell): b
     left.archivedAt === right.archivedAt &&
     left.updatedAt === right.updatedAt &&
     left.branch === right.branch &&
-    left.worktreePath === right.worktreePath
+    left.worktreePath === right.worktreePath &&
+    left.queuedTurnCount === right.queuedTurnCount
   );
 }
 

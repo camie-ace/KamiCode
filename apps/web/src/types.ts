@@ -160,6 +160,7 @@ export interface SidebarThreadSummary {
   branch: string | null;
   worktreePath: string | null;
   latestUserMessageAt: string | null;
+  queuedTurnCount?: number | undefined;
   hasPendingApprovals: boolean;
   hasPendingUserInput: boolean;
   hasActionableProposedPlan: boolean;

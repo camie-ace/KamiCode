@@ -49,6 +49,23 @@ export class ElectronApp extends Context.Service<ElectronApp, ElectronAppShape>(
   "@t3tools/desktop/electron/ElectronApp",
 ) {}
 
+const DEV_ROOT_ARG = "--t3code-dev-root";
+
+function readDevRootArg(): string | undefined {
+  for (let index = 0; index < process.argv.length; index += 1) {
+    const value = process.argv[index];
+    if (value === DEV_ROOT_ARG) {
+      const nextValue = process.argv[index + 1]?.trim();
+      return nextValue && nextValue.length > 0 ? nextValue : undefined;
+    }
+    if (value?.startsWith(`${DEV_ROOT_ARG}=`)) {
+      const nextValue = value.slice(DEV_ROOT_ARG.length + 1).trim();
+      return nextValue.length > 0 ? nextValue : undefined;
+    }
+  }
+  return undefined;
+}
+
 const addScopedAppListener = <Args extends ReadonlyArray<unknown>>(
   eventName: string,
   listener: (...args: Args) => void,
@@ -64,13 +81,16 @@ const addScopedAppListener = <Args extends ReadonlyArray<unknown>>(
   ).pipe(Effect.asVoid);
 
 const make = ElectronApp.of({
-  metadata: Effect.sync(() => ({
-    appVersion: Electron.app.getVersion(),
-    appPath: Electron.app.getAppPath(),
-    isPackaged: Electron.app.isPackaged,
-    resourcesPath: process.resourcesPath,
-    runningUnderArm64Translation: Electron.app.runningUnderARM64Translation === true,
-  })),
+  metadata: Effect.sync(() => {
+    const devRoot = readDevRootArg();
+    return {
+      appVersion: Electron.app.getVersion(),
+      appPath: devRoot ?? Electron.app.getAppPath(),
+      isPackaged: devRoot === undefined ? Electron.app.isPackaged : false,
+      resourcesPath: process.resourcesPath,
+      runningUnderArm64Translation: Electron.app.runningUnderARM64Translation === true,
+    };
+  }),
   name: Effect.sync(() => Electron.app.name),
   whenReady: Effect.promise(() => Electron.app.whenReady()).pipe(Effect.asVoid),
   quit: Effect.sync(() => {

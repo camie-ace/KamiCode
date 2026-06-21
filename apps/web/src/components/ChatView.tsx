@@ -89,6 +89,7 @@ import {
 import { useTheme } from "../hooks/useTheme";
 import { useTurnDiffSummaries } from "../hooks/useTurnDiffSummaries";
 import { useCommandPaletteStore } from "../commandPaletteStore";
+import { queuedMessageThreadKey, useQueuedMessageUiStore } from "../queuedMessageUiStore";
 import { buildTemporaryWorktreeBranchName } from "@t3tools/shared/git";
 import { useMediaQuery } from "../hooks/useMediaQuery";
 import { RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY } from "../rightPanelLayout";
@@ -231,6 +232,8 @@ const EMPTY_PROPOSED_PLANS: Thread["proposedPlans"] = [];
 const EMPTY_PROVIDERS: ServerProvider[] = [];
 const EMPTY_PROVIDER_SKILLS: ServerProvider["skills"] = [];
 const EMPTY_PENDING_USER_INPUT_ANSWERS: Record<string, PendingUserInputDraftAnswer> = {};
+const EMPTY_OPTIMISTIC_QUEUED_MESSAGES: ChatMessage[] = [];
+const EMPTY_MESSAGE_ID_SET: ReadonlySet<MessageId> = new Set<MessageId>();
 const TYPE_TO_FOCUS_EDITABLE_SELECTOR = [
   "input",
   "textarea",
@@ -1234,12 +1237,6 @@ function ChatViewContent(props: ChatViewProps) {
   const [optimisticUserMessages, setOptimisticUserMessages] = useState<ChatMessage[]>([]);
   const optimisticUserMessagesRef = useRef(optimisticUserMessages);
   optimisticUserMessagesRef.current = optimisticUserMessages;
-  const [optimisticQueuedMessages, setOptimisticQueuedMessages] = useState<ChatMessage[]>([]);
-  const optimisticQueuedMessagesRef = useRef(optimisticQueuedMessages);
-  optimisticQueuedMessagesRef.current = optimisticQueuedMessages;
-  const [locallyCancelledQueuedMessageIds, setLocallyCancelledQueuedMessageIds] = useState<
-    ReadonlySet<MessageId>
-  >(() => new Set());
   const queuedDeleteInFlightByQueueIdRef = useRef<Set<string>>(new Set());
   const [localDraftErrorsByDraftId, setLocalDraftErrorsByDraftId] = useState<
     Record<string, string | null>
@@ -1371,6 +1368,39 @@ function ChatViewContent(props: ChatViewProps) {
     [activeThread],
   );
   const activeThreadKey = activeThreadRef ? scopedThreadKey(activeThreadRef) : null;
+  const activeQueuedUiThreadKey = activeThread
+    ? queuedMessageThreadKey(activeThread.environmentId, activeThread.id)
+    : null;
+  const queuedMessageUi = useQueuedMessageUiStore(
+    useShallow((state) => ({
+      optimisticQueuedMessages:
+        activeQueuedUiThreadKey !== null
+          ? (state.optimisticQueuedMessagesByThreadKey[activeQueuedUiThreadKey] ??
+            EMPTY_OPTIMISTIC_QUEUED_MESSAGES)
+          : EMPTY_OPTIMISTIC_QUEUED_MESSAGES,
+      locallyCancelledQueuedMessageIds:
+        activeQueuedUiThreadKey !== null
+          ? (state.locallyCancelledQueuedMessageIdsByThreadKey[activeQueuedUiThreadKey] ??
+            EMPTY_MESSAGE_ID_SET)
+          : EMPTY_MESSAGE_ID_SET,
+    })),
+  );
+  const { optimisticQueuedMessages, locallyCancelledQueuedMessageIds } = queuedMessageUi;
+  const addOptimisticQueuedMessage = useQueuedMessageUiStore(
+    (store) => store.addOptimisticQueuedMessage,
+  );
+  const removeOptimisticQueuedMessage = useQueuedMessageUiStore(
+    (store) => store.removeOptimisticQueuedMessage,
+  );
+  const removeOptimisticQueuedMessages = useQueuedMessageUiStore(
+    (store) => store.removeOptimisticQueuedMessages,
+  );
+  const markLocallyCancelledQueuedMessage = useQueuedMessageUiStore(
+    (store) => store.markLocallyCancelledQueuedMessage,
+  );
+  const unmarkLocallyCancelledQueuedMessage = useQueuedMessageUiStore(
+    (store) => store.unmarkLocallyCancelledQueuedMessage,
+  );
   const activeRightPanelKind = useRightPanelStore((store) =>
     selectActiveRightPanelKindWithUrl(store.byThreadKey, activeThreadRef, diffOpen),
   );
@@ -1978,6 +2008,10 @@ function ChatViewContent(props: ChatViewProps) {
     () => deriveActivePlanState(threadActivities, activeLatestTurn?.turnId ?? undefined),
     [activeLatestTurn?.turnId, threadActivities],
   );
+  const dismissPlanSidebarForCurrentTurn = useCallback(() => {
+    planSidebarDismissedForTurnRef.current =
+      activePlan?.turnId ?? sidebarProposedPlan?.turnId ?? "__dismissed__";
+  }, [activePlan?.turnId, sidebarProposedPlan?.turnId]);
   const planSidebarLabel = sidebarProposedPlan || interactionMode === "plan" ? "Plan" : "Tasks";
   const showPlanFollowUpPrompt =
     pendingUserInputs.length === 0 &&
@@ -2042,9 +2076,6 @@ function ChatViewContent(props: ChatViewProps) {
     return () => {
       clearAttachmentPreviewHandoffs();
       for (const message of optimisticUserMessagesRef.current) {
-        revokeUserMessagePreviewUrls(message);
-      }
-      for (const message of optimisticQueuedMessagesRef.current) {
         revokeUserMessagePreviewUrls(message);
       }
     };
@@ -2509,6 +2540,7 @@ function ChatViewContent(props: ChatViewProps) {
   ]);
   const openTestsPanel = useCallback(() => {
     if (!activeThreadRef || !activeProject?.cwd) return;
+    dismissPlanSidebarForCurrentTurn();
     useRightPanelStore.getState().open(activeThreadRef, "tests");
     if (diffOpen) {
       void navigate({
@@ -2518,7 +2550,15 @@ function ChatViewContent(props: ChatViewProps) {
         search: (previous) => ({ ...stripDiffSearchParams(previous), diff: undefined }),
       });
     }
-  }, [activeProject?.cwd, activeThreadRef, diffOpen, environmentId, navigate, threadId]);
+  }, [
+    activeProject?.cwd,
+    activeThreadRef,
+    diffOpen,
+    dismissPlanSidebarForCurrentTurn,
+    environmentId,
+    navigate,
+    threadId,
+  ]);
   const addFilesSurface = () => {
     if (!activeThreadRef || !activeProject) return;
     useRightPanelStore.getState().open(activeThreadRef, "files");
@@ -2698,12 +2738,7 @@ function ChatViewContent(props: ChatViewProps) {
             return;
           }
           pendingQueuedMessageDeleteKeys.delete(pendingKey);
-          setLocallyCancelledQueuedMessageIds((existing) => {
-            if (!existing.has(input.messageId)) return existing;
-            const next = new Set(existing);
-            next.delete(input.messageId);
-            return next;
-          });
+          unmarkLocallyCancelledQueuedMessage(environmentId, threadId, input.messageId);
           setThreadError(
             threadId,
             err instanceof Error ? err.message : "Failed to delete queued message.",
@@ -2713,34 +2748,36 @@ function ChatViewContent(props: ChatViewProps) {
           queuedDeleteInFlightByQueueIdRef.current.delete(inFlightKey);
         });
     },
-    [activeThread?.id, environmentId, setThreadError],
+    [activeThread?.id, environmentId, setThreadError, unmarkLocallyCancelledQueuedMessage],
   );
   const deleteQueuedMessage = useCallback(
     (item: QueuedMessageItem) => {
-      setLocallyCancelledQueuedMessageIds((existing) => {
-        if (existing.has(item.id)) return existing;
-        const next = new Set(existing);
-        next.add(item.id);
-        return next;
-      });
       if (activeThread) {
+        markLocallyCancelledQueuedMessage(environmentId, activeThread.id, item.id);
         pendingQueuedMessageDeleteKeys.add(
           queuedMessageDeleteKey(environmentId, activeThread.id, item.id),
         );
       }
       if (item.queueId === null) {
-        setOptimisticQueuedMessages((existing) => {
-          const removed = existing.filter((message) => message.id === item.id);
-          for (const message of removed) {
-            revokeUserMessagePreviewUrls(message);
-          }
-          return existing.filter((message) => message.id !== item.id);
-        });
+        const removed = optimisticQueuedMessages.filter((message) => message.id === item.id);
+        for (const message of removed) {
+          revokeUserMessagePreviewUrls(message);
+        }
+        if (activeThread) {
+          removeOptimisticQueuedMessage(environmentId, activeThread.id, item.id);
+        }
         return;
       }
       dispatchQueuedMessageDelete({ queueId: item.queueId, messageId: item.id });
     },
-    [dispatchQueuedMessageDelete],
+    [
+      activeThread,
+      dispatchQueuedMessageDelete,
+      environmentId,
+      markLocallyCancelledQueuedMessage,
+      optimisticQueuedMessages,
+      removeOptimisticQueuedMessage,
+    ],
   );
   useEffect(() => {
     if (locallyCancelledQueuedMessageIds.size === 0 && pendingQueuedMessageDeleteKeys.size === 0) {
@@ -3348,10 +3385,6 @@ function ChatViewContent(props: ChatViewProps) {
       interactionMode === "default" ? "plan" : interactionMode === "plan" ? "test" : "default";
     handleInteractionModeChange(nextInteractionMode);
   }, [handleInteractionModeChange, interactionMode]);
-  const dismissPlanSidebarForCurrentTurn = useCallback(() => {
-    planSidebarDismissedForTurnRef.current =
-      activePlan?.turnId ?? sidebarProposedPlan?.turnId ?? "__dismissed__";
-  }, [activePlan?.turnId, sidebarProposedPlan?.turnId]);
   const togglePlanSidebar = useCallback(() => {
     if (!activeThreadRef) return;
     if (planSidebarOpen) {
@@ -3744,10 +3777,10 @@ function ChatViewContent(props: ChatViewProps) {
     if (removedMessages.length === 0) {
       return;
     }
+    const threadEnvironmentId = activeThread.environmentId;
+    const activeThreadId = activeThread.id;
     const timer = window.setTimeout(() => {
-      setOptimisticQueuedMessages((existing) =>
-        existing.filter((message) => !queuedServerIds.has(message.id)),
-      );
+      removeOptimisticQueuedMessages(threadEnvironmentId, activeThreadId, queuedServerIds);
     }, 0);
     for (const removedMessage of removedMessages) {
       const previewUrls = collectUserMessageBlobPreviewUrls(removedMessage);
@@ -3760,7 +3793,62 @@ function ChatViewContent(props: ChatViewProps) {
     return () => {
       window.clearTimeout(timer);
     };
-  }, [activeQueuedTurns, activeThread?.id, handoffAttachmentPreviews, optimisticQueuedMessages]);
+  }, [
+    activeQueuedTurns,
+    activeThread?.environmentId,
+    activeThread?.id,
+    handoffAttachmentPreviews,
+    optimisticQueuedMessages,
+    removeOptimisticQueuedMessages,
+  ]);
+
+  useEffect(() => {
+    if (!activeThread?.id || optimisticQueuedMessages.length === 0) return;
+    const queuedServerIds = new Set(activeQueuedTurns.map((turn) => turn.messageId));
+    const serverMessagesById = new Map(
+      (serverMessagesWithAssetUrls ?? []).map((message) => [message.id, message]),
+    );
+    const startedServerIds = new Set<MessageId>();
+    const removedMessages: ChatMessage[] = [];
+    for (const message of optimisticQueuedMessages) {
+      if (queuedServerIds.has(message.id)) {
+        continue;
+      }
+      const serverMessage = serverMessagesById.get(message.id);
+      if (serverMessage?.role !== "user" || serverMessage.turnId == null) {
+        continue;
+      }
+      startedServerIds.add(message.id);
+      removedMessages.push(message);
+    }
+    if (removedMessages.length === 0) {
+      return;
+    }
+    const threadEnvironmentId = activeThread.environmentId;
+    const activeThreadId = activeThread.id;
+    const timer = window.setTimeout(() => {
+      removeOptimisticQueuedMessages(threadEnvironmentId, activeThreadId, startedServerIds);
+    }, 0);
+    for (const removedMessage of removedMessages) {
+      const previewUrls = collectUserMessageBlobPreviewUrls(removedMessage);
+      if (previewUrls.length > 0) {
+        handoffAttachmentPreviews(removedMessage.id, previewUrls);
+        continue;
+      }
+      revokeUserMessagePreviewUrls(removedMessage);
+    }
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [
+    activeQueuedTurns,
+    activeThread?.environmentId,
+    activeThread?.id,
+    handoffAttachmentPreviews,
+    optimisticQueuedMessages,
+    removeOptimisticQueuedMessages,
+    serverMessagesWithAssetUrls,
+  ]);
 
   useEffect(() => {
     setOptimisticUserMessages((existing) => {
@@ -3769,13 +3857,6 @@ function ChatViewContent(props: ChatViewProps) {
       }
       return [];
     });
-    setOptimisticQueuedMessages((existing) => {
-      for (const message of existing) {
-        revokeUserMessagePreviewUrls(message);
-      }
-      return [];
-    });
-    setLocallyCancelledQueuedMessageIds(new Set());
     queuedDeleteInFlightByQueueIdRef.current.clear();
     resetLocalDispatch();
     setExpandedImage(null);
@@ -4258,7 +4339,7 @@ function ChatViewContent(props: ChatViewProps) {
       streaming: false,
     };
     if (isQueuedDispatch) {
-      setOptimisticQueuedMessages((existing) => [...existing, optimisticMessage]);
+      addOptimisticQueuedMessage(environmentId, threadIdForSend, optimisticMessage);
     } else {
       // Scroll to the current end *before* adding the optimistic message.
       // This sets LegendList's internal isAtEnd=true so maintainScrollAtEnd
@@ -4409,7 +4490,7 @@ function ChatViewContent(props: ChatViewProps) {
         (useComposerDraftStore.getState().getComposerDraft(composerDraftTarget)?.reviewComments
           .length ?? 0) === 0
       ) {
-        const removeOptimisticMessage = (existing: ChatMessage[]) => {
+        const removeOptimisticUserMessage = (existing: ChatMessage[]) => {
           const removed = existing.filter((message) => message.id === messageIdForSend);
           for (const message of removed) {
             revokeUserMessagePreviewUrls(message);
@@ -4418,9 +4499,10 @@ function ChatViewContent(props: ChatViewProps) {
           return next.length === existing.length ? existing : next;
         };
         if (isQueuedDispatch) {
-          setOptimisticQueuedMessages(removeOptimisticMessage);
+          removeOptimisticQueuedMessage(environmentId, threadIdForSend, messageIdForSend);
+          revokeUserMessagePreviewUrls(optimisticMessage);
         } else {
-          setOptimisticUserMessages(removeOptimisticMessage);
+          setOptimisticUserMessages(removeOptimisticUserMessage);
         }
         promptRef.current = promptForSend;
         const retryComposerImages = composerImagesSnapshot.map(cloneComposerImageForRetry);

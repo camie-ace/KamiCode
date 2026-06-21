@@ -1,0 +1,1364 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>KamiCode Persistent Remote Runtime Plan</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f7f8;
+        --panel: #ffffff;
+        --panel-soft: #eef3f4;
+        --text: #172026;
+        --muted: #52616b;
+        --border: #d7dee2;
+        --accent: #0f766e;
+        --accent-soft: #dff3f0;
+        --warn: #8a5a00;
+        --warn-soft: #fff4d8;
+        --danger: #a33b3b;
+        --danger-soft: #fde8e8;
+        --code: #edf1f3;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--text);
+        font-family:
+          Inter,
+          ui-sans-serif,
+          system-ui,
+          -apple-system,
+          BlinkMacSystemFont,
+          "Segoe UI",
+          sans-serif;
+        line-height: 1.55;
+      }
+
+      main {
+        width: min(1120px, calc(100% - 32px));
+        margin: 0 auto;
+        padding: 44px 0 72px;
+      }
+
+      h1,
+      h2,
+      h3,
+      h4 {
+        margin: 0;
+        letter-spacing: 0;
+        line-height: 1.15;
+      }
+
+      h1 {
+        max-width: 920px;
+        font-size: clamp(2.2rem, 5vw, 4rem);
+      }
+
+      h2 {
+        font-size: clamp(1.55rem, 3vw, 2.1rem);
+      }
+
+      h3 {
+        margin-top: 28px;
+        font-size: 1.14rem;
+      }
+
+      h4 {
+        font-size: 0.98rem;
+      }
+
+      p {
+        margin: 0;
+      }
+
+      a {
+        color: var(--accent);
+      }
+
+      code {
+        border-radius: 4px;
+        background: var(--code);
+        padding: 0.12rem 0.34rem;
+        font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+        font-size: 0.92em;
+      }
+
+      pre {
+        margin: 12px 0 0;
+        overflow-x: auto;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        background: #101820;
+        color: #f6fbff;
+        padding: 14px;
+        font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+        font-size: 0.9rem;
+        line-height: 1.5;
+      }
+
+      ul,
+      ol {
+        margin: 10px 0 0;
+        padding-left: 1.2rem;
+      }
+
+      li + li {
+        margin-top: 6px;
+      }
+
+      .eyebrow {
+        margin-bottom: 10px;
+        color: var(--accent);
+        font-size: 0.82rem;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      .lede {
+        max-width: 880px;
+        margin-top: 16px;
+        color: var(--muted);
+        font-size: 1.08rem;
+      }
+
+      .meta {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        margin-top: 20px;
+      }
+
+      .pill {
+        display: inline-flex;
+        align-items: center;
+        min-height: 30px;
+        border: 1px solid var(--border);
+        border-radius: 999px;
+        background: var(--panel);
+        padding: 0 12px;
+        color: var(--muted);
+        font-size: 0.88rem;
+      }
+
+      .toc {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 14px;
+        margin: 28px 0;
+      }
+
+      .toc a {
+        display: block;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        background: var(--panel);
+        padding: 18px;
+        color: inherit;
+        text-decoration: none;
+      }
+
+      .toc span {
+        display: block;
+        margin-top: 6px;
+        color: var(--muted);
+        font-size: 0.92rem;
+      }
+
+      section {
+        margin-top: 28px;
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        background: var(--panel);
+        padding: clamp(20px, 4vw, 34px);
+      }
+
+      .section-intro {
+        max-width: 860px;
+        margin-top: 10px;
+        color: var(--muted);
+      }
+
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 14px;
+        margin-top: 18px;
+      }
+
+      .card {
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        background: var(--panel-soft);
+        padding: 16px;
+      }
+
+      .card p {
+        margin-top: 8px;
+        color: var(--muted);
+      }
+
+      .callout {
+        margin-top: 18px;
+        border: 1px solid var(--border);
+        border-left: 4px solid var(--accent);
+        border-radius: 8px;
+        background: var(--accent-soft);
+        padding: 15px 16px;
+      }
+
+      .callout.warning {
+        border-left-color: var(--warn);
+        background: var(--warn-soft);
+      }
+
+      .callout.danger {
+        border-left-color: var(--danger);
+        background: var(--danger-soft);
+      }
+
+      .steps {
+        display: grid;
+        gap: 12px;
+        margin-top: 18px;
+        counter-reset: step;
+      }
+
+      .step {
+        position: relative;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        background: var(--panel);
+        padding: 16px 16px 16px 54px;
+      }
+
+      .step::before {
+        counter-increment: step;
+        content: counter(step);
+        position: absolute;
+        left: 16px;
+        top: 16px;
+        display: grid;
+        width: 26px;
+        height: 26px;
+        place-items: center;
+        border-radius: 50%;
+        background: var(--accent);
+        color: #ffffff;
+        font-size: 0.82rem;
+        font-weight: 700;
+      }
+
+      .step p {
+        margin-top: 6px;
+        color: var(--muted);
+      }
+
+      table {
+        width: 100%;
+        margin-top: 16px;
+        border-collapse: collapse;
+        overflow: hidden;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        background: var(--panel);
+      }
+
+      th,
+      td {
+        border-bottom: 1px solid var(--border);
+        padding: 11px 12px;
+        text-align: left;
+        vertical-align: top;
+      }
+
+      th {
+        background: var(--panel-soft);
+        font-size: 0.86rem;
+      }
+
+      tr:last-child td {
+        border-bottom: 0;
+      }
+
+      details {
+        margin-top: 12px;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        background: var(--panel);
+      }
+
+      summary {
+        cursor: pointer;
+        padding: 14px 16px;
+        font-weight: 700;
+      }
+
+      details > div {
+        border-top: 1px solid var(--border);
+        padding: 0 16px 16px;
+      }
+
+      .phase {
+        margin-top: 18px;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        background: var(--panel);
+        padding: 18px;
+      }
+
+      .phase h3 {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin-top: 0;
+      }
+
+      .phase-number {
+        display: inline-grid;
+        min-width: 30px;
+        height: 30px;
+        place-items: center;
+        border-radius: 50%;
+        background: var(--accent);
+        color: #ffffff;
+        font-size: 0.86rem;
+      }
+
+      .footer-note {
+        margin-top: 28px;
+        color: var(--muted);
+        font-size: 0.92rem;
+      }
+
+      @media (max-width: 820px) {
+        main {
+          width: min(100% - 22px, 1120px);
+          padding-top: 28px;
+        }
+
+        .toc,
+        .grid {
+          grid-template-columns: 1fr;
+        }
+
+        table {
+          display: block;
+          overflow-x: auto;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>
+        <p class="eyebrow">KamiCode product and implementation plan</p>
+        <h1>Persistent Remote Runtimes for VPS-Backed Agent Work</h1>
+        <p class="lede">
+          This plan defines the target experience where a user can connect a VPS from the local
+          KamiCode GUI, let KamiCode provision itself remotely, select that runtime from the
+          composer, and keep agents running after the local PC is closed.
+        </p>
+        <div class="meta" aria-label="Plan metadata">
+          <span class="pill">Primary user: desktop KamiCode user</span>
+          <span class="pill">Runtime target: Linux VPS over SSH</span>
+          <span class="pill">Core promise: survives local PC shutdown</span>
+          <span class="pill">Project memory path: .camie/project-memory.md</span>
+        </div>
+      </header>
+
+      <nav class="toc" aria-label="Document sections">
+        <a href="#ux">
+          <strong>1. UX Plan</strong>
+          <span>The user-facing flow, product behavior, states, and guardrails.</span>
+        </a>
+        <a href="#build">
+          <strong>2. Build Plan</strong>
+          <span>Exact implementation slices, data model, APIs, provisioning, and tests.</span>
+        </a>
+      </nav>
+
+      <section id="ux">
+        <p class="eyebrow">Section 1</p>
+        <h2>UX Plan</h2>
+        <p class="section-intro">
+          The remote runtime should feel like a normal place to run work, not like a network
+          debugging project. The user gives KamiCode VPS access once. KamiCode handles install,
+          remote service management, connection setup, provider/profile migration where safe, and
+          project porting when the runtime is first used.
+        </p>
+
+        <div class="callout">
+          <h3>Product promise</h3>
+          <p>
+            Connect a VPS, choose it from the composer, and let agents keep working there even if
+            this computer closes.
+          </p>
+          <p>
+            This promise only holds when the VPS owns the running KamiCode service and reachable
+            endpoint. A local desktop SSH tunnel can be used for setup, but it cannot be the final
+            access path.
+          </p>
+        </div>
+
+        <h3>Primary User Journey</h3>
+        <div class="steps">
+          <div class="step">
+            <h4>Open Connections</h4>
+            <p>
+              User opens <code>Settings -> Connections</code> and selects
+              <code>Add remote runtime</code>.
+            </p>
+          </div>
+          <div class="step">
+            <h4>Choose VPS over SSH</h4>
+            <p>
+              User selects a runtime type named <code>VPS over SSH</code>. The screen explains that
+              SSH is used to provision the host, but the resulting runtime runs independently on
+              the VPS.
+            </p>
+          </div>
+          <div class="step">
+            <h4>Enter SSH credentials</h4>
+            <p>
+              User enters host, port, username, and either password or private key. Passwords are
+              used for this setup attempt unless the user explicitly saves a credential.
+            </p>
+          </div>
+          <div class="step">
+            <h4>Preflight and install</h4>
+            <p>
+              KamiCode checks OS, CPU architecture, disk space, shell, <code>git</code>,
+              <code>curl</code>, Node availability, service support, and network requirements. It
+              then installs or updates the remote runtime.
+            </p>
+          </div>
+          <div class="step">
+            <h4>Configure persistent access</h4>
+            <p>
+              KamiCode creates a VPS-owned reachable endpoint using a managed relay or tunnel. The
+              connection must keep working after the desktop shuts down.
+            </p>
+          </div>
+          <div class="step">
+            <h4>Sync provider profiles</h4>
+            <p>
+              KamiCode offers provider profile sync. Safe settings are synced by default. Secrets
+              and auth folders are opt-in and validated after transfer. Providers that cannot be
+              moved cleanly show <code>Needs login on VPS</code>.
+            </p>
+          </div>
+          <div class="step">
+            <h4>Use runtime from composer</h4>
+            <p>
+              The runtime appears in the composer checkout/runtime selector next to
+              <code>Local checkout</code>. User selects it and sends a message.
+            </p>
+          </div>
+          <div class="step">
+            <h4>Automatic project porting</h4>
+            <p>
+              If the selected project has never run on that VPS, KamiCode prepares a remote checkout
+              first, including source code, current branch state, dirty changes, AGENTS/instructions,
+              and <code>.camie/project-memory.md</code>.
+            </p>
+          </div>
+          <div class="step">
+            <h4>Agent continues remotely</h4>
+            <p>
+              The agent session runs on the VPS. Closing the local PC disconnects the client, not
+              the runtime.
+            </p>
+          </div>
+        </div>
+
+        <h3>Connection Wizard Screens</h3>
+        <div class="grid">
+          <div class="card">
+            <h4>1. Runtime Type</h4>
+            <p>
+              Options: <code>Local backend</code>, <code>Pair existing backend</code>,
+              <code>VPS over SSH</code>. This plan implements the third as a persistent runtime,
+              not a temporary SSH tunnel.
+            </p>
+          </div>
+          <div class="card">
+            <h4>2. SSH Access</h4>
+            <p>
+              Fields: host, username, port, password, private key, passphrase, label. Include
+              discovered SSH config hosts, but always merge typed fields into selected hosts.
+            </p>
+          </div>
+          <div class="card">
+            <h4>3. Preflight</h4>
+            <p>
+              Show checks as rows: reachable, Linux, arch, disk, writable home, shell, git, curl,
+              Node, service manager, network endpoint, provider profile compatibility.
+            </p>
+          </div>
+          <div class="card">
+            <h4>4. Installation</h4>
+            <p>
+              Show a log-style progress surface with bounded, named stages. Keep raw logs behind
+              <code>View details</code>.
+            </p>
+          </div>
+          <div class="card">
+            <h4>5. Provider Profiles</h4>
+            <p>
+              Let the user choose which profiles to transfer. Default to settings and model
+              preferences. Require explicit opt-in for auth folders and tokens.
+            </p>
+          </div>
+          <div class="card">
+            <h4>6. Finish</h4>
+            <p>
+              Show runtime label, endpoint, health, installed version, provider status, and a
+              primary action: <code>Use in composer</code>.
+            </p>
+          </div>
+        </div>
+
+        <h3>Runtime Card States</h3>
+        <table aria-label="Runtime card states">
+          <thead>
+            <tr>
+              <th>State</th>
+              <th>Meaning</th>
+              <th>Primary action</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Provisioning</td>
+              <td>SSH connected; installation or endpoint setup is running.</td>
+              <td>View progress, cancel.</td>
+            </tr>
+            <tr>
+              <td>Ready</td>
+              <td>Runtime is paired, reachable, healthy, and usable from the composer.</td>
+              <td>Use in composer.</td>
+            </tr>
+            <tr>
+              <td>Needs Attention</td>
+              <td>Runtime works, but one or more providers need login or a project needs sync.</td>
+              <td>Review provider status.</td>
+            </tr>
+            <tr>
+              <td>Offline</td>
+              <td>Saved runtime cannot be reached through its VPS-owned endpoint.</td>
+              <td>Reconnect, repair.</td>
+            </tr>
+            <tr>
+              <td>Update Available</td>
+              <td>Remote KamiCode version differs from local desktop or selected channel.</td>
+              <td>Review and update remote runtime.</td>
+            </tr>
+            <tr>
+              <td>Broken Setup</td>
+              <td>Preflight or service checks failed.</td>
+              <td>Auto repair, view logs, remove.</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h3>Remote Update UX</h3>
+        <p class="section-intro">
+          The VPS runtime needs to keep up with KamiCode releases without requiring the user to SSH
+          in manually. Updates should be visible, reversible, and tied to the runtime's selected
+          channel.
+        </p>
+        <div class="grid">
+          <div class="card">
+            <h4>Channel choice</h4>
+            <p>
+              Each runtime has an update channel: <code>latest</code>, <code>nightly</code>, or
+              <code>pin current version</code>. Default to the same channel as the desktop unless
+              the user overrides it.
+            </p>
+          </div>
+          <div class="card">
+            <h4>Update prompts</h4>
+            <p>
+              Runtime cards show <code>Update available</code> with current version, target version,
+              release channel, and whether the update is required for compatibility.
+            </p>
+          </div>
+          <div class="card">
+            <h4>Automatic policy</h4>
+            <p>
+              Let users choose <code>Manual</code>, <code>Auto-update when idle</code>, or
+              <code>Match desktop channel</code>. Never interrupt an active agent turn unless the
+              update is explicitly forced.
+            </p>
+          </div>
+          <div class="card">
+            <h4>Rollback</h4>
+            <p>
+              Keep the previous remote runner package/version and service config. If health checks
+              fail after update, rollback automatically and mark the runtime as needing attention.
+            </p>
+          </div>
+        </div>
+        <details>
+          <summary>Update states users should see</summary>
+          <div>
+            <ul>
+              <li><code>Up to date</code>: remote version matches selected channel target.</li>
+              <li><code>Update available</code>: update is optional and can be scheduled.</li>
+              <li><code>Update required</code>: local client and remote server protocol versions are incompatible.</li>
+              <li><code>Updating</code>: service is installing the new runner and will restart when idle.</li>
+              <li><code>Rollback complete</code>: update failed, previous version is running again.</li>
+              <li><code>Update failed</code>: service could not install or restart; show logs and repair.</li>
+            </ul>
+          </div>
+        </details>
+
+        <h3>Composer Runtime Selector</h3>
+        <p class="section-intro">
+          The composer should make execution location visible every time a user starts or continues
+          work. If the current UI already has a local checkout dropdown, the persistent VPS runtime
+          should appear in that same control.
+        </p>
+        <table aria-label="Composer runtime behavior">
+          <thead>
+            <tr>
+              <th>Selection</th>
+              <th>Meaning</th>
+              <th>Before send</th>
+              <th>After send</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>Local checkout</code></td>
+              <td>Run agent on this machine against the local project.</td>
+              <td>No remote setup.</td>
+              <td>Existing local behavior.</td>
+            </tr>
+            <tr>
+              <td><code>VPS: Production Box</code></td>
+              <td>Run agent on the remote VPS runtime.</td>
+              <td>Check runtime health and project-port mapping.</td>
+              <td>Remote thread starts on the VPS and streams back to the local UI.</td>
+            </tr>
+            <tr>
+              <td><code>VPS: Production Box - first use</code></td>
+              <td>Runtime exists, but project has not been initialized there.</td>
+              <td>Run project porting flow before dispatching the first turn.</td>
+              <td>Save project mapping and start the remote turn.</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h3>Project Porting UX</h3>
+        <div class="callout">
+          <h4>Trigger</h4>
+          <p>
+            The first time a user sends a message with a remote runtime selected for a local
+            project, KamiCode runs <code>Prepare remote checkout</code> before starting the agent.
+          </p>
+        </div>
+        <details open>
+          <summary>What the user should see during project porting</summary>
+          <div>
+            <ol>
+              <li>Detect project state: git repo, branch, HEAD SHA, dirty files, untracked files.</li>
+              <li>Show a compact progress row above the composer: <code>Preparing remote checkout...</code></li>
+              <li>Create or update remote project directory under <code>~/kamicode-projects/</code>.</li>
+              <li>Clone or sync source files.</li>
+              <li>Copy required context: <code>AGENTS.md</code>, selected instructions, and <code>.camie/project-memory.md</code>.</li>
+              <li>Apply local dirty changes as a patch or file overlay.</li>
+              <li>Register the remote project with the remote KamiCode backend.</li>
+              <li>Start the user message after porting completes.</li>
+            </ol>
+          </div>
+        </details>
+        <details>
+          <summary>Conflict and safety UX</summary>
+          <div>
+            <ul>
+              <li>If remote checkout has uncommitted changes, pause and show <code>Remote checkout has local changes</code>.</li>
+              <li>If local project has secret files that match denylisted patterns, exclude them and show <code>Secrets were not copied</code>.</li>
+              <li>If the repo has no remote, use archive sync and label the mapping as <code>File sync</code>.</li>
+              <li>If the project is very large, show an estimate and allow cancel before upload.</li>
+              <li>If dependencies are missing remotely, let the agent or project setup script handle them after checkout exists.</li>
+            </ul>
+          </div>
+        </details>
+
+        <h3>Provider Profile UX</h3>
+        <p class="section-intro">
+          The desired outcome is "do not make me reauthenticate if avoidable." The safe product
+          design is "try profile migration, verify it, and clearly fall back to reauth when a
+          provider refuses moved credentials."
+        </p>
+        <table aria-label="Provider profile transfer behavior">
+          <thead>
+            <tr>
+              <th>Item</th>
+              <th>Default</th>
+              <th>Reason</th>
+              <th>User copy</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>KamiCode provider settings</td>
+              <td>Copy</td>
+              <td>Needed for model/profile parity.</td>
+              <td>Copied from local settings.</td>
+            </tr>
+            <tr>
+              <td>Provider auth folders such as <code>.codex</code></td>
+              <td>Ask</td>
+              <td>May contain sensitive tokens and machine-bound auth.</td>
+              <td>Copy encrypted over SSH and verify. You may still need to sign in again.</td>
+            </tr>
+            <tr>
+              <td>GitHub CLI auth</td>
+              <td>Ask</td>
+              <td>Useful for PRs, but highly sensitive.</td>
+              <td>Copy GitHub CLI auth to let remote agents push branches and open PRs.</td>
+            </tr>
+            <tr>
+              <td><code>.env</code> files and private keys</td>
+              <td>Do not copy</td>
+              <td>Project secrets should not move silently.</td>
+              <td>Secrets are excluded unless you explicitly add them.</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <div class="callout warning">
+          <h3>Important guardrail</h3>
+          <p>
+            Copying the entire <code>.codex</code> or other provider home can work in some cases,
+            but it must be opt-in and verified. Some providers bind credentials to the local
+            machine, OS keychain, browser session, or device authorization. The UX must expect
+            partial success.
+          </p>
+        </div>
+
+        <h3>What Should Not Happen</h3>
+        <div class="grid">
+          <div class="card">
+            <h4>No hidden dependency on the PC</h4>
+            <p>
+              If the runtime says <code>Ready</code>, closing the local PC must not kill access or
+              running agent work.
+            </p>
+          </div>
+          <div class="card">
+            <h4>No blind secret transfer</h4>
+            <p>
+              Raw <code>.env</code>, private keys, provider tokens, and auth folders require clear
+              consent and should never pass through hosted collaboration services.
+            </p>
+          </div>
+          <div class="card">
+            <h4>No silent project divergence</h4>
+            <p>
+              When local and remote checkouts differ, show the difference and require a choice
+              before overwriting either side.
+            </p>
+          </div>
+          <div class="card">
+            <h4>No fake readiness</h4>
+            <p>
+              A runtime is ready only after service, endpoint, auth, and remote API probes succeed.
+            </p>
+          </div>
+        </div>
+
+        <h3>UX Acceptance Criteria</h3>
+        <ul>
+          <li>A user can add a Linux VPS using only the desktop Connections page.</li>
+          <li>The resulting runtime remains reachable after the desktop app is closed.</li>
+          <li>The runtime appears in the composer runtime/checkout selector.</li>
+          <li>First remote use of a local project initializes a remote checkout automatically.</li>
+          <li><code>.camie/project-memory.md</code> is included in project porting.</li>
+          <li>The UI distinguishes provider states: ready, copied, skipped, unavailable, needs login.</li>
+          <li>Secrets are never copied silently.</li>
+          <li>Failure states offer retry, repair, view logs, and remove runtime.</li>
+        </ul>
+      </section>
+
+      <section id="build">
+        <p class="eyebrow">Section 2</p>
+        <h2>How to Build It Exactly</h2>
+        <p class="section-intro">
+          This section maps the UX into implementation work inside the current repo shape. It keeps
+          SSH launch, saved environments, provider settings, shared-project runtime concepts, and
+          project memory aligned instead of introducing a separate remote-control system.
+        </p>
+
+        <div class="callout">
+          <h3>Architecture decision</h3>
+          <p>
+            The remote VPS is an execution environment. The desktop is a provisioning client and
+            reconnecting UI. SSH is a setup channel, not the long-term transport.
+          </p>
+        </div>
+
+        <h3>Existing Code to Reuse</h3>
+        <table aria-label="Existing code map">
+          <thead>
+            <tr>
+              <th>Area</th>
+              <th>Current surface</th>
+              <th>Reuse</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Connections UI</td>
+              <td><code>apps/web/src/components/settings/ConnectionsSettings.tsx</code></td>
+              <td>Extend add-environment flow into persistent remote runtime wizard.</td>
+            </tr>
+            <tr>
+              <td>SSH bootstrap</td>
+              <td><code>packages/ssh/src/tunnel.ts</code></td>
+              <td>Reuse target parsing, auth prompting, Node fallback, remote runner install.</td>
+            </tr>
+            <tr>
+              <td>Saved environments</td>
+              <td><code>apps/web/src/environments/runtime</code> and client runtime stores</td>
+              <td>Save remote runtime connection records and reconnect state.</td>
+            </tr>
+            <tr>
+              <td>Provider settings</td>
+              <td><code>packages/contracts/src/settings.ts</code></td>
+              <td>Sync provider instances/settings to remote runtime with explicit secret handling.</td>
+            </tr>
+            <tr>
+              <td>Shared runtime concepts</td>
+              <td><code>packages/contracts/src/sharedProject.ts</code></td>
+              <td>Reuse or align type names for <code>ssh-vps</code> runtime records.</td>
+            </tr>
+            <tr>
+              <td>Project CLI</td>
+              <td><code>apps/server/src/cli/project.ts</code></td>
+              <td>Register remote checkout after porting via existing project create path.</td>
+            </tr>
+            <tr>
+              <td>Update channel resolution</td>
+              <td><code>packages/ssh/src/command.ts</code> and desktop update settings</td>
+              <td>
+                Reuse release-channel logic so remote runtime installs follow
+                <code>t3@latest</code>, <code>t3@nightly</code>, or a pinned release version.
+              </td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h3>New Concepts</h3>
+        <div class="grid">
+          <div class="card">
+            <h4>PersistentRemoteRuntime</h4>
+            <p>
+              A saved remote execution target with SSH provisioning metadata, remote service
+              metadata, endpoint metadata, provider health, and lifecycle state.
+            </p>
+          </div>
+          <div class="card">
+            <h4>RemoteProjectPort</h4>
+            <p>
+              A mapping between a local project and its remote checkout on a specific runtime. This
+              prevents repeated first-use sync and tracks divergence.
+            </p>
+          </div>
+          <div class="card">
+            <h4>ProviderProfileTransfer</h4>
+            <p>
+              A structured transfer and verification flow for provider settings, homes, auth
+              folders, and reauth requirements.
+            </p>
+          </div>
+          <div class="card">
+            <h4>RemoteOwnedEndpoint</h4>
+            <p>
+              The URL or relay identifier that reaches the VPS without depending on the local
+              desktop or its SSH tunnel.
+            </p>
+          </div>
+        </div>
+
+        <details open>
+          <summary>Data model additions</summary>
+          <div>
+            <p>
+              Add schemas in <code>packages/contracts</code>. Keep contracts schema-only. Runtime
+              logic belongs in server, desktop, shared, or ssh packages.
+            </p>
+            <pre><code>PersistentRemoteRuntime {
+  id: EnvironmentId | RemoteRuntimeId
+  label: string
+  type: "ssh-vps"
+  sshTarget: {
+    host: string
+    port: number
+    username: string
+    alias?: string
+  }
+  credentialRef?: string
+  install: {
+    channel: "stable" | "nightly" | "dev"
+    packageSpec: string
+    installedVersion?: string
+    installRoot: string
+    serviceName: string
+    updatePolicy: "manual" | "auto-when-idle" | "match-desktop"
+    previousVersion?: string
+    lastUpdateCheckAt?: string
+    lastUpdateResult?: "available" | "none" | "failed" | "rolled-back"
+  }
+  endpoint: {
+    kind: "kamicode-connect" | "tailscale-serve" | "https" | "ssh-forward"
+    httpBaseUrl: string
+    wsBaseUrl: string
+    survivesLocalShutdown: boolean
+  }
+  health: "provisioning" | "ready" | "needs-attention" | "offline" | "failed"
+  providerHealth: Record&lt;ProviderInstanceId, ProviderRemoteHealth&gt;
+  createdAt: string
+  updatedAt: string
+  lastSeenAt?: string
+}</code></pre>
+            <pre><code>RemoteProjectPort {
+  id: string
+  localEnvironmentId: EnvironmentId
+  localProjectId: ProjectId
+  remoteRuntimeId: string
+  remoteEnvironmentId: EnvironmentId
+  remoteProjectId?: ProjectId
+  localRoot: string
+  remoteRoot: string
+  repoRemote?: string
+  branch?: string
+  localHeadSha?: string
+  remoteHeadSha?: string
+  dirtyState: "clean" | "dirty-applied" | "dirty-blocked"
+  syncMode: "git-clone" | "archive-sync" | "file-overlay"
+  status: "preparing" | "ready" | "blocked" | "failed"
+  lastPreparedAt?: string
+}</code></pre>
+          </div>
+        </details>
+
+        <details>
+          <summary>Desktop IPC and backend APIs</summary>
+          <div>
+            <p>
+              Add desktop IPC methods rather than placing SSH/provisioning in the renderer. The
+              renderer owns wizard state. Desktop main owns local process and SSH operations.
+            </p>
+            <ul>
+              <li><code>desktop:remote-runtime.preflight(target)</code></li>
+              <li><code>desktop:remote-runtime.provision(input)</code></li>
+              <li><code>desktop:remote-runtime.repair(runtimeId)</code></li>
+              <li><code>desktop:remote-runtime.remove(runtimeId, options)</code></li>
+              <li><code>desktop:remote-runtime.sync-provider-profiles(runtimeId, selection)</code></li>
+              <li><code>desktop:remote-runtime.prepare-project(runtimeId, localProjectRef)</code></li>
+              <li><code>desktop:remote-runtime.read-logs(runtimeId)</code></li>
+            </ul>
+            <p>
+              Add server or local API endpoints only for operations that need the current primary
+              backend's project/settings state. Do not expose raw SSH credentials to the renderer
+              after submission.
+            </p>
+          </div>
+        </details>
+
+        <h3>Provisioning Pipeline</h3>
+        <div class="phase">
+          <h3><span class="phase-number">1</span> Preflight</h3>
+          <ul>
+            <li>Resolve SSH target using existing <code>packages/ssh</code> helpers.</li>
+            <li>Connect with password/key and verify non-interactive <code>sh</code>.</li>
+            <li>Detect OS and architecture. MVP supports Linux x64 and arm64.</li>
+            <li>Check home directory write access and available disk.</li>
+            <li>Check or install <code>git</code> and <code>curl</code> through a bounded allowlist.</li>
+            <li>Check Node using existing remote Node fallback under <code>~/.t3/node</code>.</li>
+            <li>Check service manager: prefer user systemd, fallback to managed background process with a warning.</li>
+          </ul>
+        </div>
+
+        <div class="phase">
+          <h3><span class="phase-number">2</span> Install KamiCode Runtime</h3>
+          <ul>
+            <li>Create <code>~/.kamicode/runtime</code> for installer state.</li>
+            <li>Reuse <code>~/.t3/runner/t3-cli</code> or align it under a new stable path.</li>
+            <li>Install package matching the selected update channel.</li>
+            <li>Run <code>t3 --version</code> remotely and save installed version.</li>
+            <li>Write a stable runner script owned by the SSH user with mode <code>700</code>.</li>
+            <li>Write an update metadata file with channel, installed version, previous version, and package spec.</li>
+          </ul>
+        </div>
+
+        <div class="phase">
+          <h3><span class="phase-number">3</span> Create Persistent Service</h3>
+          <p class="section-intro">
+            The service must start without a GUI and keep the backend alive after SSH disconnects.
+          </p>
+          <pre><code>[Unit]
+Description=KamiCode remote runtime
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Environment=T3CODE_NO_BROWSER=1
+ExecStart=%h/.kamicode/runtime/run-t3.sh serve --base-dir %h/.t3
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target</code></pre>
+          <ul>
+            <li>Use <code>systemctl --user daemon-reload</code> and <code>enable --now</code>.</li>
+            <li>Run <code>loginctl enable-linger &lt;user&gt;</code> only when available and permitted.</li>
+            <li>If user systemd is unavailable, fall back to <code>nohup</code> with a clear "less durable" warning.</li>
+          </ul>
+        </div>
+
+        <div class="phase">
+          <h3><span class="phase-number">4</span> Establish Remote-Owned Endpoint</h3>
+          <p class="section-intro">
+            This is the key difference from the current desktop-managed SSH tunnel. The endpoint has
+            to survive local PC shutdown.
+          </p>
+          <ol>
+            <li>Preferred: KamiCode Connect relay, using a headless/device-flow friendly link path.</li>
+            <li>Supported alternative: Tailscale Serve if user has Tailscale configured on the VPS.</li>
+            <li>Advanced alternative: user-provided HTTPS/WSS reverse proxy endpoint.</li>
+            <li>Fallback only: SSH port forward, marked as <code>Does not survive PC shutdown</code>.</li>
+          </ol>
+          <div class="callout warning">
+            <p>
+              If KamiCode Connect currently requires browser OAuth on the remote host, add a
+              desktop-assisted headless link flow before calling this feature complete. The desktop
+              should authorize the relay, then the VPS should receive a scoped remote-runtime link
+              credential over SSH.
+            </p>
+          </div>
+        </div>
+
+        <div class="phase">
+          <h3><span class="phase-number">5</span> Pair and Save Runtime</h3>
+          <ul>
+            <li>Run remote pairing command once the service is reachable.</li>
+            <li>Exchange pairing credential from the desktop.</li>
+            <li>Save environment/runtime record with endpoint metadata.</li>
+            <li>Probe server config, version, provider availability, and auth scopes.</li>
+            <li>Mark runtime <code>Ready</code> only after all required probes pass.</li>
+          </ul>
+        </div>
+
+        <div class="phase">
+          <h3><span class="phase-number">6</span> Remote Runtime Update Lifecycle</h3>
+          <p class="section-intro">
+            Updates should be performed by the desktop orchestrating SSH commands, or by a small
+            remote updater command invoked through the running runtime. The remote service should
+            not depend on the desktop staying online after the update is scheduled.
+          </p>
+          <ol>
+            <li>Resolve target package from runtime channel: <code>t3@latest</code>, <code>t3@nightly</code>, or exact <code>t3@x.y.z</code>.</li>
+            <li>Ask the remote runtime for current version, active turns, queued turns, service status, and previous version.</li>
+            <li>If active work exists and policy is not forced, mark update as pending until idle.</li>
+            <li>Install the new package into a versioned directory or update the runner cache atomically.</li>
+            <li>Write new runner metadata, keeping the previous package spec and runner path.</li>
+            <li>Restart the user service with <code>systemctl --user restart</code> or the configured fallback supervisor.</li>
+            <li>Run health probes: HTTP, WebSocket, auth/session, server config, provider registry, and version.</li>
+            <li>If probes pass, mark update complete and clear pending state.</li>
+            <li>If probes fail, restore previous runner metadata, restart again, and mark rollback complete.</li>
+          </ol>
+          <div class="callout warning">
+            <p>
+              Protocol compatibility must be explicit. If the local desktop can talk to older remote
+              servers, allow deferred updates. If schemas or RPC methods are incompatible, block new
+              turns on that runtime and show <code>Update required</code>.
+            </p>
+          </div>
+        </div>
+
+        <h3>Project Porting Implementation</h3>
+        <details open>
+          <summary>Git-aware path</summary>
+          <div>
+            <ol>
+              <li>Local server resolves project: workspace root, repository identity, remote URL, branch, HEAD SHA, dirty state.</li>
+              <li>Desktop asks remote runtime for existing project mapping.</li>
+              <li>If missing, remote creates directory under <code>~/kamicode-projects/&lt;slug&gt;</code>.</li>
+              <li>Remote runs <code>git clone</code> using HTTPS or SSH URL depending on available auth.</li>
+              <li>Remote checks out matching branch and attempts to reset to matching HEAD SHA.</li>
+              <li>Local generates a patch for tracked dirty changes.</li>
+              <li>Local packages selected untracked files, excluding denylisted files.</li>
+              <li>Remote applies patch and overlays allowed untracked files.</li>
+              <li>Remote registers project through its own server/project API.</li>
+              <li>Save <code>RemoteProjectPort</code> mapping locally and remotely.</li>
+            </ol>
+          </div>
+        </details>
+
+        <details>
+          <summary>Archive sync fallback</summary>
+          <div>
+            <p>
+              Use this when the local project is not a git repo or has no usable remote. Implement
+              packaging in Node so Windows desktop works without <code>rsync</code>.
+            </p>
+            <ul>
+              <li>Generate a manifest of files to copy.</li>
+              <li>Default include: source files, config, docs, package metadata, AGENTS/instructions, <code>.camie/</code>.</li>
+              <li>Default exclude: <code>node_modules</code>, build output, caches, <code>.git</code>, logs, screenshots, raw env files, private keys.</li>
+              <li>Show excluded secrets summary before first copy.</li>
+              <li>Stream tar/zip over SSH stdin to a remote unpack script.</li>
+              <li>Use checksums to avoid reuploading unchanged files on later syncs.</li>
+            </ul>
+          </div>
+        </details>
+
+        <details>
+          <summary>Required context files</summary>
+          <div>
+            <ul>
+              <li><code>.camie/project-memory.md</code> must be copied when present.</li>
+              <li><code>AGENTS.md</code>, <code>CLAUDE.md</code>, and other known instruction files should be copied when present.</li>
+              <li>Project package metadata and scripts must be copied so remote agents can infer setup.</li>
+              <li>Environment variable names may be copied, but secret values should not move without explicit consent.</li>
+            </ul>
+          </div>
+        </details>
+
+        <h3>Provider Profile Sync Implementation</h3>
+        <details open>
+          <summary>Profile discovery</summary>
+          <div>
+            <p>
+              Add provider-specific profile descriptors. Each descriptor returns settings paths,
+              optional auth paths, health probe commands, and transfer risk.
+            </p>
+            <pre><code>ProviderProfileDescriptor {
+  providerId: "codex" | "claude" | "opencode" | "cursor" | "grok" | "github"
+  displayName: string
+  settingsPaths: string[]
+  authPaths: string[]
+  defaultTransfer: "settings-only" | "ask" | "never"
+  probeCommand: string[]
+  redactedPreview: ProfilePreview
+}</code></pre>
+          </div>
+        </details>
+        <details>
+          <summary>Transfer rules</summary>
+          <div>
+            <ul>
+              <li>Settings and provider instance configs can be copied by default.</li>
+              <li>Auth folders require explicit user selection.</li>
+              <li>Never print token file contents in logs.</li>
+              <li>Transfer over SSH only. Do not send provider secrets through hosted collaboration services.</li>
+              <li>After transfer, run remote provider probes and update provider health.</li>
+              <li>If probe fails, mark as <code>Needs login</code> and provide a guided reauth action.</li>
+            </ul>
+          </div>
+        </details>
+
+        <h3>Frontend Work</h3>
+        <table aria-label="Frontend tasks">
+          <thead>
+            <tr>
+              <th>Task</th>
+              <th>Files</th>
+              <th>Behavior</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Remote runtime wizard</td>
+              <td><code>ConnectionsSettings.tsx</code> plus extracted components</td>
+              <td>Step-based setup flow with preflight, install progress, provider sync, and finish screen.</td>
+            </tr>
+            <tr>
+              <td>Runtime cards</td>
+              <td>Connections settings components</td>
+              <td>Show status, endpoint, provider health, version, reconnect, repair, remove.</td>
+            </tr>
+            <tr>
+              <td>Composer selector</td>
+              <td><code>ChatComposer.tsx</code>, draft store, environment runtime store</td>
+              <td>Expose local and remote runtime choices before first send.</td>
+            </tr>
+            <tr>
+              <td>Project porting progress</td>
+              <td>Chat view/composer surfaces</td>
+              <td>Show progress before dispatch, block send on conflicts, resume after success.</td>
+            </tr>
+            <tr>
+              <td>Provider health UI</td>
+              <td>Provider settings and Connections page</td>
+              <td>Show copied/ready/needs login/skipped per provider.</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h3>Backend and Desktop Work</h3>
+        <div class="grid">
+          <div class="card">
+            <h4>Desktop main</h4>
+            <p>
+              Own SSH provisioning, credential prompts, remote scripts, profile transfer, project
+              packaging, and runtime repair. Renderer should never run SSH directly.
+            </p>
+          </div>
+          <div class="card">
+            <h4>Server</h4>
+            <p>
+              Expose project metadata, settings snapshots, provider profile descriptors, and
+              project registration APIs for remote runtime setup.
+            </p>
+          </div>
+          <div class="card">
+            <h4>Contracts</h4>
+            <p>
+              Define schemas for runtime records, provisioning events, project port mappings, and
+              provider transfer status.
+            </p>
+          </div>
+          <div class="card">
+            <h4>SSH package</h4>
+            <p>
+              Extend current launch scripts into idempotent provisioning scripts with service
+              install, endpoint setup, status, logs, repair, and uninstall.
+            </p>
+          </div>
+        </div>
+
+        <h3>Provisioning Event Stream</h3>
+        <p class="section-intro">
+          The renderer should receive structured events, not parse raw logs.
+        </p>
+        <pre><code>RemoteRuntimeProvisioningEvent =
+  | { type: "preflight.started" }
+  | { type: "preflight.check"; check: string; status: "running" | "passed" | "failed"; detail?: string }
+  | { type: "install.started"; packageSpec: string }
+  | { type: "install.progress"; stage: string; detail?: string }
+  | { type: "service.created"; serviceName: string }
+  | { type: "endpoint.created"; endpointKind: string; url: string }
+  | { type: "pairing.created" }
+  | { type: "provider.probed"; providerId: string; status: string }
+  | { type: "completed"; runtimeId: string }
+  | { type: "failed"; stage: string; message: string; repairAvailable: boolean }</code></pre>
+
+        <h3>Testing Plan</h3>
+        <ul>
+          <li>Unit test SSH script builders in <code>packages/ssh</code>.</li>
+          <li>Unit test secret/profile transfer manifest redaction.</li>
+          <li>Unit test project porting manifest excludes and required <code>.camie</code> includes.</li>
+          <li>Browser test Connections wizard happy path with mocked desktop bridge.</li>
+          <li>Browser test provider profile statuses.</li>
+          <li>Browser test composer runtime selector and first-send project porting gate.</li>
+          <li>Integration test remote project add through a fake remote environment API.</li>
+          <li>Manual VPS smoke test: provision runtime, close desktop, reconnect from fresh client, confirm running turn survives.</li>
+        </ul>
+
+        <h3>Implementation Phases</h3>
+        <div class="phase">
+          <h3><span class="phase-number">1</span> Persistent SSH Runtime MVP</h3>
+          <ul>
+            <li>Build wizard shell and provisioning event stream.</li>
+            <li>Install runtime and create user systemd service.</li>
+            <li>Save runtime record with temporary SSH-forward fallback clearly marked as not shutdown-safe.</li>
+            <li>Do not claim final product promise until remote-owned endpoint is implemented.</li>
+          </ul>
+        </div>
+        <div class="phase">
+          <h3><span class="phase-number">2</span> Remote-Owned Endpoint</h3>
+          <ul>
+            <li>Implement or finish desktop-assisted KamiCode Connect linking for VPS runtimes.</li>
+            <li>Make endpoint health part of runtime readiness.</li>
+            <li>Confirm runtime remains reachable after desktop exit.</li>
+          </ul>
+        </div>
+        <div class="phase">
+          <h3><span class="phase-number">3</span> Composer Runtime Selection</h3>
+          <ul>
+            <li>Show persistent remote runtimes next to local checkout.</li>
+            <li>Persist draft runtime choice per project/thread.</li>
+            <li>Route turn creation to selected environment/runtime.</li>
+          </ul>
+        </div>
+        <div class="phase">
+          <h3><span class="phase-number">4</span> Project Porting</h3>
+          <ul>
+            <li>Add <code>RemoteProjectPort</code> mapping.</li>
+            <li>Implement git clone plus dirty patch path.</li>
+            <li>Implement archive sync fallback.</li>
+            <li>Ensure <code>.camie/project-memory.md</code> is included.</li>
+          </ul>
+        </div>
+        <div class="phase">
+          <h3><span class="phase-number">5</span> Provider Profile Sync</h3>
+          <ul>
+            <li>Add provider profile descriptors.</li>
+            <li>Sync safe settings by default.</li>
+            <li>Add opt-in auth folder transfer and remote probes.</li>
+            <li>Build reauth fallback UX.</li>
+          </ul>
+        </div>
+        <div class="phase">
+          <h3><span class="phase-number">6</span> Remote Runtime Updates</h3>
+          <ul>
+            <li>Add update policy and channel controls to runtime cards.</li>
+            <li>Implement update check, install, restart, health probe, and rollback.</li>
+            <li>Block incompatible runtimes from new turns until updated.</li>
+            <li>Keep active turns running by waiting for idle before normal updates.</li>
+          </ul>
+        </div>
+        <div class="phase">
+          <h3><span class="phase-number">7</span> Sync Back and Team Continuation</h3>
+          <ul>
+            <li>Prefer git push/PR for remote changes.</li>
+            <li>Expose remote branch/dirty state in local UI.</li>
+            <li>Integrate with shared project/session snapshot workflows without silently publishing private local threads.</li>
+          </ul>
+        </div>
+
+        <h3>Definition of Done</h3>
+        <ul>
+          <li>Fresh VPS can be provisioned from the GUI with SSH credentials.</li>
+          <li>Remote runtime service restarts after VPS reboot and local desktop shutdown.</li>
+          <li>Remote-owned endpoint works without same-LAN or desktop SSH tunnel dependency.</li>
+          <li>Runtime appears in composer selector.</li>
+          <li>First remote send ports the local project and starts the turn afterward.</li>
+          <li>Provider profile sync reports accurate per-provider status.</li>
+          <li>Remote runtime updates can be checked, installed, restarted, and rolled back from the GUI.</li>
+          <li>Update policy respects active work and waits for idle unless the user forces the update.</li>
+          <li>Project secrets are excluded unless explicitly approved.</li>
+          <li>Automated tests cover wizard, provisioning events, project porting, and selector routing.</li>
+        </ul>
+
+        <div class="callout danger">
+          <h3>Do not ship as complete without this</h3>
+          <p>
+            The final runtime must have a remote-owned endpoint. If the only working path is an SSH
+            tunnel owned by the local desktop process, the feature does not satisfy the core
+            requirement.
+          </p>
+        </div>
+      </section>
+
+      <p class="footer-note">
+        This document intentionally uses "remote runtime" for the machine/session doing execution
+        and "environment" for the backend connection or target app context. Keep those concepts
+        separate during implementation.
+      </p>
+    </main>
+  </body>
+</html>

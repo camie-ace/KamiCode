@@ -7,6 +7,7 @@ import {
   EnvironmentId,
   type EnvironmentApi,
   type MessageId,
+  type OrchestrationEvent,
   type OrchestrationReadModel,
   type ProjectId,
   ProviderDriverKind,
@@ -67,6 +68,7 @@ import { getRouter } from "../router";
 import { deriveLogicalProjectKeyFromSettings } from "../logicalProject";
 import { selectThreadRightPanelState, useRightPanelStore } from "../rightPanelStore";
 import { selectBootstrapCompleteForActiveEnvironment, useStore } from "../store";
+import { resetQueuedMessageUiStoreForTests } from "../queuedMessageUiStore";
 import { terminalSessionManager } from "../terminalSessionState";
 import { useTerminalUiStateStore } from "../terminalUiStateStore";
 import { useUiStateStore } from "../uiStateStore";
@@ -1896,6 +1898,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
     __resetEnvironmentApiOverridesForTests();
     resetSavedEnvironmentRegistryStoreForTests();
     resetSavedEnvironmentRuntimeStoreForTests();
+    resetQueuedMessageUiStoreForTests();
     Reflect.deleteProperty(window, "desktopBridge");
     useComposerDraftStore.setState({
       draftsByThreadKey: {},
@@ -1928,6 +1931,129 @@ describe("ChatView timeline estimator parity (full app)", () => {
   afterEach(() => {
     customWsRpcResolver = null;
     document.body.innerHTML = "";
+  });
+
+  it("keeps queued messages in the Queue UI after leaving and returning before queue ack", async () => {
+    const queuedText = "queued navigation regression message";
+    const snapshot = createSnapshotForTargetUser({
+      targetMessageId: "msg-user-queued-navigation-target" as MessageId,
+      targetText: "busy thread target",
+      sessionStatus: "running",
+    });
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot,
+      resolveRpc: (body) => {
+        if (body._tag === ORCHESTRATION_WS_METHODS.dispatchCommand) {
+          return {
+            sequence: fixture.snapshot.snapshotSequence + 1,
+          };
+        }
+        return undefined;
+      },
+    });
+
+    try {
+      useComposerDraftStore.getState().setPrompt(THREAD_REF, queuedText);
+      await waitForLayout();
+
+      const queueButton = await waitForElement(
+        () => document.querySelector<HTMLButtonElement>('button[aria-label="Queue message"]'),
+        "Unable to find queue button.",
+      );
+      expect(queueButton.disabled).toBe(false);
+      queueButton.click();
+
+      type QueuedTurnStartRequest = {
+        message?: { messageId?: MessageId };
+        createdAt?: string;
+        dispatchPolicy?: string;
+      };
+      let queuedRequest: QueuedTurnStartRequest | undefined;
+      await vi.waitFor(
+        () => {
+          queuedRequest = wsRequests.find(
+            (request) =>
+              request._tag === ORCHESTRATION_WS_METHODS.dispatchCommand &&
+              request.type === "thread.turn.start" &&
+              request.dispatchPolicy === "queue",
+          ) as QueuedTurnStartRequest | undefined;
+          expect(queuedRequest).toBeDefined();
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+
+      const queuedRequestSnapshot = queuedRequest;
+      if (!queuedRequestSnapshot?.message?.messageId) {
+        throw new Error("Queued turn request did not include a message id.");
+      }
+      const queuedMessageId = queuedRequestSnapshot.message.messageId;
+      const createdAt = queuedRequestSnapshot.createdAt ?? isoAt(2_000);
+      useStore.getState().applyOrchestrationEvent(
+        {
+          sequence: fixture.snapshot.snapshotSequence + 2,
+          eventId: EventId.make("event-queued-navigation-message-sent"),
+          aggregateKind: "thread",
+          aggregateId: THREAD_ID,
+          occurredAt: createdAt,
+          commandId: null,
+          causationEventId: null,
+          correlationId: null,
+          metadata: {},
+          type: "thread.message-sent",
+          payload: {
+            threadId: THREAD_ID,
+            turnId: null,
+            messageId: queuedMessageId,
+            role: "user",
+            text: queuedText,
+            streaming: false,
+            createdAt,
+            updatedAt: createdAt,
+          },
+        } as OrchestrationEvent,
+        LOCAL_ENVIRONMENT_ID,
+      );
+
+      const timelineContainsQueuedText = () => {
+        const root = document.querySelector<HTMLElement>("[data-timeline-root]");
+        return root?.textContent?.includes(queuedText) ?? false;
+      };
+
+      await vi.waitFor(
+        () => {
+          expect(document.body.textContent).toContain("Queued");
+          expect(document.body.textContent).toContain(queuedText);
+          expect(timelineContainsQueuedText()).toBe(false);
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+
+      await mounted.router.navigate({ to: "/settings/profile" });
+      await waitForURL(
+        mounted.router,
+        (path) => path === "/settings/profile",
+        "Route should change to settings.",
+      );
+
+      await mounted.router.navigate({ to: serverThreadPath(THREAD_ID) });
+      await waitForURL(
+        mounted.router,
+        (path) => path === serverThreadPath(THREAD_ID),
+        "Route should return to the queued thread.",
+      );
+
+      await vi.waitFor(
+        () => {
+          expect(document.body.textContent).toContain("Queued");
+          expect(document.body.textContent).toContain(queuedText);
+          expect(timelineContainsQueuedText()).toBe(false);
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+    } finally {
+      await mounted.cleanup();
+    }
   });
 
   it("renders locked single-environment mobile run context as a static workspace label", async () => {
@@ -3078,6 +3204,55 @@ describe("ChatView timeline estimator parity (full app)", () => {
           expect(document.body.textContent).toContain(
             "The dashboard loaded and the expected controls were visible.",
           );
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("keeps Tests active when opened over an incomplete plan panel", async () => {
+    const mounted = await mountChatView({
+      viewport: WIDE_FOOTER_VIEWPORT,
+      snapshot: createSnapshotWithActivePlan(),
+    });
+
+    try {
+      await vi.waitFor(
+        () => {
+          expect(
+            selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, THREAD_REF),
+          ).toEqual({
+            isOpen: true,
+            activeSurfaceId: "plan",
+            surfaces: [{ id: "plan", kind: "plan" }],
+          });
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+
+      const testRunsButton = await waitForElement(
+        () =>
+          document.querySelector<HTMLButtonElement>('button[aria-label="Open test runs panel"]'),
+        "Unable to find Test runs panel button.",
+      );
+      testRunsButton.click();
+      await waitForLayout();
+
+      await vi.waitFor(
+        () => {
+          expect(
+            selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, THREAD_REF),
+          ).toEqual({
+            isOpen: true,
+            activeSurfaceId: "tests",
+            surfaces: [
+              { id: "plan", kind: "plan" },
+              { id: "tests", kind: "tests" },
+            ],
+          });
+          expect(document.body.textContent).toContain("Tests");
         },
         { timeout: 8_000, interval: 16 },
       );
