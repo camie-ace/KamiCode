@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 
+import { describe, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
-import { describe, it } from "vite-plus/test";
 import { ThreadId } from "@t3tools/contracts";
 import * as CodexErrors from "effect-codex-app-server/errors";
 import * as CodexRpc from "effect-codex-app-server/rpc";
@@ -367,29 +367,29 @@ describe("isRecoverableThreadResumeError", () => {
 });
 
 describe("openCodexThread", () => {
-  it("uses raw thread/start so dynamic tool specs are preserved", async () => {
-    const calls: Array<{ method: "thread/start"; payload: unknown }> = [];
-    const started = makeThreadOpenResponse("fresh-thread");
-    const client = {
-      raw: {
-        request: (method: "thread/start" | "thread/resume", payload: unknown) => {
-          if (method === "thread/start") {
-            calls.push({ method, payload });
-          }
-          return Effect.succeed(started as unknown);
+  it.effect("uses raw thread/start so dynamic tool specs are preserved", () =>
+    Effect.gen(function* () {
+      const calls: Array<{ method: "thread/start"; payload: unknown }> = [];
+      const started = makeThreadOpenResponse("fresh-thread");
+      const client = {
+        raw: {
+          request: (method: "thread/start" | "thread/resume", payload: unknown) => {
+            if (method === "thread/start") {
+              calls.push({ method, payload });
+            }
+            return Effect.succeed(started as unknown);
+          },
         },
-      },
-      request: <M extends "thread/start" | "thread/resume">(
-        _method: M,
-        _payload: CodexRpc.ClientRequestParamsByMethod[M],
-      ) =>
-        Effect.fail(
-          CodexErrors.CodexAppServerRequestError.internalError("typed request was not expected"),
-        ),
-    };
+        request: <M extends "thread/start" | "thread/resume">(
+          _method: M,
+          _payload: CodexRpc.ClientRequestParamsByMethod[M],
+        ) =>
+          Effect.fail(
+            CodexErrors.CodexAppServerRequestError.internalError("typed request was not expected"),
+          ),
+      };
 
-    const opened = await Effect.runPromise(
-      openCodexThread({
+      const opened = yield* openCodexThread({
         client,
         threadId: ThreadId.make("thread-1"),
         runtimeMode: "full-access",
@@ -397,43 +397,43 @@ describe("openCodexThread", () => {
         requestedModel: "gpt-5.3-codex",
         serviceTier: undefined,
         resumeThreadId: undefined,
-      }),
-    );
+      });
 
-    assert.equal(opened.thread.id, "fresh-thread");
-    assert.equal(calls.length, 1);
-    assert.deepStrictEqual(calls[0]?.payload, {
-      cwd: "/tmp/project",
-      approvalPolicy: "never",
-      sandbox: "danger-full-access",
-      dynamicTools: [KAMI_TEST_HARNESS_DYNAMIC_TOOL_SPEC],
-      model: "gpt-5.3-codex",
-    });
-  });
+      assert.equal(opened.thread.id, "fresh-thread");
+      assert.equal(calls.length, 1);
+      assert.deepStrictEqual(calls[0]?.payload, {
+        cwd: "/tmp/project",
+        approvalPolicy: "never",
+        sandbox: "danger-full-access",
+        dynamicTools: [KAMI_TEST_HARNESS_DYNAMIC_TOOL_SPEC],
+        model: "gpt-5.3-codex",
+      });
+    }),
+  );
 
-  it("accepts newer thread/start responses that omit thread sessionId", async () => {
-    const started = makeThreadOpenResponse("fresh-thread");
-    const { sessionId: _sessionId, ...threadWithoutSessionId } = started.thread;
-    const rawStarted = {
-      ...started,
-      thread: threadWithoutSessionId,
-    };
-    const client = {
-      raw: {
-        request: (_method: "thread/start" | "thread/resume", _payload: unknown) =>
-          Effect.succeed(rawStarted),
-      },
-      request: <M extends "thread/start" | "thread/resume">(
-        _method: M,
-        _payload: CodexRpc.ClientRequestParamsByMethod[M],
-      ) =>
-        Effect.fail(
-          CodexErrors.CodexAppServerRequestError.internalError("typed request was not expected"),
-        ),
-    };
+  it.effect("accepts newer thread/start responses that omit thread sessionId", () =>
+    Effect.gen(function* () {
+      const started = makeThreadOpenResponse("fresh-thread");
+      const { sessionId: _sessionId, ...threadWithoutSessionId } = started.thread;
+      const rawStarted = {
+        ...started,
+        thread: threadWithoutSessionId,
+      };
+      const client = {
+        raw: {
+          request: (_method: "thread/start" | "thread/resume", _payload: unknown) =>
+            Effect.succeed(rawStarted),
+        },
+        request: <M extends "thread/start" | "thread/resume">(
+          _method: M,
+          _payload: CodexRpc.ClientRequestParamsByMethod[M],
+        ) =>
+          Effect.fail(
+            CodexErrors.CodexAppServerRequestError.internalError("typed request was not expected"),
+          ),
+      };
 
-    const opened = await Effect.runPromise(
-      openCodexThread({
+      const opened = yield* openCodexThread({
         client,
         threadId: ThreadId.make("thread-1"),
         runtimeMode: "full-access",
@@ -441,36 +441,36 @@ describe("openCodexThread", () => {
         requestedModel: "gpt-5.3-codex",
         serviceTier: undefined,
         resumeThreadId: undefined,
-      }),
-    );
+      });
 
-    assert.equal(opened.thread.id, "fresh-thread");
-    assert.equal(opened.thread.sessionId, "fresh-thread");
-  });
+      assert.equal(opened.thread.id, "fresh-thread");
+      assert.equal(opened.thread.sessionId, "fresh-thread");
+    }),
+  );
 
-  it("falls back to thread/start when resume fails recoverably", async () => {
-    const calls: Array<{ method: "thread/start" | "thread/resume"; payload: unknown }> = [];
-    const started = makeThreadOpenResponse("fresh-thread");
-    const client = {
-      request: <M extends "thread/start" | "thread/resume">(
-        method: M,
-        payload: CodexRpc.ClientRequestParamsByMethod[M],
-      ) => {
-        calls.push({ method, payload });
-        if (method === "thread/resume") {
-          return Effect.fail(
-            new CodexErrors.CodexAppServerRequestError({
-              code: -32603,
-              errorMessage: "thread not found",
-            }),
-          );
-        }
-        return Effect.succeed(started as CodexRpc.ClientRequestResponsesByMethod[M]);
-      },
-    };
+  it.effect("falls back to thread/start when resume fails recoverably", () =>
+    Effect.gen(function* () {
+      const calls: Array<{ method: "thread/start" | "thread/resume"; payload: unknown }> = [];
+      const started = makeThreadOpenResponse("fresh-thread");
+      const client = {
+        request: <M extends "thread/start" | "thread/resume">(
+          method: M,
+          payload: CodexRpc.ClientRequestParamsByMethod[M],
+        ) => {
+          calls.push({ method, payload });
+          if (method === "thread/resume") {
+            return Effect.fail(
+              new CodexErrors.CodexAppServerRequestError({
+                code: -32603,
+                errorMessage: "thread not found",
+              }),
+            );
+          }
+          return Effect.succeed(started as CodexRpc.ClientRequestResponsesByMethod[M]);
+        },
+      };
 
-    const opened = await Effect.runPromise(
-      openCodexThread({
+      const opened = yield* openCodexThread({
         client,
         threadId: ThreadId.make("thread-1"),
         runtimeMode: "full-access",
@@ -478,44 +478,44 @@ describe("openCodexThread", () => {
         requestedModel: "gpt-5.3-codex",
         serviceTier: undefined,
         resumeThreadId: "stale-thread",
-      }),
-    );
+      });
 
-    assert.equal(opened.thread.id, "fresh-thread");
-    assert.deepStrictEqual(
-      calls.map((call) => call.method),
-      ["thread/resume", "thread/start"],
-    );
-  });
+      assert.equal(opened.thread.id, "fresh-thread");
+      assert.deepStrictEqual(
+        calls.map((call) => call.method),
+        ["thread/resume", "thread/start"],
+      );
+    }),
+  );
 
-  it("accepts newer thread/resume responses that omit thread sessionId", async () => {
-    const resumed = makeThreadOpenResponse("resumed-thread");
-    const { sessionId: _sessionId, ...threadWithoutSessionId } = resumed.thread;
-    const rawResumed = {
-      ...resumed,
-      thread: threadWithoutSessionId,
-    };
-    const calls: Array<{ method: "thread/resume"; payload: unknown }> = [];
-    const client = {
-      raw: {
-        request: (method: "thread/start" | "thread/resume", payload: unknown) => {
-          if (method === "thread/resume") {
-            calls.push({ method, payload });
-          }
-          return Effect.succeed(rawResumed);
+  it.effect("accepts newer thread/resume responses that omit thread sessionId", () =>
+    Effect.gen(function* () {
+      const resumed = makeThreadOpenResponse("resumed-thread");
+      const { sessionId: _sessionId, ...threadWithoutSessionId } = resumed.thread;
+      const rawResumed = {
+        ...resumed,
+        thread: threadWithoutSessionId,
+      };
+      const calls: Array<{ method: "thread/resume"; payload: unknown }> = [];
+      const client = {
+        raw: {
+          request: (method: "thread/start" | "thread/resume", payload: unknown) => {
+            if (method === "thread/resume") {
+              calls.push({ method, payload });
+            }
+            return Effect.succeed(rawResumed);
+          },
         },
-      },
-      request: <M extends "thread/start" | "thread/resume">(
-        _method: M,
-        _payload: CodexRpc.ClientRequestParamsByMethod[M],
-      ) =>
-        Effect.fail(
-          CodexErrors.CodexAppServerRequestError.internalError("typed request was not expected"),
-        ),
-    };
+        request: <M extends "thread/start" | "thread/resume">(
+          _method: M,
+          _payload: CodexRpc.ClientRequestParamsByMethod[M],
+        ) =>
+          Effect.fail(
+            CodexErrors.CodexAppServerRequestError.internalError("typed request was not expected"),
+          ),
+      };
 
-    const opened = await Effect.runPromise(
-      openCodexThread({
+      const opened = yield* openCodexThread({
         client,
         threadId: ThreadId.make("thread-1"),
         runtimeMode: "full-access",
@@ -523,43 +523,43 @@ describe("openCodexThread", () => {
         requestedModel: "gpt-5.3-codex",
         serviceTier: undefined,
         resumeThreadId: "resumed-thread",
-      }),
-    );
+      });
 
-    assert.equal(opened.thread.id, "resumed-thread");
-    assert.equal(opened.thread.sessionId, "resumed-thread");
-    assert.deepStrictEqual(calls[0]?.payload, {
-      threadId: "resumed-thread",
-      cwd: "/tmp/project",
-      approvalPolicy: "never",
-      sandbox: "danger-full-access",
-      dynamicTools: [KAMI_TEST_HARNESS_DYNAMIC_TOOL_SPEC],
-      model: "gpt-5.3-codex",
-    });
-  });
+      assert.equal(opened.thread.id, "resumed-thread");
+      assert.equal(opened.thread.sessionId, "resumed-thread");
+      assert.deepStrictEqual(calls[0]?.payload, {
+        threadId: "resumed-thread",
+        cwd: "/tmp/project",
+        approvalPolicy: "never",
+        sandbox: "danger-full-access",
+        dynamicTools: [KAMI_TEST_HARNESS_DYNAMIC_TOOL_SPEC],
+        model: "gpt-5.3-codex",
+      });
+    }),
+  );
 
-  it("propagates non-recoverable resume failures", async () => {
-    const client = {
-      request: <M extends "thread/start" | "thread/resume">(
-        method: M,
-        _payload: CodexRpc.ClientRequestParamsByMethod[M],
-      ) => {
-        if (method === "thread/resume") {
-          return Effect.fail(
-            new CodexErrors.CodexAppServerRequestError({
-              code: -32603,
-              errorMessage: "timed out waiting for server",
-            }),
+  it.effect("propagates non-recoverable resume failures", () =>
+    Effect.gen(function* () {
+      const client = {
+        request: <M extends "thread/start" | "thread/resume">(
+          method: M,
+          _payload: CodexRpc.ClientRequestParamsByMethod[M],
+        ) => {
+          if (method === "thread/resume") {
+            return Effect.fail(
+              new CodexErrors.CodexAppServerRequestError({
+                code: -32603,
+                errorMessage: "timed out waiting for server",
+              }),
+            );
+          }
+          return Effect.succeed(
+            makeThreadOpenResponse("fresh-thread") as CodexRpc.ClientRequestResponsesByMethod[M],
           );
-        }
-        return Effect.succeed(
-          makeThreadOpenResponse("fresh-thread") as CodexRpc.ClientRequestResponsesByMethod[M],
-        );
-      },
-    };
+        },
+      };
 
-    await assert.rejects(
-      Effect.runPromise(
+      const error = yield* Effect.flip(
         openCodexThread({
           client,
           threadId: ThreadId.make("thread-1"),
@@ -569,10 +569,11 @@ describe("openCodexThread", () => {
           serviceTier: undefined,
           resumeThreadId: "stale-thread",
         }),
-      ),
-      (error: unknown) =>
-        isCodexAppServerRequestError(error) &&
-        error.errorMessage === "timed out waiting for server",
-    );
-  });
+      );
+      if (!isCodexAppServerRequestError(error)) {
+        throw new Error("Expected CodexAppServerRequestError");
+      }
+      assert.equal(error.errorMessage, "timed out waiting for server");
+    }),
+  );
 });

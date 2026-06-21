@@ -52,6 +52,7 @@ import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as PubSub from "effect/PubSub";
 import * as Stream from "effect/Stream";
+import * as TestClock from "effect/testing/TestClock";
 import { ChildProcessSpawner } from "effect/unstable/process";
 import {
   FetchHttpClient,
@@ -124,7 +125,7 @@ import {
   SharedProjectsError,
   type SharedProjectsShape,
 } from "./sharedProjects/Services/SharedProjects.ts";
-import { WorkspaceEntriesLive } from "./workspace/Layers/WorkspaceEntries.ts";
+import * as WorkspaceEntries from "./workspace/WorkspaceEntries.ts";
 import { WorkspaceFileSystemLive } from "./workspace/Layers/WorkspaceFileSystem.ts";
 import { WorkspacePathsLive } from "./workspace/Layers/WorkspacePaths.ts";
 import * as GitVcsDriver from "./vcs/GitVcsDriver.ts";
@@ -552,7 +553,7 @@ const buildAppUnderTest = (options?: {
     const gitManagerLayer = Layer.mock(GitManager)({
       ...options?.layers?.gitManager,
     });
-    const workspaceEntriesLayer = WorkspaceEntriesLive.pipe(
+    const workspaceEntriesLayer = WorkspaceEntries.layer.pipe(
       Layer.provide(WorkspacePathsLive),
       Layer.provideMerge(vcsDriverRegistryLayer),
     );
@@ -4331,7 +4332,10 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         assert.deepEqual(first.config.keybindings, []);
         assert.deepEqual(first.config.issues, []);
         assert.deepEqual(first.config.providers, providers);
-        assert.equal(first.config.observability.logsDirectoryPath.endsWith("/logs"), true);
+        assert.equal(
+          first.config.observability.logsDirectoryPath.replaceAll("\\", "/").endsWith("/logs"),
+          true,
+        );
         assert.equal(first.config.observability.localTracingEnabled, true);
         assert.equal(first.config.observability.otlpTracesUrl, "http://localhost:4318/v1/traces");
         assert.equal(first.config.observability.otlpTracesEnabled, true);
@@ -4477,7 +4481,43 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       assert.isAtLeast(response.entries.length, 1);
       assert.isTrue(response.entries.some((entry) => entry.path === "needle-file.ts"));
       assert.equal(response.truncated, false);
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+    }).pipe(Effect.provide(NodeHttpServer.layerTest), TestClock.withLive),
+  );
+
+  it.effect("routes websocket rpc projects.listEntries and projects.readFile", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const workspaceDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-ws-project-files-" });
+      yield* fs.makeDirectory(path.join(workspaceDir, "src"), { recursive: true });
+      yield* fs.writeFileString(
+        path.join(workspaceDir, "src", "index.ts"),
+        "export const answer = 42;\n",
+      );
+
+      yield* buildAppUnderTest();
+
+      const wsUrl = yield* getWsServerUrl("/ws");
+      const response = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          Effect.all({
+            listing: client[WS_METHODS.projectsListEntries]({ cwd: workspaceDir }),
+            file: client[WS_METHODS.projectsReadFile]({
+              cwd: workspaceDir,
+              relativePath: "src/index.ts",
+            }),
+          }),
+        ),
+      );
+
+      assert.isTrue(response.listing.entries.some((entry) => entry.path === "src/index.ts"));
+      assert.deepEqual(response.file, {
+        relativePath: "src/index.ts",
+        contents: "export const answer = 42;\n",
+        byteLength: 26,
+        truncated: false,
+      });
+    }).pipe(Effect.provide(NodeHttpServer.layerTest), TestClock.withLive),
   );
 
   it.effect("routes websocket rpc projects.searchEntries excludes gitignored files", () =>
@@ -4534,7 +4574,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
 
       assert.equal(response.entries.length, 0);
       assert.equal(response.truncated, false);
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+    }).pipe(Effect.provide(NodeHttpServer.layerTest), TestClock.withLive),
   );
 
   it.effect("routes websocket rpc projects.searchEntries errors", () =>
@@ -4554,9 +4594,10 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
 
       assertTrue(result._tag === "Failure");
       assertTrue(result.failure._tag === "ProjectSearchEntriesError");
+      assertInclude(result.failure.message.replaceAll("\\", "/"), "Workspace root does not exist:");
       assertInclude(
-        result.failure.message,
-        "Workspace root does not exist: /definitely/not/a/real/workspace/path",
+        result.failure.message.replaceAll("\\", "/"),
+        "definitely/not/a/real/workspace/path",
       );
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
