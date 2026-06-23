@@ -360,7 +360,7 @@ const QueuedMessagesPanel = memo(function QueuedMessagesPanel(props: {
   if (props.items.length === 0) return null;
 
   return (
-    <div className="mb-2 rounded-lg border border-border/60 bg-card/80 px-3 py-2 shadow-sm backdrop-blur">
+    <div className="mx-auto mb-2 w-full min-w-0 max-w-208 rounded-lg border border-border/60 bg-card/80 px-3 py-2 shadow-sm backdrop-blur">
       <div className="mb-1.5 flex items-center gap-2 text-muted-foreground text-xs">
         <ListOrderedIcon className="size-3.5" aria-hidden="true" />
         <span className="font-medium text-foreground">Queued</span>
