@@ -30,7 +30,8 @@ import { Command, Flag } from "effect/unstable/cli";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
 const LINUX_ICON_SIZES = [16, 22, 24, 32, 48, 64, 128, 256, 512] as const;
-const DESKTOP_APP_ID = "com.t3tools.t3code";
+const DESKTOP_APP_ID = "tech.camie.kamicode";
+const DESKTOP_PUBLISHER_NAME = "Camie Tech";
 const APPLE_TEAM_ID_PATTERN = /^[A-Z0-9]{10}$/u;
 
 const BuildPlatform = Schema.Literals(["mac", "linux", "win"]);
@@ -880,7 +881,9 @@ function getPatchedDependencyPackageName(patchKey: string): string {
 }
 
 const AzureTrustedSigningOptionsConfig = Config.all({
-  publisherName: Config.string("AZURE_TRUSTED_SIGNING_PUBLISHER_NAME"),
+  publisherName: Config.string("AZURE_TRUSTED_SIGNING_PUBLISHER_NAME").pipe(
+    Config.withDefault(DESKTOP_PUBLISHER_NAME),
+  ),
   endpoint: Config.string("AZURE_TRUSTED_SIGNING_ENDPOINT"),
   certificateProfileName: Config.string("AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE_NAME"),
   codeSigningAccountName: Config.string("AZURE_TRUSTED_SIGNING_ACCOUNT_NAME"),
@@ -1278,8 +1281,8 @@ export function resolveMockUpdateServerUrl(mockUpdateServerPort: number | undefi
 
 export function resolveDesktopProductName(version: string): string {
   return resolveDesktopUpdateChannel(version) === "nightly"
-    ? "T3 Code (Nightly)"
-    : (desktopPackageJson.productName ?? "T3 Code");
+    ? "KamiCode (Nightly)"
+    : (desktopPackageJson.productName ?? "KamiCode");
 }
 
 export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
@@ -1299,7 +1302,7 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
   const buildConfig: Record<string, unknown> = {
     appId: DESKTOP_APP_ID,
     productName: resolveDesktopProductName(version),
-    artifactName: "T3-Code-${version}-${arch}.${ext}",
+    artifactName: "KamiCode-Setup-${arch}.${ext}",
     asarUnpack: [...DESKTOP_ASAR_UNPACK],
     directories: {
       buildResources: "apps/desktop/resources",
@@ -1325,7 +1328,7 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
       category: "public.app-category.developer-tools",
       protocols: [
         {
-          name: "T3 Code",
+          name: "KamiCode",
           schemes: ["t3code", "t3code-dev"],
         },
       ],
@@ -1357,6 +1360,7 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
     const winConfig: Record<string, unknown> = {
       target: [target],
       icon: "icon.ico",
+      publisherName: [DESKTOP_PUBLISHER_NAME],
     };
     if (signed) {
       winConfig.azureSignOptions = yield* AzureTrustedSigningOptionsConfig;
@@ -1567,8 +1571,8 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
     t3codeCommitHash: commitHash,
     private: true,
     packageManager: rootPackageJson.packageManager,
-    description: "T3 Code desktop build",
-    author: "T3 Tools",
+    description: "KamiCode desktop build",
+    author: DESKTOP_PUBLISHER_NAME,
     main: "apps/desktop/dist-electron/main.cjs",
     build: yield* createBuildConfig(
       options.platform,

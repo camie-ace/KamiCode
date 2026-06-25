@@ -38,6 +38,8 @@ const flushCallbacks = Effect.yieldNow;
 function makeHarness(options: UpdatesHarnessOptions = {}) {
   let checkCount = 0;
   let allowDowngrade = false;
+  let allowPrerelease = false;
+  let channel = "latest";
   const feedUrls: ElectronUpdater.ElectronUpdaterFeedUrl[] = [];
   const listeners = new Map<string, Set<(...args: readonly unknown[]) => void>>();
   const sentStates: DesktopUpdateState[] = [];
@@ -66,8 +68,14 @@ function makeHarness(options: UpdatesHarnessOptions = {}) {
       }),
     setAutoDownload: () => Effect.void,
     setAutoInstallOnAppQuit: () => Effect.void,
-    setChannel: () => Effect.void,
-    setAllowPrerelease: () => Effect.void,
+    setChannel: (value) =>
+      Effect.sync(() => {
+        channel = value;
+      }),
+    setAllowPrerelease: (value) =>
+      Effect.sync(() => {
+        allowPrerelease = value;
+      }),
     allowDowngrade: Effect.sync(() => allowDowngrade),
     setAllowDowngrade: (value) =>
       Effect.sync(() => {
@@ -176,6 +184,9 @@ function makeHarness(options: UpdatesHarnessOptions = {}) {
   return {
     layer,
     checkCount: () => checkCount,
+    allowDowngrade: () => allowDowngrade,
+    allowPrerelease: () => allowPrerelease,
+    channel: () => channel,
     feedUrls: () => feedUrls,
     listenerCount: () =>
       Array.from(listeners.values()).reduce(
@@ -465,6 +476,24 @@ describe("DesktopUpdates", () => {
         assert.equal(state.channel, "nightly");
         assert.equal(persistedSettings.updateChannel, "nightly");
         assert.equal(persistedSettings.updateChannelConfiguredByUser, true);
+      }),
+    ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
+  });
+
+  it.effect("enables nightly prereleases without leaving downgrade checks enabled", () => {
+    const harness = makeHarness();
+
+    return Effect.scoped(
+      Effect.gen(function* () {
+        const updates = yield* DesktopUpdates.DesktopUpdates;
+        yield* updates.configure;
+
+        const state = yield* updates.setChannel("nightly");
+
+        assert.equal(state.channel, "nightly");
+        assert.equal(harness.channel(), "nightly");
+        assert.isTrue(harness.allowPrerelease());
+        assert.isFalse(harness.allowDowngrade());
       }),
     ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
   });

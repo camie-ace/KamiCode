@@ -77,7 +77,7 @@ export class DesktopEnvironment extends Context.Service<
 >()("@t3tools/desktop/app/DesktopEnvironment") {}
 
 const APP_BASE_NAME = "KamiCode";
-const APP_ID = "ai.kagura.kamicode";
+const APP_ID = "tech.camie.kamicode";
 
 function resolveDesktopAppStageLabel(input: {
   readonly isDevelopment: boolean;

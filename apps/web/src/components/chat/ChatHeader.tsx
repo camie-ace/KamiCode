@@ -18,7 +18,6 @@ import ProjectScriptsControl, {
 } from "../ProjectScriptsControl";
 import ProjectTestEnvironmentControl from "../ProjectTestEnvironmentControl";
 import TestHarnessRunsControl from "../TestHarnessRunsControl";
-import { SidebarTrigger } from "../ui/sidebar";
 import { OpenInPicker } from "./OpenInPicker";
 import { usePrimaryEnvironmentId } from "../../state/environments";
 import { cn } from "~/lib/utils";
@@ -94,7 +93,6 @@ export const ChatHeader = memo(function ChatHeader({
   return (
     <div className="@container/header-actions flex min-w-0 flex-1 items-center gap-2 sm:gap-3">
       <div className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden sm:gap-3">
-        <SidebarTrigger className="size-7 shrink-0 md:hidden" />
         <Tooltip>
           <TooltipTrigger
             render={

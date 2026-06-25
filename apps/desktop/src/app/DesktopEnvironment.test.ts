@@ -82,7 +82,7 @@ describe("DesktopEnvironment", () => {
       assert.equal(toPortablePath(environment.appRoot), "/repo");
       assert.equal(toPortablePath(environment.backendEntryPath), "/repo/apps/server/dist/bin.mjs");
       assert.equal(toPortablePath(environment.backendCwd), "/repo");
-      assert.equal(environment.appUserModelId, "ai.kagura.kamicode.dev");
+      assert.equal(environment.appUserModelId, "tech.camie.kamicode.dev");
       assert.equal(environment.linuxWmClass, "kamicode-dev");
       assert.deepEqual(
         Option.map(environment.devServerUrl, (url) => url.href),
@@ -134,7 +134,7 @@ describe("DesktopEnvironment", () => {
       assert.equal(toPortablePath(environment.stateDir), "/Users/alice/.kamicode/userdata");
       assert.equal(environment.userDataDirName, "kamicode");
       assert.equal(environment.legacyUserDataDirName, "KamiCode (Alpha)");
-      assert.equal(environment.appUserModelId, "ai.kagura.kamicode");
+      assert.equal(environment.appUserModelId, "tech.camie.kamicode");
       assert.equal(environment.linuxDesktopEntryName, "kamicode.desktop");
       assert.equal(environment.linuxWmClass, "kamicode");
     }),

@@ -4,10 +4,27 @@ import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import * as NodeURL from "node:url";
+import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
 import * as Console from "effect/Console";
 import * as Effect from "effect/Effect";
 
 const repoRoot = NodePath.resolve(NodePath.dirname(NodeURL.fileURLToPath(import.meta.url)), "..");
+const hostProcessPlatform = Effect.runSync(HostProcessPlatform);
+const VP_INSTALL_COMMAND =
+  hostProcessPlatform === "win32"
+    ? {
+        file: process.execPath,
+        args: [
+          NodePath.resolve(repoRoot, "node_modules/vite-plus/bin/vp"),
+          "install",
+          "--lockfile-only",
+          "--ignore-scripts",
+        ],
+      }
+    : {
+        file: "vp",
+        args: ["install", "--lockfile-only", "--ignore-scripts"],
+      };
 
 const workspaceFiles = [
   "package.json",
@@ -206,7 +223,7 @@ try {
 
   NodeFS.rmSync(NodePath.resolve(tempRoot, "pnpm-lock.yaml"), { force: true });
 
-  NodeChildProcess.execFileSync("vp", ["install", "--lockfile-only", "--ignore-scripts"], {
+  NodeChildProcess.execFileSync(VP_INSTALL_COMMAND.file, VP_INSTALL_COMMAND.args, {
     cwd: tempRoot,
     stdio: "inherit",
   });
@@ -253,7 +270,7 @@ try {
   );
   assertContains(
     nightlyReleaseMetadata,
-    "name=T3 Code Nightly 9.9.10-nightly.20260413.321 (abcdef123456)",
+    "name=KamiCode Nightly 9.9.10-nightly.20260413.321 (abcdef123456)",
     "Expected nightly metadata to include the short commit SHA in the release name.",
   );
 
@@ -298,45 +315,38 @@ try {
   const mergedPreviewWindowsManifestPath = NodePath.resolve(tempRoot, "release-assets/preview.yml");
   const { arm64Path: winDebugArm64Path, x64Path: winDebugX64Path } =
     writeWindowsBuilderDebugFixtures(tempRoot);
-  NodeChildProcess.execFileSync(
-    "bash",
-    [
-      "-lc",
-      `
-        release_assets_dir=${JSON.stringify(NodePath.resolve(tempRoot, "release-assets"))}
-        shopt -s nullglob
-        found_windows_manifest=false
-        for x64_manifest in "$release_assets_dir"/*-win-x64.yml; do
-          if [[ "$(basename "$x64_manifest")" == builder-debug-* ]]; then
-            continue
-          fi
+  const releaseAssetsDir = NodePath.resolve(tempRoot, "release-assets");
+  const windowsX64Manifests = NodeFS.readdirSync(releaseAssetsDir)
+    .filter((name) => name.endsWith("-win-x64.yml") && !name.startsWith("builder-debug-"))
+    .map((name) => NodePath.resolve(releaseAssetsDir, name));
+  if (windowsX64Manifests.length === 0) {
+    throw new Error("No Windows updater manifests found to merge.");
+  }
+  for (const x64ManifestPath of windowsX64Manifests) {
+    const arm64ManifestPath = x64ManifestPath.replace(/-x64\.yml$/u, "-arm64.yml");
+    const outputManifestPath = x64ManifestPath.replace(/-win-x64\.yml$/u, ".yml");
+    if (!NodeFS.existsSync(arm64ManifestPath)) {
+      throw new Error(`Missing matching arm64 Windows manifest for ${x64ManifestPath}`);
+    }
 
-          arm64_manifest="\${x64_manifest/-x64.yml/-arm64.yml}"
-          output_manifest="\${x64_manifest/-win-x64.yml/.yml}"
-          if [[ ! -f "$arm64_manifest" ]]; then
-            echo "Missing matching arm64 Windows manifest for $x64_manifest" >&2
-            exit 1
-          fi
-
-          found_windows_manifest=true
-          ${JSON.stringify(process.execPath)} ${JSON.stringify(NodePath.resolve(repoRoot, "scripts/merge-update-manifests.ts"))} --platform win \
-            "$arm64_manifest" \
-            "$x64_manifest" \
-            "$output_manifest"
-          rm -f "$arm64_manifest" "$x64_manifest"
-        done
-
-        if [[ "$found_windows_manifest" != true ]]; then
-          echo "No Windows updater manifests found to merge." >&2
-          exit 1
-        fi
-      `,
-    ],
-    {
-      cwd: repoRoot,
-      stdio: "inherit",
-    },
-  );
+    NodeChildProcess.execFileSync(
+      process.execPath,
+      [
+        NodePath.resolve(repoRoot, "scripts/merge-update-manifests.ts"),
+        "--platform",
+        "win",
+        arm64ManifestPath,
+        x64ManifestPath,
+        outputManifestPath,
+      ],
+      {
+        cwd: repoRoot,
+        stdio: "inherit",
+      },
+    );
+    NodeFS.rmSync(arm64ManifestPath, { force: true });
+    NodeFS.rmSync(x64ManifestPath, { force: true });
+  }
 
   const mergedWindowsManifest = NodeFS.readFileSync(mergedWindowsManifestPath, "utf8");
   assertContains(

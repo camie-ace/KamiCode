@@ -92,6 +92,11 @@ jobs:
         env:
           T3CODE_DESKTOP_UPDATE_REPOSITORY: ${{ github.repository }}
           T3CODE_GITHUB_OAUTH_CLIENT_ID: ${{ secrets.T3CODE_GITHUB_OAUTH_CLIENT_ID }}
+          T3CODE_DESKTOP_SIGNED: ${{ vars.T3CODE_DESKTOP_SIGNED || 'false' }}
+          AZURE_TRUSTED_SIGNING_PUBLISHER_NAME: ${{ vars.AZURE_TRUSTED_SIGNING_PUBLISHER_NAME || 'Camie Tech' }}
+          AZURE_TRUSTED_SIGNING_ENDPOINT: ${{ secrets.AZURE_TRUSTED_SIGNING_ENDPOINT }}
+          AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE_NAME: ${{ secrets.AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE_NAME }}
+          AZURE_TRUSTED_SIGNING_ACCOUNT_NAME: ${{ secrets.AZURE_TRUSTED_SIGNING_ACCOUNT_NAME }}
         run: |
           node scripts/build-desktop-artifact.ts `
             --platform win `
