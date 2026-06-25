@@ -14,6 +14,7 @@ import { type DraftId } from "~/composerDraftStore";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import ProjectScriptsControl, { type NewProjectScriptInput } from "../ProjectScriptsControl";
 import ProjectTestEnvironmentControl from "../ProjectTestEnvironmentControl";
+import ProjectTriggersControl from "../ProjectTriggersControl";
 import TestHarnessRunsControl from "../TestHarnessRunsControl";
 import { SidebarTrigger } from "../ui/sidebar";
 import { OpenInPicker } from "./OpenInPicker";
@@ -119,6 +120,13 @@ export const ChatHeader = memo(function ChatHeader({
             onAddScript={onAddProjectScript}
             onUpdateScript={onUpdateProjectScript}
             onDeleteScript={onDeleteProjectScript}
+          />
+        )}
+        {activeProjectId && (
+          <ProjectTriggersControl
+            environmentId={activeThreadEnvironmentId}
+            projectId={activeProjectId}
+            projectName={activeProjectName}
           />
         )}
         {activeProjectTestEnvironments && (

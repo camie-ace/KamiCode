@@ -20,6 +20,7 @@ import {
   ThreadStatusLabel,
 } from "./ThreadStatusIndicators";
 import { ProjectFavicon } from "./ProjectFavicon";
+import { writeProjectTriggersSettingsFocus } from "./ProjectTriggersControl";
 import { autoAnimate } from "@formkit/auto-animate";
 import React, { useCallback, useEffect, memo, useMemo, useRef, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
@@ -1650,6 +1651,20 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
     [memberThreadCountByPhysicalKey, removeProject],
   );
 
+  const openProjectTriggersSettings = useCallback(
+    (member: SidebarProjectGroupMember) => {
+      writeProjectTriggersSettingsFocus({
+        environmentId: member.environmentId,
+        projectId: member.id,
+      });
+      if (isMobile) {
+        setOpenMobile(false);
+      }
+      void router.navigate({ to: "/settings/shared-projects" });
+    },
+    [isMobile, router, setOpenMobile],
+  );
+
   const handleProjectButtonContextMenu = useCallback(
     (event: React.MouseEvent<HTMLButtonElement>) => {
       event.preventDefault();
@@ -1660,7 +1675,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
 
         const actionHandlers = new Map<string, () => Promise<void> | void>();
         const makeLeaf = (
-          action: "rename" | "grouping" | "copy-path" | "delete",
+          action: "rename" | "grouping" | "copy-path" | "triggers" | "delete",
           member: SidebarProjectGroupMember,
           options?: {
             destructive?: boolean;
@@ -1679,6 +1694,9 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
               case "copy-path":
                 copyPathToClipboard(member.cwd, { path: member.cwd });
                 return;
+              case "triggers":
+                openProjectTriggersSettings(member);
+                return;
               case "delete":
                 return handleRemoveProject(member);
             }
@@ -1693,7 +1711,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
         };
 
         const buildTargetedItem = (
-          action: "rename" | "grouping" | "copy-path" | "delete",
+          action: "rename" | "grouping" | "copy-path" | "triggers" | "delete",
           label: string,
           options?: {
             destructive?: boolean;
@@ -1730,6 +1748,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
             buildTargetedItem("rename", "Rename"),
             buildTargetedItem("grouping", "Group into..."),
             buildTargetedItem("copy-path", "Copy Path"),
+            buildTargetedItem("triggers", "Manage triggers"),
             buildTargetedItem("delete", "Remove", {
               destructive: true,
             }),
@@ -1750,6 +1769,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
     [
       copyPathToClipboard,
       handleRemoveProject,
+      openProjectTriggersSettings,
       openProjectGroupingDialog,
       openProjectRenameDialog,
       project.groupedProjectCount,

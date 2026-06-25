@@ -54,6 +54,7 @@ import { ProviderRuntimeIngestionLive } from "./orchestration/Layers/ProviderRun
 import { ProviderCommandReactorLive } from "./orchestration/Layers/ProviderCommandReactor.ts";
 import { CheckpointReactorLive } from "./orchestration/Layers/CheckpointReactor.ts";
 import { ThreadDeletionReactorLive } from "./orchestration/Layers/ThreadDeletionReactor.ts";
+import { ServerOrchestrationDispatcherLive } from "./orchestration/Layers/ServerOrchestrationDispatcher.ts";
 import * as AgentAwarenessRelay from "./relay/AgentAwarenessRelay.ts";
 import { hasCloudPublicConfig } from "./cloud/publicConfig.ts";
 import { ProviderRegistryLive } from "./provider/Layers/ProviderRegistry.ts";
@@ -129,6 +130,11 @@ import {
   persistServerRuntimeState,
 } from "./serverRuntimeState.ts";
 import { orchestrationHttpApiLayer } from "./orchestration/http.ts";
+import { projectTriggerWebhookRouteLayer } from "./projectTriggers/http.ts";
+import { ProjectTriggerRepositoryLive } from "./projectTriggers/Layers/ProjectTriggerRepository.ts";
+import { ProjectTriggerSchedulerLive } from "./projectTriggers/Layers/ProjectTriggerScheduler.ts";
+import { ProjectTriggerServiceLive } from "./projectTriggers/Layers/ProjectTriggerService.ts";
+import { ProjectTriggerScheduler } from "./projectTriggers/Services/ProjectTriggerScheduler.ts";
 import * as NetService from "@t3tools/shared/Net";
 import * as RelayClient from "@t3tools/shared/relayClient";
 import { disableTailscaleServe, ensureTailscaleServe } from "@t3tools/tailscale";
@@ -336,6 +342,26 @@ const ProviderRuntimeLayerLive = ProviderSessionReaperLive.pipe(
   Layer.provideMerge(OrchestrationLayerLive),
 );
 
+const ProjectTriggersLayerLive = ProjectTriggerSchedulerLive().pipe(
+  Layer.provideMerge(ProjectTriggerServiceLive),
+  Layer.provideMerge(ProjectTriggerRepositoryLive),
+  Layer.provideMerge(ServerOrchestrationDispatcherLive),
+);
+
+const ProjectTriggerSchedulerStartupLive = Layer.effectDiscard(
+  Effect.gen(function* () {
+    const startup = yield* ServerRuntimeStartup;
+    const scheduler = yield* ProjectTriggerScheduler;
+    yield* startup.awaitCommandReady.pipe(
+      Effect.flatMap(() => scheduler.start()),
+      Effect.catch((cause) =>
+        Effect.logWarning("failed to start project trigger scheduler", { cause }),
+      ),
+      Effect.forkScoped,
+    );
+  }),
+);
+
 const RuntimeCoreServicesLive = ReactorLayerLive.pipe(
   // Core Services
   Layer.provideMerge(CheckpointingLayerLive),
@@ -397,7 +423,9 @@ const RuntimeDependenciesLive = RuntimeCoreDependenciesLive.pipe(
   Layer.provide(NetService.layer),
 );
 
-const RuntimeServicesLive = ServerRuntimeStartupLive.pipe(
+const RuntimeServicesLive = ProjectTriggerSchedulerStartupLive.pipe(
+  Layer.provideMerge(ProjectTriggersLayerLive),
+  Layer.provideMerge(ServerRuntimeStartupLive),
   Layer.provideMerge(RuntimeDependenciesLive),
 );
 
@@ -444,6 +472,7 @@ export const makeRoutesLayer = Layer.mergeAll(
   otlpTracesProxyRouteLayer,
   assetRouteLayer,
   projectFaviconRouteLayer,
+  projectTriggerWebhookRouteLayer,
   staticAndDevRouteLayer,
   websocketRpcRouteLayer,
   McpHttpServer.layer.pipe(Layer.provide(McpSessionRegistry.layer)),

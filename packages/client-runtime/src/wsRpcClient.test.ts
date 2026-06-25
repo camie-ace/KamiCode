@@ -3,7 +3,7 @@ import type {
   VcsStatusRemoteResult,
   VcsStatusStreamEvent,
 } from "@t3tools/contracts";
-import { ORCHESTRATION_WS_METHODS, ThreadId, WS_METHODS } from "@t3tools/contracts";
+import { ORCHESTRATION_WS_METHODS, ProjectId, ThreadId, WS_METHODS } from "@t3tools/contracts";
 import { describe, expect, it, vi } from "vite-plus/test";
 
 vi.mock("./wsTransport.ts", () => ({
@@ -170,6 +170,7 @@ describe("createWsRpcClient", () => {
 
     client.terminal.onMetadata(listener);
     client.vcs.onStatus({ cwd: "/repo" }, listener);
+    client.projectTriggers.subscribe({ projectId: ProjectId.make("project-1") }, listener);
     client.server.subscribeConfig(listener);
     client.orchestration.subscribeThread({ threadId: ThreadId.make("thread-1") }, listener);
 
@@ -179,6 +180,7 @@ describe("createWsRpcClient", () => {
     expect(subscribeCalls.map((call) => call[2]?.tag)).toEqual([
       WS_METHODS.subscribeTerminalMetadata,
       WS_METHODS.subscribeVcsStatus,
+      WS_METHODS.projectTriggersSubscribe,
       WS_METHODS.subscribeServerConfig,
       ORCHESTRATION_WS_METHODS.subscribeThread,
     ]);

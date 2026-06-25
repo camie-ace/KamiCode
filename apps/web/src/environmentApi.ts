@@ -24,6 +24,17 @@ export function createEnvironmentApi(rpcClient: WsRpcClient): EnvironmentApi {
       searchEntries: rpcClient.projects.searchEntries,
       writeFile: rpcClient.projects.writeFile,
     },
+    projectTriggers: {
+      list: (input) => rpcClient.projectTriggers.list(input),
+      get: (input) => rpcClient.projectTriggers.get(input),
+      create: (input) => rpcClient.projectTriggers.create(input),
+      update: (input) => rpcClient.projectTriggers.update(input),
+      delete: (input) => rpcClient.projectTriggers.delete(input),
+      fire: (input) => rpcClient.projectTriggers.fire(input),
+      listRuns: (input) => rpcClient.projectTriggers.listRuns(input),
+      subscribe: (input, callback, options) =>
+        rpcClient.projectTriggers.subscribe(input, callback, options),
+    },
     filesystem: {
       browse: rpcClient.filesystem.browse,
     },

@@ -92,6 +92,7 @@ import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Textarea } from "../ui/textarea";
+import ProjectTriggersSection from "./ProjectTriggersSection";
 import { SettingsPageContainer, SettingsRow, SettingsSection } from "./settingsLayout";
 
 const SELECT_CLASS =
@@ -1597,6 +1598,10 @@ export function SharedProjectsSettings() {
         )}
       </SettingsSection>
 
+      {!detail && loadState.status !== "loading" ? (
+        <ProjectTriggersSection projects={localProjects} />
+      ) : null}
+
       {detail ? (
         <>
           <SettingsSection title="Context bundle" icon={<GitBranchIcon className="size-3.5" />}>
@@ -2241,6 +2246,11 @@ export function SharedProjectsSettings() {
               />
             ) : null}
           </SettingsSection>
+
+          <ProjectTriggersSection
+            projects={localProjects}
+            preferredProjectId={selectedLocalProject?.id ?? null}
+          />
 
           <SettingsSection title="Environments" icon={<LinkIcon className="size-3.5" />}>
             {detail.environments.map((environment) => (

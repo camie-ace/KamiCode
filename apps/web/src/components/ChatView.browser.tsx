@@ -250,6 +250,7 @@ function createMockEnvironmentApi(input: {
   return {
     terminal: {} as EnvironmentApi["terminal"],
     projects: {} as EnvironmentApi["projects"],
+    projectTriggers: {} as EnvironmentApi["projectTriggers"],
     filesystem: {
       browse: input.browse,
     },

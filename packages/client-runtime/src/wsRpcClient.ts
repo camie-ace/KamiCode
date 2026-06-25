@@ -101,6 +101,16 @@ export interface WsRpcClient {
     readonly searchEntries: RpcUnaryMethod<typeof WS_METHODS.projectsSearchEntries>;
     readonly writeFile: RpcUnaryMethod<typeof WS_METHODS.projectsWriteFile>;
   };
+  readonly projectTriggers: {
+    readonly list: RpcUnaryMethod<typeof WS_METHODS.projectTriggersList>;
+    readonly get: RpcUnaryMethod<typeof WS_METHODS.projectTriggersGet>;
+    readonly create: RpcUnaryMethod<typeof WS_METHODS.projectTriggersCreate>;
+    readonly update: RpcUnaryMethod<typeof WS_METHODS.projectTriggersUpdate>;
+    readonly delete: RpcUnaryMethod<typeof WS_METHODS.projectTriggersDelete>;
+    readonly fire: RpcUnaryMethod<typeof WS_METHODS.projectTriggersFire>;
+    readonly listRuns: RpcUnaryMethod<typeof WS_METHODS.projectTriggersListRuns>;
+    readonly subscribe: RpcInputStreamMethod<typeof WS_METHODS.projectTriggersSubscribe>;
+  };
   readonly filesystem: {
     readonly browse: RpcUnaryMethod<typeof WS_METHODS.filesystemBrowse>;
   };
@@ -277,6 +287,25 @@ export function createWsRpcClient(
         transport.request((client) => client[WS_METHODS.projectsSearchEntries](input)),
       writeFile: (input) =>
         transport.request((client) => client[WS_METHODS.projectsWriteFile](input)),
+    },
+    projectTriggers: {
+      list: (input) => transport.request((client) => client[WS_METHODS.projectTriggersList](input)),
+      get: (input) => transport.request((client) => client[WS_METHODS.projectTriggersGet](input)),
+      create: (input) =>
+        transport.request((client) => client[WS_METHODS.projectTriggersCreate](input)),
+      update: (input) =>
+        transport.request((client) => client[WS_METHODS.projectTriggersUpdate](input)),
+      delete: (input) =>
+        transport.request((client) => client[WS_METHODS.projectTriggersDelete](input)),
+      fire: (input) => transport.request((client) => client[WS_METHODS.projectTriggersFire](input)),
+      listRuns: (input) =>
+        transport.request((client) => client[WS_METHODS.projectTriggersListRuns](input)),
+      subscribe: (input, listener, options) =>
+        transport.subscribe(
+          (client) => client[WS_METHODS.projectTriggersSubscribe](input),
+          listener,
+          subscriptionOptions(options, WS_METHODS.projectTriggersSubscribe),
+        ),
     },
     filesystem: {
       browse: (input) => transport.request((client) => client[WS_METHODS.filesystemBrowse](input)),

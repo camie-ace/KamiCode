@@ -187,11 +187,15 @@ export const ModelPickerSidebar = memo(function ModelPickerSidebar(props: {
                 onClick={() => !isDisabled && handleSelect(entry.instanceId)}
                 onMouseEnter={() => setHoveredInstanceId(entry.instanceId)}
                 onMouseLeave={() =>
-                  setHoveredInstanceId((current) => (current === entry.instanceId ? null : current))
+                  setHoveredInstanceId((current: ProviderInstanceId | null) =>
+                    current === entry.instanceId ? null : current,
+                  )
                 }
                 onFocus={() => setHoveredInstanceId(entry.instanceId)}
                 onBlur={() =>
-                  setHoveredInstanceId((current) => (current === entry.instanceId ? null : current))
+                  setHoveredInstanceId((current: ProviderInstanceId | null) =>
+                    current === entry.instanceId ? null : current,
+                  )
                 }
                 disabled={isDisabled}
                 type="button"
