@@ -400,7 +400,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
     }).pipe(Effect.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env: {} })))),
   );
 
-  it.effect("uses KamiCode artifact and publisher metadata for unsigned Windows builds", () =>
+  it.effect("uses KamiCode artifact metadata for unsigned Windows builds", () =>
     Effect.gen(function* () {
       const config = yield* createBuildConfig(
         "win",
@@ -415,9 +415,38 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
 
       assert.equal(config.appId, "tech.camie.kamicode");
       assert.equal(config.artifactName, "KamiCode-Setup-${arch}.${ext}");
-      assert.deepStrictEqual(win.publisherName, ["Camie Tech"]);
       assert.equal(win.signAndEditExecutable, false);
     }).pipe(Effect.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env: {} })))),
+  );
+
+  it.effect("uses Camie Tech as the default Azure signing publisher for Windows builds", () =>
+    Effect.gen(function* () {
+      const config = yield* createBuildConfig(
+        "win",
+        "nsis",
+        "1.2.3",
+        true,
+        false,
+        undefined,
+        undefined,
+      );
+      const win = config.win as Record<string, unknown>;
+      const azureSignOptions = win.azureSignOptions as Record<string, unknown>;
+
+      assert.equal(azureSignOptions.publisherName, "Camie Tech");
+    }).pipe(
+      Effect.provide(
+        ConfigProvider.layer(
+          ConfigProvider.fromEnv({
+            env: {
+              AZURE_TRUSTED_SIGNING_ENDPOINT: "https://trusted-signing.example.test",
+              AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE_NAME: "kamicode-nightly",
+              AZURE_TRUSTED_SIGNING_ACCOUNT_NAME: "camie-tech",
+            },
+          }),
+        ),
+      ),
+    ),
   );
 
   it("promotes target fff binaries to direct staged dependencies", () => {
