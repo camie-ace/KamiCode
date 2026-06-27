@@ -6,6 +6,7 @@ import * as NodePath from "node:path";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
+  attachmentRelativePath,
   createAttachmentId,
   parseThreadSegmentFromAttachmentId,
   resolveAttachmentPathById,
@@ -58,6 +59,55 @@ describe("attachmentStore", () => {
         attachmentId,
       });
       expect(resolved).toBe(pngPath);
+    } finally {
+      NodeFS.rmSync(attachmentsDir, { recursive: true, force: true });
+    }
+  });
+
+  it("derives safe relative paths for video and generic file attachments", () => {
+    expect(
+      attachmentRelativePath({
+        type: "video",
+        id: "thread-1-video",
+        name: "demo.mov",
+        mimeType: "video/mp4",
+        sizeBytes: 5,
+      }),
+    ).toBe("thread-1-video.mp4");
+    expect(
+      attachmentRelativePath({
+        type: "file",
+        id: "thread-1-file",
+        name: "report.html",
+        mimeType: "text/html",
+        sizeBytes: 5,
+      }),
+    ).toBe("thread-1-file.bin");
+    expect(
+      attachmentRelativePath({
+        type: "file",
+        id: "thread-1-notes",
+        name: "notes.txt",
+        mimeType: "application/octet-stream",
+        sizeBytes: 5,
+      }),
+    ).toBe("thread-1-notes.txt");
+  });
+
+  it("resolves attachment path by id for video extensions", () => {
+    const attachmentsDir = NodeFS.mkdtempSync(
+      NodePath.join(NodeOS.tmpdir(), "t3code-attachment-store-"),
+    );
+    try {
+      const attachmentId = "thread-1-video";
+      const videoPath = NodePath.join(attachmentsDir, `${attachmentId}.mp4`);
+      NodeFS.writeFileSync(videoPath, Buffer.from("hello"));
+
+      const resolved = resolveAttachmentPathById({
+        attachmentsDir,
+        attachmentId,
+      });
+      expect(resolved).toBe(videoPath);
     } finally {
       NodeFS.rmSync(attachmentsDir, { recursive: true, force: true });
     }

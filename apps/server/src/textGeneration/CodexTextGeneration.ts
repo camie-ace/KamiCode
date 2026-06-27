@@ -125,7 +125,7 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
 
     const imagePaths: string[] = [];
     for (const attachment of attachments) {
-      if (attachment.type !== "image") {
+      if (attachment.type !== "image" && attachment.type !== "gif") {
         continue;
       }
 

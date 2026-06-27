@@ -12,8 +12,11 @@ import {
   hasServerAcknowledgedLocalDispatch,
   reconcileMountedTerminalThreadIds,
   reconcileRetainedMountedThreadIds,
+  resolveMediaFollowUpReferences,
   resolveSendEnvMode,
   shouldWriteThreadErrorToCurrentServerThread,
+  appendMediaFollowUpReferencesToPrompt,
+  type MediaFollowUpArtifact,
 } from "./ChatView.logic";
 
 const environmentId = EnvironmentId.make("environment-local");
@@ -226,6 +229,119 @@ describe("resolveSendEnvMode", () => {
   it("keeps worktree mode only for git repositories", () => {
     expect(resolveSendEnvMode({ requestedEnvMode: "worktree", isGitRepo: true })).toBe("worktree");
     expect(resolveSendEnvMode({ requestedEnvMode: "worktree", isGitRepo: false })).toBe("local");
+  });
+});
+
+describe("resolveMediaFollowUpReferences", () => {
+  const makeArtifact = (
+    id: string,
+    kind: MediaFollowUpArtifact["kind"],
+    title: string,
+    path: string,
+  ): MediaFollowUpArtifact => ({
+    id,
+    kind,
+    title,
+    path,
+    source: "project",
+    origin: "found",
+  });
+
+  const selectedImage = makeArtifact(
+    "selected-image",
+    "image",
+    "selected.png",
+    String.raw`C:\repo\media\selected.png`,
+  );
+  const recentImage = makeArtifact(
+    "recent-image",
+    "image",
+    "recent.png",
+    String.raw`C:\repo\media\recent.png`,
+  );
+  const firstVideo = makeArtifact(
+    "first-video",
+    "video",
+    "first.mp4",
+    String.raw`C:\repo\media\first.mp4`,
+  );
+  const secondVideo = makeArtifact(
+    "second-video",
+    "video",
+    "second.mp4",
+    String.raw`C:\repo\media\second.mp4`,
+  );
+
+  it("resolves this/that image through selected-first media context", () => {
+    const references = resolveMediaFollowUpReferences({
+      prompt: "Please revise this image and keep that image's composition.",
+      selectedArtifact: selectedImage,
+      recentArtifacts: [recentImage, selectedImage],
+    });
+
+    expect(references.map((reference) => [reference.phrase, reference.artifact.id])).toEqual([
+      ["that image", "selected-image"],
+      ["this image", "selected-image"],
+    ]);
+  });
+
+  it("matches selected video with or without a leading article", () => {
+    const references = resolveMediaFollowUpReferences({
+      prompt: "Trim selected video, then summarize the selected video.",
+      selectedArtifact: firstVideo,
+      recentArtifacts: [recentImage, firstVideo],
+    });
+
+    expect(references).toHaveLength(1);
+    expect(references[0]).toMatchObject({
+      phrase: "selected video",
+      artifact: { id: "first-video" },
+      reference: String.raw`C:\repo\media\first.mp4`,
+    });
+  });
+
+  it("resolves second one against recent media order, not selected-first order", () => {
+    const references = resolveMediaFollowUpReferences({
+      prompt: "Use second one as the follow-up reference.",
+      selectedArtifact: selectedImage,
+      recentArtifacts: [firstVideo, secondVideo, selectedImage],
+    });
+
+    expect(references).toHaveLength(1);
+    expect(references[0]).toMatchObject({
+      phrase: "second one",
+      artifact: { id: "second-video" },
+    });
+  });
+
+  it("appends deterministic media context for matched follow-up phrases", () => {
+    const references = resolveMediaFollowUpReferences({
+      prompt: "Can you crop the selected video?",
+      selectedArtifact: firstVideo,
+      recentArtifacts: [firstVideo],
+    });
+
+    expect(
+      appendMediaFollowUpReferencesToPrompt({
+        prompt: "Can you crop the selected video?",
+        references,
+      }),
+    ).toContain(
+      `"selected video" -> video "first.mp4" (${String.raw`C:\repo\media\first.mp4`}; source: project; origin: found)`,
+    );
+  });
+
+  it("leaves prompts unchanged when there is no resolvable media context", () => {
+    const references = resolveMediaFollowUpReferences({
+      prompt: "Can you revise that image?",
+      selectedArtifact: null,
+      recentArtifacts: [],
+    });
+
+    expect(references).toEqual([]);
+    expect(appendMediaFollowUpReferencesToPrompt({ prompt: "No change", references })).toBe(
+      "No change",
+    );
   });
 });
 

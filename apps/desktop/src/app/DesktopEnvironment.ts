@@ -13,7 +13,7 @@ import * as Path from "effect/Path";
 
 import * as DesktopAppSettings from "../settings/DesktopAppSettings.ts";
 import * as DesktopConfig from "./DesktopConfig.ts";
-import { isNightlyDesktopVersion } from "../updates/updateChannels.ts";
+import { isDevDesktopVersion, isNightlyDesktopVersion } from "../updates/updateChannels.ts";
 
 export interface MakeDesktopEnvironmentInput {
   readonly dirname: string;
@@ -84,6 +84,10 @@ function resolveDesktopAppStageLabel(input: {
   readonly appVersion: string;
 }): DesktopAppStageLabel {
   if (input.isDevelopment) {
+    return "Dev";
+  }
+
+  if (isDevDesktopVersion(input.appVersion)) {
     return "Dev";
   }
 

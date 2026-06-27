@@ -13,14 +13,15 @@ import {
   type ServerProvider,
   type ResolvedKeybindingsConfig,
   type ScopedThreadRef,
-  type ThreadId,
-  type TurnId,
+  ThreadId,
+  TurnId,
   type KeybindingCommand,
   OrchestrationThreadActivity,
   ProviderInteractionMode,
   ProviderDriverKind,
   RuntimeMode,
   TerminalOpenInput,
+  type UploadChatAttachment,
   type WorkflowRecordKind,
 } from "@t3tools/contracts";
 import {
@@ -54,7 +55,7 @@ import {
   type AtomCommandResult,
 } from "@t3tools/client-runtime/state/runtime";
 import * as Cause from "effect/Cause";
-import { AsyncResult } from "effect/unstable/reactivity";
+import { AsyncResult, Atom } from "effect/unstable/reactivity";
 import { isElectron } from "../env";
 import { readLocalApi } from "../localApi";
 import { useDiffPanelStore } from "../diffPanelStore";
@@ -94,6 +95,7 @@ import {
   DEFAULT_RUNTIME_MODE,
   DEFAULT_THREAD_TERMINAL_ID,
   MAX_TERMINALS_PER_GROUP,
+  type ChatAttachment,
   type ChatMessage,
   type SessionPhase,
   type Thread,
@@ -156,6 +158,7 @@ import {
 } from "../logicalProject";
 import { buildDraftThreadRouteParams } from "../threadRoutes";
 import {
+  type ComposerAttachment,
   type ComposerImageAttachment,
   type DraftThreadEnvMode,
   useComposerDraftStore,
@@ -185,7 +188,7 @@ import {
   serverEnvironment,
 } from "../state/server";
 import { terminalEnvironment } from "../state/terminal";
-import { threadEnvironment } from "../state/threads";
+import { environmentThreadDetails, threadEnvironment } from "../state/threads";
 import { vcsEnvironment } from "../state/vcs";
 import { useEnvironments, usePrimaryEnvironment } from "../state/environments";
 import {
@@ -200,6 +203,7 @@ import { ChatComposer, type ChatComposerHandle } from "./chat/ChatComposer";
 import { ExpandedImageDialog } from "./chat/ExpandedImageDialog";
 import { PullRequestThreadDialog } from "./PullRequestThreadDialog";
 import { MessagesTimeline } from "./chat/MessagesTimeline";
+import { MediaShelf } from "./chat/MediaShelf";
 import { ChatHeader } from "./chat/ChatHeader";
 import { PanelLayoutControls, RightPanelMaximizeControl } from "./chat/PanelLayoutControls";
 import { type ExpandedImagePreview } from "./chat/ExpandedImagePreview";
@@ -211,6 +215,7 @@ import { ThreadErrorBanner } from "./chat/ThreadErrorBanner";
 import { ComposerBannerStack, type ComposerBannerStackItem } from "./chat/ComposerBannerStack";
 import {
   MAX_HIDDEN_MOUNTED_TERMINAL_THREADS,
+  appendMediaFollowUpReferencesToPrompt,
   buildExpiredTerminalContextToastCopy,
   buildLocalDraftThread,
   collectUserMessageBlobPreviewUrls,
@@ -222,10 +227,10 @@ import {
   LastInvokedScriptByProjectSchema,
   type LocalDispatchSnapshot,
   PullRequestDialogState,
-  cloneComposerImageForRetry,
   deriveLockedProvider,
   readFileAsDataUrl,
   reconcileMountedTerminalThreadIds,
+  resolveMediaFollowUpReferences,
   resolveSendEnvMode,
   revokeBlobPreviewUrl,
   revokeUserMessagePreviewUrls,
@@ -245,13 +250,96 @@ import {
   resolveServerConfigVersionMismatch,
 } from "../versionSkew";
 import { useAssetUrls } from "../assets/assetUrls";
+import { collectThreadMediaArtifacts } from "~/mediaArtifacts";
 
-const IMAGE_ONLY_BOOTSTRAP_PROMPT =
-  "[User attached one or more images without additional text. Respond using the conversation context and the attached image(s).]";
+const ATTACHMENT_ONLY_BOOTSTRAP_PROMPT =
+  "[User attached one or more media files without additional text. Respond using the conversation context and the attached media.]";
 const EMPTY_ACTIVITIES: OrchestrationThreadActivity[] = [];
 const EMPTY_PROVIDERS: ServerProvider[] = [];
 const EMPTY_PROVIDER_SKILLS: ServerProvider["skills"] = [];
 const EMPTY_PENDING_USER_INPUT_ANSWERS: Record<string, PendingUserInputDraftAnswer> = {};
+const WORKFLOW_USE_LEAD_DEFAULT = "Use lead default";
+
+type SendableComposerAttachment = Exclude<ComposerAttachment, { readonly status: "unsupported" }>;
+
+function isSendableComposerAttachment(
+  attachment: ComposerAttachment,
+): attachment is SendableComposerAttachment {
+  return attachment.status !== "unsupported";
+}
+
+function uploadTypeForComposerAttachment(
+  attachment: SendableComposerAttachment,
+): UploadChatAttachment["type"] {
+  if (attachment.type === "image" && attachment.mimeType.toLowerCase() === "image/gif") {
+    return "gif";
+  }
+  return attachment.type;
+}
+
+async function toUploadChatAttachment(
+  attachment: SendableComposerAttachment,
+): Promise<UploadChatAttachment> {
+  const dataUrl = await readFileAsDataUrl(attachment.file);
+  const type = uploadTypeForComposerAttachment(attachment);
+  const base = {
+    name: attachment.name,
+    mimeType: attachment.mimeType,
+    sizeBytes: attachment.sizeBytes,
+    dataUrl,
+  };
+  switch (type) {
+    case "image":
+      return { ...base, type };
+    case "gif":
+      return { ...base, type };
+    case "video":
+      return { ...base, type };
+    case "file":
+      return { ...base, type };
+  }
+}
+
+function toOptimisticChatAttachment(attachment: SendableComposerAttachment): ChatAttachment {
+  const type = uploadTypeForComposerAttachment(attachment);
+  const base = {
+    id: attachment.id,
+    name: attachment.name,
+    mimeType: attachment.mimeType,
+    sizeBytes: attachment.sizeBytes,
+    previewUrl: attachment.previewUrl,
+  };
+  switch (type) {
+    case "image":
+      return { ...base, type };
+    case "gif":
+      return { ...base, type };
+    case "video":
+      return { ...base, type };
+    case "file":
+      return { ...base, type };
+  }
+}
+
+function cloneComposerAttachmentForRetry(
+  attachment: SendableComposerAttachment,
+): SendableComposerAttachment {
+  if (
+    typeof URL === "undefined" ||
+    typeof URL.createObjectURL !== "function" ||
+    !attachment.previewUrl.startsWith("blob:")
+  ) {
+    return attachment;
+  }
+  try {
+    return {
+      ...attachment,
+      previewUrl: URL.createObjectURL(attachment.file),
+    };
+  } catch {
+    return attachment;
+  }
+}
 
 function workflowActionLabel(action: string): string {
   switch (action) {
@@ -284,8 +372,449 @@ function workflowActionInstruction(action: string, laneRole?: string): string {
   }
 }
 
+interface WorkflowLaneTarget {
+  readonly id: string;
+  readonly role: string;
+}
+
+interface WorkflowPlannedSubAgent extends WorkflowLaneTarget {
+  readonly goal?: string;
+  readonly prompt?: string;
+  readonly model?: string;
+  readonly reasoningEffort?: string;
+  readonly fastMode?: boolean;
+  readonly startsAfter?: ReadonlyArray<string>;
+}
+
+function workflowPayloadSubAgents(
+  payload: Record<string, unknown> | null,
+): WorkflowPlannedSubAgent[] {
+  const value = payload?.subAgents;
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((entry) => {
+    if (!entry || typeof entry !== "object") return [];
+    const item = entry as Record<string, unknown>;
+    if (typeof item.id !== "string" || typeof item.role !== "string") return [];
+    return [
+      {
+        id: item.id,
+        role: item.role,
+        ...(typeof item.goal === "string" ? { goal: item.goal } : {}),
+        ...(typeof item.prompt === "string" ? { prompt: item.prompt } : {}),
+        ...(typeof item.model === "string" ? { model: item.model } : {}),
+        ...(typeof item.reasoningEffort === "string"
+          ? { reasoningEffort: item.reasoningEffort }
+          : {}),
+        ...(typeof item.fastMode === "boolean" ? { fastMode: item.fastMode } : {}),
+        ...(Array.isArray(item.startsAfter)
+          ? {
+              startsAfter: item.startsAfter.filter(
+                (entry): entry is string => typeof entry === "string",
+              ),
+            }
+          : {}),
+      },
+    ];
+  });
+}
+
+function workflowActivityPayload(
+  activity: OrchestrationThreadActivity,
+): Record<string, unknown> | null {
+  return activity.payload && typeof activity.payload === "object"
+    ? (activity.payload as Record<string, unknown>)
+    : null;
+}
+
+function workflowPayloadString(
+  payload: Record<string, unknown> | null,
+  key: string,
+): string | null {
+  const value = payload?.[key];
+  return typeof value === "string" && value.trim().length > 0 ? value : null;
+}
+
+function workflowLaneMatchesPayload(
+  payload: Record<string, unknown> | null,
+  lane: WorkflowLaneTarget,
+): boolean {
+  return workflowPayloadString(payload, "laneId") === lane.id;
+}
+
+function latestWorkflowPlanDetails(
+  activities: ReadonlyArray<OrchestrationThreadActivity>,
+  fallbackGoal: string,
+): {
+  readonly activity: OrchestrationThreadActivity | null;
+  readonly payload: Record<string, unknown>;
+  readonly goal: string;
+  readonly plannedSubAgents: WorkflowPlannedSubAgent[];
+} {
+  const activity =
+    activities
+      .filter((entry) => entry.kind === "workflow.customized" || entry.kind === "workflow.planned")
+      .toSorted((left, right) => right.createdAt.localeCompare(left.createdAt))[0] ?? null;
+  const payload = activity ? (workflowActivityPayload(activity) ?? {}) : {};
+  const goal = typeof payload.goal === "string" ? payload.goal : fallbackGoal;
+  return {
+    activity,
+    payload,
+    goal,
+    plannedSubAgents: workflowPayloadSubAgents(payload),
+  };
+}
+
+function latestWorkflowChildThreadId(
+  activities: ReadonlyArray<OrchestrationThreadActivity>,
+  lane: WorkflowLaneTarget,
+): ThreadId | null {
+  const latest = activities
+    .filter((activity) => {
+      if (activity.kind !== "workflow.lane.started") return false;
+      return workflowLaneMatchesPayload(workflowActivityPayload(activity), lane);
+    })
+    .toSorted((left, right) => right.createdAt.localeCompare(left.createdAt))[0];
+  const childThreadId = latest
+    ? workflowPayloadString(workflowActivityPayload(latest), "childThreadId")
+    : null;
+  return childThreadId ? ThreadId.make(childThreadId) : null;
+}
+
+function workflowLaneRequestedModel(lane: WorkflowPlannedSubAgent): string | null {
+  const model = lane.model?.trim();
+  if (!model) return null;
+  return model.toLowerCase() === WORKFLOW_USE_LEAD_DEFAULT.toLowerCase() ? null : model;
+}
+
+type WorkflowModelOptionSelection = NonNullable<ModelSelection["options"]>[number];
+
+function workflowModelOptionSelections(
+  baseOptions: ModelSelection["options"],
+): Array<WorkflowModelOptionSelection> {
+  return (baseOptions ?? []).map((option) => ({ ...option }));
+}
+
+function setWorkflowModelOption(
+  options: Array<WorkflowModelOptionSelection>,
+  id: string,
+  value: string | boolean,
+): Array<WorkflowModelOptionSelection> {
+  const next = [...options];
+  const index = next.findIndex((option) => option.id === id);
+  const selection = { id, value };
+  if (index === -1) {
+    next.push(selection);
+  } else {
+    next[index] = selection;
+  }
+  return next;
+}
+
+function workflowLaneModelSelection(
+  baseModelSelection: ModelSelection,
+  lane: WorkflowPlannedSubAgent,
+): ModelSelection {
+  let options = workflowModelOptionSelections(baseModelSelection.options);
+  const reasoningEffort = lane.reasoningEffort?.trim();
+  if (reasoningEffort) {
+    options = setWorkflowModelOption(options, "reasoningEffort", reasoningEffort);
+  }
+  if (typeof lane.fastMode === "boolean") {
+    options = setWorkflowModelOption(options, "fastMode", lane.fastMode);
+  }
+  return createModelSelection(
+    baseModelSelection.instanceId,
+    workflowLaneRequestedModel(lane) ?? baseModelSelection.model,
+    options,
+  );
+}
+
+function workflowLaneThreadTitle(params: {
+  parentTitle: string;
+  workflowGoal: string;
+  laneRole: string;
+}): string {
+  return truncate(
+    `Workflow: ${params.parentTitle || params.workflowGoal} - ${params.laneRole}`,
+    80,
+  );
+}
+
+function workflowLaneSettingText(lane: WorkflowPlannedSubAgent): string {
+  return [
+    `model: ${lane.model ?? "inherit current selection"}`,
+    `reasoning: ${lane.reasoningEffort ?? "inherit current selection"}`,
+    `fastMode: ${
+      typeof lane.fastMode === "boolean" ? (lane.fastMode ? "on" : "off") : "inherit current"
+    }`,
+  ].join("\n");
+}
+
+function workflowLaneStartsAfterText(lane: WorkflowPlannedSubAgent): string {
+  const startsAfter = lane.startsAfter ?? [];
+  return startsAfter.length > 0 ? startsAfter.join(", ") : "(none)";
+}
+
+function buildWorkflowChildPrompt(params: {
+  workflowGoal: string;
+  parentThreadId: ThreadId;
+  parentThreadTitle: string;
+  lane: WorkflowPlannedSubAgent;
+  guidance?: string;
+}): string {
+  const lanePrompt = params.lane.prompt ?? params.lane.goal ?? "Report findings through the Lead.";
+  const laneGoal = params.lane.goal ?? lanePrompt;
+  return [
+    "You are a subordinate workflow agent, not the Lead.",
+    "Work only on the lane assigned below. Keep decisions scoped to this lane and avoid taking over final workflow synthesis.",
+    "",
+    `Parent workflow thread: ${params.parentThreadTitle} (${params.parentThreadId})`,
+    `Approved workflow goal: ${params.workflowGoal}`,
+    "",
+    "Lane identity:",
+    `role: ${params.lane.role}`,
+    `id: ${params.lane.id}`,
+    "",
+    "Approved lane goal:",
+    laneGoal,
+    "",
+    "Approved lane prompt:",
+    lanePrompt,
+    "",
+    "Approved lane settings:",
+    workflowLaneSettingText(params.lane),
+    "",
+    `startsAfter: ${workflowLaneStartsAfterText(params.lane)}`,
+    "",
+    "Subordinate instructions:",
+    "- Treat the parent thread as the Lead-owned workflow record.",
+    "- Do not launch other workflow lanes, perform final synthesis, or mark verifier outcomes.",
+    "- Keep changes and investigation scoped to this lane unless the approved prompt explicitly says otherwise.",
+    "- If blocked, report the blocker, evidence, and the smallest Lead action needed.",
+    ...(params.guidance ? ["", "New Lead guidance for this rerun:", params.guidance] : []),
+    "",
+    "Hand results back to the Lead explicitly in your final assistant message. Include what changed, files touched if any, tests/checks run if any, known risks, and any follow-up the Lead must handle.",
+  ].join("\n");
+}
+
+interface WorkflowStartedChildLane {
+  readonly activityId: string;
+  readonly createdAt: string;
+  readonly laneId: string;
+  readonly laneRole: string;
+  readonly childThreadId: ThreadId;
+  readonly childTurnMessageId: string | null;
+  readonly childTurnRequestedAt: string | null;
+}
+
+function workflowStartedChildLanes(
+  activities: ReadonlyArray<OrchestrationThreadActivity>,
+): WorkflowStartedChildLane[] {
+  return activities.flatMap((activity) => {
+    if (activity.kind !== "workflow.lane.started") return [];
+    const payload = workflowActivityPayload(activity);
+    const laneId = workflowPayloadString(payload, "laneId");
+    const childThreadId = workflowPayloadString(payload, "childThreadId");
+    if (!laneId || !childThreadId) return [];
+    const laneRole = workflowPayloadString(payload, "laneRole") ?? laneId;
+    return [
+      {
+        activityId: activity.id,
+        createdAt: activity.createdAt,
+        laneId,
+        laneRole,
+        childThreadId: ThreadId.make(childThreadId),
+        childTurnMessageId: workflowPayloadString(payload, "childTurnMessageId"),
+        childTurnRequestedAt: workflowPayloadString(payload, "childTurnRequestedAt"),
+      },
+    ];
+  });
+}
+
+function workflowCompletionKey(input: {
+  parentThreadId: ThreadId;
+  startedActivityId: string;
+  childThreadId: ThreadId;
+  childTurnId: TurnId;
+}): string {
+  return `${input.parentThreadId}:${input.startedActivityId}:${input.childThreadId}:${input.childTurnId}`;
+}
+
+function workflowLaneLaunchKey(parentThreadId: ThreadId, laneId: string): string {
+  return `${parentThreadId}:${laneId}`;
+}
+
+function workflowCompletionKindKey(
+  kind: "workflow.handoff" | "workflow.lane.completed",
+  key: string,
+) {
+  return `${kind}:${key}`;
+}
+
+function existingWorkflowCompletionPresence(
+  parentThreadId: ThreadId | null,
+  activities: ReadonlyArray<OrchestrationThreadActivity>,
+): {
+  readonly handoffKeys: Set<string>;
+  readonly completedKeys: Set<string>;
+} {
+  const handoffKeys = new Set<string>();
+  const completedKeys = new Set<string>();
+  if (!parentThreadId) return { handoffKeys, completedKeys };
+  for (const activity of activities) {
+    if (activity.kind !== "workflow.handoff" && activity.kind !== "workflow.lane.completed") {
+      continue;
+    }
+    const payload = workflowActivityPayload(activity);
+    const startedActivityId = workflowPayloadString(payload, "sourceStartedActivityId");
+    const childThreadId = workflowPayloadString(payload, "childThreadId");
+    const childTurnId = workflowPayloadString(payload, "childTurnId");
+    if (!startedActivityId || !childThreadId || !childTurnId) {
+      continue;
+    }
+    const key = workflowCompletionKey({
+      parentThreadId,
+      startedActivityId,
+      childThreadId: ThreadId.make(childThreadId),
+      childTurnId: TurnId.make(childTurnId),
+    });
+    if (activity.kind === "workflow.handoff") {
+      handoffKeys.add(key);
+    } else {
+      completedKeys.add(key);
+    }
+  }
+  return { handoffKeys, completedKeys };
+}
+
+function workflowCompletedLaneIds(
+  activities: ReadonlyArray<OrchestrationThreadActivity>,
+): Set<string> {
+  const completed = new Set<string>();
+  for (const activity of activities) {
+    if (activity.kind !== "workflow.lane.completed") continue;
+    const laneId = workflowPayloadString(workflowActivityPayload(activity), "laneId");
+    if (laneId) completed.add(laneId);
+  }
+  return completed;
+}
+
+function workflowStartedChildLaneIds(
+  activities: ReadonlyArray<OrchestrationThreadActivity>,
+): Set<string> {
+  return new Set(workflowStartedChildLanes(activities).map((entry) => entry.laneId));
+}
+
+function workflowStartedRunMatchesLatestTurn(
+  started: WorkflowStartedChildLane,
+  latestTurn: Thread["latestTurn"],
+): boolean {
+  if (!latestTurn) return false;
+  if (!started.childTurnRequestedAt) return true;
+  return latestTurn.requestedAt.localeCompare(started.childTurnRequestedAt) >= 0;
+}
+
+interface WorkflowChildCompletionObservation {
+  readonly completionKey: string;
+  readonly needsHandoff: boolean;
+  readonly needsCompleted: boolean;
+  readonly parentThreadId: ThreadId;
+  readonly startedActivityId: string;
+  readonly laneId: string;
+  readonly laneRole: string;
+  readonly childThreadId: ThreadId;
+  readonly childTurnId: TurnId;
+  readonly childAssistantMessageId: string | null;
+  readonly summary: string;
+  readonly detail: string;
+}
+
+function workflowChildCompletionObservations(input: {
+  parentThread: Thread;
+  childThreadForId: (childThreadId: ThreadId) => Thread | null;
+}): WorkflowChildCompletionObservation[] {
+  const presence = existingWorkflowCompletionPresence(
+    input.parentThread.id,
+    input.parentThread.activities,
+  );
+  return workflowStartedChildLanes(input.parentThread.activities).flatMap((started) => {
+    const childThread = input.childThreadForId(started.childThreadId);
+    const latestTurn = childThread?.latestTurn ?? null;
+    if (!childThread || !latestTurn || !workflowStartedRunMatchesLatestTurn(started, latestTurn)) {
+      return [];
+    }
+    if (!isLatestTurnSettled(latestTurn, childThread.session)) {
+      return [];
+    }
+    const completionKey = workflowCompletionKey({
+      parentThreadId: input.parentThread.id,
+      startedActivityId: started.activityId,
+      childThreadId: started.childThreadId,
+      childTurnId: latestTurn.turnId,
+    });
+    const needsHandoff = !presence.handoffKeys.has(completionKey);
+    const needsCompleted = !presence.completedKeys.has(completionKey);
+    if (!needsHandoff && !needsCompleted) {
+      return [];
+    }
+    const { summary, detail } = workflowChildResultText(
+      latestAssistantTextForTurn(childThread, latestTurn.turnId, latestTurn.assistantMessageId),
+    );
+    return [
+      {
+        completionKey,
+        needsHandoff,
+        needsCompleted,
+        parentThreadId: input.parentThread.id,
+        startedActivityId: started.activityId,
+        laneId: started.laneId,
+        laneRole: started.laneRole,
+        childThreadId: started.childThreadId,
+        childTurnId: latestTurn.turnId,
+        childAssistantMessageId: latestTurn.assistantMessageId,
+        summary,
+        detail,
+      },
+    ];
+  });
+}
+
+function latestAssistantTextForTurn(
+  thread: Thread,
+  turnId: TurnId,
+  assistantMessageId: string | null,
+) {
+  const exact = assistantMessageId
+    ? thread.messages.find((message) => message.id === assistantMessageId)
+    : null;
+  const message =
+    exact ??
+    thread.messages
+      .filter((entry) => entry.role === "assistant" && entry.turnId === turnId)
+      .toSorted((left, right) => right.createdAt.localeCompare(left.createdAt))[0] ??
+    null;
+  const text = message?.text.trim() ?? "";
+  return text.length > 0 ? text : null;
+}
+
+function workflowChildResultText(text: string | null): { summary: string; detail: string } {
+  if (!text) {
+    return {
+      summary: "Child thread settled without an assistant message",
+      detail: "The child thread settled, but no assistant message was available to hand off.",
+    };
+  }
+  const normalized = text.replace(/\s+/g, " ").trim();
+  return {
+    summary: truncate(normalized, 140),
+    detail: truncate(text, 4000),
+  };
+}
+
 const PreviewPanel = lazy(() =>
-  import("./preview/PreviewPanel").then((module) => ({ default: module.PreviewPanel })),
+  import("./preview/PreviewPanel").then((module) => ({
+    default: module.PreviewPanel,
+  })),
 );
 const DiffPanel = lazy(() => import("./DiffPanel"));
 const FilePreviewPanel = lazy(() => import("./files/FilePreviewPanel"));
@@ -1094,15 +1623,21 @@ function ChatViewContent(props: ChatViewProps) {
     [environmentId, threadId],
   );
   const routeThreadKey = useMemo(() => scopedThreadKey(routeThreadRef), [routeThreadRef]);
-  const updateProject = useAtomCommand(projectEnvironment.update, { reportFailure: false });
+  const updateProject = useAtomCommand(projectEnvironment.update, {
+    reportFailure: false,
+  });
   const upsertKeybinding = useAtomCommand(serverEnvironment.upsertKeybinding, {
     reportFailure: false,
   });
   const openTerminal = useAtomCommand(terminalEnvironment.open, "terminal open");
   const writeTerminal = useAtomCommand(terminalEnvironment.write, "terminal write");
   const closeTerminalMutation = useAtomCommand(terminalEnvironment.close, "terminal close");
-  const createThread = useAtomCommand(threadEnvironment.create, { reportFailure: false });
-  const deleteThread = useAtomCommand(threadEnvironment.delete, { reportFailure: false });
+  const createThread = useAtomCommand(threadEnvironment.create, {
+    reportFailure: false,
+  });
+  const deleteThread = useAtomCommand(threadEnvironment.delete, {
+    reportFailure: false,
+  });
   const updateThreadMetadata = useAtomCommand(threadEnvironment.updateMetadata, {
     reportFailure: false,
   });
@@ -1115,7 +1650,9 @@ function ChatViewContent(props: ChatViewProps) {
   const deleteThreadQueuedTurn = useAtomCommand(threadEnvironment.deleteQueuedTurn, {
     reportFailure: false,
   });
-  const startThreadTurn = useAtomCommand(threadEnvironment.startTurn, { reportFailure: false });
+  const startThreadTurn = useAtomCommand(threadEnvironment.startTurn, {
+    reportFailure: false,
+  });
   const recordThreadWorkflow = useAtomCommand(threadEnvironment.recordWorkflow, {
     reportFailure: false,
   });
@@ -1131,11 +1668,15 @@ function ChatViewContent(props: ChatViewProps) {
   const revertThreadCheckpoint = useAtomCommand(threadEnvironment.revertCheckpoint, {
     reportFailure: false,
   });
-  const openPreview = useAtomCommand(previewEnvironment.open, { reportFailure: false });
+  const openPreview = useAtomCommand(previewEnvironment.open, {
+    reportFailure: false,
+  });
   const closePreview = useAtomCommand(previewEnvironment.close, "preview close");
   const { environments } = useEnvironments();
   const primaryEnvironment = usePrimaryEnvironment();
-  const retryEnvironment = useAtomCommand(environmentCatalog.retryNow, { reportFailure: false });
+  const retryEnvironment = useAtomCommand(environmentCatalog.retryNow, {
+    reportFailure: false,
+  });
   const environmentById = useMemo(
     () => new Map(environments.map((environment) => [environment.environmentId, environment])),
     [environments],
@@ -1166,7 +1707,7 @@ function ChatViewContent(props: ChatViewProps) {
     (store) => store.getComposerDraft(composerDraftTarget)?.activeProvider ?? null,
   );
   const setComposerDraftPrompt = useComposerDraftStore((store) => store.setPrompt);
-  const addComposerDraftImages = useComposerDraftStore((store) => store.addImages);
+  const addComposerDraftAttachments = useComposerDraftStore((store) => store.addAttachments);
   const setComposerDraftTerminalContexts = useComposerDraftStore(
     (store) => store.setTerminalContexts,
   );
@@ -1250,6 +1791,7 @@ function ChatViewContent(props: ChatViewProps) {
   const [attachmentPreviewHandoffByMessageId, setAttachmentPreviewHandoffByMessageId] = useState<
     Record<string, string[]>
   >({});
+  const [selectedMediaArtifactKey, setSelectedMediaArtifactKey] = useState<string | null>(null);
   const [pendingServerThreadEnvMode, setPendingServerThreadEnvMode] =
     useState<DraftThreadEnvMode | null>(null);
   const [pendingServerThreadBranch, setPendingServerThreadBranch] = useState<string | null>();
@@ -1267,6 +1809,10 @@ function ChatViewContent(props: ChatViewProps) {
   const attachmentPreviewHandoffByMessageIdRef = useRef<Record<string, string[]>>({});
   const attachmentPreviewPromotionInFlightByMessageIdRef = useRef<Record<string, true>>({});
   const sendInFlightRef = useRef(false);
+  const workflowLaneLaunchInFlightRef = useRef<Set<string>>(new Set());
+  const workflowLaneLaunchRecordedRef = useRef<Set<string>>(new Set());
+  const workflowCompletionInFlightRef = useRef<Set<string>>(new Set());
+  const workflowCompletionRecordedRef = useRef<Set<string>>(new Set());
   const terminalUiOpenByThreadRef = useRef<Record<string, boolean>>({});
 
   const terminalUiState = useTerminalUiStateStore((state) =>
@@ -1876,6 +2422,23 @@ function ChatViewContent(props: ChatViewProps) {
     () => deriveActivePlanState(threadActivities, activeLatestTurn?.turnId ?? undefined),
     [activeLatestTurn?.turnId, threadActivities],
   );
+  const workflowChildCompletionsAtom = useMemo(
+    () =>
+      Atom.make((get): WorkflowChildCompletionObservation[] => {
+        if (!activeThread) return [];
+        return workflowChildCompletionObservations({
+          parentThread: activeThread,
+          childThreadForId: (childThreadId) =>
+            get(
+              environmentThreadDetails.detailAtom(
+                scopeThreadRef(activeThread.environmentId, childThreadId),
+              ),
+            ),
+        });
+      }).pipe(Atom.withLabel(`workflow-child-completions:${routeThreadKey}`)),
+    [activeThread, routeThreadKey],
+  );
+  const workflowChildCompletions = useAtomValue(workflowChildCompletionsAtom);
   const workflowSidebarActive = interactionMode === "workflow";
   const planSidebarLabel = workflowSidebarActive
     ? "Workflow"
@@ -2253,6 +2816,16 @@ function ChatViewContent(props: ChatViewProps) {
     () =>
       deriveTimelineEntries(timelineMessages, activeThread?.proposedPlans ?? [], workLogEntries),
     [activeThread?.proposedPlans, timelineMessages, workLogEntries],
+  );
+  const threadMediaArtifacts = useMemo(
+    () => collectThreadMediaArtifacts(timelineMessages),
+    [timelineMessages],
+  );
+  const selectedThreadMediaArtifact = useMemo(
+    () =>
+      threadMediaArtifacts.find((artifact) => artifact.dedupeKey === selectedMediaArtifactKey) ??
+      null,
+    [selectedMediaArtifactKey, threadMediaArtifacts],
   );
   const { turnDiffSummaries, inferredCheckpointTurnCountByTurnId } =
     useTurnDiffSummaries(activeThread);
@@ -2814,7 +3387,10 @@ function ChatViewContent(props: ChatViewProps) {
         storeSetActiveTerminal(activeThreadRef, targetTerminalId);
       }
 
-      const openResult = await openTerminal({ environmentId, input: openTerminalInput });
+      const openResult = await openTerminal({
+        environmentId,
+        input: openTerminalInput,
+      });
       if (openResult._tag === "Failure") {
         if (!isAtomCommandInterrupted(openResult)) {
           const error = squashAtomCommandFailure(openResult);
@@ -3229,7 +3805,11 @@ function ChatViewContent(props: ChatViewProps) {
       if (!activeThreadRef || activeRightPanelSurface?.kind !== "terminal") return;
       void closeTerminalMutation({
         environmentId: activeThreadRef.environmentId,
-        input: { threadId: activeThreadRef.threadId, terminalId, deleteHistory: true },
+        input: {
+          threadId: activeThreadRef.threadId,
+          terminalId,
+          deleteHistory: true,
+        },
       });
       storeCloseTerminal(activeThreadRef, terminalId);
       useRightPanelStore
@@ -3302,7 +3882,11 @@ function ChatViewContent(props: ChatViewProps) {
             storeCloseTerminal(activeThreadRef, terminalId);
             void closeTerminalMutation({
               environmentId: activeThreadRef.environmentId,
-              input: { threadId: activeThreadRef.threadId, terminalId, deleteHistory: true },
+              input: {
+                threadId: activeThreadRef.threadId,
+                terminalId,
+                deleteHistory: true,
+              },
             });
           }
         }
@@ -3510,7 +4094,7 @@ function ChatViewContent(props: ChatViewProps) {
       createdAt?: string;
     }) => {
       const createdAt = input.createdAt ?? new Date().toISOString();
-      await recordThreadWorkflow({
+      return await recordThreadWorkflow({
         environmentId,
         input: {
           threadId: input.threadId,
@@ -3524,6 +4108,280 @@ function ChatViewContent(props: ChatViewProps) {
     },
     [environmentId, recordThreadWorkflow],
   );
+
+  const launchWorkflowChildLane = useCallback(
+    async (input: {
+      lane: WorkflowPlannedSubAgent;
+      workflowGoal: string;
+      guidance?: string;
+      existingChildThreadId?: ThreadId | null;
+    }): Promise<ThreadId | null> => {
+      if (!activeThread || !activeProject) return null;
+
+      const childThreadId = input.existingChildThreadId ?? newThreadId();
+      const childTurnMessageId = newMessageId();
+      const childTurnRequestedAt = new Date().toISOString();
+      const title = workflowLaneThreadTitle({
+        parentTitle: activeThread.title,
+        workflowGoal: input.workflowGoal,
+        laneRole: input.lane.role,
+      });
+      const childPrompt = buildWorkflowChildPrompt({
+        workflowGoal: input.workflowGoal,
+        parentThreadId: activeThread.id,
+        parentThreadTitle: activeThread.title,
+        lane: input.lane,
+        ...(input.guidance ? { guidance: input.guidance } : {}),
+      });
+      const childModelSelection = workflowLaneModelSelection(
+        activeThread.modelSelection,
+        input.lane,
+      );
+
+      if (!input.existingChildThreadId) {
+        const createResult = await createThread({
+          environmentId,
+          input: {
+            threadId: childThreadId,
+            projectId: activeProject.id,
+            title,
+            modelSelection: childModelSelection,
+            runtimeMode,
+            interactionMode: "default",
+            branch: activeThread.branch,
+            worktreePath: activeThread.worktreePath,
+            createdAt: childTurnRequestedAt,
+          },
+        });
+        if (createResult._tag === "Failure") {
+          if (!isAtomCommandInterrupted(createResult)) {
+            const error = squashAtomCommandFailure(createResult);
+            setThreadError(
+              activeThread.id,
+              error instanceof Error ? error.message : `Failed to create ${input.lane.role} lane.`,
+            );
+          }
+          return null;
+        }
+      }
+
+      const startResult = await startThreadTurn({
+        environmentId,
+        input: {
+          threadId: childThreadId,
+          message: {
+            messageId: childTurnMessageId,
+            role: "user",
+            text: childPrompt,
+            attachments: [],
+          },
+          modelSelection: childModelSelection,
+          titleSeed: title,
+          runtimeMode,
+          interactionMode: "default",
+          createdAt: childTurnRequestedAt,
+        },
+      });
+      if (startResult._tag === "Failure") {
+        if (!isAtomCommandInterrupted(startResult)) {
+          const error = squashAtomCommandFailure(startResult);
+          setThreadError(
+            activeThread.id,
+            error instanceof Error ? error.message : `Failed to start ${input.lane.role} lane.`,
+          );
+        }
+        return null;
+      }
+
+      const appendStartedResult = await appendWorkflowActivity({
+        threadId: activeThread.id,
+        kind: "workflow.lane.started",
+        summary: `${input.lane.role} lane started`,
+        payload: {
+          laneId: input.lane.id,
+          laneRole: input.lane.role,
+          childThreadId,
+          childTurnMessageId,
+          childTurnRequestedAt,
+          title: input.guidance ? `${input.lane.role} re-triggered` : `${input.lane.role} launched`,
+          detail:
+            input.guidance ??
+            input.lane.goal ??
+            input.lane.prompt ??
+            "This planned lane was launched as a child workflow thread.",
+        },
+      }).catch((error) => {
+        setThreadError(
+          activeThread.id,
+          error instanceof Error
+            ? error.message
+            : `Failed to record ${input.lane.role} lane start.`,
+        );
+        return null;
+      });
+      if (!appendStartedResult) return null;
+      if (appendStartedResult._tag === "Failure") {
+        if (!isAtomCommandInterrupted(appendStartedResult)) {
+          const error = squashAtomCommandFailure(appendStartedResult);
+          setThreadError(
+            activeThread.id,
+            error instanceof Error
+              ? error.message
+              : `Failed to record ${input.lane.role} lane start.`,
+          );
+        }
+        return null;
+      }
+
+      return childThreadId;
+    },
+    [
+      activeProject,
+      activeThread,
+      appendWorkflowActivity,
+      createThread,
+      environmentId,
+      runtimeMode,
+      setThreadError,
+      startThreadTurn,
+    ],
+  );
+
+  useEffect(() => {
+    if (!activeThread || workflowChildCompletions.length === 0) return;
+
+    let cancelled = false;
+    void (async () => {
+      for (const observation of workflowChildCompletions) {
+        if (cancelled || observation.parentThreadId !== activeThread.id) continue;
+
+        if (observation.needsHandoff) {
+          const key = workflowCompletionKindKey("workflow.handoff", observation.completionKey);
+          if (
+            !workflowCompletionRecordedRef.current.has(key) &&
+            !workflowCompletionInFlightRef.current.has(key)
+          ) {
+            workflowCompletionInFlightRef.current.add(key);
+            try {
+              const result = await appendWorkflowActivity({
+                threadId: activeThread.id,
+                kind: "workflow.handoff",
+                summary: `${observation.laneRole} handed results to Lead`,
+                payload: {
+                  laneId: observation.laneId,
+                  laneRole: observation.laneRole,
+                  childThreadId: observation.childThreadId,
+                  childTurnId: observation.childTurnId,
+                  sourceStartedActivityId: observation.startedActivityId,
+                  cardType: "handoff",
+                  title: `${observation.laneRole} handoff`,
+                  detail: observation.detail,
+                },
+              }).catch(() => null);
+              if (result && result._tag !== "Failure") {
+                workflowCompletionRecordedRef.current.add(key);
+              }
+            } finally {
+              workflowCompletionInFlightRef.current.delete(key);
+            }
+          }
+        }
+
+        if (observation.needsCompleted) {
+          const key = workflowCompletionKindKey(
+            "workflow.lane.completed",
+            observation.completionKey,
+          );
+          if (
+            !workflowCompletionRecordedRef.current.has(key) &&
+            !workflowCompletionInFlightRef.current.has(key)
+          ) {
+            workflowCompletionInFlightRef.current.add(key);
+            try {
+              const result = await appendWorkflowActivity({
+                threadId: activeThread.id,
+                kind: "workflow.lane.completed",
+                summary: `${observation.laneRole} lane completed`,
+                payload: {
+                  laneId: observation.laneId,
+                  laneRole: observation.laneRole,
+                  childThreadId: observation.childThreadId,
+                  childTurnId: observation.childTurnId,
+                  sourceStartedActivityId: observation.startedActivityId,
+                  cardType: "completion",
+                  title: `${observation.laneRole} completed`,
+                  detail: observation.summary,
+                },
+              }).catch(() => null);
+              if (result && result._tag !== "Failure") {
+                workflowCompletionRecordedRef.current.add(key);
+              }
+            } finally {
+              workflowCompletionInFlightRef.current.delete(key);
+            }
+          }
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeThread, appendWorkflowActivity, workflowChildCompletions]);
+
+  useEffect(() => {
+    if (!activeThread) return;
+    if (!activeThread.activities.some((activity) => activity.kind === "workflow.started")) return;
+
+    const { goal, plannedSubAgents } = latestWorkflowPlanDetails(
+      activeThread.activities,
+      activePlan?.explanation ?? "Workflow",
+    );
+    if (plannedSubAgents.length === 0) return;
+
+    const completedLaneIds = workflowCompletedLaneIds(activeThread.activities);
+    const startedLaneIds = workflowStartedChildLaneIds(activeThread.activities);
+    const eligibleLanes = plannedSubAgents.filter((lane) => {
+      const dependencies = lane.startsAfter ?? [];
+      const laneLaunchKey = workflowLaneLaunchKey(activeThread.id, lane.id);
+      return (
+        dependencies.length > 0 &&
+        dependencies.every((laneId) => completedLaneIds.has(laneId)) &&
+        !startedLaneIds.has(lane.id) &&
+        !workflowLaneLaunchRecordedRef.current.has(laneLaunchKey) &&
+        !workflowLaneLaunchInFlightRef.current.has(laneLaunchKey)
+      );
+    });
+    if (eligibleLanes.length === 0) return;
+
+    let cancelled = false;
+    void (async () => {
+      for (const lane of eligibleLanes) {
+        if (cancelled) return;
+        const laneLaunchKey = workflowLaneLaunchKey(activeThread.id, lane.id);
+        if (
+          workflowLaneLaunchRecordedRef.current.has(laneLaunchKey) ||
+          workflowLaneLaunchInFlightRef.current.has(laneLaunchKey) ||
+          workflowStartedChildLaneIds(activeThread.activities).has(lane.id)
+        ) {
+          continue;
+        }
+        workflowLaneLaunchInFlightRef.current.add(laneLaunchKey);
+        try {
+          const childThreadId = await launchWorkflowChildLane({ lane, workflowGoal: goal });
+          if (childThreadId) {
+            workflowLaneLaunchRecordedRef.current.add(laneLaunchKey);
+          }
+        } finally {
+          workflowLaneLaunchInFlightRef.current.delete(laneLaunchKey);
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activePlan?.explanation, activeThread, launchWorkflowChildLane]);
 
   const scrollToEnd = useCallback((animated = false) => {
     legendListRef.current?.scrollToEnd?.({ animated });
@@ -3582,300 +4440,6 @@ function ChatViewContent(props: ChatViewProps) {
     autoOpenPlanSidebar,
     planSidebarOpen,
     sidebarProposedPlan?.turnId,
-  ]);
-
-  useEffect(() => {
-    if (!activeThread || !activeLatestTurn || !latestTurnSettled) return;
-    if (activeThread.interactionMode !== "workflow") return;
-    if (activeLatestTurn.state !== "completed") return;
-    const turnId = activeLatestTurn.turnId;
-    const hasWorkflowStart = activeThread.activities.some(
-      (activity) => activity.kind === "workflow.started",
-    );
-    if (!hasWorkflowStart) return;
-    const alreadyFinalized = activeThread.activities.some((activity) => {
-      if (activity.kind !== "workflow.completed" && activity.kind !== "workflow.blocked") {
-        return false;
-      }
-      const payload =
-        activity.payload && typeof activity.payload === "object"
-          ? (activity.payload as Record<string, unknown>)
-          : null;
-      return payload?.turnId === turnId;
-    });
-    if (alreadyFinalized) return;
-
-    const completedSteps = activePlan?.steps.filter((step) => step.status === "completed") ?? [];
-    const verifierStep = completedSteps.find((step) =>
-      /test|verify|check|coverage/i.test(step.step),
-    );
-    const builderStep = completedSteps.find((step) =>
-      /implement|build|engine|core|package/i.test(step.step),
-    );
-    const documenterStep = completedSteps.find((step) =>
-      /document|readme|memory|note/i.test(step.step),
-    );
-    const createdAt = activeLatestTurn.completedAt ?? new Date().toISOString();
-    const filesTouched: string[] = [];
-    const testSteps = completedSteps
-      .filter((step) => /test|verify|check|coverage|lint|typecheck|build/i.test(step.step))
-      .map((step) => step.step);
-    const criteria =
-      activeThread.activities
-        .filter((activity) => activity.kind === "workflow.started")
-        .flatMap((activity) => {
-          const payload =
-            activity.payload && typeof activity.payload === "object"
-              ? (activity.payload as Record<string, unknown>)
-              : null;
-          const value = payload?.acceptanceCriteria;
-          return Array.isArray(value)
-            ? value.filter((entry): entry is string => typeof entry === "string")
-            : [];
-        }) ?? [];
-    const workflowConfigPayload = activeThread.activities
-      .filter(
-        (activity) =>
-          activity.kind === "workflow.started" || activity.kind === "workflow.customized",
-      )
-      .toSorted((left, right) => right.createdAt.localeCompare(left.createdAt))
-      .map((activity) =>
-        activity.payload && typeof activity.payload === "object"
-          ? (activity.payload as Record<string, unknown>)
-          : null,
-      )
-      .find((payload): payload is Record<string, unknown> => payload !== null);
-    const verifierApprovalRequired = workflowConfigPayload?.requireVerifierApproval !== false;
-    const testsRequiredBeforeFinal = workflowConfigPayload?.requireTestsBeforeFinal === true;
-    const verificationRequired = verifierApprovalRequired || testsRequiredBeforeFinal;
-    const missingRequiredVerifierEvidence = !verifierStep && verificationRequired;
-
-    const writes: Array<Parameters<typeof appendWorkflowActivity>[0]> = [];
-    if (builderStep) {
-      writes.push({
-        threadId: activeThread.id,
-        kind: "workflow.handoff",
-        summary: "Builder handoff recorded",
-        payload: {
-          turnId,
-          laneRole: "Builder",
-          cardType: "builder-handoff",
-          title: builderStep.step,
-          detail: "Implementation work was handed to verification with changed-file context.",
-          filesTouched,
-          testsRun: testSteps,
-          knownRisks:
-            verifierStep || testSteps.length > 0
-              ? []
-              : ["No explicit verifier or test checklist item was detected."],
-        },
-        turnId,
-        createdAt,
-      });
-    }
-    if (verifierStep) {
-      writes.push({
-        threadId: activeThread.id,
-        kind: "workflow.evidence",
-        summary: "Verifier evidence captured",
-        payload: {
-          turnId,
-          laneRole: "Verifier",
-          cardType: "test-mode-evidence",
-          status: "captured",
-          title: verifierStep.step,
-          detail: "Verification completed as part of the workflow turn.",
-          checksRun: testSteps.length > 0 ? testSteps : [verifierStep.step],
-          artifacts: filesTouched.length > 0 ? filesTouched : ["Workflow verification log"],
-          result: "Passed, no blocking failures detected in the completed checklist.",
-        },
-        turnId,
-        createdAt,
-      });
-      writes.push({
-        threadId: activeThread.id,
-        kind: "workflow.verifier.result",
-        summary: "Verifier passed the completed workflow turn",
-        payload: {
-          turnId,
-          status: "pass",
-          detail: verifierStep.step,
-          passed: [verifierStep.step],
-          failed: [],
-          requiredFix: "",
-        },
-        turnId,
-        createdAt,
-      });
-    } else {
-      writes.push({
-        threadId: activeThread.id,
-        kind: "workflow.objection",
-        summary: "Verifier evidence was not captured",
-        payload: {
-          turnId,
-          severity: missingRequiredVerifierEvidence ? "blocking objection" : "non-blocking concern",
-          title: "No verifier evidence step was detected",
-          detail: missingRequiredVerifierEvidence
-            ? "Verifier approval is required before this workflow can be marked complete, but no completed test or verification step was found."
-            : "The workflow completed, but no completed test or verification step was found in the task checklist.",
-        },
-        turnId,
-        createdAt,
-      });
-      writes.push({
-        threadId: activeThread.id,
-        kind: "workflow.verifier.result",
-        summary: "Verifier evidence missing",
-        payload: {
-          turnId,
-          status: missingRequiredVerifierEvidence ? "fail" : "reviewed",
-          detail: "No completed verifier step was detected.",
-          passed: [],
-          failed: ["Verifier evidence was not found in the completed checklist."],
-          requiredFix:
-            "Run or record verification evidence before treating this workflow as fully verified.",
-        },
-        turnId,
-        createdAt,
-      });
-      if (missingRequiredVerifierEvidence) {
-        writes.push({
-          threadId: activeThread.id,
-          kind: "workflow.route-back",
-          summary: "Builder route-back required",
-          payload: {
-            turnId,
-            laneRole: "Builder",
-            title: "Verification evidence required",
-            detail:
-              "The Lead must route this back to Builder or Verifier before final completion because required verification evidence is missing.",
-            requiredFix:
-              "Add a verification step, run the relevant check, and record the verifier result before completing the workflow.",
-            filesTouched,
-            testsRun: testSteps,
-            knownRisks: ["Completion is blocked until verifier evidence exists."],
-          },
-          turnId,
-          createdAt,
-        });
-      }
-    }
-    if (documenterStep) {
-      writes.push({
-        threadId: activeThread.id,
-        kind: "workflow.handoff",
-        summary: "Documenter handoff recorded",
-        payload: {
-          turnId,
-          laneRole: "Documenter",
-          cardType: "memory-update",
-          title: documenterStep.step,
-          detail: "Documentation or durable project notes were included in the workflow outcome.",
-          filesTouched,
-          testsRun: [],
-          knownRisks: [],
-        },
-        turnId,
-        createdAt,
-      });
-      writes.push({
-        threadId: activeThread.id,
-        kind: "workflow.memory.update",
-        summary: "Memory update audit note recorded",
-        payload: {
-          turnId,
-          title: "Memory update recorded",
-          memoryText:
-            "Workflow outcome included documentation or durable notes that should remain visible to future work.",
-          detail: "Workflow completion audit",
-        },
-        turnId,
-        createdAt,
-      });
-    }
-    writes.push({
-      threadId: activeThread.id,
-      kind: "workflow.lead.synthesis",
-      summary: "Lead synthesis recorded",
-      payload: {
-        turnId,
-        cardType: "lead-synthesis",
-        title: "Lead synthesis",
-        detail:
-          criteria.length > 0
-            ? `Reviewed against ${criteria.length} acceptance criterion/criteria.`
-            : "Reviewed against the workflow task checklist.",
-        decision: verifierStep
-          ? "Complete with verifier evidence."
-          : missingRequiredVerifierEvidence
-            ? "Not complete. Builder or Verifier must provide required verification evidence."
-            : "Complete with a visible verification concern.",
-        concerns: verifierStep
-          ? []
-          : missingRequiredVerifierEvidence
-            ? ["Required verifier evidence is missing and blocks completion."]
-            : ["Verifier evidence was missing."],
-        alternatives: [],
-        overrides: [],
-      },
-      turnId,
-      createdAt,
-    });
-    writes.push(
-      missingRequiredVerifierEvidence
-        ? {
-            threadId: activeThread.id,
-            kind: "workflow.blocked",
-            summary: "Workflow blocked by required verifier evidence",
-            payload: {
-              turnId,
-              status: "blocked",
-              implementationStatus: builderStep ? "done" : "not-detected",
-              verificationStatus: "missing",
-              openObjections: 1,
-              memoryUpdates: documenterStep ? 1 : 0,
-              detail:
-                "The provider turn ended, but Workflow Mode did not mark the workflow complete because verifier evidence is required.",
-              requiredFix:
-                "Route back to Builder or Verifier, run the required verification, then record a passing verifier result.",
-            },
-            turnId,
-            createdAt,
-          }
-        : {
-            threadId: activeThread.id,
-            kind: "workflow.completed",
-            summary: "Workflow completed with structured outcome records",
-            payload: {
-              turnId,
-              status: verifierStep ? "verified" : "completed-with-concern",
-              implementationStatus: builderStep ? "done" : "not-detected",
-              verificationStatus: verifierStep ? "passed" : "missing",
-              openObjections: verifierStep ? 0 : 1,
-              memoryUpdates: documenterStep ? 1 : 0,
-              detail:
-                completedSteps.length > 0
-                  ? `Completed ${completedSteps.length} checklist item(s).`
-                  : "The provider turn completed; no checklist steps were available.",
-            },
-            turnId,
-            createdAt,
-          },
-    );
-
-    void (async () => {
-      for (const write of writes) {
-        await appendWorkflowActivity(write).catch(() => undefined);
-      }
-    })();
-  }, [
-    activeLatestTurn,
-    activeThread?.activities,
-    activePlan?.steps,
-    activeThread,
-    appendWorkflowActivity,
-    latestTurnSettled,
   ]);
 
   useEffect(() => {
@@ -4303,7 +4867,7 @@ function ChatViewContent(props: ChatViewProps) {
     const sendCtx = composerRef.current?.getSendContext();
     if (!sendCtx) return;
     const {
-      images: composerImages,
+      attachments: composerAttachments,
       terminalContexts: composerTerminalContexts,
       elementContexts: composerElementContexts,
       previewAnnotations: composerPreviewAnnotations,
@@ -4314,6 +4878,19 @@ function ChatViewContent(props: ChatViewProps) {
       selectedPromptEffort: ctxSelectedPromptEffort,
       selectedModelSelection: ctxSelectedModelSelection,
     } = sendCtx;
+    const unsupportedComposerAttachments = composerAttachments.filter(
+      (attachment) => attachment.status === "unsupported",
+    );
+    if (unsupportedComposerAttachments.length > 0) {
+      setThreadError(
+        activeThreadId,
+        unsupportedComposerAttachments.length === 1
+          ? `Remove unsupported attachment '${unsupportedComposerAttachments[0]?.name ?? "file"}' before sending.`
+          : `Remove ${unsupportedComposerAttachments.length} unsupported attachments before sending.`,
+      );
+      return;
+    }
+    const sendableComposerAttachments = composerAttachments.filter(isSendableComposerAttachment);
     const promptForSend = promptRef.current;
     const {
       trimmedPrompt: trimmed,
@@ -4322,7 +4899,7 @@ function ChatViewContent(props: ChatViewProps) {
       hasSendableContent,
     } = deriveComposerSendState({
       prompt: promptForSend,
-      imageCount: composerImages.length,
+      imageCount: sendableComposerAttachments.length,
       terminalContexts: composerTerminalContexts,
       elementContextCount:
         composerElementContexts.length +
@@ -4344,7 +4921,7 @@ function ChatViewContent(props: ChatViewProps) {
       return;
     }
     const standaloneSlashCommand =
-      composerImages.length === 0 &&
+      sendableComposerAttachments.length === 0 &&
       sendableComposerTerminalContexts.length === 0 &&
       composerElementContexts.length === 0 &&
       composerPreviewAnnotations.length === 0 &&
@@ -4398,13 +4975,22 @@ function ChatViewContent(props: ChatViewProps) {
       beginLocalDispatch({ preparingWorktree: Boolean(baseBranchForWorktree) });
     }
 
-    const composerImagesSnapshot = [...composerImages];
+    const composerAttachmentsSnapshot = [...sendableComposerAttachments];
     const composerTerminalContextsSnapshot = [...sendableComposerTerminalContexts];
     const composerElementContextsSnapshot = [...composerElementContexts];
     const composerPreviewAnnotationsSnapshot = [...composerPreviewAnnotations];
     const composerReviewCommentsSnapshot: ReviewCommentContext[] = [...composerReviewComments];
+    const mediaFollowUpReferences = resolveMediaFollowUpReferences({
+      prompt: promptForSend,
+      selectedArtifact: selectedThreadMediaArtifact,
+      recentArtifacts: threadMediaArtifacts,
+    });
+    const promptWithMediaReferences = appendMediaFollowUpReferencesToPrompt({
+      prompt: promptForSend,
+      references: mediaFollowUpReferences,
+    });
     const messageTextWithContexts = appendElementContextsToPrompt(
-      appendTerminalContextsToPrompt(promptForSend, composerTerminalContextsSnapshot),
+      appendTerminalContextsToPrompt(promptWithMediaReferences, composerTerminalContextsSnapshot),
       composerElementContextsSnapshot,
     );
     const messageTextWithPreviewAnnotations = composerPreviewAnnotationsSnapshot.reduce(
@@ -4422,25 +5008,12 @@ function ChatViewContent(props: ChatViewProps) {
       model: ctxSelectedModel,
       models: ctxSelectedProviderModels,
       effort: ctxSelectedPromptEffort,
-      text: messageTextForSend || IMAGE_ONLY_BOOTSTRAP_PROMPT,
+      text: messageTextForSend || ATTACHMENT_ONLY_BOOTSTRAP_PROMPT,
     });
     const turnAttachmentsPromise = Promise.all(
-      composerImagesSnapshot.map(async (image) => ({
-        type: "image" as const,
-        name: image.name,
-        mimeType: image.mimeType,
-        sizeBytes: image.sizeBytes,
-        dataUrl: await readFileAsDataUrl(image.file),
-      })),
+      composerAttachmentsSnapshot.map((attachment) => toUploadChatAttachment(attachment)),
     );
-    const optimisticAttachments = composerImagesSnapshot.map((image) => ({
-      type: "image" as const,
-      id: image.id,
-      name: image.name,
-      mimeType: image.mimeType,
-      sizeBytes: image.sizeBytes,
-      previewUrl: image.previewUrl,
-    }));
+    const optimisticAttachments = composerAttachmentsSnapshot.map(toOptimisticChatAttachment);
     const optimisticMessage: ChatMessage = {
       id: messageIdForSend,
       role: "user",
@@ -4483,17 +5056,11 @@ function ChatViewContent(props: ChatViewProps) {
     clearComposerDraftContent(composerDraftTarget);
     composerRef.current?.resetCursorState();
 
-    let firstComposerImageName: string | null = null;
-    if (composerImagesSnapshot.length > 0) {
-      const firstComposerImage = composerImagesSnapshot[0];
-      if (firstComposerImage) {
-        firstComposerImageName = firstComposerImage.name;
-      }
-    }
+    const firstComposerAttachment = composerAttachmentsSnapshot[0] ?? null;
     let titleSeed = trimmed;
     if (!titleSeed) {
-      if (firstComposerImageName) {
-        titleSeed = `Image: ${firstComposerImageName}`;
+      if (firstComposerAttachment) {
+        titleSeed = `${firstComposerAttachment.type === "video" ? "Video" : "Image"}: ${firstComposerAttachment.name}`;
       } else if (composerTerminalContextsSnapshot.length > 0) {
         titleSeed = formatTerminalContextLabel(composerTerminalContextsSnapshot[0]!);
       } else if (composerElementContextsSnapshot.length > 0) {
@@ -4615,15 +5182,14 @@ function ChatViewContent(props: ChatViewProps) {
     }
 
     if (failure !== null) {
+      const currentDraft = useComposerDraftStore.getState().getComposerDraft(composerDraftTarget);
       if (
         promptRef.current.length === 0 &&
-        composerImagesRef.current.length === 0 &&
+        (currentDraft?.attachments.length ?? 0) === 0 &&
         composerTerminalContextsRef.current.length === 0 &&
         composerElementContextsRef.current.length === 0 &&
-        (useComposerDraftStore.getState().getComposerDraft(composerDraftTarget)?.previewAnnotations
-          .length ?? 0) === 0 &&
-        (useComposerDraftStore.getState().getComposerDraft(composerDraftTarget)?.reviewComments
-          .length ?? 0) === 0
+        (currentDraft?.previewAnnotations.length ?? 0) === 0 &&
+        (currentDraft?.reviewComments.length ?? 0) === 0
       ) {
         const removeOptimisticMessage = (existing: ChatMessage[]) => {
           const removed = existing.filter((message) => message.id === messageIdForSend);
@@ -4639,12 +5205,17 @@ function ChatViewContent(props: ChatViewProps) {
           setOptimisticUserMessages(removeOptimisticMessage);
         }
         promptRef.current = promptForSend;
-        const retryComposerImages = composerImagesSnapshot.map(cloneComposerImageForRetry);
+        const retryComposerAttachments = composerAttachmentsSnapshot.map(
+          cloneComposerAttachmentForRetry,
+        );
+        const retryComposerImages = retryComposerAttachments.filter(
+          (attachment): attachment is ComposerImageAttachment => attachment.type === "image",
+        );
         composerImagesRef.current = retryComposerImages;
         composerTerminalContextsRef.current = composerTerminalContextsSnapshot;
         composerElementContextsRef.current = composerElementContextsSnapshot;
         setComposerDraftPrompt(composerDraftTarget, promptForSend);
-        addComposerDraftImages(composerDraftTarget, retryComposerImages);
+        addComposerDraftAttachments(composerDraftTarget, retryComposerAttachments);
         setComposerDraftTerminalContexts(composerDraftTarget, composerTerminalContextsSnapshot);
         setComposerDraftElementContexts(composerDraftTarget, composerElementContextsSnapshot);
         setComposerDraftPreviewAnnotations(composerDraftTarget, composerPreviewAnnotationsSnapshot);
@@ -5010,40 +5581,115 @@ function ChatViewContent(props: ChatViewProps) {
   );
 
   const onSubmitWorkflowGuidance = useCallback(
-    (laneRole: string, guidance: string) => {
-      if (activeThread) {
-        void appendWorkflowActivity({
+    (lane: WorkflowLaneTarget, guidance: string) => {
+      if (!activeThread) return;
+
+      const { goal, plannedSubAgents } = latestWorkflowPlanDetails(
+        activeThread.activities,
+        activePlan?.explanation ?? "Workflow",
+      );
+      const plannedLane: WorkflowPlannedSubAgent = plannedSubAgents.find(
+        (agent) => agent.id === lane.id,
+      ) ?? {
+        id: lane.id,
+        role: lane.role,
+        prompt: guidance,
+        startsAfter: [],
+      };
+      const existingChildThreadId = latestWorkflowChildThreadId(activeThread.activities, lane);
+
+      void (async () => {
+        await appendWorkflowActivity({
           threadId: activeThread.id,
           kind: "workflow.lane.guidance",
-          summary: `Guidance added to ${laneRole}`,
+          summary: `Guidance re-triggered ${lane.role}`,
           payload: {
-            laneRole,
+            laneId: lane.id,
+            laneRole: lane.role,
             guidance,
+            retrigger: true,
           },
         }).catch(() => undefined);
-      }
-      void onSubmitPlanFollowUp({
-        interactionMode: "workflow",
-        text: [
-          `Workflow guidance for ${laneRole}:`,
-          guidance,
-          "",
-          "Keep this guidance Lead-visible, route it only to the named lane unless it affects the whole workflow, and summarize any workflow changes back in the main thread.",
-        ].join("\n"),
-      });
+
+        const laneLaunchKey = workflowLaneLaunchKey(activeThread.id, lane.id);
+        if (workflowLaneLaunchInFlightRef.current.has(laneLaunchKey)) return;
+        workflowLaneLaunchInFlightRef.current.add(laneLaunchKey);
+        try {
+          await launchWorkflowChildLane({
+            lane: plannedLane,
+            workflowGoal: goal,
+            guidance,
+            existingChildThreadId,
+          });
+        } finally {
+          workflowLaneLaunchInFlightRef.current.delete(laneLaunchKey);
+        }
+      })();
     },
-    [activeThread, appendWorkflowActivity, onSubmitPlanFollowUp],
+    [activePlan?.explanation, activeThread, appendWorkflowActivity, launchWorkflowChildLane],
   );
 
+  const onStartWorkflow = useCallback(() => {
+    if (!activeThread) return;
+    const {
+      activity: workflowPlanActivity,
+      payload: workflowPlanPayload,
+      goal,
+      plannedSubAgents,
+    } = latestWorkflowPlanDetails(activeThread.activities, activePlan?.explanation ?? "Workflow");
+    const launchableSubAgents = plannedSubAgents.filter(
+      (agent) => (agent.startsAfter?.length ?? 0) === 0,
+    );
+    const startedLaneIds = workflowStartedChildLaneIds(activeThread.activities);
+
+    void (async () => {
+      await appendWorkflowActivity({
+        threadId: activeThread.id,
+        kind: "workflow.started",
+        summary: "Workflow started",
+        payload: {
+          ...workflowPlanPayload,
+          goal,
+          launchStatus: "started",
+          startedFromActivityId: workflowPlanActivity?.id ?? null,
+        },
+      }).catch(() => undefined);
+
+      for (const lane of launchableSubAgents) {
+        const laneLaunchKey = workflowLaneLaunchKey(activeThread.id, lane.id);
+        if (
+          startedLaneIds.has(lane.id) ||
+          workflowLaneLaunchRecordedRef.current.has(laneLaunchKey) ||
+          workflowLaneLaunchInFlightRef.current.has(laneLaunchKey)
+        ) {
+          continue;
+        }
+        workflowLaneLaunchInFlightRef.current.add(laneLaunchKey);
+        try {
+          const childThreadId = await launchWorkflowChildLane({
+            lane,
+            workflowGoal: goal,
+          });
+          if (childThreadId) {
+            workflowLaneLaunchRecordedRef.current.add(laneLaunchKey);
+          }
+        } finally {
+          workflowLaneLaunchInFlightRef.current.delete(laneLaunchKey);
+        }
+      }
+    })();
+  }, [activePlan?.explanation, activeThread, appendWorkflowActivity, launchWorkflowChildLane]);
+
   const onStopWorkflowLane = useCallback(
-    (laneRole: string) => {
+    (lane: WorkflowLaneTarget) => {
       if (activeThread) {
         void appendWorkflowActivity({
           threadId: activeThread.id,
           kind: "workflow.lane.stopped",
-          summary: `${laneRole} lane stopped`,
+          summary: `${lane.role} lane stopped`,
           payload: {
-            laneRole,
+            laneId: lane.id,
+            laneRole: lane.role,
             preserved: true,
           },
         }).catch(() => undefined);
@@ -5051,7 +5697,7 @@ function ChatViewContent(props: ChatViewProps) {
       void onSubmitPlanFollowUp({
         interactionMode: "workflow",
         text: [
-          `Stop the ${laneRole} workflow lane.`,
+          `Stop the ${lane.role} workflow lane.`,
           "Preserve its partial findings, artifacts, open questions, and unfinished status. The Lead should explain what remains usable and what was not completed.",
         ].join("\n"),
       });
@@ -5074,15 +5720,16 @@ function ChatViewContent(props: ChatViewProps) {
   }, [activeThread, appendWorkflowActivity, onInterrupt]);
 
   const onWorkflowLaneControl = useCallback(
-    (laneRole: string, action: "pause" | "replace" | "freeze" | "continue-manually") => {
+    (lane: WorkflowLaneTarget, action: "pause" | "replace" | "freeze" | "continue-manually") => {
       const label = workflowActionLabel(action);
       if (activeThread) {
         void appendWorkflowActivity({
           threadId: activeThread.id,
           kind: "workflow.lane.control",
-          summary: `${label} requested for ${laneRole}`,
+          summary: `${label} requested for ${lane.role}`,
           payload: {
-            laneRole,
+            laneId: lane.id,
+            laneRole: lane.role,
             action,
             preserved: true,
           },
@@ -5091,7 +5738,7 @@ function ChatViewContent(props: ChatViewProps) {
       void onSubmitPlanFollowUp({
         interactionMode: "workflow",
         text: [
-          workflowActionInstruction(action, laneRole),
+          workflowActionInstruction(action, lane.role),
           "Keep the instruction Lead-visible, preserve the lane history, and update the workflow panel with the result.",
         ].join("\n"),
       });
@@ -5134,6 +5781,19 @@ function ChatViewContent(props: ChatViewProps) {
       showMemoryAuditNotes: boolean;
       exploreParallelApproaches: boolean;
       stopAfterPlanningForApproval: boolean;
+      model: string | null;
+      reasoningEffort: string | null;
+      fastMode: boolean;
+      subAgents: ReadonlyArray<{
+        id: string;
+        role: string;
+        goal?: string;
+        prompt: string;
+        model?: string;
+        reasoningEffort?: string;
+        fastMode?: boolean;
+        startsAfter: ReadonlyArray<string>;
+      }>;
     }) => {
       if (activeThread) {
         void appendWorkflowActivity({
@@ -5149,6 +5809,10 @@ function ChatViewContent(props: ChatViewProps) {
             showMemoryAuditNotes: input.showMemoryAuditNotes,
             exploreParallelApproaches: input.exploreParallelApproaches,
             stopAfterPlanningForApproval: input.stopAfterPlanningForApproval,
+            model: input.model,
+            reasoningEffort: input.reasoningEffort,
+            fastMode: input.fastMode,
+            subAgents: input.subAgents,
           },
         }).catch(() => undefined);
       }
@@ -5170,6 +5834,32 @@ function ChatViewContent(props: ChatViewProps) {
           `- Explore multiple approaches in parallel: ${input.exploreParallelApproaches ? "yes" : "no"}`,
           `- Stop after planning for approval: ${input.stopAfterPlanningForApproval ? "yes" : "no"}`,
         ].join("\n"),
+        [
+          "Sub-agent model settings:",
+          input.model ? `- Model: ${input.model}` : "",
+          input.reasoningEffort ? `- Reasoning effort: ${input.reasoningEffort}` : "",
+          `- Fast mode: ${input.fastMode ? "yes" : "no"}`,
+        ]
+          .filter(Boolean)
+          .join("\n"),
+        input.subAgents.length > 0
+          ? [
+              "Approved sub-agents:",
+              ...input.subAgents.map((agent) =>
+                [
+                  `- ${agent.role}`,
+                  agent.goal ? `  Goal: ${agent.goal}` : "",
+                  `  Prompt: ${agent.prompt}`,
+                  `  Model: ${agent.model ?? input.model ?? "Use lead default"}`,
+                  `  Reasoning effort: ${agent.reasoningEffort ?? input.reasoningEffort ?? "Use lead default"}`,
+                  `  Fast mode: ${(agent.fastMode ?? input.fastMode) ? "yes" : "no"}`,
+                  `  Starts after: ${agent.startsAfter.length > 0 ? agent.startsAfter.join(", ") : "Lead approval / immediate launch"}`,
+                ]
+                  .filter(Boolean)
+                  .join("\n"),
+              ),
+            ].join("\n")
+          : "",
         "Keep these constraints Lead-visible and apply them to the remaining workflow.",
       ].filter(Boolean);
       void onSubmitPlanFollowUp({
@@ -5561,6 +6251,7 @@ function ChatViewContent(props: ChatViewProps) {
         activities={threadActivities}
         label={planSidebarLabel}
         workflowActive={workflowSidebarActive}
+        currentModelSelection={activeThread?.modelSelection}
         environmentId={environmentId}
         threadRef={activeThreadRef}
         markdownCwd={gitCwd ?? undefined}
@@ -5572,7 +6263,9 @@ function ChatViewContent(props: ChatViewProps) {
         onStopWorkflow={onStopWorkflow}
         onWorkflowLaneControl={onWorkflowLaneControl}
         onWorkflowControl={onWorkflowControl}
+        onOpenTestsPanel={openTestsPanel}
         onCustomizeWorkflow={onCustomizeWorkflow}
+        onStartWorkflow={onStartWorkflow}
       />
     ) : activeRightPanelSurface?.kind === "tests" ? (
       <TestHarnessRunsPanel
@@ -5725,6 +6418,15 @@ function ChatViewContent(props: ChatViewProps) {
               )}
             >
               <div className="relative isolate">
+                <MediaShelf
+                  artifacts={threadMediaArtifacts}
+                  environmentId={activeThread.environmentId}
+                  threadRef={activeThreadRef}
+                  composerTarget={composerDraftTarget}
+                  activeArtifactKey={selectedMediaArtifactKey}
+                  onActiveArtifactKeyChange={setSelectedMediaArtifactKey}
+                  className="relative z-0 mb-2"
+                />
                 <ComposerBannerStack className="relative z-0" items={composerBannerItems} />
                 <QueuedMessagesPanel items={queuedMessageItems} onDelete={deleteQueuedMessage} />
                 <div className="relative z-10">

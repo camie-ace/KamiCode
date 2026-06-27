@@ -65,12 +65,56 @@ describe("ElectronProtocol", () => {
         }),
       );
 
+      const forwardedHeaders = netFetchMock.mock.calls[0]?.[1]?.headers;
       assert.deepEqual(
         handleMock.mock.calls.map((call) => call[0]),
         ["t3code-dev"],
       );
       assert.equal(netFetchMock.mock.calls[0]?.[0], "http://127.0.0.1:3773/api/health?verbose=1");
+      assert.instanceOf(forwardedHeaders, Headers);
+      assert.equal(forwardedHeaders.get("host"), null);
       assert.deepEqual(unhandleMock.mock.calls, [["t3code-dev"]]);
+    }).pipe(Effect.provide(ElectronProtocol.layer)),
+  );
+
+  it.effect("does not forward the custom protocol host header to the target server", () =>
+    Effect.gen(function* () {
+      let handler: ((request: Request) => Promise<Response>) | undefined;
+      handleMock.mockImplementation((_scheme, nextHandler) => {
+        handler = nextHandler;
+      });
+      netFetchMock.mockResolvedValue(new Response("ok"));
+
+      yield* Effect.scoped(
+        Effect.gen(function* () {
+          const protocol = yield* ElectronProtocol.ElectronProtocol;
+          yield* protocol.registerDesktopProtocol({
+            scheme: "t3code-dev",
+            targetOrigin: new URL("http://127.0.0.1:5733/"),
+            backendOrigin: new URL("http://127.0.0.1:3773/"),
+            clerkFrontendApiHostname: undefined,
+          });
+          assert.isDefined(handler);
+
+          yield* Effect.promise(() =>
+            handler!(
+              new Request("t3code-dev://app/src/main.tsx", {
+                headers: {
+                  host: "app",
+                  accept: "text/javascript",
+                  connection: "keep-alive",
+                },
+              }),
+            ),
+          );
+        }),
+      );
+
+      const forwardedHeaders = netFetchMock.mock.calls[0]?.[1]?.headers;
+      assert.instanceOf(forwardedHeaders, Headers);
+      assert.equal(forwardedHeaders.get("host"), null);
+      assert.equal(forwardedHeaders.get("connection"), null);
+      assert.equal(forwardedHeaders.get("accept"), "text/javascript");
     }).pipe(Effect.provide(ElectronProtocol.layer)),
   );
 

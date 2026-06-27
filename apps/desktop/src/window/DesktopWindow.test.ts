@@ -187,6 +187,7 @@ function makeTestLayer(input: {
         input.openExternal
           ? Layer.succeed(ElectronShell.ElectronShell, {
               openExternal: input.openExternal,
+              revealLocalMediaFile: () => Effect.succeed(false),
               copyText: () => Effect.void,
             } satisfies ElectronShell.ElectronShell["Service"])
           : Layer.succeed(ElectronShell.ElectronShell, {
@@ -195,6 +196,7 @@ function makeTestLayer(input: {
                   input.openedExternalUrls?.push(url);
                   return true;
                 }),
+              revealLocalMediaFile: () => Effect.succeed(false),
               copyText: () => Effect.void,
             } satisfies ElectronShell.ElectronShell["Service"]),
         electronThemeLayer,

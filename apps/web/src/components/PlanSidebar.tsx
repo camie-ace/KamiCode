@@ -1,17 +1,17 @@
-import { memo, useState, useCallback } from "react";
+import { memo, useCallback, useMemo, useState } from "react";
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
 import type {
   EnvironmentId,
+  ModelSelection,
   OrchestrationThreadActivity,
   ScopedThreadRef,
 } from "@t3tools/contracts";
 import { type TimestampFormat } from "@t3tools/contracts/settings";
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
-import { Checkbox } from "./ui/checkbox";
 import { ScrollArea } from "./ui/scroll-area";
 import { Textarea } from "./ui/textarea";
 import ChatMarkdown from "./ChatMarkdown";
@@ -66,10 +66,16 @@ type WorkflowLaneControlAction = "pause" | "replace" | "freeze" | "continue-manu
 type WorkflowControlAction = "pause" | "freeze" | "continue-manually";
 
 interface WorkflowLane {
+  readonly id: string;
   readonly role: string;
   readonly status: WorkflowLaneStatus;
   readonly summary: string;
   readonly brief: string;
+  readonly prompt?: string;
+  readonly model?: string;
+  readonly reasoningEffort?: string;
+  readonly fastMode?: boolean;
+  readonly startsAfter: ReadonlyArray<string>;
   readonly nextNeed: string;
   readonly latestOutput?: string;
   readonly artifacts: ReadonlyArray<string>;
@@ -77,20 +83,40 @@ interface WorkflowLane {
   readonly activityLog: ReadonlyArray<string>;
 }
 
+interface WorkflowLaneTarget {
+  readonly id: string;
+  readonly role: string;
+}
+
+interface WorkflowSubAgentPlan {
+  readonly id: string;
+  readonly role: string;
+  readonly goal?: string;
+  readonly prompt: string;
+  readonly model?: string;
+  readonly reasoningEffort?: string;
+  readonly fastMode?: boolean;
+  readonly startsAfter: ReadonlyArray<string>;
+}
+
 interface WorkflowRecord {
   readonly id: string;
   readonly kind: string;
   readonly summary: string;
   readonly createdAt: string;
+  readonly laneId?: string;
   readonly laneRole?: string;
   readonly title?: string;
   readonly detail?: string;
   readonly status?: string;
   readonly severity?: string;
   readonly cardType?: string;
+  readonly action?: string;
   readonly result?: string;
   readonly decision?: string;
+  readonly guidance?: string;
   readonly memoryText?: string;
+  readonly reason?: string;
   readonly requiredFix?: string;
   readonly filesTouched: ReadonlyArray<string>;
   readonly testsRun: ReadonlyArray<string>;
@@ -104,19 +130,6 @@ interface WorkflowRecord {
   readonly overrides: ReadonlyArray<string>;
 }
 
-function laneStatusFromStep(status: string | undefined): WorkflowLaneStatus {
-  if (status === "completed") return "Done";
-  if (status === "inProgress") return "Running";
-  return "Waiting";
-}
-
-function findStep(
-  activePlan: ActivePlanState | null,
-  patterns: ReadonlyArray<RegExp>,
-): ActivePlanState["steps"][number] | undefined {
-  return activePlan?.steps.find((step) => patterns.some((pattern) => pattern.test(step.step)));
-}
-
 function workflowActivityPayload(
   activity: OrchestrationThreadActivity,
 ): Record<string, unknown> | null {
@@ -125,17 +138,40 @@ function workflowActivityPayload(
     : null;
 }
 
+function workflowActivityLaneId(activity: OrchestrationThreadActivity): string | null {
+  const payload = workflowActivityPayload(activity);
+  return typeof payload?.laneId === "string" ? payload.laneId : null;
+}
+
+function workflowRecordMatchesLane(record: WorkflowRecord, lane: WorkflowLaneTarget): boolean {
+  return record.laneId === lane.id;
+}
+
+function workflowRecordButtonLabel(record: WorkflowRecord): string {
+  return record.title ?? record.summary;
+}
+
 function latestWorkflowLaneActivity(
   activities: ReadonlyArray<OrchestrationThreadActivity>,
-  laneRole: string,
+  lane: WorkflowLaneTarget,
   kind: string,
 ): OrchestrationThreadActivity | undefined {
   return activities
-    .filter((activity) => {
-      const payload = workflowActivityPayload(activity);
-      return activity.kind === kind && payload?.laneRole === laneRole;
-    })
+    .filter((activity) => activity.kind === kind && workflowActivityLaneId(activity) === lane.id)
     .toSorted((left, right) => right.createdAt.localeCompare(left.createdAt))[0];
+}
+
+function latestWorkflowLaneActivities(
+  activities: ReadonlyArray<OrchestrationThreadActivity>,
+  lane: WorkflowLaneTarget,
+  kinds: ReadonlyArray<string>,
+): ReadonlyArray<OrchestrationThreadActivity> {
+  return activities
+    .filter((activity) => {
+      if (!kinds.includes(activity.kind)) return false;
+      return workflowActivityLaneId(activity) === lane.id;
+    })
+    .toSorted((left, right) => right.createdAt.localeCompare(left.createdAt));
 }
 
 function latestWorkflowActivity(
@@ -160,15 +196,19 @@ function workflowRecords(
         kind: activity.kind,
         summary: activity.summary,
         createdAt: activity.createdAt,
+        ...(typeof payload?.laneId === "string" ? { laneId: payload.laneId } : {}),
         ...(typeof payload?.laneRole === "string" ? { laneRole: payload.laneRole } : {}),
         ...(typeof payload?.title === "string" ? { title: payload.title } : {}),
         ...(typeof payload?.detail === "string" ? { detail: payload.detail } : {}),
         ...(typeof payload?.status === "string" ? { status: payload.status } : {}),
         ...(typeof payload?.severity === "string" ? { severity: payload.severity } : {}),
         ...(typeof payload?.cardType === "string" ? { cardType: payload.cardType } : {}),
+        ...(typeof payload?.action === "string" ? { action: payload.action } : {}),
         ...(typeof payload?.result === "string" ? { result: payload.result } : {}),
         ...(typeof payload?.decision === "string" ? { decision: payload.decision } : {}),
+        ...(typeof payload?.guidance === "string" ? { guidance: payload.guidance } : {}),
         ...(typeof payload?.memoryText === "string" ? { memoryText: payload.memoryText } : {}),
+        ...(typeof payload?.reason === "string" ? { reason: payload.reason } : {}),
         ...(typeof payload?.requiredFix === "string" ? { requiredFix: payload.requiredFix } : {}),
         filesTouched: payloadStringList(payload, "filesTouched"),
         testsRun: payloadStringList(payload, "testsRun"),
@@ -195,97 +235,261 @@ function payloadStringList(
     : [];
 }
 
+function payloadSubAgents(
+  payload: Record<string, unknown> | null,
+): ReadonlyArray<WorkflowSubAgentPlan> {
+  const value = payload?.subAgents;
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((entry) => {
+    if (!entry || typeof entry !== "object") return [];
+    const item = entry as Record<string, unknown>;
+    if (typeof item.id !== "string" || typeof item.role !== "string") return [];
+    return [
+      {
+        id: item.id,
+        role: item.role,
+        ...(typeof item.goal === "string" ? { goal: item.goal } : {}),
+        prompt: typeof item.prompt === "string" ? item.prompt : "Report findings through the Lead.",
+        ...(typeof item.model === "string" ? { model: item.model } : {}),
+        ...(typeof item.reasoningEffort === "string"
+          ? { reasoningEffort: item.reasoningEffort }
+          : {}),
+        ...(typeof item.fastMode === "boolean" ? { fastMode: item.fastMode } : {}),
+        startsAfter: Array.isArray(item.startsAfter)
+          ? item.startsAfter.filter((entry): entry is string => typeof entry === "string")
+          : [],
+      },
+    ];
+  });
+}
+
+function normalizeWorkflowAgentId(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+function isWorkflowLeadRole(value: string): boolean {
+  return value.trim().toLowerCase() === "lead";
+}
+
+function mergeWorkflowSubAgents(
+  plannedSubAgents: ReadonlyArray<WorkflowSubAgentPlan>,
+  requestedRoles: ReadonlyArray<string>,
+): ReadonlyArray<WorkflowSubAgentPlan> {
+  const merged = new Map<string, WorkflowSubAgentPlan>();
+  for (const agent of plannedSubAgents) {
+    merged.set(agent.id, agent);
+  }
+  for (const role of requestedRoles.filter((entry) => !isWorkflowLeadRole(entry))) {
+    const existing = [...merged.values()].some(
+      (agent) => agent.role.toLowerCase() === role.toLowerCase(),
+    );
+    if (existing) continue;
+    const id = normalizeWorkflowAgentId(role) || `sub-agent-${merged.size + 1}`;
+    merged.set(id, {
+      id,
+      role,
+      goal: role,
+      prompt: role.toLowerCase().includes("research")
+        ? "Gather context and report useful findings to the Lead."
+        : role.toLowerCase().includes("critic")
+          ? "Look for flaws, weak assumptions, and non-blocking concerns."
+          : "Handle the assigned workflow responsibility and report through the Lead.",
+      startsAfter: [],
+    });
+  }
+  return [...merged.values()];
+}
+
+function formatWorkflowLaneRefs(
+  laneIds: ReadonlyArray<string>,
+  lanes: ReadonlyArray<WorkflowLane>,
+): string {
+  if (laneIds.length === 0) return "Lead";
+  return laneIds
+    .map((laneId) => lanes.find((lane) => lane.id === laneId)?.role ?? laneId)
+    .join(", ");
+}
+
+function modelOptionValue(
+  modelSelection: ModelSelection | undefined,
+  ids: ReadonlyArray<string>,
+): string | boolean | null {
+  const option = modelSelection?.options?.find((entry) => ids.includes(entry.id));
+  const value = option?.value;
+  return typeof value === "string" || typeof value === "boolean" ? value : null;
+}
+
+function workflowVerifierStatus(value: unknown): "pass" | "fail" | null {
+  if (typeof value !== "string") return null;
+  const normalized = value.trim().toLowerCase();
+  if (["pass", "passed", "accept", "accepted", "success", "succeeded"].includes(normalized)) {
+    return "pass";
+  }
+  if (["fail", "failed", "reject", "rejected", "error", "blocked"].includes(normalized)) {
+    return "fail";
+  }
+  return null;
+}
+
+function workflowLaneStatusFromActivity(
+  activity: OrchestrationThreadActivity | undefined,
+): WorkflowLaneStatus | null {
+  if (!activity) return null;
+  const payload = workflowActivityPayload(activity);
+  switch (activity.kind) {
+    case "workflow.lane.started":
+      return "Running";
+    case "workflow.lane.completed":
+      return "Done";
+    case "workflow.lane.blocked":
+      return "Needs you";
+    case "workflow.lane.stopped":
+      return "Stopped";
+    case "workflow.lane.guidance":
+      return "Running";
+    case "workflow.lane.control": {
+      const action = typeof payload?.action === "string" ? payload.action : "";
+      if (action === "pause") return "Waiting";
+      if (action === "replace") return "Running";
+      if (action === "freeze") return "Done";
+      if (action === "continue-manually") return "Stopped";
+      return "Needs you";
+    }
+    case "workflow.verifier.result": {
+      const status = workflowVerifierStatus(payload?.status);
+      if (status === "pass") return "Done";
+      if (status === "fail") return "Failed";
+      return "Needs you";
+    }
+    default:
+      return null;
+  }
+}
+
+function workflowLeadStatus(
+  activities: ReadonlyArray<OrchestrationThreadActivity>,
+): WorkflowLaneStatus {
+  const latest = activities
+    .filter((activity) =>
+      [
+        "workflow.started",
+        "workflow.completed",
+        "workflow.blocked",
+        "workflow.stopped",
+        "workflow.control",
+      ].includes(activity.kind),
+    )
+    .toSorted((left, right) => right.createdAt.localeCompare(left.createdAt))[0];
+  if (!latest) return "Waiting";
+  if (latest.kind === "workflow.completed") return "Done";
+  if (latest.kind === "workflow.blocked") return "Needs you";
+  if (latest.kind === "workflow.stopped") return "Stopped";
+  if (latest.kind === "workflow.control") {
+    const payload = workflowActivityPayload(latest);
+    const action = typeof payload?.action === "string" ? payload.action : "";
+    if (action === "pause") return "Waiting";
+    if (action === "freeze") return "Done";
+    if (action === "continue-manually") return "Stopped";
+    return "Needs you";
+  }
+  return "Running";
+}
+
 function enrichWorkflowLane(
   lane: WorkflowLane,
   activities: ReadonlyArray<OrchestrationThreadActivity>,
 ): WorkflowLane {
-  const stopped = latestWorkflowLaneActivity(activities, lane.role, "workflow.lane.stopped");
-  if (stopped) {
-    return {
-      ...lane,
-      status: "Stopped",
-      latestOutput: stopped.summary,
-      nextNeed: "Partial findings are preserved for Lead synthesis.",
-      artifacts: [...lane.artifacts, "Preserved lane findings"],
-      activityLog: [...lane.activityLog, stopped.summary],
-    };
-  }
-  const control = latestWorkflowLaneActivity(activities, lane.role, "workflow.lane.control");
-  const guidance = latestWorkflowLaneActivity(activities, lane.role, "workflow.lane.guidance");
-  const handoff = latestWorkflowLaneActivity(activities, lane.role, "workflow.handoff");
-  const routeBack =
-    lane.role === "Builder"
-      ? latestWorkflowLaneActivity(activities, lane.role, "workflow.route-back")
-      : undefined;
-  const verifierResult =
-    lane.role === "Verifier"
-      ? latestWorkflowActivity(activities, "workflow.verifier.result")
-      : undefined;
-  const verifierPayload = verifierResult ? workflowActivityPayload(verifierResult) : null;
-  if (routeBack) {
-    const payload = workflowActivityPayload(routeBack);
-    return {
-      ...lane,
-      status: "Needs you",
-      latestOutput:
-        typeof payload?.detail === "string"
-          ? payload.detail
-          : "Required fix routed back to Builder.",
-      nextNeed:
-        typeof payload?.requiredFix === "string"
-          ? payload.requiredFix
-          : "Address the verifier route-back before completion.",
-      artifacts: [...lane.artifacts, "Required fix handoff"],
-      openQuestions: [...lane.openQuestions, "Verifier evidence is required before completion."],
-      activityLog: [...lane.activityLog, routeBack.summary],
-    };
-  }
-  if (verifierPayload?.status === "fail") {
-    return {
-      ...lane,
-      status: "Failed",
-      latestOutput:
-        typeof verifierPayload.detail === "string"
-          ? verifierPayload.detail
-          : "Verifier blocked completion.",
-      nextNeed:
-        typeof verifierPayload.requiredFix === "string"
-          ? verifierPayload.requiredFix
-          : "Route the required fix back to Builder.",
-      artifacts: [...lane.artifacts, "Verifier rejection"],
-      openQuestions: [...lane.openQuestions, "Required verifier fix is still open."],
-      activityLog: [...lane.activityLog, verifierResult?.summary ?? "Verifier failed"],
-    };
-  }
-  const output = handoff ?? guidance ?? control;
+  const laneLifecycle = latestWorkflowLaneActivities(activities, lane, [
+    "workflow.lane.started",
+    "workflow.lane.completed",
+    "workflow.lane.blocked",
+    "workflow.lane.stopped",
+    "workflow.lane.control",
+    "workflow.lane.guidance",
+    "workflow.verifier.result",
+  ]);
+  const latestLaneLifecycle = laneLifecycle[0];
+  const control = latestWorkflowLaneActivity(activities, lane, "workflow.lane.control");
+  const guidance = latestWorkflowLaneActivity(activities, lane, "workflow.lane.guidance");
+  const handoff = latestWorkflowLaneActivity(activities, lane, "workflow.handoff");
+  const routeBack = latestWorkflowLaneActivity(activities, lane, "workflow.route-back");
+  const verifierResult = latestWorkflowLaneActivity(activities, lane, "workflow.verifier.result");
+  const runtimeStatus = workflowLaneStatusFromActivity(latestLaneLifecycle);
+  const output = [handoff, routeBack, verifierResult, guidance, control, latestLaneLifecycle]
+    .filter((activity): activity is OrchestrationThreadActivity => Boolean(activity))
+    .toSorted((left, right) => right.createdAt.localeCompare(left.createdAt))[0];
   const payload = output ? workflowActivityPayload(output) : null;
+  const verifierStatus =
+    output?.kind === "workflow.verifier.result" ? workflowVerifierStatus(payload?.status) : null;
   const latestOutput =
     typeof payload?.detail === "string"
       ? payload.detail
       : typeof payload?.guidance === "string"
         ? payload.guidance
-        : output?.summary;
-  if (guidance) {
-    return {
-      ...lane,
-      latestOutput: latestOutput ?? guidance.summary,
-      nextNeed: "Apply the latest user guidance and report any changes.",
-      activityLog: [...lane.activityLog, guidance.summary],
-    };
-  }
+        : typeof payload?.reason === "string"
+          ? payload.reason
+          : output?.summary;
+  const nextNeed =
+    output?.kind === "workflow.route-back"
+      ? typeof payload?.requiredFix === "string"
+        ? payload.requiredFix
+        : "Address the verifier route-back before completion."
+      : verifierStatus === "fail"
+        ? typeof payload?.requiredFix === "string"
+          ? payload.requiredFix
+          : "Route the required fix back through the Lead."
+        : output?.kind === "workflow.lane.blocked"
+          ? typeof payload?.requiredFix === "string"
+            ? payload.requiredFix
+            : typeof payload?.reason === "string"
+              ? payload.reason
+              : "Resolve the lane blocker before completion."
+          : output?.kind === "workflow.lane.guidance"
+            ? "Apply the latest user guidance and report any changes."
+            : output?.kind === "workflow.lane.completed"
+              ? "Ready for Lead synthesis."
+              : output?.kind === "workflow.lane.stopped"
+                ? "Partial findings are preserved for Lead synthesis."
+                : lane.nextNeed;
+  const artifacts =
+    output?.kind === "workflow.route-back"
+      ? [...lane.artifacts, "Required fix handoff"]
+      : verifierStatus === "fail"
+        ? [...lane.artifacts, "Verifier rejection"]
+        : lane.artifacts;
+  const openQuestions =
+    output?.kind === "workflow.route-back"
+      ? [...lane.openQuestions, "Verifier evidence is required before completion."]
+      : verifierStatus === "fail"
+        ? [...lane.openQuestions, "Required verifier fix is still open."]
+        : lane.openQuestions;
   return output
     ? {
         ...lane,
+        ...(runtimeStatus ? { status: runtimeStatus } : {}),
         latestOutput: latestOutput ?? output.summary,
+        nextNeed,
+        artifacts,
+        openQuestions,
         activityLog: [...lane.activityLog, output.summary],
       }
-    : lane;
+    : runtimeStatus
+      ? { ...lane, status: runtimeStatus }
+      : lane;
 }
 
 function buildWorkflowLanes(
   activePlan: ActivePlanState | null,
   activities: ReadonlyArray<OrchestrationThreadActivity>,
+  currentModelSelection: ModelSelection | undefined,
 ): WorkflowLane[] {
+  const plannedPayload = workflowActivityPayload(
+    latestWorkflowActivity(activities, "workflow.planned") ?? ({} as OrchestrationThreadActivity),
+  );
   const startedPayload = workflowActivityPayload(
     latestWorkflowActivity(activities, "workflow.started") ?? ({} as OrchestrationThreadActivity),
   );
@@ -294,95 +498,62 @@ function buildWorkflowLanes(
       ({} as OrchestrationThreadActivity),
   );
   const requestedRoles = [
+    ...payloadStringList(plannedPayload, "initialLanes"),
     ...payloadStringList(startedPayload, "initialLanes"),
     ...payloadStringList(customizedPayload, "lanes"),
   ];
-  const steps = activePlan?.steps ?? [];
-  const allDone = steps.length > 0 && steps.every((step) => step.status === "completed");
-  const anyRunning = steps.some((step) => step.status === "inProgress");
-  const planner = findStep(activePlan, [/plan/i, /scope/i, /design/i, /research/i]);
-  const builder = findStep(activePlan, [/implement/i, /build/i, /engine/i, /core/i, /package/i]);
-  const verifier = findStep(activePlan, [/test/i, /verify/i, /check/i, /coverage/i]);
-  const documenter = findStep(activePlan, [/document/i, /readme/i, /memory/i, /note/i]);
-
-  const lanes: WorkflowLane[] = [
-    {
-      role: "Lead",
-      status: allDone ? "Done" : anyRunning ? "Running" : "Waiting",
-      summary: "Owns synthesis",
-      brief: activePlan?.explanation ?? "Interprets the goal and coordinates the workflow lanes.",
-      nextNeed: allDone ? "Prepare final summary" : "Keep lanes aligned and report decisions.",
-      artifacts: ["Lead synthesis", "Workflow decision log"],
-      openQuestions: [],
-      activityLog: [],
-    },
-    {
-      role: "Planner",
-      status: laneStatusFromStep(planner?.status),
-      summary: "Defines scope",
-      brief: planner?.step ?? "Create the build plan and acceptance criteria.",
-      nextNeed:
-        planner?.status === "completed" ? "Hand off plan to Builder" : "Finish concrete plan.",
-      artifacts: ["Implementation plan", "Acceptance criteria"],
-      openQuestions: planner?.status === "completed" ? [] : ["Confirm scope is concrete enough."],
-      activityLog: [],
-    },
-    {
-      role: "Builder",
-      status: laneStatusFromStep(builder?.status),
-      summary: "Implements",
-      brief: builder?.step ?? "Implement the main requested change.",
-      nextNeed:
-        builder?.status === "completed"
-          ? "Hand off implementation to Verifier"
-          : "Complete build work.",
-      artifacts: ["Files touched", "Builder handoff"],
-      openQuestions: builder?.status === "completed" ? [] : ["Finish implementation handoff."],
-      activityLog: [],
-    },
-    {
-      role: "Verifier",
-      status: laneStatusFromStep(verifier?.status),
-      summary: "Tests evidence",
-      brief: verifier?.step ?? "Run tests and capture verification evidence.",
-      nextNeed:
-        verifier?.status === "completed" ? "Report pass/fail evidence" : "Run verification checks.",
-      artifacts: ["Verifier feedback", "Test Mode evidence"],
-      openQuestions: verifier?.status === "completed" ? [] : ["Capture pass/fail evidence."],
-      activityLog: [],
-    },
-    {
-      role: "Documenter",
-      status: laneStatusFromStep(documenter?.status),
-      summary: "Records outcome",
-      brief: documenter?.step ?? "Document usage notes and durable project context.",
-      nextNeed:
-        documenter?.status === "completed" ? "Confirm notes are preserved" : "Write concise notes.",
-      artifacts: ["Memory candidates", "Documentation notes"],
-      openQuestions: documenter?.status === "completed" ? [] : ["Record durable outcome notes."],
-      activityLog: [],
-    },
+  const plannedSubAgents = [
+    ...payloadSubAgents(plannedPayload),
+    ...payloadSubAgents(startedPayload),
+    ...payloadSubAgents(customizedPayload),
   ];
+  const workflowAgents = mergeWorkflowSubAgents(plannedSubAgents, requestedRoles);
+  const currentReasoningEffort = modelOptionValue(currentModelSelection, [
+    "reasoningEffort",
+    "reasoning",
+    "effort",
+  ]);
+  const currentFastMode = modelOptionValue(currentModelSelection, ["fastMode"]);
+  const fallbackModel = currentModelSelection?.model ?? "Use lead default";
+  const fallbackReasoning =
+    typeof currentReasoningEffort === "string" ? currentReasoningEffort : "Use lead default";
+  const fallbackFastMode = typeof currentFastMode === "boolean" ? currentFastMode : false;
+  const plannedAgentLanes: WorkflowLane[] = workflowAgents.map((agent) => ({
+    id: agent.id,
+    role: agent.role,
+    status: "Waiting",
+    summary: agent.goal ?? "Handles this workflow responsibility",
+    brief: agent.goal ?? "Handles this workflow responsibility and reports through the Lead.",
+    prompt: agent.prompt,
+    model: agent.model ?? fallbackModel,
+    reasoningEffort: agent.reasoningEffort ?? fallbackReasoning,
+    fastMode: agent.fastMode ?? fallbackFastMode,
+    startsAfter: agent.startsAfter,
+    nextNeed: "Wait for Lead launch or complete assigned work.",
+    artifacts: ["Lane findings", "Handoff notes"],
+    openQuestions: ["Awaiting Lead routing."],
+    activityLog: [],
+  }));
 
-  for (const role of requestedRoles) {
-    if (lanes.some((lane) => lane.role.toLowerCase() === role.toLowerCase())) continue;
-    lanes.push({
-      role,
-      status: allDone ? "Done" : "Waiting",
-      summary: role.toLowerCase().includes("critic") ? "Reviews risks" : "Supports workflow",
-      brief: role.toLowerCase().includes("research")
-        ? "Gather context and report useful findings to the Lead."
-        : role.toLowerCase().includes("critic")
-          ? "Look for flaws, weak assumptions, and non-blocking concerns."
-          : "Handle the assigned workflow responsibility and report through the Lead.",
-      nextNeed: allDone ? "Confirm final synthesis" : "Wait for Lead routing or lane handoff.",
-      artifacts: ["Lane findings", "Handoff notes"],
-      openQuestions: allDone ? [] : ["Awaiting Lead routing."],
-      activityLog: [],
-    });
-  }
+  const leadLane: WorkflowLane = {
+    id: "lead",
+    role: "Lead",
+    status: workflowLeadStatus(activities),
+    summary: "Owns synthesis",
+    brief: activePlan?.explanation ?? "Interprets the goal and coordinates the workflow lanes.",
+    prompt:
+      "Plan the workflow, revise it from main-chat guidance, then coordinate launched sub-agents.",
+    model: fallbackModel,
+    reasoningEffort: fallbackReasoning,
+    fastMode: fallbackFastMode,
+    startsAfter: [],
+    nextNeed: "Keep lanes aligned and report decisions.",
+    artifacts: ["Lead synthesis", "Workflow decision log"],
+    openQuestions: [],
+    activityLog: [],
+  };
 
-  return lanes.map((lane) => enrichWorkflowLane(lane, activities));
+  return [leadLane, ...plannedAgentLanes].map((lane) => enrichWorkflowLane(lane, activities));
 }
 
 interface PlanSidebarProps {
@@ -391,17 +562,19 @@ interface PlanSidebarProps {
   activities?: ReadonlyArray<OrchestrationThreadActivity>;
   label?: string;
   workflowActive?: boolean;
+  currentModelSelection?: ModelSelection | undefined;
   environmentId: EnvironmentId;
   threadRef?: ScopedThreadRef | undefined;
   markdownCwd: string | undefined;
   workspaceRoot: string | undefined;
   timestampFormat: TimestampFormat;
   mode?: "sheet" | "sidebar" | "embedded";
-  onSubmitWorkflowGuidance?: (laneRole: string, guidance: string) => void;
-  onStopWorkflowLane?: (laneRole: string) => void;
+  onSubmitWorkflowGuidance?: (lane: WorkflowLaneTarget, guidance: string) => void;
+  onStopWorkflowLane?: (lane: WorkflowLaneTarget) => void;
   onStopWorkflow?: () => void;
-  onWorkflowLaneControl?: (laneRole: string, action: WorkflowLaneControlAction) => void;
+  onWorkflowLaneControl?: (lane: WorkflowLaneTarget, action: WorkflowLaneControlAction) => void;
   onWorkflowControl?: (action: WorkflowControlAction) => void;
+  onOpenTestsPanel?: () => void;
   onCustomizeWorkflow?: (input: {
     acceptanceCriteria: ReadonlyArray<string>;
     lanes: ReadonlyArray<string>;
@@ -411,7 +584,12 @@ interface PlanSidebarProps {
     showMemoryAuditNotes: boolean;
     exploreParallelApproaches: boolean;
     stopAfterPlanningForApproval: boolean;
+    model: string | null;
+    reasoningEffort: string | null;
+    fastMode: boolean;
+    subAgents: ReadonlyArray<WorkflowSubAgentPlan>;
   }) => void;
+  onStartWorkflow?: () => void;
 }
 
 const EMPTY_PLAN_SIDEBAR_ACTIVITIES: ReadonlyArray<OrchestrationThreadActivity> = [];
@@ -422,6 +600,7 @@ const PlanSidebar = memo(function PlanSidebar({
   activities = EMPTY_PLAN_SIDEBAR_ACTIVITIES,
   label = "Plan",
   workflowActive = false,
+  currentModelSelection,
   environmentId,
   threadRef,
   markdownCwd,
@@ -430,47 +609,53 @@ const PlanSidebar = memo(function PlanSidebar({
   mode = "sidebar",
   onSubmitWorkflowGuidance,
   onStopWorkflowLane,
-  onStopWorkflow,
   onWorkflowLaneControl,
-  onWorkflowControl,
-  onCustomizeWorkflow,
+  onOpenTestsPanel,
+  onStartWorkflow,
 }: PlanSidebarProps) {
   const [proposedPlanExpanded, setProposedPlanExpanded] = useState(false);
   const [isSavingToWorkspace, setIsSavingToWorkspace] = useState(false);
-  const [expandedLaneRole, setExpandedLaneRole] = useState<string | null>(null);
-  const [guidanceLaneRole, setGuidanceLaneRole] = useState<string | null>(null);
+  const [guidanceLaneId, setGuidanceLaneId] = useState<string | null>(null);
   const [guidanceText, setGuidanceText] = useState("");
-  const [customizeOpen, setCustomizeOpen] = useState(false);
-  const [customCriteriaText, setCustomCriteriaText] = useState("");
-  const [customLanesText, setCustomLanesText] = useState("");
-  const [customRequireVerifierApproval, setCustomRequireVerifierApproval] = useState(true);
-  const [customAddRedTeamCritique, setCustomAddRedTeamCritique] = useState(false);
-  const [customRequireTestsBeforeFinal, setCustomRequireTestsBeforeFinal] = useState(false);
-  const [customShowMemoryAuditNotes, setCustomShowMemoryAuditNotes] = useState(true);
-  const [customExploreParallelApproaches, setCustomExploreParallelApproaches] = useState(false);
-  const [customStopAfterPlanningForApproval, setCustomStopAfterPlanningForApproval] =
-    useState(false);
   const writeProjectFile = useAtomCommand(projectEnvironment.writeFile, {
     reportFailure: false,
   });
   const { copyToClipboard, isCopied } = useCopyToClipboard({ target: "plan" });
+  const [selectedWorkflowLaneId, setSelectedWorkflowLaneId] = useState<string | null>(null);
+  const [selectedWorkflowRecordId, setSelectedWorkflowRecordId] = useState<string | null>(null);
+  const [selectedLaneRecordId, setSelectedLaneRecordId] = useState<string | null>(null);
 
   const planMarkdown = activeProposedPlan?.planMarkdown ?? null;
   const displayedPlanMarkdown = planMarkdown ? stripDisplayedPlanMarkdown(planMarkdown) : null;
   const planTitle = planMarkdown ? proposedPlanTitle(planMarkdown) : null;
-  const workflowLanes = workflowActive ? buildWorkflowLanes(activePlan, activities) : [];
+  const workflowLanes = workflowActive
+    ? buildWorkflowLanes(activePlan, activities, currentModelSelection)
+    : [];
+  const workflowPlannedActivity = workflowActive
+    ? latestWorkflowActivity(activities, "workflow.planned")
+    : undefined;
+  const workflowPlannedPayload = workflowPlannedActivity
+    ? workflowActivityPayload(workflowPlannedActivity)
+    : null;
   const workflowStartedActivity = workflowActive
     ? latestWorkflowActivity(activities, "workflow.started")
     : undefined;
   const workflowStartedPayload = workflowStartedActivity
     ? workflowActivityPayload(workflowStartedActivity)
     : null;
+  const workflowStarted = Boolean(workflowStartedActivity);
   const workflowGoal =
-    typeof workflowStartedPayload?.goal === "string" ? workflowStartedPayload.goal : null;
+    typeof workflowStartedPayload?.goal === "string"
+      ? workflowStartedPayload.goal
+      : typeof workflowPlannedPayload?.goal === "string"
+        ? workflowPlannedPayload.goal
+        : null;
   const workflowPattern =
     typeof workflowStartedPayload?.workflowPattern === "string"
       ? workflowStartedPayload.workflowPattern
-      : null;
+      : typeof workflowPlannedPayload?.workflowPattern === "string"
+        ? workflowPlannedPayload.workflowPattern
+        : null;
   const customizedActivity = workflowActive
     ? latestWorkflowActivity(activities, "workflow.customized")
     : undefined;
@@ -478,12 +663,14 @@ const PlanSidebar = memo(function PlanSidebar({
   const workflowInitialLanes = [
     ...new Set([
       ...payloadStringList(workflowStartedPayload, "initialLanes"),
+      ...payloadStringList(workflowPlannedPayload, "initialLanes"),
       ...payloadStringList(customizedPayload, "lanes"),
     ]),
   ];
   const acceptanceCriteria = [
     ...new Set([
       ...payloadStringList(workflowStartedPayload, "acceptanceCriteria"),
+      ...payloadStringList(workflowPlannedPayload, "acceptanceCriteria"),
       ...payloadStringList(customizedPayload, "acceptanceCriteria"),
     ]),
   ];
@@ -491,12 +678,73 @@ const PlanSidebar = memo(function PlanSidebar({
   const routeBacks = workflowRecords(activities, "workflow.route-back");
   const objections = workflowRecords(activities, "workflow.objection");
   const evidence = workflowRecords(activities, "workflow.evidence");
-  const verifierResult = latestWorkflowActivity(activities, "workflow.verifier.result");
-  const verifierPayload = verifierResult ? workflowActivityPayload(verifierResult) : null;
+  const verifierResults = workflowRecords(activities, "workflow.verifier.result");
   const synthesis = workflowRecords(activities, "workflow.lead.synthesis");
   const memoryUpdates = workflowRecords(activities, "workflow.memory.update");
+  const guidanceRecords = workflowRecords(activities, "workflow.lane.guidance");
+  const laneStartedRecords = workflowRecords(activities, "workflow.lane.started");
+  const laneCompletedRecords = workflowRecords(activities, "workflow.lane.completed");
+  const laneBlockedRecords = workflowRecords(activities, "workflow.lane.blocked");
+  const laneStoppedRecords = workflowRecords(activities, "workflow.lane.stopped");
   const laneControls = workflowRecords(activities, "workflow.lane.control");
   const workflowControls = workflowRecords(activities, "workflow.control");
+  const laneRuntimeRecords = [
+    ...laneStartedRecords,
+    ...laneCompletedRecords,
+    ...laneBlockedRecords,
+    ...laneStoppedRecords,
+    ...guidanceRecords,
+    ...laneControls,
+    ...handoffs,
+    ...routeBacks,
+    ...evidence,
+    ...verifierResults,
+    ...memoryUpdates,
+  ].toSorted((left, right) => right.createdAt.localeCompare(left.createdAt));
+  const detailRecords = [
+    ...guidanceRecords,
+    ...handoffs,
+    ...routeBacks,
+    ...evidence,
+    ...verifierResults,
+    ...synthesis,
+    ...memoryUpdates,
+  ].toSorted((left, right) => right.createdAt.localeCompare(left.createdAt));
+  const selectedWorkflowRecord =
+    detailRecords.find((record) => record.id === selectedWorkflowRecordId) ?? null;
+  const selectedWorkflowLane = useMemo(
+    () => workflowLanes.find((lane) => lane.id === selectedWorkflowLaneId) ?? null,
+    [selectedWorkflowLaneId, workflowLanes],
+  );
+  const workflowRecordCountByLaneId = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const record of laneRuntimeRecords) {
+      if (!record.laneId) continue;
+      counts.set(record.laneId, (counts.get(record.laneId) ?? 0) + 1);
+    }
+    return counts;
+  }, [laneRuntimeRecords]);
+  const selectedWorkflowLaneRecords = useMemo(() => {
+    if (!selectedWorkflowLane) return [];
+    if (selectedWorkflowLane.id === "lead") {
+      return detailRecords.filter((record) => !record.laneId);
+    }
+    return laneRuntimeRecords.filter((record) =>
+      workflowRecordMatchesLane(record, selectedWorkflowLane),
+    );
+  }, [detailRecords, laneRuntimeRecords, selectedWorkflowLane]);
+  const selectedLaneWorkflowRecord =
+    selectedWorkflowLaneRecords.find((record) => record.id === selectedLaneRecordId) ?? null;
+  const leadWorkflowLane = workflowLanes.find((lane) => lane.id === "lead") ?? null;
+  const workflowRuntimeLabel = workflowStarted
+    ? (leadWorkflowLane?.status ?? "Running")
+    : "Awaiting start";
+  const subAgentWorkflowLanes = workflowLanes.filter((lane) => lane.id !== "lead");
+  const activeWorkflowLaneCount = subAgentWorkflowLanes.length;
+  const runningLaneCount = subAgentWorkflowLanes.filter((lane) => lane.status === "Running").length;
+  const blockedLaneCount = subAgentWorkflowLanes.filter(
+    (lane) => lane.status === "Needs you" || lane.status === "Failed",
+  ).length;
   const workflowCompleted = latestWorkflowActivity(activities, "workflow.completed");
   const workflowCompletedPayload = workflowCompleted
     ? workflowActivityPayload(workflowCompleted)
@@ -551,62 +799,25 @@ const PlanSidebar = memo(function PlanSidebar({
   }, [environmentId, planMarkdown, workspaceRoot, writeProjectFile]);
 
   const handleSubmitGuidance = useCallback(() => {
-    if (!guidanceLaneRole) return;
+    if (!guidanceLaneId) return;
     const trimmed = guidanceText.trim();
     if (!trimmed) return;
-    onSubmitWorkflowGuidance?.(guidanceLaneRole, trimmed);
-    setGuidanceLaneRole(null);
+    const target = workflowLanes.find((lane) => lane.id === guidanceLaneId);
+    if (!target) return;
+    onSubmitWorkflowGuidance?.({ id: target.id, role: target.role }, trimmed);
+    setGuidanceLaneId(null);
     setGuidanceText("");
-  }, [guidanceLaneRole, guidanceText, onSubmitWorkflowGuidance]);
+  }, [guidanceLaneId, guidanceText, onSubmitWorkflowGuidance, workflowLanes]);
 
   const handleStopLane = useCallback(
-    (laneRole: string) => {
-      if (!window.confirm(`Stop this ${laneRole} lane? Preserved findings will remain visible.`)) {
+    (lane: WorkflowLaneTarget) => {
+      if (!window.confirm(`Stop this ${lane.role} lane? Preserved findings will remain visible.`)) {
         return;
       }
-      onStopWorkflowLane?.(laneRole);
+      onStopWorkflowLane?.(lane);
     },
     [onStopWorkflowLane],
   );
-
-  const handleStopWorkflow = useCallback(() => {
-    if (!window.confirm("Stop this workflow? Completed and partial work will remain visible.")) {
-      return;
-    }
-    onStopWorkflow?.();
-  }, [onStopWorkflow]);
-
-  const handleCustomizeWorkflow = useCallback(() => {
-    const criteria = customCriteriaText
-      .split(/\r?\n/)
-      .map((entry) => entry.trim())
-      .filter(Boolean);
-    const lanes = customLanesText
-      .split(/[\r\n,]+/)
-      .map((entry) => entry.trim())
-      .filter(Boolean);
-    onCustomizeWorkflow?.({
-      acceptanceCriteria: criteria,
-      lanes,
-      requireVerifierApproval: customRequireVerifierApproval,
-      addRedTeamCritique: customAddRedTeamCritique,
-      requireTestsBeforeFinal: customRequireTestsBeforeFinal,
-      showMemoryAuditNotes: customShowMemoryAuditNotes,
-      exploreParallelApproaches: customExploreParallelApproaches,
-      stopAfterPlanningForApproval: customStopAfterPlanningForApproval,
-    });
-    setCustomizeOpen(false);
-  }, [
-    customAddRedTeamCritique,
-    customCriteriaText,
-    customExploreParallelApproaches,
-    customLanesText,
-    customRequireTestsBeforeFinal,
-    customRequireVerifierApproval,
-    customShowMemoryAuditNotes,
-    customStopAfterPlanningForApproval,
-    onCustomizeWorkflow,
-  ]);
 
   const renderStringList = useCallback(
     (label: string, entries: ReadonlyArray<string>) =>
@@ -626,18 +837,63 @@ const PlanSidebar = memo(function PlanSidebar({
     [],
   );
 
-  const renderCustomizeCheckbox = useCallback(
-    (label: string, checked: boolean, onCheckedChange: (value: boolean) => void) => (
-      <label className="flex items-start gap-2 rounded-md border border-border/40 bg-background/35 px-2 py-1.5 text-[11px] leading-snug text-muted-foreground/75">
-        <Checkbox
-          checked={checked}
-          onCheckedChange={(value) => onCheckedChange(value === true)}
-          className="mt-0.5"
-        />
-        <span>{label}</span>
-      </label>
+  const renderWorkflowRecordDetails = useCallback(
+    (record: WorkflowRecord) => (
+      <div className="rounded-md border border-border/50 bg-background/60 p-2 text-[11px] leading-snug text-muted-foreground/70">
+        <p className="font-medium text-foreground/80">{record.title ?? record.summary}</p>
+        <p className="mt-0.5 text-muted-foreground/50">
+          {record.kind} | {formatTimestamp(record.createdAt, timestampFormat)}
+          {record.laneRole ? ` | ${record.laneRole}` : ""}
+        </p>
+        {record.detail ? <p className="mt-1">{record.detail}</p> : null}
+        {record.guidance ? (
+          <p className="mt-1">
+            <span className="font-medium text-foreground/70">Guidance:</span> {record.guidance}
+          </p>
+        ) : null}
+        {record.reason ? (
+          <p className="mt-1">
+            <span className="font-medium text-foreground/70">Reason:</span> {record.reason}
+          </p>
+        ) : null}
+        {record.action ? (
+          <p className="mt-1">
+            <span className="font-medium text-foreground/70">Action:</span> {record.action}
+          </p>
+        ) : null}
+        {record.result ? (
+          <p className="mt-1">
+            <span className="font-medium text-foreground/70">Result:</span> {record.result}
+          </p>
+        ) : null}
+        {record.decision ? (
+          <p className="mt-1">
+            <span className="font-medium text-foreground/70">Decision:</span> {record.decision}
+          </p>
+        ) : null}
+        {record.memoryText ? (
+          <p className="mt-1">
+            <span className="font-medium text-foreground/70">Memory:</span> {record.memoryText}
+          </p>
+        ) : null}
+        {renderStringList("Files touched", record.filesTouched)}
+        {renderStringList("Tests run", record.testsRun)}
+        {renderStringList("Checks run", record.checksRun)}
+        {renderStringList("Artifacts", record.artifacts)}
+        {renderStringList("Passed", record.passed)}
+        {renderStringList("Failed", record.failed)}
+        {renderStringList("Known risks", record.knownRisks)}
+        {renderStringList("Concerns", record.concerns)}
+        {renderStringList("Alternatives", record.alternatives)}
+        {renderStringList("Overrides", record.overrides)}
+        {record.requiredFix ? (
+          <p className="mt-1.5 rounded-md border border-destructive/20 bg-destructive/5 px-2 py-1 text-destructive">
+            Required fix: {record.requiredFix}
+          </p>
+        ) : null}
+      </div>
     ),
-    [],
+    [renderStringList, timestampFormat],
   );
 
   return (
@@ -666,39 +922,6 @@ const PlanSidebar = memo(function PlanSidebar({
           ) : null}
         </div>
         <div className="flex items-center gap-1">
-          {workflowActive && onStopWorkflow ? (
-            <Button
-              size="xs"
-              variant="ghost"
-              onClick={handleStopWorkflow}
-              className="text-muted-foreground/60 hover:text-destructive"
-            >
-              Stop workflow
-            </Button>
-          ) : null}
-          {workflowActive && onWorkflowControl ? (
-            <Menu>
-              <MenuTrigger
-                render={
-                  <Button
-                    size="icon-xs"
-                    variant="ghost"
-                    className="text-muted-foreground/50 hover:text-foreground/70"
-                    aria-label="Workflow controls"
-                  />
-                }
-              >
-                <EllipsisIcon className="size-3.5" />
-              </MenuTrigger>
-              <MenuPopup align="end">
-                <MenuItem onClick={() => onWorkflowControl("pause")}>Pause workflow</MenuItem>
-                <MenuItem onClick={() => onWorkflowControl("freeze")}>Freeze result</MenuItem>
-                <MenuItem onClick={() => onWorkflowControl("continue-manually")}>
-                  Continue manually
-                </MenuItem>
-              </MenuPopup>
-            </Menu>
-          ) : null}
           {planMarkdown ? (
             <Menu>
               <MenuTrigger
@@ -741,18 +964,18 @@ const PlanSidebar = memo(function PlanSidebar({
           ) : null}
 
           {workflowActive ? (
-            <div className="space-y-2">
-              <div className="rounded-lg border border-primary/20 bg-primary/5 p-2.5">
+            <div className="space-y-3">
+              <div className="rounded-xl border border-primary/20 bg-gradient-to-b from-primary/8 to-background/70 p-3">
                 <div className="flex items-center justify-between gap-2">
                   <span className="text-[13px] font-semibold text-foreground/90">
-                    Workflow started
+                    {workflowStarted ? "Workflow runtime" : "Workflow plan"}
                   </span>
                   <Badge
                     variant="secondary"
                     size="sm"
                     className="rounded-md px-1.5 py-0 text-[10px]"
                   >
-                    Active
+                    {workflowRuntimeLabel}
                   </Badge>
                 </div>
                 <p className="mt-1 text-[12px] leading-snug text-muted-foreground/75">
@@ -771,7 +994,7 @@ const PlanSidebar = memo(function PlanSidebar({
                   </p>
                 ) : null}
                 {acceptanceCriteria.length > 0 ? (
-                  <div className="mt-2 border-t border-primary/10 pt-2">
+                  <div className="mt-3 border-t border-primary/10 pt-2">
                     <p className="text-[10px] font-semibold tracking-widest text-muted-foreground/40 uppercase">
                       Acceptance criteria
                     </p>
@@ -785,133 +1008,67 @@ const PlanSidebar = memo(function PlanSidebar({
                     </ul>
                   </div>
                 ) : null}
-                {onCustomizeWorkflow ? (
-                  <div className="mt-2">
-                    {customizeOpen ? (
-                      <div className="space-y-2 border-t border-primary/10 pt-2">
-                        <Textarea
-                          value={customCriteriaText}
-                          onChange={(event) => setCustomCriteriaText(event.currentTarget.value)}
-                          placeholder="Acceptance criteria, one per line"
-                          className="min-h-20 text-xs"
-                        />
-                        <Textarea
-                          value={customLanesText}
-                          onChange={(event) => setCustomLanesText(event.currentTarget.value)}
-                          placeholder="Lanes, comma-separated"
-                          className="min-h-16 text-xs"
-                        />
-                        <div className="grid gap-1.5">
-                          <p className="text-[10px] font-semibold tracking-widest text-muted-foreground/40 uppercase">
-                            Verification
-                          </p>
-                          {renderCustomizeCheckbox(
-                            "Require verifier approval",
-                            customRequireVerifierApproval,
-                            setCustomRequireVerifierApproval,
-                          )}
-                          {renderCustomizeCheckbox(
-                            "Add red-team critique",
-                            customAddRedTeamCritique,
-                            setCustomAddRedTeamCritique,
-                          )}
-                          {renderCustomizeCheckbox(
-                            "Require tests or evidence before final",
-                            customRequireTestsBeforeFinal,
-                            setCustomRequireTestsBeforeFinal,
-                          )}
-                          <p className="pt-1 text-[10px] font-semibold tracking-widest text-muted-foreground/40 uppercase">
-                            Memory
-                          </p>
-                          {renderCustomizeCheckbox(
-                            "Show memory write audit notes",
-                            customShowMemoryAuditNotes,
-                            setCustomShowMemoryAuditNotes,
-                          )}
-                          <p className="pt-1 text-[10px] font-semibold tracking-widest text-muted-foreground/40 uppercase">
-                            Execution
-                          </p>
-                          {renderCustomizeCheckbox(
-                            "Explore multiple approaches in parallel",
-                            customExploreParallelApproaches,
-                            setCustomExploreParallelApproaches,
-                          )}
-                          {renderCustomizeCheckbox(
-                            "Stop after planning for approval",
-                            customStopAfterPlanningForApproval,
-                            setCustomStopAfterPlanningForApproval,
-                          )}
-                        </div>
-                        <div className="flex justify-end gap-1.5">
-                          <Button size="xs" variant="ghost" onClick={() => setCustomizeOpen(false)}>
-                            Cancel
-                          </Button>
-                          <Button
-                            size="xs"
-                            onClick={handleCustomizeWorkflow}
-                            disabled={!customCriteriaText.trim() && !customLanesText.trim()}
-                          >
-                            Save customize
-                          </Button>
-                        </div>
-                      </div>
-                    ) : (
-                      <Button
-                        size="xs"
-                        variant="secondary"
-                        onClick={() => {
-                          setCustomCriteriaText(acceptanceCriteria.join("\n"));
-                          setCustomLanesText(workflowInitialLanes.join(", "));
-                          if (customizedPayload) {
-                            setCustomRequireVerifierApproval(
-                              customizedPayload.requireVerifierApproval !== false,
-                            );
-                            setCustomAddRedTeamCritique(
-                              customizedPayload.addRedTeamCritique === true,
-                            );
-                            setCustomRequireTestsBeforeFinal(
-                              customizedPayload.requireTestsBeforeFinal === true,
-                            );
-                            setCustomShowMemoryAuditNotes(
-                              customizedPayload.showMemoryAuditNotes !== false,
-                            );
-                            setCustomExploreParallelApproaches(
-                              customizedPayload.exploreParallelApproaches === true,
-                            );
-                            setCustomStopAfterPlanningForApproval(
-                              customizedPayload.stopAfterPlanningForApproval === true,
-                            );
-                          }
-                          setCustomizeOpen(true);
-                        }}
-                      >
-                        Customize
-                      </Button>
-                    )}
+                {!workflowStarted && onStartWorkflow ? (
+                  <div className="mt-3 flex flex-wrap gap-2 border-t border-primary/10 pt-2">
+                    <Button size="xs" onClick={onStartWorkflow}>
+                      Start workflow
+                    </Button>
                   </div>
                 ) : null}
+                <div className="mt-2 rounded-lg border border-primary/10 bg-background/45 p-2.5">
+                  <p className="text-[10px] font-semibold tracking-widest text-muted-foreground/40 uppercase">
+                    Workflow changes
+                  </p>
+                  <p className="mt-1 text-[11px] leading-snug text-muted-foreground/65">
+                    Use the main chat to ask the Lead to change agents, prompts, models, reasoning
+                    effort, fast mode, or sequencing before launch.
+                  </p>
+                  <p className="mt-1 text-[11px] leading-snug text-muted-foreground/50">
+                    {workflowStarted
+                      ? "Lead updates and sub-agent handoffs appear here as runtime events."
+                      : "This panel stays read-only; the Lead owns workflow revisions through chat."}
+                  </p>
+                </div>
               </div>
               <div className="flex items-center justify-between gap-2">
                 <p className="text-[10px] font-semibold tracking-widest text-muted-foreground/40 uppercase">
-                  Workflow lanes
+                  Agent cards
                 </p>
                 <Badge variant="secondary" size="sm" className="rounded-md px-1.5 py-0 text-[10px]">
-                  Lead owned
+                  {activeWorkflowLaneCount} sub-agents
                 </Badge>
+              </div>
+              <div className="flex flex-wrap gap-1.5 text-[10px] text-muted-foreground/60">
+                <span className="rounded-full border border-border/50 bg-background/55 px-2 py-0.5">
+                  {runningLaneCount} running
+                </span>
+                <span className="rounded-full border border-border/50 bg-background/55 px-2 py-0.5">
+                  {blockedLaneCount} need attention
+                </span>
+                <span className="rounded-full border border-border/50 bg-background/55 px-2 py-0.5">
+                  {detailRecords.length} lead inbox items
+                </span>
               </div>
               {workflowLanes.map((lane) => (
                 <div
-                  key={lane.role}
-                  className="rounded-lg border border-border/50 bg-background/45"
+                  key={lane.id}
+                  className={cn(
+                    "rounded-lg border bg-background/45",
+                    selectedWorkflowLaneId === lane.id
+                      ? "border-primary/35 bg-primary/6"
+                      : "border-border/50",
+                  )}
                 >
                   <div className="flex items-start justify-between gap-2">
                     <button
                       type="button"
                       className="min-w-0 flex-1 p-2.5 text-left"
                       onClick={() =>
-                        setExpandedLaneRole((current) => (current === lane.role ? null : lane.role))
+                        setSelectedWorkflowLaneId((current) =>
+                          current === lane.id ? null : lane.id,
+                        )
                       }
-                      aria-expanded={expandedLaneRole === lane.role}
+                      aria-expanded={selectedWorkflowLaneId === lane.id}
                     >
                       <div className="flex items-center gap-2">
                         <span className="text-[13px] font-semibold text-foreground/90">
@@ -927,6 +1084,20 @@ const PlanSidebar = memo(function PlanSidebar({
                       <p className="mt-1 text-[11px] leading-snug text-muted-foreground/50">
                         Next: {lane.nextNeed}
                       </p>
+                      {(workflowRecordCountByLaneId.get(lane.id) ?? 0) > 0 ? (
+                        <p className="mt-1 text-[10px] leading-snug text-muted-foreground/45">
+                          {workflowRecordCountByLaneId.get(lane.id)} lane activity items
+                        </p>
+                      ) : null}
+                      <p className="mt-1 text-[10px] leading-snug text-muted-foreground/45">
+                        {selectedWorkflowLaneId === lane.id
+                          ? lane.id === "lead"
+                            ? "Lead panel open"
+                            : "Sub-agent panel open"
+                          : lane.id === "lead"
+                            ? "Open lead panel"
+                            : "Open sub-agent panel"}
+                      </p>
                     </button>
                     <span
                       className={cn(
@@ -939,30 +1110,183 @@ const PlanSidebar = memo(function PlanSidebar({
                         lane.status === "Failed" && "bg-destructive/10 text-destructive",
                       )}
                     >
-                      {lane.status}
+                      {workflowStarted ? lane.status : "Planned"}
                     </span>
                   </div>
-                  {expandedLaneRole === lane.role ? (
-                    <div className="border-t border-border/50 px-2.5 py-2 text-[11px] leading-snug text-muted-foreground/70">
-                      <p>
-                        <span className="font-medium text-foreground/70">Latest output:</span>{" "}
-                        {lane.latestOutput ?? lane.brief}
+                </div>
+              ))}
+              {selectedWorkflowLane ? (
+                <div className="rounded-xl border border-primary/20 bg-primary/5 p-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <div>
+                      <p className="text-[10px] font-semibold tracking-widest text-muted-foreground/40 uppercase">
+                        {selectedWorkflowLane.id === "lead" ? "Lead panel" : "Sub-agent panel"}
                       </p>
-                      <p className="mt-1">
-                        <span className="font-medium text-foreground/70">Open need:</span>{" "}
-                        {lane.nextNeed}
+                      <p className="mt-1 text-[13px] font-semibold text-foreground/90">
+                        {selectedWorkflowLane.role}
                       </p>
-                      {renderStringList("Artifacts", lane.artifacts)}
-                      {renderStringList("Open questions", lane.openQuestions)}
-                      {renderStringList("Activity log", lane.activityLog)}
+                    </div>
+                    <Badge
+                      variant="secondary"
+                      size="sm"
+                      className="rounded-md px-1.5 py-0 text-[10px]"
+                    >
+                      {workflowStarted ? selectedWorkflowLane.status : "Planned"}
+                    </Badge>
+                  </div>
+                  <p className="mt-2 text-[12px] leading-snug text-muted-foreground/75">
+                    {selectedWorkflowLane.brief}
+                  </p>
+                  <p className="mt-2 text-[11px] leading-snug text-muted-foreground/70">
+                    <span className="font-medium text-foreground/75">Prompt:</span>{" "}
+                    {selectedWorkflowLane.prompt ?? selectedWorkflowLane.brief}
+                  </p>
+                  <div className="mt-3 grid grid-cols-2 gap-1.5">
+                    <div className="rounded-md border border-border/40 bg-background/35 px-2 py-1">
+                      <p className="text-[10px] text-muted-foreground/45">Model</p>
+                      <p className="truncate text-[11px] text-foreground/75">
+                        {selectedWorkflowLane.model ?? "Use lead default"}
+                      </p>
+                    </div>
+                    <div className="rounded-md border border-border/40 bg-background/35 px-2 py-1">
+                      <p className="text-[10px] text-muted-foreground/45">Reasoning</p>
+                      <p className="truncate text-[11px] text-foreground/75">
+                        {selectedWorkflowLane.reasoningEffort ?? "Use lead default"}
+                      </p>
+                    </div>
+                    <div className="rounded-md border border-border/40 bg-background/35 px-2 py-1">
+                      <p className="text-[10px] text-muted-foreground/45">Fast mode</p>
+                      <p className="text-[11px] text-foreground/75">
+                        {selectedWorkflowLane.fastMode ? "On" : "Off"}
+                      </p>
+                    </div>
+                    <div className="rounded-md border border-border/40 bg-background/35 px-2 py-1">
+                      <p className="text-[10px] text-muted-foreground/45">Starts after</p>
+                      <p className="truncate text-[11px] text-foreground/75">
+                        {formatWorkflowLaneRefs(selectedWorkflowLane.startsAfter, workflowLanes)}
+                      </p>
+                    </div>
+                  </div>
+                  <p className="mt-3 text-[11px] leading-snug text-muted-foreground/70">
+                    <span className="font-medium text-foreground/75">Latest output:</span>{" "}
+                    {selectedWorkflowLane.latestOutput ?? selectedWorkflowLane.brief}
+                  </p>
+                  <p className="mt-1 text-[11px] leading-snug text-muted-foreground/70">
+                    <span className="font-medium text-foreground/75">Open need:</span>{" "}
+                    {selectedWorkflowLane.nextNeed}
+                  </p>
+                  {renderStringList("Artifacts", selectedWorkflowLane.artifacts)}
+                  {renderStringList("Open questions", selectedWorkflowLane.openQuestions)}
+                  {renderStringList("Activity log", selectedWorkflowLane.activityLog)}
+                  {selectedWorkflowLaneRecords.length > 0 ? (
+                    <div className="mt-3 space-y-1.5 rounded-lg border border-border/50 bg-background/35 p-2.5">
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="text-[10px] font-semibold tracking-widest text-muted-foreground/40 uppercase">
+                          {selectedWorkflowLane.id === "lead" ? "Lead context" : "Lane activity"}
+                        </p>
+                        <Badge
+                          variant="secondary"
+                          size="sm"
+                          className="rounded-md px-1.5 py-0 text-[10px]"
+                        >
+                          {selectedWorkflowLaneRecords.length}
+                        </Badge>
+                      </div>
+                      <div className="flex flex-wrap gap-1.5">
+                        {selectedWorkflowLaneRecords.map((record) => (
+                          <Button
+                            key={record.id}
+                            size="xs"
+                            variant={selectedLaneRecordId === record.id ? "secondary" : "ghost"}
+                            onClick={() =>
+                              setSelectedLaneRecordId((current) =>
+                                current === record.id ? null : record.id,
+                              )
+                            }
+                          >
+                            {workflowRecordButtonLabel(record)}
+                          </Button>
+                        ))}
+                      </div>
+                      {selectedLaneWorkflowRecord ? (
+                        renderWorkflowRecordDetails(selectedLaneWorkflowRecord)
+                      ) : (
+                        <p className="text-[11px] leading-snug text-muted-foreground/50">
+                          Select an activity card to inspect the handoff, evidence, or context.
+                        </p>
+                      )}
                     </div>
                   ) : null}
-                  {guidanceLaneRole === lane.role ? (
-                    <div className="space-y-2 border-t border-border/50 px-2.5 py-2">
+                  {workflowStarted && selectedWorkflowLane.id !== "lead" ? (
+                    <div className="mt-3 flex flex-wrap gap-1.5">
+                      <Button
+                        size="xs"
+                        variant="secondary"
+                        onClick={() => setGuidanceLaneId(selectedWorkflowLane.id)}
+                        disabled={!onSubmitWorkflowGuidance}
+                      >
+                        Add guidance
+                      </Button>
+                      {onOpenTestsPanel ? (
+                        <Button size="xs" variant="ghost" onClick={onOpenTestsPanel}>
+                          Shared evidence
+                        </Button>
+                      ) : null}
+                      <Button
+                        size="xs"
+                        variant="ghost"
+                        onClick={() => handleStopLane(selectedWorkflowLane)}
+                        disabled={!onStopWorkflowLane}
+                      >
+                        Stop
+                      </Button>
+                      {onWorkflowLaneControl ? (
+                        <Menu>
+                          <MenuTrigger
+                            render={
+                              <Button
+                                size="icon-xs"
+                                variant="ghost"
+                                aria-label={`${selectedWorkflowLane.role} advanced controls`}
+                              />
+                            }
+                          >
+                            <EllipsisIcon className="size-3.5" />
+                          </MenuTrigger>
+                          <MenuPopup align="end">
+                            <MenuItem
+                              onClick={() => onWorkflowLaneControl(selectedWorkflowLane, "pause")}
+                            >
+                              Pause lane
+                            </MenuItem>
+                            <MenuItem
+                              onClick={() => onWorkflowLaneControl(selectedWorkflowLane, "replace")}
+                            >
+                              Replace lane
+                            </MenuItem>
+                            <MenuItem
+                              onClick={() => onWorkflowLaneControl(selectedWorkflowLane, "freeze")}
+                            >
+                              Freeze result
+                            </MenuItem>
+                            <MenuItem
+                              onClick={() =>
+                                onWorkflowLaneControl(selectedWorkflowLane, "continue-manually")
+                              }
+                            >
+                              Continue manually
+                            </MenuItem>
+                          </MenuPopup>
+                        </Menu>
+                      ) : null}
+                    </div>
+                  ) : null}
+                  {guidanceLaneId === selectedWorkflowLane.id ? (
+                    <div className="mt-3 space-y-2 border-t border-border/50 pt-3">
                       <Textarea
                         value={guidanceText}
                         onChange={(event) => setGuidanceText(event.currentTarget.value)}
-                        placeholder={`Guidance to ${lane.role}`}
+                        placeholder={`Guidance to ${selectedWorkflowLane.role}`}
                         className="min-h-20 text-xs"
                       />
                       <div className="flex justify-end gap-1.5">
@@ -970,7 +1294,7 @@ const PlanSidebar = memo(function PlanSidebar({
                           size="xs"
                           variant="ghost"
                           onClick={() => {
-                            setGuidanceLaneRole(null);
+                            setGuidanceLaneId(null);
                             setGuidanceText("");
                           }}
                         >
@@ -981,187 +1305,49 @@ const PlanSidebar = memo(function PlanSidebar({
                           onClick={handleSubmitGuidance}
                           disabled={!guidanceText.trim() || !onSubmitWorkflowGuidance}
                         >
-                          Send guidance
+                          Re-trigger lane
                         </Button>
                       </div>
                     </div>
                   ) : null}
-                  <div className="flex gap-1.5 px-2.5 pb-2.5">
-                    <Button
-                      size="xs"
-                      variant="secondary"
-                      onClick={() => {
-                        setGuidanceLaneRole(lane.role);
-                        setExpandedLaneRole(lane.role);
-                      }}
-                      disabled={!onSubmitWorkflowGuidance}
-                    >
-                      Add guidance
-                    </Button>
-                    <Button
-                      size="xs"
-                      variant="ghost"
-                      onClick={() => handleStopLane(lane.role)}
-                      disabled={!onStopWorkflowLane}
-                    >
-                      Stop
-                    </Button>
-                    {onWorkflowLaneControl ? (
-                      <Menu>
-                        <MenuTrigger
-                          render={
-                            <Button
-                              size="icon-xs"
-                              variant="ghost"
-                              aria-label={`${lane.role} advanced controls`}
-                            />
-                          }
-                        >
-                          <EllipsisIcon className="size-3.5" />
-                        </MenuTrigger>
-                        <MenuPopup align="end">
-                          <MenuItem onClick={() => onWorkflowLaneControl(lane.role, "pause")}>
-                            Pause lane
-                          </MenuItem>
-                          <MenuItem onClick={() => onWorkflowLaneControl(lane.role, "replace")}>
-                            Replace lane
-                          </MenuItem>
-                          <MenuItem onClick={() => onWorkflowLaneControl(lane.role, "freeze")}>
-                            Freeze result
-                          </MenuItem>
-                          <MenuItem
-                            onClick={() => onWorkflowLaneControl(lane.role, "continue-manually")}
-                          >
-                            Continue manually
-                          </MenuItem>
-                        </MenuPopup>
-                      </Menu>
-                    ) : null}
-                  </div>
                 </div>
-              ))}
-              {handoffs.length > 0 ? (
+              ) : null}
+              {workflowStarted && detailRecords.length > 0 ? (
                 <div className="space-y-1.5 rounded-lg border border-border/50 bg-background/35 p-2.5">
-                  <p className="text-[10px] font-semibold tracking-widest text-muted-foreground/40 uppercase">
-                    Handoffs
-                  </p>
-                  {handoffs.map((record) => (
-                    <div
-                      key={record.id}
-                      className="text-[11px] leading-snug text-muted-foreground/70"
-                    >
-                      <span className="font-medium text-foreground/75">
-                        {record.laneRole ?? "Workflow"}:
-                      </span>{" "}
-                      {record.title ?? record.summary}
-                      {record.detail ? (
-                        <p className="mt-0.5 text-muted-foreground/50">{record.detail}</p>
-                      ) : null}
-                      {renderStringList("Files touched", record.filesTouched)}
-                      {renderStringList("Tests run", record.testsRun)}
-                      {renderStringList("Known risks", record.knownRisks)}
-                      {record.requiredFix ? (
-                        <p className="mt-1.5 rounded-md border border-destructive/20 bg-destructive/5 px-2 py-1 text-destructive">
-                          Required fix: {record.requiredFix}
-                        </p>
-                      ) : null}
-                    </div>
-                  ))}
-                </div>
-              ) : null}
-              {routeBacks.length > 0 ? (
-                <div className="space-y-1.5 rounded-lg border border-destructive/20 bg-destructive/5 p-2.5">
-                  <p className="text-[10px] font-semibold tracking-widest text-destructive/80 uppercase">
-                    Route back
-                  </p>
-                  {routeBacks.map((record) => (
-                    <div
-                      key={record.id}
-                      className="text-[11px] leading-snug text-muted-foreground/75"
-                    >
-                      <span className="font-medium text-foreground/75">
-                        {record.laneRole ?? "Builder"}:
-                      </span>{" "}
-                      {record.title ?? record.summary}
-                      {record.detail ? (
-                        <p className="mt-0.5 text-muted-foreground/50">{record.detail}</p>
-                      ) : null}
-                      {record.requiredFix ? (
-                        <p className="mt-1.5 rounded-md border border-destructive/20 bg-destructive/5 px-2 py-1 text-destructive">
-                          Required fix: {record.requiredFix}
-                        </p>
-                      ) : null}
-                      {renderStringList("Known risks", record.knownRisks)}
-                    </div>
-                  ))}
-                </div>
-              ) : null}
-              {verifierResult ? (
-                <div className="rounded-lg border border-border/50 bg-background/35 p-2.5">
                   <div className="flex items-center justify-between gap-2">
                     <p className="text-[10px] font-semibold tracking-widest text-muted-foreground/40 uppercase">
-                      Verifier result
+                      Lead inbox
                     </p>
                     <Badge
                       variant="secondary"
                       size="sm"
-                      className={cn(
-                        "rounded-md px-1.5 py-0 text-[10px]",
-                        verifierPayload?.status === "pass" && "text-emerald-400",
-                        verifierPayload?.status === "fail" && "text-destructive",
-                      )}
+                      className="rounded-md px-1.5 py-0 text-[10px]"
                     >
-                      {typeof verifierPayload?.status === "string"
-                        ? verifierPayload.status
-                        : "reviewed"}
+                      {detailRecords.length}
                     </Badge>
                   </div>
-                  <p className="mt-1 text-[12px] leading-snug text-muted-foreground/75">
-                    {verifierResult.summary}
-                  </p>
-                  {typeof verifierPayload?.detail === "string" ? (
-                    <p className="mt-1 text-[11px] leading-snug text-muted-foreground/50">
-                      {verifierPayload.detail}
-                    </p>
-                  ) : null}
-                  {renderStringList("Passed", payloadStringList(verifierPayload, "passed"))}
-                  {renderStringList("Failed", payloadStringList(verifierPayload, "failed"))}
-                  {typeof verifierPayload?.requiredFix === "string" ? (
-                    <p className="mt-1.5 rounded-md border border-destructive/20 bg-destructive/5 px-2 py-1 text-[11px] text-destructive">
-                      Required fix: {verifierPayload.requiredFix}
-                    </p>
-                  ) : null}
+                  <div className="flex flex-wrap gap-1.5">
+                    {detailRecords.map((record) => (
+                      <Button
+                        key={record.id}
+                        size="xs"
+                        variant={selectedWorkflowRecordId === record.id ? "secondary" : "ghost"}
+                        onClick={() =>
+                          setSelectedWorkflowRecordId((current) =>
+                            current === record.id ? null : record.id,
+                          )
+                        }
+                      >
+                        {workflowRecordButtonLabel(record)}
+                      </Button>
+                    ))}
+                  </div>
+                  {selectedWorkflowRecord
+                    ? renderWorkflowRecordDetails(selectedWorkflowRecord)
+                    : null}
                 </div>
               ) : null}
-              {synthesis.length > 0 ? (
-                <div className="space-y-1.5 rounded-lg border border-border/50 bg-background/35 p-2.5">
-                  <p className="text-[10px] font-semibold tracking-widest text-muted-foreground/40 uppercase">
-                    Lead synthesis
-                  </p>
-                  {synthesis.map((record) => (
-                    <div
-                      key={record.id}
-                      className="text-[11px] leading-snug text-muted-foreground/70"
-                    >
-                      <span className="font-medium text-foreground/75">
-                        {record.title ?? record.summary}
-                      </span>
-                      {record.decision ? (
-                        <p className="mt-0.5 text-muted-foreground/60">
-                          Decision: {record.decision}
-                        </p>
-                      ) : null}
-                      {record.detail ? (
-                        <p className="mt-0.5 text-muted-foreground/50">{record.detail}</p>
-                      ) : null}
-                      {renderStringList("Concerns", record.concerns)}
-                      {renderStringList("Alternatives", record.alternatives)}
-                      {renderStringList("Overrides", record.overrides)}
-                    </div>
-                  ))}
-                </div>
-              ) : null}
-              {objections.length > 0 ? (
+              {workflowStarted && objections.length > 0 ? (
                 <div className="space-y-1.5 rounded-lg border border-amber-500/20 bg-amber-500/5 p-2.5">
                   <p className="text-[10px] font-semibold tracking-widest text-amber-400/80 uppercase">
                     Objections
@@ -1182,53 +1368,7 @@ const PlanSidebar = memo(function PlanSidebar({
                   ))}
                 </div>
               ) : null}
-              {evidence.length > 0 ? (
-                <div className="space-y-1.5 rounded-lg border border-border/50 bg-background/35 p-2.5">
-                  <p className="text-[10px] font-semibold tracking-widest text-muted-foreground/40 uppercase">
-                    Test evidence
-                  </p>
-                  {evidence.map((record) => (
-                    <div
-                      key={record.id}
-                      className="text-[11px] leading-snug text-muted-foreground/70"
-                    >
-                      <span className="font-medium text-foreground/75">
-                        {record.status ?? "captured"}:
-                      </span>{" "}
-                      {record.title ?? record.summary}
-                      {record.detail ? (
-                        <p className="mt-0.5 text-muted-foreground/50">{record.detail}</p>
-                      ) : null}
-                      {renderStringList("Checks run", record.checksRun)}
-                      {renderStringList("Artifacts", record.artifacts)}
-                    </div>
-                  ))}
-                </div>
-              ) : null}
-              {memoryUpdates.length > 0 ? (
-                <div className="space-y-1.5 rounded-lg border border-sky-500/20 bg-sky-500/5 p-2.5">
-                  <p className="text-[10px] font-semibold tracking-widest text-sky-400/80 uppercase">
-                    Memory updates
-                  </p>
-                  {memoryUpdates.map((record) => (
-                    <div
-                      key={record.id}
-                      className="text-[11px] leading-snug text-muted-foreground/75"
-                    >
-                      <span className="font-medium text-foreground/75">
-                        {record.title ?? "Memory update recorded"}
-                      </span>
-                      {record.memoryText ? (
-                        <p className="mt-0.5 text-muted-foreground/60">{record.memoryText}</p>
-                      ) : null}
-                      {record.detail ? (
-                        <p className="mt-0.5 text-muted-foreground/50">Source: {record.detail}</p>
-                      ) : null}
-                    </div>
-                  ))}
-                </div>
-              ) : null}
-              {laneControls.length > 0 || workflowControls.length > 0 ? (
+              {workflowStarted && (laneControls.length > 0 || workflowControls.length > 0) ? (
                 <div className="space-y-1.5 rounded-lg border border-border/50 bg-background/35 p-2.5">
                   <p className="text-[10px] font-semibold tracking-widest text-muted-foreground/40 uppercase">
                     Control log
@@ -1246,7 +1386,7 @@ const PlanSidebar = memo(function PlanSidebar({
                   ))}
                 </div>
               ) : null}
-              {workflowBlocked ? (
+              {workflowStarted && workflowBlocked ? (
                 <div className="rounded-lg border border-destructive/20 bg-destructive/5 p-2.5">
                   <div className="flex items-center justify-between gap-2">
                     <span className="text-[13px] font-semibold text-foreground/90">
@@ -1275,7 +1415,7 @@ const PlanSidebar = memo(function PlanSidebar({
                   ) : null}
                 </div>
               ) : null}
-              {workflowCompleted ? (
+              {workflowStarted && workflowCompleted ? (
                 <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/5 p-2.5">
                   <div className="flex items-center justify-between gap-2">
                     <span className="text-[13px] font-semibold text-foreground/90">

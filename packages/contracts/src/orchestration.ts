@@ -144,42 +144,177 @@ export type ProviderUserInputAnswers = typeof ProviderUserInputAnswers.Type;
 export const PROVIDER_SEND_TURN_MAX_INPUT_CHARS = 120_000;
 export const PROVIDER_SEND_TURN_MAX_ATTACHMENTS = 8;
 export const PROVIDER_SEND_TURN_MAX_IMAGE_BYTES = 10 * 1024 * 1024;
+export const PROVIDER_SEND_TURN_MAX_VIDEO_BYTES = 25 * 1024 * 1024;
+export const PROVIDER_SEND_TURN_MAX_FILE_BYTES = 10 * 1024 * 1024;
 const PROVIDER_SEND_TURN_MAX_IMAGE_DATA_URL_CHARS = 14_000_000;
+const PROVIDER_SEND_TURN_MAX_VIDEO_DATA_URL_CHARS = 35_000_000;
+const PROVIDER_SEND_TURN_MAX_FILE_DATA_URL_CHARS = 14_000_000;
 const CHAT_ATTACHMENT_ID_MAX_CHARS = 128;
+const MEDIA_TITLE_MAX_CHARS = 255;
+const MEDIA_MIME_TYPE_MAX_CHARS = 100;
+const MEDIA_EXTENSION_MAX_CHARS = 16;
 // Correlation id is command id by design in this model.
 export const CorrelationId = CommandId;
 export type CorrelationId = typeof CorrelationId.Type;
 
-const ChatAttachmentId = TrimmedNonEmptyString.check(
+export const ChatAttachmentId = TrimmedNonEmptyString.check(
   Schema.isMaxLength(CHAT_ATTACHMENT_ID_MAX_CHARS),
   Schema.isPattern(/^[a-z0-9_-]+$/i),
 );
 export type ChatAttachmentId = typeof ChatAttachmentId.Type;
 
+const MediaMimeType = TrimmedNonEmptyString.check(
+  Schema.isMaxLength(MEDIA_MIME_TYPE_MAX_CHARS),
+  Schema.isPattern(/^[a-z0-9][a-z0-9!#$&^_.+-]*\/[a-z0-9][a-z0-9!#$&^_.+-]*(?:\s*;\s*[^;]+)*$/i),
+);
+
+const MediaDimension = NonNegativeInt.check(Schema.isLessThanOrEqualTo(100_000));
+const MediaDurationMs = NonNegativeInt.check(Schema.isLessThanOrEqualTo(24 * 60 * 60 * 1000));
+const MediaTitle = TrimmedNonEmptyString.check(Schema.isMaxLength(MEDIA_TITLE_MAX_CHARS));
+const MediaExtension = TrimmedNonEmptyString.check(
+  Schema.isMaxLength(MEDIA_EXTENSION_MAX_CHARS),
+  Schema.isPattern(/^[a-z0-9]+$/i),
+);
+
+const ChatAttachmentSharedFields = {
+  id: ChatAttachmentId,
+  name: MediaTitle,
+  mimeType: MediaMimeType,
+} as const;
+
+const UploadMediaMetadataFields = {
+  width: Schema.optional(MediaDimension),
+  height: Schema.optional(MediaDimension),
+  durationMs: Schema.optional(MediaDurationMs),
+} as const;
+
 export const ChatImageAttachment = Schema.Struct({
   type: Schema.Literal("image"),
-  id: ChatAttachmentId,
-  name: TrimmedNonEmptyString.check(Schema.isMaxLength(255)),
-  mimeType: TrimmedNonEmptyString.check(Schema.isMaxLength(100), Schema.isPattern(/^image\//i)),
+  ...ChatAttachmentSharedFields,
+  mimeType: MediaMimeType.check(Schema.isPattern(/^image\//i)),
   sizeBytes: NonNegativeInt.check(Schema.isLessThanOrEqualTo(PROVIDER_SEND_TURN_MAX_IMAGE_BYTES)),
+  width: Schema.optional(MediaDimension),
+  height: Schema.optional(MediaDimension),
 });
 export type ChatImageAttachment = typeof ChatImageAttachment.Type;
 
-const UploadChatImageAttachment = Schema.Struct({
+export const ChatGifAttachment = Schema.Struct({
+  type: Schema.Literal("gif"),
+  ...ChatAttachmentSharedFields,
+  mimeType: MediaMimeType.check(Schema.isPattern(/^image\/gif$/i)),
+  sizeBytes: NonNegativeInt.check(Schema.isLessThanOrEqualTo(PROVIDER_SEND_TURN_MAX_IMAGE_BYTES)),
+  width: Schema.optional(MediaDimension),
+  height: Schema.optional(MediaDimension),
+});
+export type ChatGifAttachment = typeof ChatGifAttachment.Type;
+
+export const ChatVideoAttachment = Schema.Struct({
+  type: Schema.Literal("video"),
+  ...ChatAttachmentSharedFields,
+  mimeType: MediaMimeType.check(Schema.isPattern(/^video\//i)),
+  sizeBytes: NonNegativeInt.check(Schema.isLessThanOrEqualTo(PROVIDER_SEND_TURN_MAX_VIDEO_BYTES)),
+  width: Schema.optional(MediaDimension),
+  height: Schema.optional(MediaDimension),
+  durationMs: Schema.optional(MediaDurationMs),
+});
+export type ChatVideoAttachment = typeof ChatVideoAttachment.Type;
+
+export const ChatFileAttachment = Schema.Struct({
+  type: Schema.Literal("file"),
+  ...ChatAttachmentSharedFields,
+  sizeBytes: NonNegativeInt.check(Schema.isLessThanOrEqualTo(PROVIDER_SEND_TURN_MAX_FILE_BYTES)),
+});
+export type ChatFileAttachment = typeof ChatFileAttachment.Type;
+
+export const UploadChatImageAttachment = Schema.Struct({
   type: Schema.Literal("image"),
-  name: TrimmedNonEmptyString.check(Schema.isMaxLength(255)),
-  mimeType: TrimmedNonEmptyString.check(Schema.isMaxLength(100), Schema.isPattern(/^image\//i)),
+  name: MediaTitle,
+  mimeType: MediaMimeType.check(Schema.isPattern(/^image\//i)),
   sizeBytes: NonNegativeInt.check(Schema.isLessThanOrEqualTo(PROVIDER_SEND_TURN_MAX_IMAGE_BYTES)),
   dataUrl: TrimmedNonEmptyString.check(
     Schema.isMaxLength(PROVIDER_SEND_TURN_MAX_IMAGE_DATA_URL_CHARS),
   ),
+  ...UploadMediaMetadataFields,
 });
 export type UploadChatImageAttachment = typeof UploadChatImageAttachment.Type;
 
-export const ChatAttachment = Schema.Union([ChatImageAttachment]);
+export const UploadChatGifAttachment = Schema.Struct({
+  type: Schema.Literal("gif"),
+  name: MediaTitle,
+  mimeType: MediaMimeType.check(Schema.isPattern(/^image\/gif$/i)),
+  sizeBytes: NonNegativeInt.check(Schema.isLessThanOrEqualTo(PROVIDER_SEND_TURN_MAX_IMAGE_BYTES)),
+  dataUrl: TrimmedNonEmptyString.check(
+    Schema.isMaxLength(PROVIDER_SEND_TURN_MAX_IMAGE_DATA_URL_CHARS),
+  ),
+  ...UploadMediaMetadataFields,
+});
+export type UploadChatGifAttachment = typeof UploadChatGifAttachment.Type;
+
+export const UploadChatVideoAttachment = Schema.Struct({
+  type: Schema.Literal("video"),
+  name: MediaTitle,
+  mimeType: MediaMimeType.check(Schema.isPattern(/^video\//i)),
+  sizeBytes: NonNegativeInt.check(Schema.isLessThanOrEqualTo(PROVIDER_SEND_TURN_MAX_VIDEO_BYTES)),
+  dataUrl: TrimmedNonEmptyString.check(
+    Schema.isMaxLength(PROVIDER_SEND_TURN_MAX_VIDEO_DATA_URL_CHARS),
+  ),
+  ...UploadMediaMetadataFields,
+});
+export type UploadChatVideoAttachment = typeof UploadChatVideoAttachment.Type;
+
+export const UploadChatFileAttachment = Schema.Struct({
+  type: Schema.Literal("file"),
+  name: MediaTitle,
+  mimeType: MediaMimeType,
+  sizeBytes: NonNegativeInt.check(Schema.isLessThanOrEqualTo(PROVIDER_SEND_TURN_MAX_FILE_BYTES)),
+  dataUrl: TrimmedNonEmptyString.check(
+    Schema.isMaxLength(PROVIDER_SEND_TURN_MAX_FILE_DATA_URL_CHARS),
+  ),
+});
+export type UploadChatFileAttachment = typeof UploadChatFileAttachment.Type;
+
+export const ChatAttachment = Schema.Union([
+  ChatImageAttachment,
+  ChatGifAttachment,
+  ChatVideoAttachment,
+  ChatFileAttachment,
+]);
 export type ChatAttachment = typeof ChatAttachment.Type;
-const UploadChatAttachment = Schema.Union([UploadChatImageAttachment]);
+export const UploadChatAttachment = Schema.Union([
+  UploadChatImageAttachment,
+  UploadChatGifAttachment,
+  UploadChatVideoAttachment,
+  UploadChatFileAttachment,
+]);
 export type UploadChatAttachment = typeof UploadChatAttachment.Type;
+
+export const MediaArtifactKind = Schema.Literals(["image", "gif", "video", "file", "unknown"]);
+export type MediaArtifactKind = typeof MediaArtifactKind.Type;
+export const MediaArtifactSource = Schema.Literals(["generated", "local", "project", "web"]);
+export type MediaArtifactSource = typeof MediaArtifactSource.Type;
+export const MediaArtifactOrigin = Schema.Literals(["attached", "found", "generated"]);
+export type MediaArtifactOrigin = typeof MediaArtifactOrigin.Type;
+
+export const MediaArtifact = Schema.Struct({
+  id: TrimmedNonEmptyString,
+  kind: MediaArtifactKind,
+  source: MediaArtifactSource,
+  title: MediaTitle,
+  extension: MediaExtension,
+  path: Schema.optional(TrimmedNonEmptyString),
+  url: Schema.optional(TrimmedNonEmptyString),
+  previewUrl: Schema.optional(TrimmedNonEmptyString),
+  mimeType: Schema.optional(MediaMimeType),
+  sizeBytes: Schema.optional(NonNegativeInt),
+  width: Schema.optional(MediaDimension),
+  height: Schema.optional(MediaDimension),
+  durationMs: Schema.optional(MediaDurationMs),
+  modifiedAt: Schema.optional(IsoDateTime),
+  createdAt: Schema.optional(IsoDateTime),
+  messageId: Schema.optional(MessageId),
+  origin: Schema.optional(MediaArtifactOrigin),
+});
+export type MediaArtifact = typeof MediaArtifact.Type;
 
 export const ProjectScriptIcon = Schema.Literals([
   "play",
@@ -334,6 +469,297 @@ export const OrchestrationThreadActivity = Schema.Struct({
   createdAt: IsoDateTime,
 });
 export type OrchestrationThreadActivity = typeof OrchestrationThreadActivity.Type;
+
+export const WorkflowLaunchStatus = Schema.Literals(["planned", "started"]);
+export type WorkflowLaunchStatus = typeof WorkflowLaunchStatus.Type;
+
+export const WorkflowSubAgentPlan = Schema.Struct({
+  id: TrimmedNonEmptyString,
+  role: TrimmedNonEmptyString,
+  goal: TrimmedNonEmptyString,
+  prompt: TrimmedNonEmptyString,
+  model: TrimmedNonEmptyString,
+  reasoningEffort: TrimmedNonEmptyString,
+  fastMode: Schema.Boolean,
+  startsAfter: Schema.Array(TrimmedNonEmptyString),
+});
+export type WorkflowSubAgentPlan = typeof WorkflowSubAgentPlan.Type;
+
+const WorkflowSubAgentPlans = Schema.Array(WorkflowSubAgentPlan).check(
+  Schema.makeFilter(
+    (input) => {
+      if (input.length === 0) {
+        return new SchemaIssue.InvalidValue(Option.some(input), {
+          message: "workflow plans must include at least one sub-agent",
+        });
+      }
+
+      const ids = new Set<string>();
+      for (const agent of input) {
+        if (ids.has(agent.id)) {
+          return new SchemaIssue.InvalidValue(Option.some(agent.id), {
+            message: "workflow sub-agent ids must be unique",
+          });
+        }
+        ids.add(agent.id);
+      }
+
+      for (const agent of input) {
+        for (const dependencyId of agent.startsAfter) {
+          if (dependencyId === agent.id) {
+            return new SchemaIssue.InvalidValue(Option.some(agent.id), {
+              message: "workflow sub-agents cannot start after themselves",
+            });
+          }
+          if (!ids.has(dependencyId)) {
+            return new SchemaIssue.InvalidValue(Option.some(dependencyId), {
+              message: "workflow sub-agent startsAfter dependencies must reference planned ids",
+            });
+          }
+        }
+      }
+
+      return true;
+    },
+    { identifier: "WorkflowSubAgentPlans" },
+  ),
+);
+
+const WorkflowPlanSharedFields = {
+  goal: TrimmedNonEmptyString,
+  workflowPattern: TrimmedNonEmptyString,
+  initialLanes: Schema.Array(TrimmedNonEmptyString),
+  subAgents: WorkflowSubAgentPlans,
+  acceptanceCriteria: Schema.Array(TrimmedNonEmptyString),
+  requireVerifierApproval: Schema.Boolean,
+  addRedTeamCritique: Schema.Boolean,
+  requireTestsBeforeFinal: Schema.Boolean,
+  showMemoryAuditNotes: Schema.Boolean,
+  exploreParallelApproaches: Schema.Boolean,
+  stopAfterPlanningForApproval: Schema.Boolean,
+} as const;
+
+export const WorkflowPlannedPayload = Schema.Struct({
+  ...WorkflowPlanSharedFields,
+  launchStatus: Schema.Literal("planned"),
+});
+export type WorkflowPlannedPayload = typeof WorkflowPlannedPayload.Type;
+
+export const WorkflowStartedPayload = Schema.Struct({
+  goal: TrimmedNonEmptyString,
+  launchStatus: Schema.Literal("started"),
+  workflowPattern: Schema.optional(TrimmedNonEmptyString),
+  initialLanes: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
+  lanes: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
+  subAgents: WorkflowSubAgentPlans,
+  acceptanceCriteria: Schema.Array(TrimmedNonEmptyString),
+  requireVerifierApproval: Schema.optional(Schema.Boolean),
+  addRedTeamCritique: Schema.optional(Schema.Boolean),
+  requireTestsBeforeFinal: Schema.optional(Schema.Boolean),
+  showMemoryAuditNotes: Schema.optional(Schema.Boolean),
+  exploreParallelApproaches: Schema.optional(Schema.Boolean),
+  stopAfterPlanningForApproval: Schema.optional(Schema.Boolean),
+  model: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+  reasoningEffort: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+  fastMode: Schema.optional(Schema.Boolean),
+  startedFromActivityId: Schema.optional(Schema.NullOr(EventId)),
+});
+export type WorkflowStartedPayload = typeof WorkflowStartedPayload.Type;
+
+export const WorkflowCustomizedPayload = Schema.Struct({
+  acceptanceCriteria: Schema.Array(TrimmedNonEmptyString),
+  lanes: Schema.Array(TrimmedNonEmptyString),
+  requireVerifierApproval: Schema.Boolean,
+  addRedTeamCritique: Schema.Boolean,
+  requireTestsBeforeFinal: Schema.Boolean,
+  showMemoryAuditNotes: Schema.Boolean,
+  exploreParallelApproaches: Schema.Boolean,
+  stopAfterPlanningForApproval: Schema.Boolean,
+  model: Schema.NullOr(TrimmedNonEmptyString),
+  reasoningEffort: Schema.NullOr(TrimmedNonEmptyString),
+  fastMode: Schema.Boolean,
+  subAgents: WorkflowSubAgentPlans,
+});
+export type WorkflowCustomizedPayload = typeof WorkflowCustomizedPayload.Type;
+
+const WorkflowStringList = Schema.Array(TrimmedNonEmptyString);
+
+const WorkflowLaneTarget = Schema.Struct({
+  laneId: TrimmedNonEmptyString,
+  laneRole: Schema.optional(TrimmedNonEmptyString),
+});
+
+const WorkflowRuntimePayloadBase = {
+  turnId: Schema.optional(TurnId),
+  cardType: Schema.optional(TrimmedNonEmptyString),
+  title: Schema.optional(TrimmedNonEmptyString),
+  detail: Schema.optional(TrimmedNonEmptyString),
+} as const;
+
+const WorkflowLaneStartedChildThreadFields = {
+  childThreadId: ThreadId,
+  childTurnMessageId: MessageId,
+  childTurnRequestedAt: IsoDateTime,
+} as const;
+
+const WorkflowChildThreadResultFields = {
+  childThreadId: Schema.optional(ThreadId),
+  childTurnId: Schema.optional(TurnId),
+  sourceStartedActivityId: Schema.optional(EventId),
+} as const;
+
+export const WorkflowLaneGuidancePayload = Schema.Struct({
+  ...WorkflowRuntimePayloadBase,
+  ...WorkflowLaneTarget.fields,
+  guidance: TrimmedNonEmptyString,
+  retrigger: Schema.optional(Schema.Boolean),
+});
+export type WorkflowLaneGuidancePayload = typeof WorkflowLaneGuidancePayload.Type;
+
+export const WorkflowLaneStoppedPayload = Schema.Struct({
+  ...WorkflowRuntimePayloadBase,
+  ...WorkflowLaneTarget.fields,
+  preserved: Schema.Boolean,
+});
+export type WorkflowLaneStoppedPayload = typeof WorkflowLaneStoppedPayload.Type;
+
+export const WorkflowLaneControlPayload = Schema.Struct({
+  ...WorkflowRuntimePayloadBase,
+  ...WorkflowLaneTarget.fields,
+  action: TrimmedNonEmptyString,
+  preserved: Schema.optional(Schema.Boolean),
+});
+export type WorkflowLaneControlPayload = typeof WorkflowLaneControlPayload.Type;
+
+export const WorkflowLaneStartedPayload = Schema.Struct({
+  ...WorkflowRuntimePayloadBase,
+  ...WorkflowLaneTarget.fields,
+  ...WorkflowLaneStartedChildThreadFields,
+});
+export type WorkflowLaneStartedPayload = typeof WorkflowLaneStartedPayload.Type;
+
+export const WorkflowLaneCompletedPayload = Schema.Struct({
+  ...WorkflowRuntimePayloadBase,
+  ...WorkflowLaneTarget.fields,
+  ...WorkflowChildThreadResultFields,
+  filesTouched: Schema.optional(WorkflowStringList),
+  testsRun: Schema.optional(WorkflowStringList),
+  knownRisks: Schema.optional(WorkflowStringList),
+});
+export type WorkflowLaneCompletedPayload = typeof WorkflowLaneCompletedPayload.Type;
+
+export const WorkflowLaneBlockedPayload = Schema.Struct({
+  ...WorkflowRuntimePayloadBase,
+  ...WorkflowLaneTarget.fields,
+  reason: Schema.optional(TrimmedNonEmptyString),
+  requiredFix: Schema.optional(TrimmedNonEmptyString),
+});
+export type WorkflowLaneBlockedPayload = typeof WorkflowLaneBlockedPayload.Type;
+
+export const WorkflowControlPayload = Schema.Struct({
+  ...WorkflowRuntimePayloadBase,
+  action: TrimmedNonEmptyString,
+  preserved: Schema.optional(Schema.Boolean),
+});
+export type WorkflowControlPayload = typeof WorkflowControlPayload.Type;
+
+export const WorkflowHandoffPayload = Schema.Struct({
+  ...WorkflowRuntimePayloadBase,
+  ...WorkflowLaneTarget.fields,
+  ...WorkflowChildThreadResultFields,
+  filesTouched: Schema.optional(WorkflowStringList),
+  testsRun: Schema.optional(WorkflowStringList),
+  knownRisks: Schema.optional(WorkflowStringList),
+});
+export type WorkflowHandoffPayload = typeof WorkflowHandoffPayload.Type;
+
+export const WorkflowEvidencePayload = Schema.Struct({
+  ...WorkflowRuntimePayloadBase,
+  ...WorkflowLaneTarget.fields,
+  status: Schema.optional(TrimmedNonEmptyString),
+  checksRun: Schema.optional(WorkflowStringList),
+  artifacts: Schema.optional(WorkflowStringList),
+  result: Schema.optional(TrimmedNonEmptyString),
+});
+export type WorkflowEvidencePayload = typeof WorkflowEvidencePayload.Type;
+
+export const WorkflowVerifierResultPayload = Schema.Struct({
+  ...WorkflowRuntimePayloadBase,
+  turnId: Schema.optional(TurnId),
+  ...WorkflowLaneTarget.fields,
+  status: TrimmedNonEmptyString,
+  passed: Schema.optional(WorkflowStringList),
+  failed: Schema.optional(WorkflowStringList),
+  requiredFix: Schema.optional(Schema.String),
+});
+export type WorkflowVerifierResultPayload = typeof WorkflowVerifierResultPayload.Type;
+
+export const WorkflowObjectionPayload = Schema.Struct({
+  ...WorkflowRuntimePayloadBase,
+  severity: Schema.optional(TrimmedNonEmptyString),
+});
+export type WorkflowObjectionPayload = typeof WorkflowObjectionPayload.Type;
+
+export const WorkflowRouteBackPayload = Schema.Struct({
+  ...WorkflowRuntimePayloadBase,
+  ...WorkflowLaneTarget.fields,
+  requiredFix: Schema.optional(TrimmedNonEmptyString),
+  filesTouched: Schema.optional(WorkflowStringList),
+  testsRun: Schema.optional(WorkflowStringList),
+  knownRisks: Schema.optional(WorkflowStringList),
+});
+export type WorkflowRouteBackPayload = typeof WorkflowRouteBackPayload.Type;
+
+export const WorkflowLeadSynthesisPayload = Schema.Struct({
+  ...WorkflowRuntimePayloadBase,
+  decision: Schema.optional(TrimmedNonEmptyString),
+  concerns: Schema.optional(WorkflowStringList),
+  alternatives: Schema.optional(WorkflowStringList),
+  overrides: Schema.optional(WorkflowStringList),
+});
+export type WorkflowLeadSynthesisPayload = typeof WorkflowLeadSynthesisPayload.Type;
+
+export const WorkflowMemoryUpdatePayload = Schema.Struct({
+  ...WorkflowRuntimePayloadBase,
+  turnId: Schema.optional(TurnId),
+  laneId: Schema.optional(TrimmedNonEmptyString),
+  laneRole: Schema.optional(TrimmedNonEmptyString),
+  memoryText: TrimmedNonEmptyString,
+});
+export type WorkflowMemoryUpdatePayload = typeof WorkflowMemoryUpdatePayload.Type;
+
+export const WorkflowStatusPayload = Schema.Struct({
+  ...WorkflowRuntimePayloadBase,
+  status: TrimmedNonEmptyString,
+  implementationStatus: Schema.optional(TrimmedNonEmptyString),
+  verificationStatus: Schema.optional(TrimmedNonEmptyString),
+  openObjections: Schema.optional(NonNegativeInt),
+  memoryUpdates: Schema.optional(NonNegativeInt),
+  requiredFix: Schema.optional(TrimmedNonEmptyString),
+});
+export type WorkflowStatusPayload = typeof WorkflowStatusPayload.Type;
+
+export const WorkflowRecordPayload = Schema.Union([
+  WorkflowPlannedPayload,
+  WorkflowStartedPayload,
+  WorkflowCustomizedPayload,
+  WorkflowLaneGuidancePayload,
+  WorkflowLaneStoppedPayload,
+  WorkflowLaneControlPayload,
+  WorkflowLaneStartedPayload,
+  WorkflowLaneCompletedPayload,
+  WorkflowLaneBlockedPayload,
+  WorkflowControlPayload,
+  WorkflowHandoffPayload,
+  WorkflowEvidencePayload,
+  WorkflowVerifierResultPayload,
+  WorkflowObjectionPayload,
+  WorkflowRouteBackPayload,
+  WorkflowLeadSynthesisPayload,
+  WorkflowMemoryUpdatePayload,
+  WorkflowStatusPayload,
+]);
+export type WorkflowRecordPayload = typeof WorkflowRecordPayload.Type;
 
 const OrchestrationLatestTurnState = Schema.Literals([
   "running",
@@ -656,11 +1082,15 @@ const ThreadActivityAppendCommand = Schema.Struct({
 });
 
 export const WorkflowRecordKind = Schema.Literals([
+  "workflow.planned",
   "workflow.started",
   "workflow.customized",
   "workflow.lane.guidance",
   "workflow.lane.stopped",
   "workflow.lane.control",
+  "workflow.lane.started",
+  "workflow.lane.completed",
+  "workflow.lane.blocked",
   "workflow.control",
   "workflow.handoff",
   "workflow.evidence",
@@ -675,16 +1105,117 @@ export const WorkflowRecordKind = Schema.Literals([
 ]);
 export type WorkflowRecordKind = typeof WorkflowRecordKind.Type;
 
-const ThreadWorkflowRecordCommand = Schema.Struct({
+const ThreadWorkflowRecordCommandBase = {
   type: Schema.Literal("thread.workflow.record"),
   commandId: CommandId,
   threadId: ThreadId,
-  kind: WorkflowRecordKind,
-  summary: TrimmedNonEmptyString,
-  payload: Schema.Record(Schema.String, Schema.Unknown),
   turnId: Schema.optional(Schema.NullOr(TurnId)),
+  summary: TrimmedNonEmptyString,
   createdAt: IsoDateTime,
-});
+} as const;
+
+const ThreadWorkflowRecordCommand = Schema.Union([
+  Schema.Struct({
+    ...ThreadWorkflowRecordCommandBase,
+    kind: Schema.Literal("workflow.planned"),
+    payload: WorkflowPlannedPayload,
+  }),
+  Schema.Struct({
+    ...ThreadWorkflowRecordCommandBase,
+    kind: Schema.Literal("workflow.started"),
+    payload: WorkflowStartedPayload,
+  }),
+  Schema.Struct({
+    ...ThreadWorkflowRecordCommandBase,
+    kind: Schema.Literal("workflow.customized"),
+    payload: WorkflowCustomizedPayload,
+  }),
+  Schema.Struct({
+    ...ThreadWorkflowRecordCommandBase,
+    kind: Schema.Literal("workflow.lane.guidance"),
+    payload: WorkflowLaneGuidancePayload,
+  }),
+  Schema.Struct({
+    ...ThreadWorkflowRecordCommandBase,
+    kind: Schema.Literal("workflow.lane.stopped"),
+    payload: WorkflowLaneStoppedPayload,
+  }),
+  Schema.Struct({
+    ...ThreadWorkflowRecordCommandBase,
+    kind: Schema.Literal("workflow.lane.control"),
+    payload: WorkflowLaneControlPayload,
+  }),
+  Schema.Struct({
+    ...ThreadWorkflowRecordCommandBase,
+    kind: Schema.Literal("workflow.lane.started"),
+    payload: WorkflowLaneStartedPayload,
+  }),
+  Schema.Struct({
+    ...ThreadWorkflowRecordCommandBase,
+    kind: Schema.Literal("workflow.lane.completed"),
+    payload: WorkflowLaneCompletedPayload,
+  }),
+  Schema.Struct({
+    ...ThreadWorkflowRecordCommandBase,
+    kind: Schema.Literal("workflow.lane.blocked"),
+    payload: WorkflowLaneBlockedPayload,
+  }),
+  Schema.Struct({
+    ...ThreadWorkflowRecordCommandBase,
+    kind: Schema.Literal("workflow.control"),
+    payload: WorkflowControlPayload,
+  }),
+  Schema.Struct({
+    ...ThreadWorkflowRecordCommandBase,
+    kind: Schema.Literal("workflow.handoff"),
+    payload: WorkflowHandoffPayload,
+  }),
+  Schema.Struct({
+    ...ThreadWorkflowRecordCommandBase,
+    kind: Schema.Literal("workflow.evidence"),
+    payload: WorkflowEvidencePayload,
+  }),
+  Schema.Struct({
+    ...ThreadWorkflowRecordCommandBase,
+    kind: Schema.Literal("workflow.verifier.result"),
+    payload: WorkflowVerifierResultPayload,
+  }),
+  Schema.Struct({
+    ...ThreadWorkflowRecordCommandBase,
+    kind: Schema.Literal("workflow.objection"),
+    payload: WorkflowObjectionPayload,
+  }),
+  Schema.Struct({
+    ...ThreadWorkflowRecordCommandBase,
+    kind: Schema.Literal("workflow.route-back"),
+    payload: WorkflowRouteBackPayload,
+  }),
+  Schema.Struct({
+    ...ThreadWorkflowRecordCommandBase,
+    kind: Schema.Literal("workflow.lead.synthesis"),
+    payload: WorkflowLeadSynthesisPayload,
+  }),
+  Schema.Struct({
+    ...ThreadWorkflowRecordCommandBase,
+    kind: Schema.Literal("workflow.memory.update"),
+    payload: WorkflowMemoryUpdatePayload,
+  }),
+  Schema.Struct({
+    ...ThreadWorkflowRecordCommandBase,
+    kind: Schema.Literal("workflow.blocked"),
+    payload: WorkflowStatusPayload,
+  }),
+  Schema.Struct({
+    ...ThreadWorkflowRecordCommandBase,
+    kind: Schema.Literal("workflow.completed"),
+    payload: WorkflowStatusPayload,
+  }),
+  Schema.Struct({
+    ...ThreadWorkflowRecordCommandBase,
+    kind: Schema.Literal("workflow.stopped"),
+    payload: WorkflowStatusPayload,
+  }),
+]);
 
 const ClientThreadTurnStartCommand = Schema.Struct({
   type: Schema.Literal("thread.turn.start"),

@@ -1111,7 +1111,7 @@ const buildUserMessageEffect = Effect.fn("buildUserMessageEffect")(function* (
   }
 
   for (const attachment of input.attachments ?? []) {
-    if (attachment.type !== "image") {
+    if (attachment.type !== "image" && attachment.type !== "gif") {
       continue;
     }
 

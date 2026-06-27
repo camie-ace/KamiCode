@@ -21,6 +21,32 @@ import {
 } from "../lib/terminalContext";
 import type { DraftThreadEnvMode } from "../composerDraftStore";
 
+export interface MediaFollowUpArtifact {
+  readonly id: string;
+  readonly kind: "image" | "gif" | "video" | "unknown";
+  readonly source?: string | undefined;
+  readonly origin?: string | undefined;
+  readonly title: string;
+  readonly path?: string | undefined;
+  readonly url?: string | undefined;
+  readonly previewUrl?: string | undefined;
+  readonly messageId?: string | undefined;
+  readonly createdAt?: string | undefined;
+}
+
+export type MediaFollowUpPhrase = "that image" | "this image" | "selected video" | "second one";
+
+export interface MediaFollowUpReference {
+  readonly phrase: MediaFollowUpPhrase;
+  readonly artifact: MediaFollowUpArtifact;
+  readonly reference: string;
+}
+
+const THAT_IMAGE_REFERENCE_RE = /\bthat\s+(?:image|picture|photo|gif)\b/iu;
+const THIS_IMAGE_REFERENCE_RE = /\bthis\s+(?:image|picture|photo|gif)\b/iu;
+const SELECTED_VIDEO_REFERENCE_RE = /\b(?:the\s+)?selected\s+video\b/iu;
+const SECOND_ONE_REFERENCE_RE = /\b(?:the\s+)?second\s+one\b/iu;
+
 export const LAST_INVOKED_SCRIPT_BY_PROJECT_KEY = "t3code:last-invoked-script-by-project";
 export const MAX_HIDDEN_MOUNTED_TERMINAL_THREADS = 10;
 export const MAX_HIDDEN_MOUNTED_PREVIEW_THREADS = 3;
@@ -133,9 +159,6 @@ export function revokeUserMessagePreviewUrls(message: ChatMessage): void {
     return;
   }
   for (const attachment of message.attachments) {
-    if (attachment.type !== "image") {
-      continue;
-    }
     revokeBlobPreviewUrl(attachment.previewUrl);
   }
 }
@@ -146,7 +169,6 @@ export function collectUserMessageBlobPreviewUrls(message: ChatMessage): string[
   }
   const previewUrls: string[] = [];
   for (const attachment of message.attachments) {
-    if (attachment.type !== "image") continue;
     if (!attachment.previewUrl || !attachment.previewUrl.startsWith("blob:")) continue;
     previewUrls.push(attachment.previewUrl);
   }
@@ -288,6 +310,119 @@ export function deriveLockedProvider(input: {
       ? input.selectedProvider
       : null;
   return narrowedThreadProvider ?? narrowedSelectedProvider ?? null;
+}
+
+export function resolveMediaFollowUpReferences(input: {
+  readonly prompt: string;
+  readonly selectedArtifact?: MediaFollowUpArtifact | null | undefined;
+  readonly recentArtifacts: ReadonlyArray<MediaFollowUpArtifact>;
+}): MediaFollowUpReference[] {
+  const prompt = input.prompt.trim();
+  if (prompt.length === 0) {
+    return [];
+  }
+
+  const orderedContext = buildOrderedMediaFollowUpContext({
+    selectedArtifact: input.selectedArtifact,
+    recentArtifacts: input.recentArtifacts,
+  });
+  if (orderedContext.length === 0) {
+    return [];
+  }
+
+  const references: MediaFollowUpReference[] = [];
+  const addReference = (
+    phrase: MediaFollowUpReference["phrase"],
+    artifact: MediaFollowUpArtifact | null,
+  ) => {
+    if (!artifact) return;
+    const reference = mediaFollowUpArtifactReference(artifact);
+    if (references.some((entry) => entry.phrase === phrase && entry.reference === reference)) {
+      return;
+    }
+    references.push({ phrase, artifact, reference });
+  };
+
+  if (THAT_IMAGE_REFERENCE_RE.test(prompt)) {
+    addReference("that image", firstMatchingMediaArtifact(orderedContext, isImageLikeArtifact));
+  }
+  if (THIS_IMAGE_REFERENCE_RE.test(prompt)) {
+    addReference("this image", firstMatchingMediaArtifact(orderedContext, isImageLikeArtifact));
+  }
+  if (SELECTED_VIDEO_REFERENCE_RE.test(prompt)) {
+    addReference("selected video", firstMatchingMediaArtifact(orderedContext, isVideoArtifact));
+  }
+  if (SECOND_ONE_REFERENCE_RE.test(prompt)) {
+    addReference("second one", input.recentArtifacts[1] ?? orderedContext[1] ?? null);
+  }
+
+  return references;
+}
+
+export function appendMediaFollowUpReferencesToPrompt(input: {
+  readonly prompt: string;
+  readonly references: ReadonlyArray<MediaFollowUpReference>;
+}): string {
+  if (input.references.length === 0) {
+    return input.prompt;
+  }
+
+  const lines = input.references.map((entry, index) => {
+    const artifact = entry.artifact;
+    const kind = artifact.kind === "gif" ? "image/gif" : artifact.kind;
+    const source = artifact.source ? `; source: ${artifact.source}` : "";
+    const origin = artifact.origin ? `; origin: ${artifact.origin}` : "";
+    return `${index + 1}. "${entry.phrase}" -> ${kind} "${artifact.title}" (${entry.reference}${source}${origin})`;
+  });
+
+  return [
+    input.prompt.trimEnd(),
+    "",
+    "Media reference context:",
+    "Resolve lightweight follow-up phrases in the user's prompt using these media artifacts:",
+    ...lines,
+  ].join("\n");
+}
+
+function buildOrderedMediaFollowUpContext(input: {
+  readonly selectedArtifact?: MediaFollowUpArtifact | null | undefined;
+  readonly recentArtifacts: ReadonlyArray<MediaFollowUpArtifact>;
+}): MediaFollowUpArtifact[] {
+  const selectedArtifact = input.selectedArtifact ?? null;
+  const artifacts: MediaFollowUpArtifact[] = [];
+  const seen = new Set<string>();
+  const push = (artifact: MediaFollowUpArtifact | null | undefined) => {
+    if (!artifact) return;
+    const key = mediaFollowUpArtifactReference(artifact);
+    if (seen.has(key)) return;
+    seen.add(key);
+    artifacts.push(artifact);
+  };
+
+  push(selectedArtifact);
+  for (const artifact of input.recentArtifacts) {
+    push(artifact);
+  }
+  return artifacts;
+}
+
+function firstMatchingMediaArtifact(
+  artifacts: ReadonlyArray<MediaFollowUpArtifact>,
+  predicate: (artifact: MediaFollowUpArtifact) => boolean,
+): MediaFollowUpArtifact | null {
+  return artifacts.find(predicate) ?? null;
+}
+
+function isImageLikeArtifact(artifact: MediaFollowUpArtifact): boolean {
+  return artifact.kind === "image" || artifact.kind === "gif";
+}
+
+function isVideoArtifact(artifact: MediaFollowUpArtifact): boolean {
+  return artifact.kind === "video";
+}
+
+function mediaFollowUpArtifactReference(artifact: MediaFollowUpArtifact): string {
+  return artifact.path ?? artifact.url ?? artifact.previewUrl ?? artifact.title;
 }
 
 export function getStartedThreadModelChangeBlockReason(input: {

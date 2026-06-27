@@ -40,6 +40,13 @@ import {
 } from "../../lib/diffRendering";
 import ChatMarkdown from "../ChatMarkdown";
 import {
+  extractLocalMediaSearchResultSetsFromText,
+  extractMediaArtifactsFromText,
+  stripLocalMediaSearchResultSetsFromText,
+} from "~/mediaArtifacts";
+import { MediaArtifactCard } from "./MediaArtifactCard";
+import { LocalMediaSearchResults } from "./LocalMediaSearchResults";
+import {
   BotIcon,
   CameraIcon,
   CheckIcon,
@@ -599,17 +606,54 @@ function TurnFoldTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "turn-
 function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" }> }) {
   const ctx = use(TimelineRowCtx);
   const messageText = row.message.text || (row.message.streaming ? "" : "(empty response)");
+  const localMediaSearchResultSets = useMemo(
+    () => (row.message.streaming ? [] : extractLocalMediaSearchResultSetsFromText(messageText)),
+    [messageText, row.message.streaming],
+  );
+  const visibleMessageText = useMemo(
+    () =>
+      localMediaSearchResultSets.length > 0
+        ? stripLocalMediaSearchResultSetsFromText(messageText)
+        : messageText,
+    [localMediaSearchResultSets.length, messageText],
+  );
+  const mediaArtifacts = useMemo(
+    () => (row.message.streaming ? [] : extractMediaArtifactsFromText(visibleMessageText)),
+    [row.message.streaming, visibleMessageText],
+  );
 
   return (
     <>
       <div className="relative min-w-0 px-1 py-0.5">
         <ChatMarkdown
-          text={messageText}
+          text={visibleMessageText}
           cwd={ctx.markdownCwd}
           threadRef={ctx.threadRef ?? undefined}
           isStreaming={Boolean(row.message.streaming)}
           skills={ctx.skills}
         />
+        {localMediaSearchResultSets.map((resultSet) => (
+          <LocalMediaSearchResults
+            key={resultSet.id}
+            resultSet={resultSet}
+            environmentId={ctx.activeThreadEnvironmentId}
+            threadRef={ctx.threadRef}
+            composerTarget={ctx.threadRef ?? undefined}
+          />
+        ))}
+        {mediaArtifacts.length > 0 ? (
+          <div className="grid gap-2">
+            {mediaArtifacts.map((artifact) => (
+              <MediaArtifactCard
+                key={artifact.id}
+                artifact={artifact}
+                environmentId={ctx.activeThreadEnvironmentId}
+                threadRef={ctx.threadRef}
+                composerTarget={ctx.threadRef ?? undefined}
+              />
+            ))}
+          </div>
+        ) : null}
         <AssistantChangedFilesSection
           turnSummary={row.assistantTurnDiffSummary}
           routeThreadKey={ctx.routeThreadKey}

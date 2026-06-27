@@ -1586,6 +1586,9 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
     input: ProviderSendTurnInput,
     attachment: NonNullable<ProviderSendTurnInput["attachments"]>[number],
   ) {
+    if (attachment.type !== "image" && attachment.type !== "gif") {
+      return null;
+    }
     const attachmentPath = resolveAttachmentPath({
       attachmentsDir: serverConfig.attachmentsDir,
       attachment,
@@ -1615,10 +1618,14 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
   });
 
   const sendTurn: CodexAdapterShape["sendTurn"] = Effect.fn("sendTurn")(function* (input) {
-    const codexAttachments = yield* Effect.forEach(
+    const resolvedCodexAttachments = yield* Effect.forEach(
       input.attachments ?? [],
       (attachment) => resolveAttachment(input, attachment),
       { concurrency: 1 },
+    );
+    const codexAttachments = resolvedCodexAttachments.filter(
+      (attachment): attachment is { readonly type: "image"; readonly url: string } =>
+        attachment !== null,
     );
 
     const session = yield* requireSession(input.threadId);

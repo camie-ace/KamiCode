@@ -14,7 +14,7 @@ const DesktopSettingsPatch = Schema.Struct({
   serverExposureMode: Schema.optionalKey(Schema.Literals(["local-only", "network-accessible"])),
   tailscaleServeEnabled: Schema.optionalKey(Schema.Boolean),
   tailscaleServePort: Schema.optionalKey(Schema.Number),
-  updateChannel: Schema.optionalKey(Schema.Literals(["latest", "nightly"])),
+  updateChannel: Schema.optionalKey(Schema.Literals(["latest", "dev", "nightly"])),
   updateChannelConfiguredByUser: Schema.optionalKey(Schema.Boolean),
 });
 
@@ -96,6 +96,16 @@ describe("DesktopSettings", () => {
     );
   });
 
+  it("defaults packaged dev builds to the dev update channel", () => {
+    assert.deepEqual(DesktopAppSettings.resolveDefaultDesktopSettings("0.0.17-dev.20260415.1"), {
+      serverExposureMode: "local-only",
+      tailscaleServeEnabled: false,
+      tailscaleServePort: 443,
+      updateChannel: "dev",
+      updateChannelConfiguredByUser: false,
+    } satisfies DesktopAppSettings.DesktopSettings);
+  });
+
   it.effect("loads persisted settings and applies semantic updates", () =>
     withSettings(
       Effect.gen(function* () {
@@ -127,9 +137,9 @@ describe("DesktopSettings", () => {
         assert.isTrue(tailscale.changed);
         assert.equal(tailscale.settings.tailscaleServePort, 9443);
 
-        const updateChannel = yield* settings.setUpdateChannel("nightly");
+        const updateChannel = yield* settings.setUpdateChannel("dev");
         assert.isTrue(updateChannel.changed);
-        assert.equal(updateChannel.settings.updateChannel, "nightly");
+        assert.equal(updateChannel.settings.updateChannel, "dev");
         assert.equal(updateChannel.settings.updateChannelConfiguredByUser, true);
       }),
     ),

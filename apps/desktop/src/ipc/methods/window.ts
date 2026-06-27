@@ -4,6 +4,7 @@ import {
   DesktopEnvironmentBootstrapSchema,
   DesktopThemeSchema,
   PickFolderOptionsSchema,
+  RevealLocalMediaFileInputSchema,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
@@ -142,5 +143,15 @@ export const openExternal = DesktopIpc.makeIpcMethod({
   handler: Effect.fn("desktop.ipc.window.openExternal")(function* (url) {
     const shell = yield* ElectronShell.ElectronShell;
     return yield* shell.openExternal(url);
+  }),
+});
+
+export const revealLocalMediaFile = DesktopIpc.makeIpcMethod({
+  channel: IpcChannels.REVEAL_LOCAL_MEDIA_FILE_CHANNEL,
+  payload: RevealLocalMediaFileInputSchema,
+  result: Schema.Boolean,
+  handler: Effect.fn("desktop.ipc.window.revealLocalMediaFile")(function* ({ path }) {
+    const shell = yield* ElectronShell.ElectronShell;
+    return yield* shell.revealLocalMediaFile(path);
   }),
 });

@@ -3,9 +3,11 @@ import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 
 import {
+  ChatAttachment,
   DEFAULT_PROVIDER_INTERACTION_MODE,
   DEFAULT_RUNTIME_MODE,
   ClientOrchestrationCommand,
+  MediaArtifact,
   ModelSelection,
   OrchestrationCommand,
   OrchestrationEvent,
@@ -16,6 +18,7 @@ import {
   ProjectMetaUpdatedPayload,
   OrchestrationProposedPlan,
   OrchestrationSession,
+  PROVIDER_SEND_TURN_MAX_VIDEO_BYTES,
   ProjectCreateCommand,
   ThreadMetaUpdatedPayload,
   ThreadTurnStartCommand,
@@ -51,6 +54,8 @@ const decodeClientOrchestrationCommand = Schema.decodeUnknownEffect(ClientOrches
 const decodeOrchestrationCommand = Schema.decodeUnknownEffect(OrchestrationCommand);
 const decodeOrchestrationEvent = Schema.decodeUnknownEffect(OrchestrationEvent);
 const decodeThreadMetaUpdatedPayload = Schema.decodeUnknownEffect(ThreadMetaUpdatedPayload);
+const decodeChatAttachment = Schema.decodeUnknownEffect(ChatAttachment);
+const decodeMediaArtifact = Schema.decodeUnknownEffect(MediaArtifact);
 
 it.effect("parses turn diff input when fromTurnCount <= toTurnCount", () =>
   Effect.gen(function* () {
@@ -296,6 +301,140 @@ it.effect("accepts test interaction mode in thread.turn.start", () =>
   }),
 );
 
+it.effect("accepts existing image chat attachment metadata", () =>
+  Effect.gen(function* () {
+    const image = yield* decodeChatAttachment({
+      type: "image",
+      id: "thread-1-image",
+      name: "screenshot.png",
+      mimeType: "image/png",
+      sizeBytes: 1024,
+    });
+
+    assert.strictEqual(image.type, "image");
+    assert.strictEqual(image.name, "screenshot.png");
+    assert.strictEqual(image.mimeType, "image/png");
+  }),
+);
+
+it.effect("accepts non-image chat attachment metadata", () =>
+  Effect.gen(function* () {
+    const gif = yield* decodeChatAttachment({
+      type: "gif",
+      id: "thread-1-gif",
+      name: "clip.gif",
+      mimeType: "image/gif",
+      sizeBytes: 1024,
+      width: 320,
+      height: 180,
+    });
+    const video = yield* decodeChatAttachment({
+      type: "video",
+      id: "thread-1-video",
+      name: "demo.mp4",
+      mimeType: "video/mp4",
+      sizeBytes: 2048,
+      width: 1280,
+      height: 720,
+      durationMs: 12_000,
+    });
+    const file = yield* decodeChatAttachment({
+      type: "file",
+      id: "thread-1-file",
+      name: "notes.txt",
+      mimeType: "text/plain",
+      sizeBytes: 512,
+    });
+
+    assert.strictEqual(gif.type, "gif");
+    assert.strictEqual(video.type, "video");
+    if (video.type !== "video") {
+      return;
+    }
+    assert.strictEqual(video.durationMs, 12_000);
+    assert.strictEqual(file.mimeType, "text/plain");
+  }),
+);
+
+it.effect("accepts durable video media artifact metadata", () =>
+  Effect.gen(function* () {
+    const artifact = yield* decodeMediaArtifact({
+      id: "media-demo-video",
+      kind: "video",
+      source: "local",
+      title: "demo.mp4",
+      extension: "mp4",
+      mimeType: "video/mp4",
+      sizeBytes: 2048,
+      width: 1280,
+      height: 720,
+      durationMs: 12_000,
+      createdAt: "2026-01-01T00:00:00.000Z",
+      origin: "attached",
+    });
+
+    assert.strictEqual(artifact.kind, "video");
+    assert.strictEqual(artifact.extension, "mp4");
+    assert.strictEqual(artifact.durationMs, 12_000);
+  }),
+);
+
+it.effect("rejects video attachment metadata above the video limit", () =>
+  Effect.gen(function* () {
+    const result = yield* Effect.exit(
+      decodeChatAttachment({
+        type: "video",
+        id: "thread-1-video-too-large",
+        name: "huge.mp4",
+        mimeType: "video/mp4",
+        sizeBytes: PROVIDER_SEND_TURN_MAX_VIDEO_BYTES + 1,
+      }),
+    );
+    assert.strictEqual(result._tag, "Failure");
+  }),
+);
+
+it.effect("accepts uploaded video and file attachments in thread.turn.start", () =>
+  Effect.gen(function* () {
+    const parsed = yield* decodeClientOrchestrationCommand({
+      type: "thread.turn.start",
+      commandId: "cmd-turn-media",
+      threadId: "thread-1",
+      message: {
+        messageId: "msg-media",
+        role: "user",
+        text: "inspect media",
+        attachments: [
+          {
+            type: "video",
+            name: "demo.mp4",
+            mimeType: "video/mp4",
+            sizeBytes: 12,
+            dataUrl: "data:video/mp4;base64,SGVsbG8=",
+            durationMs: 1000,
+          },
+          {
+            type: "file",
+            name: "notes.txt",
+            mimeType: "text/plain",
+            sizeBytes: 5,
+            dataUrl: "data:text/plain;base64,SGVsbG8=",
+          },
+        ],
+      },
+      runtimeMode: "full-access",
+      interactionMode: "default",
+      createdAt: "2026-01-01T00:00:00.000Z",
+    });
+    assert.strictEqual(parsed.type, "thread.turn.start");
+    if (parsed.type !== "thread.turn.start") {
+      return;
+    }
+    assert.strictEqual(parsed.message.attachments[0]?.type, "video");
+    assert.strictEqual(parsed.message.attachments[1]?.type, "file");
+  }),
+);
+
 it.effect("accepts client-dispatched thread activity append commands", () =>
   Effect.gen(function* () {
     const parsed = yield* decodeClientOrchestrationCommand({
@@ -308,6 +447,7 @@ it.effect("accepts client-dispatched thread activity append commands", () =>
         kind: "workflow.lane.guidance",
         summary: "Guidance added to Builder",
         payload: {
+          laneId: "workflow-agent-2-builder",
           laneRole: "Builder",
           guidance: "Use the existing API boundary.",
         },
@@ -334,6 +474,7 @@ it.effect("accepts client-dispatched workflow record commands", () =>
       kind: "workflow.lane.control",
       summary: "Pause requested for Builder",
       payload: {
+        laneId: "workflow-agent-2-builder",
         laneRole: "Builder",
         action: "pause",
         preserved: true,
@@ -346,6 +487,410 @@ it.effect("accepts client-dispatched workflow record commands", () =>
       return;
     }
     assert.strictEqual(parsed.kind, "workflow.lane.control");
+  }),
+);
+
+it.effect("requires explicit launch config on planned workflow sub-agents", () =>
+  Effect.gen(function* () {
+    const plannedPayload = {
+      goal: "Build the billing UI",
+      launchStatus: "planned",
+      workflowPattern: "Build + Review",
+      initialLanes: ["Lead", "Builder", "Verifier"],
+      subAgents: [
+        {
+          id: "workflow-agent-1-builder",
+          role: "Builder",
+          goal: "Implement the approved UI scope.",
+          prompt: "Build the UI and hand changed files back to the Lead.",
+          model: "Use lead default",
+          reasoningEffort: "Use lead default",
+          fastMode: false,
+          startsAfter: [],
+        },
+        {
+          id: "workflow-agent-2-verifier",
+          role: "Verifier",
+          goal: "Verify the builder output.",
+          prompt: "Run checks and report pass/fail evidence.",
+          model: "Use lead default",
+          reasoningEffort: "high",
+          fastMode: false,
+          startsAfter: ["workflow-agent-1-builder"],
+        },
+      ],
+      acceptanceCriteria: ["The UI matches the request."],
+      requireVerifierApproval: true,
+      addRedTeamCritique: false,
+      requireTestsBeforeFinal: true,
+      showMemoryAuditNotes: true,
+      exploreParallelApproaches: false,
+      stopAfterPlanningForApproval: false,
+    } as const;
+
+    const accepted = yield* decodeClientOrchestrationCommand({
+      type: "thread.workflow.record",
+      commandId: "cmd-workflow-planned",
+      threadId: "thread-workflow",
+      kind: "workflow.planned",
+      summary: "Workflow plan drafted",
+      payload: plannedPayload,
+      createdAt: "2026-01-01T00:00:00.000Z",
+    });
+
+    assert.strictEqual(accepted.type, "thread.workflow.record");
+    if (accepted.type !== "thread.workflow.record") {
+      return;
+    }
+    assert.strictEqual(accepted.kind, "workflow.planned");
+
+    const missingModel = yield* Effect.exit(
+      decodeClientOrchestrationCommand({
+        type: "thread.workflow.record",
+        commandId: "cmd-workflow-planned-missing-model",
+        threadId: "thread-workflow",
+        kind: "workflow.planned",
+        summary: "Workflow plan missing model config",
+        payload: {
+          ...plannedPayload,
+          subAgents: [
+            {
+              id: "workflow-agent-1-builder",
+              role: "Builder",
+              goal: "Implement the approved UI scope.",
+              prompt: "Build the UI and hand changed files back to the Lead.",
+              reasoningEffort: "Use lead default",
+              fastMode: false,
+              startsAfter: [],
+            },
+          ],
+        },
+        createdAt: "2026-01-01T00:00:00.000Z",
+      }),
+    );
+    assert.strictEqual(missingModel._tag, "Failure");
+
+    const missingDependency = yield* Effect.exit(
+      decodeClientOrchestrationCommand({
+        type: "thread.workflow.record",
+        commandId: "cmd-workflow-planned-missing-dependency",
+        threadId: "thread-workflow",
+        kind: "workflow.planned",
+        summary: "Workflow plan has an unknown dependency",
+        payload: {
+          ...plannedPayload,
+          subAgents: [
+            {
+              ...plannedPayload.subAgents[0],
+              startsAfter: ["workflow-agent-missing"],
+            },
+          ],
+        },
+        createdAt: "2026-01-01T00:00:00.000Z",
+      }),
+    );
+    assert.strictEqual(missingDependency._tag, "Failure");
+  }),
+);
+
+it.effect("requires workflow starts to carry approved sub-agent plans", () =>
+  Effect.gen(function* () {
+    const accepted = yield* decodeClientOrchestrationCommand({
+      type: "thread.workflow.record",
+      commandId: "cmd-workflow-started",
+      threadId: "thread-workflow",
+      kind: "workflow.started",
+      summary: "Workflow started",
+      payload: {
+        goal: "Build the billing UI",
+        launchStatus: "started",
+        subAgents: [
+          {
+            id: "workflow-agent-1-builder",
+            role: "Builder",
+            goal: "Implement the approved UI scope.",
+            prompt: "Build the UI and hand changed files back to the Lead.",
+            model: "Use lead default",
+            reasoningEffort: "Use lead default",
+            fastMode: false,
+            startsAfter: [],
+          },
+        ],
+        acceptanceCriteria: ["The UI matches the request."],
+        startedFromActivityId: "event-workflow-planned",
+      },
+      createdAt: "2026-01-01T00:00:00.000Z",
+    });
+
+    assert.strictEqual(accepted.type, "thread.workflow.record");
+    if (accepted.type !== "thread.workflow.record") {
+      return;
+    }
+    assert.strictEqual(accepted.kind, "workflow.started");
+
+    const rejected = yield* Effect.exit(
+      decodeClientOrchestrationCommand({
+        type: "thread.workflow.record",
+        commandId: "cmd-workflow-started-missing-subagents",
+        threadId: "thread-workflow",
+        kind: "workflow.started",
+        summary: "Workflow started without the approved plan",
+        payload: {
+          goal: "Build the billing UI",
+          launchStatus: "started",
+          acceptanceCriteria: ["The UI matches the request."],
+        },
+        createdAt: "2026-01-01T00:00:00.000Z",
+      }),
+    );
+
+    assert.strictEqual(rejected._tag, "Failure");
+  }),
+);
+
+it.effect("requires lane starts to link child threads and decodes lifecycle metadata", () =>
+  Effect.gen(function* () {
+    const started = yield* decodeClientOrchestrationCommand({
+      type: "thread.workflow.record",
+      commandId: "cmd-workflow-lane-started",
+      threadId: "thread-workflow",
+      kind: "workflow.lane.started",
+      summary: "UI Builder launched",
+      payload: {
+        laneId: "workflow-agent-ui-builder",
+        laneRole: "UI Builder",
+        childThreadId: "thread-workflow-child-builder",
+        childTurnMessageId: "msg-workflow-child-builder",
+        childTurnRequestedAt: "2026-01-01T00:00:01.000Z",
+      },
+      createdAt: "2026-01-01T00:00:00.000Z",
+    });
+
+    assert.strictEqual(started.type, "thread.workflow.record");
+    if (started.type !== "thread.workflow.record") {
+      return;
+    }
+    assert.strictEqual(started.kind, "workflow.lane.started");
+    if (started.kind !== "workflow.lane.started") {
+      return;
+    }
+    assert.strictEqual(started.payload.childThreadId, "thread-workflow-child-builder");
+    assert.strictEqual(started.payload.childTurnMessageId, "msg-workflow-child-builder");
+    assert.strictEqual(started.payload.childTurnRequestedAt, "2026-01-01T00:00:01.000Z");
+
+    const fakeStarted = yield* Effect.exit(
+      decodeClientOrchestrationCommand({
+        type: "thread.workflow.record",
+        commandId: "cmd-workflow-lane-started-fake",
+        threadId: "thread-workflow",
+        kind: "workflow.lane.started",
+        summary: "Fake UI Builder launched",
+        payload: {
+          laneId: "workflow-agent-ui-builder",
+          laneRole: "UI Builder",
+        },
+        createdAt: "2026-01-01T00:00:00.000Z",
+      }),
+    );
+
+    assert.strictEqual(fakeStarted._tag, "Failure");
+
+    const missingTurnMessageId = yield* Effect.exit(
+      decodeClientOrchestrationCommand({
+        type: "thread.workflow.record",
+        commandId: "cmd-workflow-lane-started-missing-message",
+        threadId: "thread-workflow",
+        kind: "workflow.lane.started",
+        summary: "UI Builder launched without turn message metadata",
+        payload: {
+          laneId: "workflow-agent-ui-builder",
+          laneRole: "UI Builder",
+          childThreadId: "thread-workflow-child-builder",
+          childTurnRequestedAt: "2026-01-01T00:00:01.000Z",
+        },
+        createdAt: "2026-01-01T00:00:00.000Z",
+      }),
+    );
+
+    assert.strictEqual(missingTurnMessageId._tag, "Failure");
+
+    const missingTurnRequestedAt = yield* Effect.exit(
+      decodeClientOrchestrationCommand({
+        type: "thread.workflow.record",
+        commandId: "cmd-workflow-lane-started-missing-requested-at",
+        threadId: "thread-workflow",
+        kind: "workflow.lane.started",
+        summary: "UI Builder launched without turn request metadata",
+        payload: {
+          laneId: "workflow-agent-ui-builder",
+          laneRole: "UI Builder",
+          childThreadId: "thread-workflow-child-builder",
+          childTurnMessageId: "msg-workflow-child-builder",
+        },
+        createdAt: "2026-01-01T00:00:00.000Z",
+      }),
+    );
+
+    assert.strictEqual(missingTurnRequestedAt._tag, "Failure");
+
+    const completed = yield* decodeClientOrchestrationCommand({
+      type: "thread.workflow.record",
+      commandId: "cmd-workflow-lane-completed",
+      threadId: "thread-workflow",
+      kind: "workflow.lane.completed",
+      summary: "UI Builder completed",
+      payload: {
+        laneId: "workflow-agent-ui-builder",
+        laneRole: "UI Builder",
+        childThreadId: "thread-workflow-child-builder",
+        childTurnId: "turn-workflow-child-builder",
+        sourceStartedActivityId: "event-workflow-lane-started",
+        filesTouched: ["apps/web/src/components/PlanSidebar.tsx"],
+      },
+      createdAt: "2026-01-01T00:00:00.000Z",
+    });
+
+    assert.strictEqual(completed.type, "thread.workflow.record");
+    if (completed.type !== "thread.workflow.record") {
+      return;
+    }
+    assert.strictEqual(completed.kind, "workflow.lane.completed");
+    if (completed.kind !== "workflow.lane.completed") {
+      return;
+    }
+    assert.strictEqual(completed.payload.childThreadId, "thread-workflow-child-builder");
+    assert.strictEqual(completed.payload.childTurnId, "turn-workflow-child-builder");
+    assert.strictEqual(completed.payload.sourceStartedActivityId, "event-workflow-lane-started");
+
+    const handoff = yield* decodeClientOrchestrationCommand({
+      type: "thread.workflow.record",
+      commandId: "cmd-workflow-handoff",
+      threadId: "thread-workflow",
+      kind: "workflow.handoff",
+      summary: "UI Builder handed off to Verifier",
+      payload: {
+        laneId: "workflow-agent-ui-builder",
+        laneRole: "UI Builder",
+        childThreadId: "thread-workflow-child-builder",
+        childTurnId: "turn-workflow-child-builder",
+        sourceStartedActivityId: "event-workflow-lane-started",
+        filesTouched: ["apps/web/src/components/PlanSidebar.tsx"],
+      },
+      createdAt: "2026-01-01T00:00:00.000Z",
+    });
+
+    assert.strictEqual(handoff.type, "thread.workflow.record");
+    if (handoff.type !== "thread.workflow.record") {
+      return;
+    }
+    assert.strictEqual(handoff.kind, "workflow.handoff");
+    if (handoff.kind !== "workflow.handoff") {
+      return;
+    }
+    assert.strictEqual(handoff.payload.childThreadId, "thread-workflow-child-builder");
+    assert.strictEqual(handoff.payload.childTurnId, "turn-workflow-child-builder");
+    assert.strictEqual(handoff.payload.sourceStartedActivityId, "event-workflow-lane-started");
+
+    const nonChildCompleted = yield* decodeClientOrchestrationCommand({
+      type: "thread.workflow.record",
+      commandId: "cmd-workflow-lane-completed-non-child",
+      threadId: "thread-workflow",
+      kind: "workflow.lane.completed",
+      summary: "Research lane completed",
+      payload: {
+        laneId: "workflow-agent-research",
+        laneRole: "Research",
+        filesTouched: ["docs/workflows/Workflow.md"],
+      },
+      createdAt: "2026-01-01T00:00:00.000Z",
+    });
+
+    assert.strictEqual(nonChildCompleted.type, "thread.workflow.record");
+    if (nonChildCompleted.type !== "thread.workflow.record") {
+      return;
+    }
+    assert.strictEqual(nonChildCompleted.kind, "workflow.lane.completed");
+
+    const nonChildHandoff = yield* decodeClientOrchestrationCommand({
+      type: "thread.workflow.record",
+      commandId: "cmd-workflow-handoff-non-child",
+      threadId: "thread-workflow",
+      kind: "workflow.handoff",
+      summary: "Research lane handed off",
+      payload: {
+        laneId: "workflow-agent-research",
+        laneRole: "Research",
+        knownRisks: ["No child-thread session was launched for this lane."],
+      },
+      createdAt: "2026-01-01T00:00:00.000Z",
+    });
+
+    assert.strictEqual(nonChildHandoff.type, "thread.workflow.record");
+    if (nonChildHandoff.type !== "thread.workflow.record") {
+      return;
+    }
+    assert.strictEqual(nonChildHandoff.kind, "workflow.handoff");
+
+    const blocked = yield* decodeClientOrchestrationCommand({
+      type: "thread.workflow.record",
+      commandId: "cmd-workflow-lane-blocked",
+      threadId: "thread-workflow",
+      kind: "workflow.lane.blocked",
+      summary: "Verifier blocked on missing evidence",
+      payload: {
+        laneId: "workflow-agent-verifier",
+        laneRole: "Verifier",
+        reason: "Waiting for shared test evidence.",
+      },
+      createdAt: "2026-01-01T00:00:00.000Z",
+    });
+
+    assert.strictEqual(blocked.type, "thread.workflow.record");
+    if (blocked.type !== "thread.workflow.record") {
+      return;
+    }
+    assert.strictEqual(blocked.kind, "workflow.lane.blocked");
+  }),
+);
+
+it.effect("requires laneId for workflow verifier results", () =>
+  Effect.gen(function* () {
+    const accepted = yield* decodeClientOrchestrationCommand({
+      type: "thread.workflow.record",
+      commandId: "cmd-workflow-verifier-result",
+      threadId: "thread-workflow",
+      kind: "workflow.verifier.result",
+      summary: "Verifier accepted the builder output",
+      payload: {
+        laneId: "workflow-agent-verifier",
+        laneRole: "Verifier",
+        status: "passed",
+        passed: ["Responsive checks passed."],
+      },
+      createdAt: "2026-01-01T00:00:00.000Z",
+    });
+
+    assert.strictEqual(accepted.type, "thread.workflow.record");
+    if (accepted.type !== "thread.workflow.record") {
+      return;
+    }
+    assert.strictEqual(accepted.kind, "workflow.verifier.result");
+
+    const rejected = yield* Effect.exit(
+      decodeClientOrchestrationCommand({
+        type: "thread.workflow.record",
+        commandId: "cmd-workflow-verifier-result-missing-lane",
+        threadId: "thread-workflow",
+        kind: "workflow.verifier.result",
+        summary: "Verifier result missing lane targeting",
+        payload: {
+          status: "failed",
+        },
+        createdAt: "2026-01-01T00:00:00.000Z",
+      }),
+    );
+
+    assert.strictEqual(rejected._tag, "Failure");
   }),
 );
 

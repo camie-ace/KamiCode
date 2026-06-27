@@ -13,9 +13,17 @@ const injectedDesktopAppBranding = readInjectedDesktopAppBranding();
 const hostedAppChannel = import.meta.env.VITE_HOSTED_APP_CHANNEL?.trim().toLowerCase();
 
 export const HOSTED_APP_CHANNEL =
-  hostedAppChannel === "latest" || hostedAppChannel === "nightly" ? hostedAppChannel : null;
+  hostedAppChannel === "latest" || hostedAppChannel === "dev" || hostedAppChannel === "nightly"
+    ? hostedAppChannel
+    : null;
 export const HOSTED_APP_CHANNEL_LABEL =
-  HOSTED_APP_CHANNEL === "nightly" ? "Nightly" : HOSTED_APP_CHANNEL === "latest" ? "Latest" : null;
+  HOSTED_APP_CHANNEL === "nightly"
+    ? "Nightly"
+    : HOSTED_APP_CHANNEL === "dev"
+      ? "Dev"
+      : HOSTED_APP_CHANNEL === "latest"
+        ? "Latest"
+        : null;
 export const APP_BASE_NAME = injectedDesktopAppBranding?.baseName ?? "KamiCode";
 export const APP_STAGE_LABEL =
   injectedDesktopAppBranding?.stageLabel ??
