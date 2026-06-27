@@ -27,6 +27,7 @@ import {
   resolveDesktopRuntimeDependencies,
   resolveFffNativeDependencies,
   resolveBuildOptions,
+  resolveDesktopArtifactName,
   resolveDesktopBuildIconAssets,
   resolveDesktopProductName,
   resolveDesktopUpdateChannel,
@@ -87,6 +88,10 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
     assert.equal(resolveDesktopProductName("0.0.17"), "KamiCode (Alpha)");
     assert.equal(resolveDesktopProductName("0.0.17-dev.20260413.42"), "KamiCode (Dev)");
     assert.equal(resolveDesktopProductName("0.0.17-nightly.20260413.42"), "KamiCode (Nightly)");
+  });
+
+  it("uses KamiCode desktop artifact names", () => {
+    assert.equal(resolveDesktopArtifactName(), "KamiCode-${version}-${arch}.${ext}");
   });
 
   it("switches desktop packaging icons for prerelease versions", () => {
@@ -418,6 +423,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
 
       const mac = config.mac as Record<string, unknown>;
       assert.equal(config.appId, "com.t3tools.t3code");
+      assert.equal(config.artifactName, "KamiCode-${version}-${arch}.${ext}");
       assert.equal(mac.entitlements, "/tmp/entitlements.mac.plist");
       assert.equal(mac.provisioningProfile, "/tmp/t3code.provisionprofile");
       assert.deepStrictEqual(mac.protocols, [

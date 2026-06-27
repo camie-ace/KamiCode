@@ -1302,6 +1302,10 @@ export function resolveDesktopProductName(version: string): string {
   return baseProductName;
 }
 
+export function resolveDesktopArtifactName(): string {
+  return "KamiCode-${version}-${arch}.${ext}";
+}
+
 export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
   platform: typeof BuildPlatform.Type,
   target: string,
@@ -1319,7 +1323,7 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
   const buildConfig: Record<string, unknown> = {
     appId: DESKTOP_APP_ID,
     productName: resolveDesktopProductName(version),
-    artifactName: "T3-Code-${version}-${arch}.${ext}",
+    artifactName: resolveDesktopArtifactName(),
     asarUnpack: [...DESKTOP_ASAR_UNPACK],
     directories: {
       buildResources: "apps/desktop/resources",
