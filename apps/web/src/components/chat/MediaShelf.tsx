@@ -1,5 +1,5 @@
 import type { EnvironmentId, ScopedThreadRef } from "@t3tools/contracts";
-import { ChevronDownIcon, ChevronUpIcon, ImagesIcon } from "lucide-react";
+import { ChevronDownIcon, ChevronUpIcon, ImagesIcon, XIcon } from "lucide-react";
 import { memo, useCallback, useEffect, useMemo, useState } from "react";
 
 import type { DraftId } from "~/composerDraftStore";
@@ -34,8 +34,10 @@ export const MediaShelf = memo(function MediaShelf({
 }: MediaShelfProps) {
   const [collapsed, setCollapsed] = useState(true);
   const [expanded, setExpanded] = useState(false);
+  const [dismissedLatestKey, setDismissedLatestKey] = useState<string | null>(null);
   const [localActiveKey, setLocalActiveKey] = useState<string | null>(null);
   const activeKey = activeArtifactKey !== undefined ? activeArtifactKey : localActiveKey;
+  const latestArtifactKey = artifacts[0]?.dedupeKey ?? null;
   const artifactKeys = useMemo(
     () => new Set(artifacts.map((artifact) => artifact.dedupeKey)),
     [artifacts],
@@ -69,6 +71,10 @@ export const MediaShelf = memo(function MediaShelf({
   }, []);
 
   if (artifacts.length === 0) {
+    return null;
+  }
+
+  if (latestArtifactKey && dismissedLatestKey === latestArtifactKey) {
     return null;
   }
 
@@ -119,6 +125,20 @@ export const MediaShelf = memo(function MediaShelf({
         >
           {collapsed ? <ChevronDownIcon /> : <ChevronUpIcon />}
           {collapsed ? "Peek" : "Collapse"}
+        </Button>
+        <Button
+          type="button"
+          size="icon-xs"
+          variant="ghost"
+          onClick={() => {
+            setDismissedLatestKey(latestArtifactKey);
+            setCollapsed(true);
+            setExpanded(false);
+          }}
+          aria-label="Close recent media shelf"
+          title="Close recent media shelf"
+        >
+          <XIcon />
         </Button>
         {!collapsed && artifacts.length > COLLAPSED_MEDIA_LIMIT ? (
           <Button
