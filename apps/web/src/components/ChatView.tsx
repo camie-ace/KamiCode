@@ -203,6 +203,7 @@ import { ChatComposer, type ChatComposerHandle } from "./chat/ChatComposer";
 import { ExpandedImageDialog } from "./chat/ExpandedImageDialog";
 import { PullRequestThreadDialog } from "./PullRequestThreadDialog";
 import { MessagesTimeline } from "./chat/MessagesTimeline";
+import { MediaPanel } from "./chat/MediaPanel";
 import { MediaShelf } from "./chat/MediaShelf";
 import { ChatHeader } from "./chat/ChatHeader";
 import { PanelLayoutControls, RightPanelMaximizeControl } from "./chat/PanelLayoutControls";
@@ -3685,6 +3686,10 @@ function ChatViewContent(props: ChatViewProps) {
     if (!activeThreadRef || !activeProject) return;
     useRightPanelStore.getState().open(activeThreadRef, "files");
   }, [activeProject, activeThreadRef]);
+  const openMediaPanel = useCallback(() => {
+    if (!activeThreadRef) return;
+    useRightPanelStore.getState().open(activeThreadRef, "media");
+  }, [activeThreadRef]);
   const openTestsPanel = useCallback(() => {
     if (!activeThreadRef || !activeProject?.workspaceRoot) return;
     useRightPanelStore.getState().open(activeThreadRef, "tests");
@@ -6267,6 +6272,15 @@ function ChatViewContent(props: ChatViewProps) {
         onCustomizeWorkflow={onCustomizeWorkflow}
         onStartWorkflow={onStartWorkflow}
       />
+    ) : activeRightPanelSurface?.kind === "media" ? (
+      <MediaPanel
+        artifacts={threadMediaArtifacts}
+        environmentId={activeThread.environmentId}
+        threadRef={activeThreadRef}
+        composerTarget={composerDraftTarget}
+        activeArtifactKey={selectedMediaArtifactKey}
+        onActiveArtifactKeyChange={setSelectedMediaArtifactKey}
+      />
     ) : activeRightPanelSurface?.kind === "tests" ? (
       <TestHarnessRunsPanel
         projectId={activeProject?.id}
@@ -6425,6 +6439,7 @@ function ChatViewContent(props: ChatViewProps) {
                   composerTarget={composerDraftTarget}
                   activeArtifactKey={selectedMediaArtifactKey}
                   onActiveArtifactKeyChange={setSelectedMediaArtifactKey}
+                  onOpenMediaPanel={openMediaPanel}
                   className="relative z-0 mb-2"
                 />
                 <ComposerBannerStack className="relative z-0" items={composerBannerItems} />
@@ -6591,6 +6606,7 @@ function ChatViewContent(props: ChatViewProps) {
           onAddTerminal={addTerminalSurface}
           onAddDiff={addDiffSurface}
           onAddFiles={addFilesSurface}
+          onAddMedia={openMediaPanel}
           onAddTests={openTestsPanel}
           browserAvailable={isPreviewSupportedInRuntime()}
           diffAvailable={isServerThread && isGitRepo}
@@ -6620,6 +6636,7 @@ function ChatViewContent(props: ChatViewProps) {
             onAddTerminal={addTerminalSurface}
             onAddDiff={addDiffSurface}
             onAddFiles={addFilesSurface}
+            onAddMedia={openMediaPanel}
             onAddTests={openTestsPanel}
             browserAvailable={isPreviewSupportedInRuntime()}
             diffAvailable={isServerThread && isGitRepo}

@@ -264,6 +264,17 @@ describe("rightPanelStore", () => {
     });
   });
 
+  it("opens media as a singleton panel surface", () => {
+    useRightPanelStore.getState().open(refA, "media");
+    useRightPanelStore.getState().open(refA, "media");
+
+    expect(selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, refA)).toEqual({
+      isOpen: true,
+      activeSurfaceId: "media",
+      surfaces: [{ id: "media", kind: "media" }],
+    });
+  });
+
   it("selects the persisted active surface", () => {
     useRightPanelStore.getState().open(refA, "preview");
     expect(selectActiveRightPanel(useRightPanelStore.getState().byThreadKey, refA)).toBe("preview");

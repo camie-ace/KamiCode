@@ -279,6 +279,211 @@ export const MediaArtifactCard = memo(function MediaArtifactCard({
     setViewerOpen(true);
   }, [artifact, canPreview, onInteract]);
 
+  const viewer =
+    viewerOpen && previewUrl ? (
+      <MediaArtifactViewer
+        artifact={artifact}
+        url={previewUrl}
+        canUseInChat={canUseInChat}
+        canCopyImage={canCopyImage}
+        canOpenExternal={canOpenExternal}
+        canReveal={canReveal}
+        imageCopied={imageCopied}
+        pathCopied={pathCopied}
+        revealLabel={revealLabel}
+        onCopyImage={copyImage}
+        onCopyPath={copyPath}
+        onOpenExternal={openExternally}
+        onReveal={revealMedia}
+        onUseInChat={useInChat}
+        onClose={() => setViewerOpen(false)}
+      />
+    ) : null;
+
+  if (compact) {
+    return (
+      <>
+        <article
+          className={cn(
+            "group/media relative min-w-0 overflow-hidden rounded-2xl border border-border/60 bg-background/62 shadow-sm transition-all",
+            "hover:-translate-y-0.5 hover:border-border hover:bg-background/82 hover:shadow-md",
+            "supports-[backdrop-filter]:bg-background/54 supports-[backdrop-filter]:backdrop-blur",
+            active && "border-primary/55 bg-primary/8 shadow-primary/10 ring-1 ring-primary/35",
+          )}
+          data-media-artifact-card
+          data-media-artifact-active={active ? "true" : undefined}
+        >
+          <button
+            type="button"
+            className={cn(
+              "relative flex aspect-[16/10] w-full items-center justify-center overflow-hidden bg-muted/35 text-muted-foreground transition-colors",
+              "after:pointer-events-none after:absolute after:inset-0 after:bg-gradient-to-t after:from-black/28 after:via-transparent after:to-transparent",
+              canPreview && "cursor-zoom-in hover:bg-muted/50",
+              !canPreview && "cursor-default",
+            )}
+            onClick={openViewer}
+            disabled={!canPreview}
+            aria-label={`Preview ${artifact.title}`}
+          >
+            {canPreview && isImageLike ? (
+              <img
+                src={previewUrl ?? undefined}
+                alt={artifact.title}
+                className="h-full w-full object-cover"
+                loading="lazy"
+                onError={() => setPreviewFailed(true)}
+              />
+            ) : canPreview && isVideo ? (
+              <video
+                src={previewUrl ?? undefined}
+                className="h-full w-full bg-black object-cover"
+                muted
+                preload="metadata"
+                onError={() => setPreviewFailed(true)}
+              />
+            ) : artifact.kind === "video" ? (
+              <PreviewUnavailableState icon="video" compact label="Preview unavailable" />
+            ) : artifact.kind === "gif" ? (
+              <PreviewUnavailableState icon="gif" compact label="Preview unavailable" />
+            ) : (
+              <PreviewUnavailableState icon="image" compact label="Preview unavailable" />
+            )}
+            <div className="absolute left-2 top-2 z-10 flex min-w-0 items-center gap-1">
+              {recent ? <MediaBadge tone="accent">Recent</MediaBadge> : null}
+              {active ? <MediaBadge tone="accent">Active</MediaBadge> : null}
+            </div>
+            {canPreview ? (
+              <span className="pointer-events-none absolute bottom-2 right-2 z-10 rounded-full border border-white/14 bg-black/45 p-1 text-white opacity-0 shadow-sm backdrop-blur transition-opacity group-hover/media:opacity-100">
+                <Maximize2Icon className="size-3.5" aria-hidden />
+              </span>
+            ) : null}
+          </button>
+          <div className="grid gap-2 p-2.5">
+            <div className="min-w-0">
+              <p className="truncate text-sm font-semibold tracking-[-0.01em] text-foreground">
+                {artifact.title}
+              </p>
+              <p
+                className="mt-0.5 truncate text-[11px] text-muted-foreground/72"
+                title={compactMetadata}
+              >
+                {compactMetadata}
+              </p>
+            </div>
+            {!canPreview ? (
+              <div className="flex items-start gap-1.5 rounded-lg border border-warning/25 bg-warning/8 px-2 py-1.5 text-[11px] text-muted-foreground/85">
+                <AlertTriangleIcon className="mt-0.5 size-3 shrink-0 text-warning" aria-hidden />
+                <p>
+                  {previewUnavailableMessage} {previewRecoveryMessage}
+                </p>
+              </div>
+            ) : null}
+            <div
+              className="grid grid-cols-2 gap-1.5"
+              role="group"
+              aria-label={`Actions for ${artifact.title}`}
+            >
+              <Button
+                type="button"
+                size="xs"
+                variant="outline"
+                disabled={!canPreview}
+                onClick={openViewer}
+                className="bg-background/76"
+              >
+                <EyeIcon />
+                {isVideo ? "Play" : "Preview"}
+              </Button>
+              {isImageLike || isVideo ? (
+                <Tooltip>
+                  <TooltipTrigger
+                    render={
+                      <Button
+                        type="button"
+                        size="xs"
+                        variant="secondary"
+                        disabled={!canUseInChat}
+                        onClick={useInChat}
+                      />
+                    }
+                  >
+                    <PlusIcon />
+                    Use
+                  </TooltipTrigger>
+                  <TooltipPopup>Attach this media to the composer</TooltipPopup>
+                </Tooltip>
+              ) : canOpenExternal ? (
+                <Button type="button" size="xs" variant="secondary" onClick={openExternally}>
+                  <ExternalLinkIcon />
+                  Open
+                </Button>
+              ) : (
+                <Button type="button" size="xs" variant="secondary" onClick={copyPath}>
+                  <CopyIcon />
+                  Copy
+                </Button>
+              )}
+            </div>
+            <div className="flex min-w-0 items-center gap-1.5">
+              {isImageLike ? (
+                <Button
+                  type="button"
+                  size="icon-xs"
+                  variant="ghost"
+                  disabled={!canCopyImage}
+                  onClick={copyImage}
+                  title={
+                    canCopyImage
+                      ? "Copy the preview image to the clipboard"
+                      : "Image clipboard support is unavailable"
+                  }
+                  aria-label={imageCopied ? "Copied image" : "Copy image"}
+                >
+                  <CopyIcon />
+                </Button>
+              ) : null}
+              {canOpenExternal ? (
+                <Button
+                  type="button"
+                  size="icon-xs"
+                  variant="ghost"
+                  onClick={openExternally}
+                  title="Open media externally"
+                  aria-label="Open media externally"
+                >
+                  <ExternalLinkIcon />
+                </Button>
+              ) : null}
+              {canReveal ? (
+                <Button
+                  type="button"
+                  size="icon-xs"
+                  variant="ghost"
+                  onClick={revealMedia}
+                  title={revealLabel}
+                  aria-label={revealLabel}
+                >
+                  <FolderOpenIcon />
+                </Button>
+              ) : null}
+              <Button
+                type="button"
+                size="icon-xs"
+                variant="ghost"
+                onClick={copyPath}
+                title={pathCopied ? "Copied path" : "Copy path"}
+                aria-label={pathCopied ? "Copied path" : "Copy path"}
+              >
+                <CopyIcon />
+              </Button>
+            </div>
+          </div>
+        </article>
+        {viewer}
+      </>
+    );
+  }
+
   return (
     <>
       <div
@@ -473,25 +678,7 @@ export const MediaArtifactCard = memo(function MediaArtifactCard({
           </div>
         </div>
       </div>
-      {viewerOpen && previewUrl ? (
-        <MediaArtifactViewer
-          artifact={artifact}
-          url={previewUrl}
-          canUseInChat={canUseInChat}
-          canCopyImage={canCopyImage}
-          canOpenExternal={canOpenExternal}
-          canReveal={canReveal}
-          imageCopied={imageCopied}
-          pathCopied={pathCopied}
-          revealLabel={revealLabel}
-          onCopyImage={copyImage}
-          onCopyPath={copyPath}
-          onOpenExternal={openExternally}
-          onReveal={revealMedia}
-          onUseInChat={useInChat}
-          onClose={() => setViewerOpen(false)}
-        />
-      ) : null}
+      {viewer}
     </>
   );
 });
@@ -517,6 +704,7 @@ export function MediaArtifactViewer(props: {
   const isVideo = props.artifact.kind === "video";
   const [imageMode, setImageMode] = useState<"fit" | "zoom">("fit");
   const [zoom, setZoom] = useState(1);
+  const [detailsOpen, setDetailsOpen] = useState(true);
   const [measuredMetadata, setMeasuredMetadata] = useState<MeasuredMediaMetadata | null>(null);
   const displayPath = mediaArtifactReference(props.artifact);
   const zoomPercent = Math.round(zoom * 100);
@@ -537,9 +725,19 @@ export function MediaArtifactViewer(props: {
     setZoom((value) => Math.max(0.5, Number((value - 0.25).toFixed(2))));
   };
 
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        props.onClose();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [props.onClose]);
+
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/82 px-3 py-4 backdrop-blur-sm [-webkit-app-region:no-drag] sm:px-4 sm:py-6"
+      className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/72 px-3 py-4 backdrop-blur-md [-webkit-app-region:no-drag] sm:px-4 sm:py-6"
       role="dialog"
       aria-modal="true"
       aria-label={`Preview ${props.artifact.title}`}
@@ -550,16 +748,39 @@ export function MediaArtifactViewer(props: {
         aria-label="Close media preview"
         onClick={props.onClose}
       />
-      <div className="relative z-10 grid max-h-[92vh] w-[min(72rem,96vw)] grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden rounded-2xl border border-white/15 bg-zinc-950 shadow-2xl">
-        <div className="flex min-w-0 flex-wrap items-center gap-2 border-b border-white/10 px-3 py-2">
-          <div className="min-w-0 flex-1">
-            <p className="truncate text-sm font-medium text-white">{props.artifact.title}</p>
-            <p className="truncate font-mono text-[11px] text-white/45" title={displayPath}>
-              {displayPath}
-            </p>
+      <div
+        className={cn(
+          "relative z-10 grid max-h-[92vh] w-[min(92rem,96vw)] overflow-hidden rounded-[1.35rem] border border-white/12 bg-[#090a0c] shadow-[0_32px_120px_rgba(0,0,0,0.62)]",
+          detailsOpen
+            ? "grid-rows-[auto_minmax(0,1fr)_auto] lg:grid-cols-[minmax(0,1fr)_20rem] lg:grid-rows-[auto_minmax(0,1fr)]"
+            : "grid-rows-[auto_minmax(0,1fr)]",
+        )}
+      >
+        <div
+          className={cn(
+            "flex min-w-0 flex-wrap items-center gap-2 border-b border-white/10 bg-white/[0.035] px-3 py-2.5",
+            detailsOpen && "lg:col-span-2",
+          )}
+        >
+          <div className="flex min-w-0 flex-1 items-center gap-2.5">
+            <span className="flex size-8 shrink-0 items-center justify-center rounded-xl border border-white/10 bg-white/8 text-white/72">
+              {isVideo ? (
+                <FilmIcon className="size-4" aria-hidden />
+              ) : (
+                <ImageIcon className="size-4" aria-hidden />
+              )}
+            </span>
+            <div className="min-w-0">
+              <p className="truncate text-sm font-semibold tracking-[-0.01em] text-white">
+                {props.artifact.title}
+              </p>
+              <p className="truncate font-mono text-[11px] text-white/42" title={displayPath}>
+                {displayPath}
+              </p>
+            </div>
           </div>
           {isImageLike ? (
-            <div className="flex items-center gap-1">
+            <div className="flex items-center gap-1 rounded-xl border border-white/10 bg-black/24 p-1">
               <Button
                 type="button"
                 size="xs"
@@ -603,6 +824,16 @@ export function MediaArtifactViewer(props: {
               </Button>
             </div>
           ) : null}
+          <Button
+            type="button"
+            size="xs"
+            variant={detailsOpen ? "secondary" : "ghost"}
+            className="border-white/10 text-white hover:bg-white/12"
+            aria-pressed={detailsOpen}
+            onClick={() => setDetailsOpen((value) => !value)}
+          >
+            {detailsOpen ? "Hide details" : "Details"}
+          </Button>
           <Button
             type="button"
             size="xs"
@@ -674,15 +905,15 @@ export function MediaArtifactViewer(props: {
             <XIcon />
           </Button>
         </div>
-        <div className="min-h-0 overflow-auto bg-black">
-          <div className="flex min-h-full items-center justify-center p-3">
+        <div className="min-h-0 overflow-auto bg-[radial-gradient(circle_at_top,_rgba(255,255,255,0.09),_transparent_34%),linear-gradient(135deg,_rgba(255,255,255,0.055),_rgba(255,255,255,0.01))]">
+          <div className="flex min-h-full items-center justify-center p-3 sm:p-5">
             {isImageLike ? (
               <img
                 src={props.url}
                 alt={props.artifact.title}
                 className={cn(
-                  "rounded-lg border border-white/10 bg-black object-contain shadow-xl",
-                  imageMode === "fit" ? "max-h-[72vh] max-w-full" : "max-w-none",
+                  "rounded-xl object-contain shadow-[0_24px_80px_rgba(0,0,0,0.55)] ring-1 ring-white/10",
+                  imageMode === "fit" ? "max-h-[calc(92vh-9rem)] max-w-full" : "max-w-none",
                 )}
                 style={imageMode === "zoom" ? { width: `${zoom * 100}%` } : undefined}
                 draggable={false}
@@ -699,7 +930,7 @@ export function MediaArtifactViewer(props: {
                 src={props.url}
                 controls
                 autoPlay
-                className="max-h-[72vh] max-w-full rounded-lg border border-white/10 bg-black shadow-xl"
+                className="max-h-[calc(92vh-9rem)] max-w-full rounded-xl bg-black shadow-[0_24px_80px_rgba(0,0,0,0.55)] ring-1 ring-white/10"
                 onLoadedMetadata={(event) => {
                   const video = event.currentTarget;
                   const durationMs = Number.isFinite(video.duration)
@@ -717,16 +948,31 @@ export function MediaArtifactViewer(props: {
             )}
           </div>
         </div>
-        <dl className="grid gap-2 border-t border-white/10 bg-zinc-950/96 px-3 py-2 text-[11px] sm:grid-cols-4">
-          {viewerMetadataRows.map((row) => (
-            <div key={row.label} className="min-w-0">
-              <dt className="uppercase tracking-[0.12em] text-white/35">{row.label}</dt>
-              <dd className="truncate text-white/72" title={row.value}>
-                {row.value}
-              </dd>
+        {detailsOpen ? (
+          <aside className="min-h-0 overflow-y-auto border-t border-white/10 bg-white/[0.035] p-3 lg:border-l lg:border-t-0">
+            <div className="mb-3">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-white/35">
+                Asset details
+              </p>
+              <p className="mt-1 text-xs text-white/62">
+                {kindLabel(props.artifact.kind)} from {sourceLabel(props.artifact.source)}
+              </p>
             </div>
-          ))}
-        </dl>
+            <dl className="grid gap-2 text-[11px]">
+              {viewerMetadataRows.map((row) => (
+                <div
+                  key={row.label}
+                  className="min-w-0 rounded-xl border border-white/8 bg-black/20 px-2.5 py-2"
+                >
+                  <dt className="uppercase tracking-[0.14em] text-white/35">{row.label}</dt>
+                  <dd className="mt-0.5 truncate text-white/76" title={row.value}>
+                    {row.value}
+                  </dd>
+                </div>
+              ))}
+            </dl>
+          </aside>
+        ) : null}
       </div>
     </div>
   );

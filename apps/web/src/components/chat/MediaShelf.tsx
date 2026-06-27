@@ -18,6 +18,7 @@ interface MediaShelfProps {
   composerTarget?: ScopedThreadRef | DraftId | undefined;
   activeArtifactKey?: string | null | undefined;
   onActiveArtifactKeyChange?: (artifactKey: string | null) => void;
+  onOpenMediaPanel?: () => void;
   className?: string;
 }
 
@@ -28,8 +29,10 @@ export const MediaShelf = memo(function MediaShelf({
   composerTarget,
   activeArtifactKey,
   onActiveArtifactKeyChange,
+  onOpenMediaPanel,
   className,
 }: MediaShelfProps) {
+  const [collapsed, setCollapsed] = useState(true);
   const [expanded, setExpanded] = useState(false);
   const [localActiveKey, setLocalActiveKey] = useState<string | null>(null);
   const activeKey = activeArtifactKey !== undefined ? activeArtifactKey : localActiveKey;
@@ -72,31 +75,52 @@ export const MediaShelf = memo(function MediaShelf({
   return (
     <section
       className={cn(
-        "rounded-xl border border-border/65 bg-background/95 p-2 shadow-sm backdrop-blur",
+        "overflow-hidden rounded-2xl border border-border/60 bg-card/78 shadow-[0_18px_52px_rgba(0,0,0,0.18)] backdrop-blur-xl",
+        "supports-[backdrop-filter]:bg-card/62",
         className,
       )}
       aria-label={`Thread media shelf with ${artifacts.length} item${artifacts.length === 1 ? "" : "s"}`}
     >
-      <div className="flex min-w-0 flex-wrap items-center gap-2 px-1 pb-2">
-        <div className="flex min-w-0 flex-1 items-center gap-2">
-          <span className="flex size-7 shrink-0 items-center justify-center rounded-full border border-border/65 bg-card/80 text-muted-foreground">
+      <div className="flex min-w-0 flex-wrap items-center gap-2 border-b border-border/45 bg-gradient-to-r from-background/72 via-background/42 to-transparent px-3 py-2.5">
+        <div className="flex min-w-0 flex-1 items-center gap-2.5">
+          <span className="flex size-8 shrink-0 items-center justify-center rounded-xl border border-border/65 bg-background/75 text-muted-foreground shadow-xs">
             <ImagesIcon className="size-3.5" aria-hidden />
           </span>
           <div className="min-w-0">
-            <div className="flex items-center gap-2">
-              <h2 className="text-xs font-medium text-foreground">Recent Media</h2>
-              <span className="rounded-full border border-border/60 bg-card px-1.5 py-0.5 text-[10px] text-muted-foreground">
-                {artifacts.length}
+            <div className="flex min-w-0 flex-wrap items-center gap-2">
+              <h2 className="text-sm font-semibold tracking-[-0.01em] text-foreground">
+                Recent Media
+              </h2>
+              <span className="rounded-full border border-primary/25 bg-primary/10 px-2 py-0.5 text-[11px] font-medium text-primary">
+                {artifacts.length} {artifacts.length === 1 ? "asset" : "assets"}
               </span>
+              {activeArtifact ? (
+                <span className="rounded-full border border-border/55 bg-background/70 px-2 py-0.5 text-[11px] text-muted-foreground">
+                  Selected
+                </span>
+              ) : null}
             </div>
             <p className="truncate text-[11px] text-muted-foreground/70">
-              {activeArtifact
-                ? `Selected: ${activeArtifact.title}`
-                : "Preview, use, or copy thread media."}
+              {activeArtifact ? activeArtifact.title : "Preview, use, or copy thread media."}
             </p>
           </div>
         </div>
-        {artifacts.length > COLLAPSED_MEDIA_LIMIT ? (
+        {onOpenMediaPanel ? (
+          <Button type="button" size="xs" variant="secondary" onClick={onOpenMediaPanel}>
+            Open Media
+          </Button>
+        ) : null}
+        <Button
+          type="button"
+          size="xs"
+          variant="ghost"
+          onClick={() => setCollapsed((value) => !value)}
+          aria-expanded={!collapsed}
+        >
+          {collapsed ? <ChevronDownIcon /> : <ChevronUpIcon />}
+          {collapsed ? "Peek" : "Collapse"}
+        </Button>
+        {!collapsed && artifacts.length > COLLAPSED_MEDIA_LIMIT ? (
           <Button
             type="button"
             size="xs"
@@ -109,27 +133,30 @@ export const MediaShelf = memo(function MediaShelf({
           </Button>
         ) : null}
       </div>
-      <div
-        className={cn(
-          "flex gap-2 overflow-x-auto pb-1",
-          expanded && "max-h-[20rem] flex-wrap overflow-y-auto pr-1",
-        )}
-      >
-        {visibleArtifacts.map((artifact, index) => (
-          <div key={artifact.dedupeKey} className="w-[min(18rem,82vw)] shrink-0">
-            <MediaArtifactCard
-              artifact={artifact}
-              environmentId={environmentId}
-              threadRef={threadRef}
-              composerTarget={composerTarget}
-              compact
-              active={artifact.dedupeKey === activeArtifact?.dedupeKey}
-              recent={index === 0}
-              onInteract={markActive}
-            />
-          </div>
-        ))}
-      </div>
+      {!collapsed ? (
+        <div
+          className={cn(
+            "flex gap-3 overflow-x-auto px-3 py-3 [scrollbar-width:thin]",
+            "snap-x snap-mandatory",
+            expanded && "max-h-[28rem] flex-wrap overflow-y-auto pr-2",
+          )}
+        >
+          {visibleArtifacts.map((artifact, index) => (
+            <div key={artifact.dedupeKey} className="w-[min(14.5rem,76vw)] shrink-0 snap-start">
+              <MediaArtifactCard
+                artifact={artifact}
+                environmentId={environmentId}
+                threadRef={threadRef}
+                composerTarget={composerTarget}
+                compact
+                active={artifact.dedupeKey === activeArtifact?.dedupeKey}
+                recent={index === 0}
+                onInteract={markActive}
+              />
+            </div>
+          ))}
+        </div>
+      ) : null}
     </section>
   );
 });

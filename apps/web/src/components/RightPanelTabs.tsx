@@ -6,6 +6,7 @@ import {
   Files,
   Globe2,
   HistoryIcon,
+  ImagesIcon,
   Plus,
   TerminalSquare,
   X,
@@ -52,6 +53,7 @@ interface RightPanelTabsProps {
   onAddTerminal: () => void;
   onAddDiff: () => void;
   onAddFiles: () => void;
+  onAddMedia: () => void;
   onAddTests: () => void;
   browserAvailable: boolean;
   diffAvailable: boolean;
@@ -101,6 +103,7 @@ function RightPanelEmptyState(props: {
   onAddTerminal: () => void;
   onAddDiff: () => void;
   onAddFiles: () => void;
+  onAddMedia: () => void;
   onAddTests: () => void;
   browserAvailable: boolean;
   diffAvailable: boolean;
@@ -131,6 +134,14 @@ function RightPanelEmptyState(props: {
       available: props.filesAvailable,
       disabledReason: SURFACE_DISABLED_REASONS.files,
       onClick: props.onAddFiles,
+    },
+    {
+      label: "Media",
+      description: "Review images, videos, and attached assets.",
+      icon: ImagesIcon,
+      available: true,
+      disabledReason: null,
+      onClick: props.onAddMedia,
     },
     {
       label: "Diff",
@@ -225,6 +236,8 @@ function surfaceTitle(
       );
     case "plan":
       return "Plan";
+    case "media":
+      return "Media";
     case "tests":
       return "Tests";
     case "preview": {
@@ -288,6 +301,8 @@ function SurfaceIcon({
       return <TerminalSquare className="size-3.5 shrink-0" />;
     case "plan":
       return <ClipboardList className="size-3.5 shrink-0" />;
+    case "media":
+      return <ImagesIcon className="size-3.5 shrink-0" />;
     case "tests":
       return <HistoryIcon className="size-3.5 shrink-0" />;
   }
@@ -470,6 +485,10 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
                     <Files />
                     Files
                   </SurfaceMenuItem>
+                  <SurfaceMenuItem available onClick={props.onAddMedia}>
+                    <ImagesIcon />
+                    Media
+                  </SurfaceMenuItem>
                   <SurfaceMenuItem
                     available={props.diffAvailable}
                     disabledReason={SURFACE_DISABLED_REASONS.diff}
@@ -496,6 +515,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
             onAddTerminal={props.onAddTerminal}
             onAddDiff={props.onAddDiff}
             onAddFiles={props.onAddFiles}
+            onAddMedia={props.onAddMedia}
             onAddTests={props.onAddTests}
             browserAvailable={props.browserAvailable}
             diffAvailable={props.diffAvailable}
