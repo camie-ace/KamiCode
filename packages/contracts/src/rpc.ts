@@ -79,6 +79,25 @@ import {
   ProjectWriteFileResult,
 } from "./project.ts";
 import {
+  ProjectTriggerCreateInput,
+  ProjectTriggerCreateResult,
+  ProjectTriggerDeleteInput,
+  ProjectTriggerDeleteResult,
+  ProjectTriggerError,
+  ProjectTriggerFireInput,
+  ProjectTriggerFireResult,
+  ProjectTriggerGetInput,
+  ProjectTriggerGetResult,
+  ProjectTriggerListInput,
+  ProjectTriggerListResult,
+  ProjectTriggerListRunsInput,
+  ProjectTriggerListRunsResult,
+  ProjectTriggerStreamEvent,
+  ProjectTriggerSubscribeInput,
+  ProjectTriggerUpdateInput,
+  ProjectTriggerUpdateResult,
+} from "./projectTriggers.ts";
+import {
   TerminalAttachInput,
   TerminalAttachStreamEvent,
   TerminalClearInput,
@@ -152,6 +171,16 @@ export const WS_METHODS = {
   projectsReadFile: "projects.readFile",
   projectsSearchEntries: "projects.searchEntries",
   projectsWriteFile: "projects.writeFile",
+
+  // Project trigger methods
+  projectTriggersList: "projectTriggers.list",
+  projectTriggersGet: "projectTriggers.get",
+  projectTriggersCreate: "projectTriggers.create",
+  projectTriggersUpdate: "projectTriggers.update",
+  projectTriggersDelete: "projectTriggers.delete",
+  projectTriggersFire: "projectTriggers.fire",
+  projectTriggersListRuns: "projectTriggers.listRuns",
+  projectTriggersSubscribe: "projectTriggers.subscribe",
 
   // Shell methods
   shellOpenInEditor: "shell.openInEditor",
@@ -375,6 +404,57 @@ export const WsProjectsWriteFileRpc = Rpc.make(WS_METHODS.projectsWriteFile, {
   payload: ProjectWriteFileInput,
   success: ProjectWriteFileResult,
   error: Schema.Union([ProjectWriteFileError, EnvironmentAuthorizationError]),
+});
+
+const ProjectTriggerRpcError = Schema.Union([ProjectTriggerError, EnvironmentAuthorizationError]);
+
+export const WsProjectTriggersListRpc = Rpc.make(WS_METHODS.projectTriggersList, {
+  payload: ProjectTriggerListInput,
+  success: ProjectTriggerListResult,
+  error: ProjectTriggerRpcError,
+});
+
+export const WsProjectTriggersGetRpc = Rpc.make(WS_METHODS.projectTriggersGet, {
+  payload: ProjectTriggerGetInput,
+  success: ProjectTriggerGetResult,
+  error: ProjectTriggerRpcError,
+});
+
+export const WsProjectTriggersCreateRpc = Rpc.make(WS_METHODS.projectTriggersCreate, {
+  payload: ProjectTriggerCreateInput,
+  success: ProjectTriggerCreateResult,
+  error: ProjectTriggerRpcError,
+});
+
+export const WsProjectTriggersUpdateRpc = Rpc.make(WS_METHODS.projectTriggersUpdate, {
+  payload: ProjectTriggerUpdateInput,
+  success: ProjectTriggerUpdateResult,
+  error: ProjectTriggerRpcError,
+});
+
+export const WsProjectTriggersDeleteRpc = Rpc.make(WS_METHODS.projectTriggersDelete, {
+  payload: ProjectTriggerDeleteInput,
+  success: ProjectTriggerDeleteResult,
+  error: ProjectTriggerRpcError,
+});
+
+export const WsProjectTriggersFireRpc = Rpc.make(WS_METHODS.projectTriggersFire, {
+  payload: ProjectTriggerFireInput,
+  success: ProjectTriggerFireResult,
+  error: ProjectTriggerRpcError,
+});
+
+export const WsProjectTriggersListRunsRpc = Rpc.make(WS_METHODS.projectTriggersListRuns, {
+  payload: ProjectTriggerListRunsInput,
+  success: ProjectTriggerListRunsResult,
+  error: ProjectTriggerRpcError,
+});
+
+export const WsProjectTriggersSubscribeRpc = Rpc.make(WS_METHODS.projectTriggersSubscribe, {
+  payload: ProjectTriggerSubscribeInput,
+  success: ProjectTriggerStreamEvent,
+  error: ProjectTriggerRpcError,
+  stream: true,
 });
 
 export const WsShellOpenInEditorRpc = Rpc.make(WS_METHODS.shellOpenInEditor, {
@@ -701,6 +781,14 @@ export const WsRpcGroup = RpcGroup.make(
   WsProjectsReadFileRpc,
   WsProjectsSearchEntriesRpc,
   WsProjectsWriteFileRpc,
+  WsProjectTriggersListRpc,
+  WsProjectTriggersGetRpc,
+  WsProjectTriggersCreateRpc,
+  WsProjectTriggersUpdateRpc,
+  WsProjectTriggersDeleteRpc,
+  WsProjectTriggersFireRpc,
+  WsProjectTriggersListRunsRpc,
+  WsProjectTriggersSubscribeRpc,
   WsShellOpenInEditorRpc,
   WsFilesystemBrowseRpc,
   WsAssetsCreateUrlRpc,

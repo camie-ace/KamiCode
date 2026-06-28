@@ -31,6 +31,24 @@ import type {
   ProjectWriteFileInput,
   ProjectWriteFileResult,
 } from "./project.ts";
+import type {
+  ProjectTriggerCreateInput,
+  ProjectTriggerCreateResult,
+  ProjectTriggerDeleteInput,
+  ProjectTriggerDeleteResult,
+  ProjectTriggerFireInput,
+  ProjectTriggerFireResult,
+  ProjectTriggerGetInput,
+  ProjectTriggerGetResult,
+  ProjectTriggerListInput,
+  ProjectTriggerListResult,
+  ProjectTriggerListRunsInput,
+  ProjectTriggerListRunsResult,
+  ProjectTriggerStreamEvent,
+  ProjectTriggerSubscribeInput,
+  ProjectTriggerUpdateInput,
+  ProjectTriggerUpdateResult,
+} from "./projectTriggers.ts";
 import type { ProviderInstanceId } from "./providerInstance.ts";
 import type {
   ServerConfig,
@@ -1109,6 +1127,22 @@ export interface EnvironmentApi {
     readFile: (input: ProjectReadFileInput) => Promise<ProjectReadFileResult>;
     searchEntries: (input: ProjectSearchEntriesInput) => Promise<ProjectSearchEntriesResult>;
     writeFile: (input: ProjectWriteFileInput) => Promise<ProjectWriteFileResult>;
+  };
+  projectTriggers: {
+    list: (input: ProjectTriggerListInput) => Promise<ProjectTriggerListResult>;
+    get: (input: ProjectTriggerGetInput) => Promise<ProjectTriggerGetResult>;
+    create: (input: ProjectTriggerCreateInput) => Promise<ProjectTriggerCreateResult>;
+    update: (input: ProjectTriggerUpdateInput) => Promise<ProjectTriggerUpdateResult>;
+    delete: (input: ProjectTriggerDeleteInput) => Promise<ProjectTriggerDeleteResult>;
+    fire: (input: ProjectTriggerFireInput) => Promise<ProjectTriggerFireResult>;
+    listRuns: (input: ProjectTriggerListRunsInput) => Promise<ProjectTriggerListRunsResult>;
+    subscribe: (
+      input: ProjectTriggerSubscribeInput,
+      callback: (event: ProjectTriggerStreamEvent) => void,
+      options?: {
+        onResubscribe?: () => void;
+      },
+    ) => () => void;
   };
   filesystem: {
     browse: (input: FilesystemBrowseInput) => Promise<FilesystemBrowseResult>;

@@ -17,6 +17,7 @@ import {
   KeybindingRule,
   MessageId,
   ExternalLauncherCommandNotFoundError,
+  OrchestrationDispatchCommandError,
   type OrchestrationThreadShell,
   TerminalNotRunningError,
   type OrchestrationCommand,
@@ -41,6 +42,7 @@ import { RELAY_HEALTH_REQUEST_TYP, RELAY_MINT_REQUEST_TYP } from "@t3tools/share
 import * as RelayClient from "@t3tools/shared/relayClient";
 import { assert, it } from "@effect/vitest";
 import { assertFailure, assertInclude, assertTrue } from "@effect/vitest/utils";
+import * as Cause from "effect/Cause";
 import * as Clock from "effect/Clock";
 import * as Deferred from "effect/Deferred";
 import * as DateTime from "effect/DateTime";
@@ -78,6 +80,7 @@ import * as GitManager from "./git/GitManager.ts";
 import * as Keybindings from "./keybindings.ts";
 import * as ExternalLauncher from "./process/externalLauncher.ts";
 import * as OrchestrationEngine from "./orchestration/Services/OrchestrationEngine.ts";
+import { ServerOrchestrationDispatcher } from "./orchestration/Services/ServerOrchestrationDispatcher.ts";
 import { OrchestrationListenerCallbackError } from "./orchestration/Errors.ts";
 import * as ProjectionSnapshotQuery from "./orchestration/Services/ProjectionSnapshotQuery.ts";
 import { SqlitePersistenceMemory } from "./persistence/Layers/Sqlite.ts";
@@ -120,6 +123,9 @@ import * as CloudCliTokenManager from "./cloud/CliTokenManager.ts";
 import * as ProcessDiagnostics from "./diagnostics/ProcessDiagnostics.ts";
 import * as ProcessResourceMonitor from "./diagnostics/ProcessResourceMonitor.ts";
 import * as TraceDiagnostics from "./diagnostics/TraceDiagnostics.ts";
+import { ProjectTriggerRepository } from "./projectTriggers/Services/ProjectTriggerRepository.ts";
+import { ProjectTriggerScheduler } from "./projectTriggers/Services/ProjectTriggerScheduler.ts";
+import { ProjectTriggerService } from "./projectTriggers/Services/ProjectTriggerService.ts";
 import * as Data from "effect/Data";
 
 const defaultProjectId = ProjectId.make("project-default");
@@ -240,6 +246,198 @@ const makeDefaultSharedProjectsMock = (): SharedProjectsShape => ({
   upsertDeployAssociation: failSharedProjectsTestOperation,
   syncRemoteRuntime: failSharedProjectsTestOperation,
 });
+
+const routeTestServerOrchestrationDispatcherLayer = Layer.effect(
+  ServerOrchestrationDispatcher,
+  Effect.gen(function* () {
+    const orchestrationEngine = yield* OrchestrationEngine.OrchestrationEngineService;
+    const gitWorkflow = yield* GitWorkflowService.GitWorkflowService;
+    const projectSetupScriptRunner = yield* ProjectSetupScriptRunner.ProjectSetupScriptRunner;
+    const vcsStatusBroadcaster = yield* VcsStatusBroadcaster.VcsStatusBroadcaster;
+
+    const toDispatchError = (cause: Cause.Cause<unknown>) => {
+      const error = Cause.squash(cause);
+      return new OrchestrationDispatchCommandError({
+        message:
+          error instanceof Error ? error.message : "Failed to dispatch orchestration command",
+        cause,
+      });
+    };
+
+    const dispatchEngine = (command: OrchestrationCommand) =>
+      orchestrationEngine.dispatch(command).pipe(
+        Effect.mapError(
+          (cause) =>
+            new OrchestrationDispatchCommandError({
+              message:
+                cause instanceof Error ? cause.message : "Failed to dispatch orchestration command",
+              cause,
+            }),
+        ),
+      );
+
+    const dispatch = (command: OrchestrationCommand) => {
+      if (command.type !== "thread.turn.start" || !command.bootstrap) {
+        return dispatchEngine(command);
+      }
+
+      return Effect.gen(function* () {
+        const bootstrap = command.bootstrap;
+        const { bootstrap: _bootstrap, ...finalTurnStartCommand } = command;
+        let createdThread = false;
+        let targetProjectId = bootstrap!.createThread?.projectId;
+        let targetProjectCwd = bootstrap!.prepareWorktree?.projectCwd;
+        let targetWorktreePath = bootstrap!.createThread?.worktreePath ?? null;
+
+        const childCommandId = (tag: string) => CommandId.make(`${command.commandId}:${tag}`);
+        const childEventId = (tag: string) => EventId.make(`${command.commandId}:${tag}`);
+
+        const appendSetupScriptActivity = (input: {
+          readonly activityKey: string;
+          readonly kind: "setup-script.requested" | "setup-script.started" | "setup-script.failed";
+          readonly summary: string;
+          readonly createdAt: string;
+          readonly payload: Record<string, unknown>;
+          readonly tone: "info" | "error";
+        }) =>
+          dispatchEngine({
+            type: "thread.activity.append",
+            commandId: childCommandId(`setup-script-activity:${input.activityKey}`),
+            threadId: command.threadId,
+            activity: {
+              id: childEventId(`setup-script-activity:${input.activityKey}`),
+              tone: input.tone,
+              kind: input.kind,
+              summary: input.summary,
+              payload: input.payload,
+              turnId: null,
+              createdAt: input.createdAt,
+            },
+            createdAt: input.createdAt,
+          });
+
+        const cleanupCreatedThread = () =>
+          createdThread
+            ? dispatchEngine({
+                type: "thread.delete",
+                commandId: childCommandId("bootstrap-thread-delete"),
+                threadId: command.threadId,
+              }).pipe(Effect.ignoreCause({ log: true }))
+            : Effect.void;
+
+        const runSetupScript = Effect.gen(function* () {
+          if (!bootstrap!.runSetupScript || !targetWorktreePath) {
+            return;
+          }
+          const worktreePath = targetWorktreePath;
+          const requestedAt = command.createdAt;
+          yield* projectSetupScriptRunner
+            .runForThread({
+              threadId: command.threadId,
+              ...(targetProjectId ? { projectId: targetProjectId } : {}),
+              ...(targetProjectCwd ? { projectCwd: targetProjectCwd } : {}),
+              worktreePath,
+            })
+            .pipe(
+              Effect.matchEffect({
+                onFailure: (error) =>
+                  appendSetupScriptActivity({
+                    activityKey: "failed",
+                    kind: "setup-script.failed",
+                    summary: "Setup script failed to start",
+                    createdAt: requestedAt,
+                    payload: {
+                      detail: error.message,
+                      worktreePath,
+                    },
+                    tone: "error",
+                  }).pipe(Effect.ignoreCause({ log: false })),
+                onSuccess: (setupResult) => {
+                  if (setupResult.status !== "started") {
+                    return Effect.void;
+                  }
+                  const payload = {
+                    scriptId: setupResult.scriptId,
+                    scriptName: setupResult.scriptName,
+                    terminalId: setupResult.terminalId,
+                    worktreePath,
+                  };
+                  return Effect.gen(function* () {
+                    yield* appendSetupScriptActivity({
+                      activityKey: "requested",
+                      kind: "setup-script.requested",
+                      summary: "Starting setup script",
+                      createdAt: requestedAt,
+                      payload,
+                      tone: "info",
+                    }).pipe(Effect.ignoreCause({ log: false }));
+                    yield* appendSetupScriptActivity({
+                      activityKey: "started",
+                      kind: "setup-script.started",
+                      summary: "Setup script started",
+                      createdAt: requestedAt,
+                      payload,
+                      tone: "info",
+                    }).pipe(Effect.ignoreCause({ log: false }));
+                  });
+                },
+              }),
+            );
+        });
+
+        return yield* Effect.gen(function* () {
+          if (bootstrap!.createThread) {
+            yield* dispatchEngine({
+              type: "thread.create",
+              commandId: childCommandId("bootstrap-thread-create"),
+              threadId: command.threadId,
+              projectId: bootstrap!.createThread.projectId,
+              title: bootstrap!.createThread.title,
+              modelSelection: bootstrap!.createThread.modelSelection,
+              runtimeMode: bootstrap!.createThread.runtimeMode,
+              interactionMode: bootstrap!.createThread.interactionMode,
+              branch: bootstrap!.createThread.branch,
+              worktreePath: bootstrap!.createThread.worktreePath,
+              createdAt: bootstrap!.createThread.createdAt,
+            });
+            createdThread = true;
+          }
+
+          if (bootstrap!.prepareWorktree) {
+            const worktree = yield* gitWorkflow.createWorktree({
+              cwd: bootstrap!.prepareWorktree.projectCwd,
+              refName: bootstrap!.prepareWorktree.baseBranch,
+              newRefName: bootstrap!.prepareWorktree.branch,
+              path: null,
+            });
+            targetProjectCwd = bootstrap!.prepareWorktree.projectCwd;
+            targetWorktreePath = worktree.worktree.path;
+            yield* dispatchEngine({
+              type: "thread.meta.update",
+              commandId: childCommandId("bootstrap-thread-meta-update"),
+              threadId: command.threadId,
+              branch: worktree.worktree.refName,
+              worktreePath: targetWorktreePath,
+            });
+            yield* vcsStatusBroadcaster
+              .refreshStatus(targetWorktreePath)
+              .pipe(Effect.ignoreCause({ log: true }));
+          }
+
+          yield* runSetupScript;
+
+          return yield* dispatchEngine(finalTurnStartCommand);
+        }).pipe(
+          Effect.catchCause((cause) =>
+            cleanupCreatedThread().pipe(Effect.flatMap(() => Effect.fail(toDispatchError(cause)))),
+          ),
+        );
+      });
+    };
+
+    return ServerOrchestrationDispatcher.of({ dispatch });
+  }),
+);
 
 const browserOtlpTracingLayer = Layer.mergeAll(
   FetchHttpClient.layer,
@@ -573,14 +771,17 @@ const buildAppUnderTest = (options?: {
       disableLogger: true,
     }).pipe(
       Layer.provide(
-        Layer.mock(Keybindings.Keybindings)({
-          loadConfigState: Effect.succeed({
-            keybindings: [],
-            issues: [],
+        Layer.mergeAll(
+          routeTestServerOrchestrationDispatcherLayer,
+          Layer.mock(Keybindings.Keybindings)({
+            loadConfigState: Effect.succeed({
+              keybindings: [],
+              issues: [],
+            }),
+            streamChanges: Stream.empty,
+            ...options?.layers?.keybindings,
           }),
-          streamChanges: Stream.empty,
-          ...options?.layers?.keybindings,
-        }),
+        ),
       ),
       Layer.provide(
         Layer.mock(ProviderRegistry.ProviderRegistry)({
@@ -798,6 +999,49 @@ const buildAppUnderTest = (options?: {
           markHttpListening: Effect.void,
           enqueueCommand: (effect) => effect,
           ...options?.layers?.serverRuntimeStartup,
+        }),
+      ),
+      Layer.provide(
+        Layer.mock(ProjectTriggerRepository)({
+          upsertTrigger: () => Effect.void,
+          getTriggerById: () => Effect.succeed(Option.none()),
+          listTriggersByProjectId: () => Effect.succeed([]),
+          deleteTrigger: () => Effect.succeed(false),
+          recoverExpiredTriggerClaims: () => Effect.succeed(0),
+          claimDueTriggers: () => Effect.succeed([]),
+          scheduleRunForClaimedTrigger: () => Effect.succeed(false),
+          insertRun: () => Effect.succeed(false),
+          markTriggerScheduleFailed: () => Effect.succeed(false),
+          getRunById: () => Effect.succeed(Option.none()),
+          listRunsByTriggerId: () => Effect.succeed([]),
+          recoverExpiredRunClaims: () => Effect.succeed(0),
+          claimDueRuns: () => Effect.succeed([]),
+          markRunDispatched: () => Effect.succeed(false),
+          markRunFailed: () => Effect.succeed(false),
+          markRunSkipped: () => Effect.succeed(false),
+        }),
+      ),
+      Layer.provide(
+        Layer.mock(ProjectTriggerService)({
+          saveTrigger: () => Effect.die("ProjectTriggerService.saveTrigger not stubbed."),
+          deleteTrigger: () => Effect.succeed(false),
+          listProjectTriggers: () => Effect.succeed([]),
+        }),
+      ),
+      Layer.provide(
+        Layer.mock(ProjectTriggerScheduler)({
+          tick: Effect.succeed({
+            recoveredTriggerClaims: 0,
+            recoveredRunClaims: 0,
+            claimedTriggers: 0,
+            scheduledRuns: 0,
+            scheduleFailures: 0,
+            claimedRuns: 0,
+            dispatchedRuns: 0,
+            failedRuns: 0,
+            skippedRuns: 0,
+          }),
+          start: () => Effect.void,
         }),
       ),
       Layer.provide(

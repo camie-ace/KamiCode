@@ -17,6 +17,7 @@ import ProjectScriptsControl, {
   type ProjectScriptActionResult,
 } from "../ProjectScriptsControl";
 import ProjectTestEnvironmentControl from "../ProjectTestEnvironmentControl";
+import ProjectTriggersControl from "../ProjectTriggersControl";
 import TestHarnessRunsControl from "../TestHarnessRunsControl";
 import { OpenInPicker } from "./OpenInPicker";
 import { usePrimaryEnvironmentId } from "../../state/environments";
@@ -123,6 +124,13 @@ export const ChatHeader = memo(function ChatHeader({
             onAddScript={onAddProjectScript}
             onUpdateScript={onUpdateProjectScript}
             onDeleteScript={onDeleteProjectScript}
+          />
+        )}
+        {activeProjectId && (
+          <ProjectTriggersControl
+            environmentId={activeThreadEnvironmentId}
+            projectId={activeProjectId}
+            projectName={activeProjectName}
           />
         )}
         {activeProjectTestEnvironments && (

@@ -1,4 +1,3 @@
-import * as Cause from "effect/Cause";
 import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
@@ -22,8 +21,9 @@ import {
   type AuthEnvironmentScope,
   AuthSessionId,
   CommandId,
+  DEFAULT_MODEL,
+  DEFAULT_PROVIDER_INTERACTION_MODE,
   type DiscoveredLocalServerList,
-  EventId,
   type OrchestrationCommand,
   type GitActionProgressEvent,
   type GitManagerServiceError,
@@ -41,6 +41,13 @@ import {
   ProjectReadFileError,
   ProjectSearchEntriesError,
   ProjectWriteFileError,
+  ProjectTriggerFireError,
+  ProjectTriggerNotFoundError,
+  type ProjectTriggerRecord,
+  type ProjectTriggerRunRecord,
+  ProjectTriggerStoreError,
+  type ProjectTriggerStreamEvent,
+  ProviderInstanceId,
   RelayClientInstallFailedError,
   type RelayClientInstallProgressEvent,
   OrchestrationReplayEventsError,
@@ -68,6 +75,7 @@ import * as ExternalLauncher from "./process/externalLauncher.ts";
 import { normalizeDispatchCommand } from "./orchestration/Normalizer.ts";
 import * as OrchestrationEngine from "./orchestration/Services/OrchestrationEngine.ts";
 import * as ProjectionSnapshotQuery from "./orchestration/Services/ProjectionSnapshotQuery.ts";
+import { ServerOrchestrationDispatcher } from "./orchestration/Services/ServerOrchestrationDispatcher.ts";
 import {
   observeRpcEffect as instrumentRpcEffect,
   observeRpcStream as instrumentRpcStream,
@@ -76,7 +84,6 @@ import {
 import * as ProviderRegistry from "./provider/Services/ProviderRegistry.ts";
 import * as ProviderMaintenanceRunner from "./provider/providerMaintenanceRunner.ts";
 import * as ServerLifecycleEvents from "./serverLifecycleEvents.ts";
-import * as ServerRuntimeStartup from "./serverRuntimeStartup.ts";
 import * as ServerSettings from "./serverSettings.ts";
 import * as TerminalManager from "./terminal/Manager.ts";
 import * as PreviewAutomationBroker from "./mcp/PreviewAutomationBroker.ts";
@@ -90,7 +97,6 @@ import * as VcsStatusBroadcaster from "./vcs/VcsStatusBroadcaster.ts";
 import * as VcsProvisioningService from "./vcs/VcsProvisioningService.ts";
 import * as GitWorkflowService from "./git/GitWorkflowService.ts";
 import * as ReviewService from "./review/ReviewService.ts";
-import * as ProjectSetupScriptRunner from "./project/ProjectSetupScriptRunner.ts";
 import * as RepositoryIdentityResolver from "./project/RepositoryIdentityResolver.ts";
 import * as ServerEnvironment from "./environment/ServerEnvironment.ts";
 import * as EnvironmentAuth from "./auth/EnvironmentAuth.ts";
@@ -111,26 +117,26 @@ import * as VcsProcess from "./vcs/VcsProcess.ts";
 import * as PairingGrantStore from "./auth/PairingGrantStore.ts";
 import * as SessionStore from "./auth/SessionStore.ts";
 import { failEnvironmentAuthInvalid, failEnvironmentInternal } from "./auth/http.ts";
+import { makeProjectTriggerRunRow } from "./projectTriggers/commands.ts";
+import {
+  ProjectTriggerId,
+  ProjectTriggerRepository,
+} from "./projectTriggers/Services/ProjectTriggerRepository.ts";
+import type {
+  ProjectTriggerRow,
+  ProjectTriggerRunRow,
+} from "./projectTriggers/Services/ProjectTriggerRepository.ts";
+import { ProjectTriggerScheduler } from "./projectTriggers/Services/ProjectTriggerScheduler.ts";
+import { ProjectTriggerService } from "./projectTriggers/Services/ProjectTriggerService.ts";
+import { computeProjectTriggerNextFireAt } from "./projectTriggers/schedule.ts";
 import * as RelayClient from "@t3tools/shared/relayClient";
 const isOrchestrationDispatchCommandError = Schema.is(OrchestrationDispatchCommandError);
+const isProjectTriggerStoreError = Schema.is(ProjectTriggerStoreError);
 
 const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
 
 function unexpectedCompatibilityError(error: never): never {
   throw new Error(`Unhandled compatibility error: ${String(error)}`);
-}
-
-/** Preserve the setup runner's broader pre-refactor message normalization. */
-function legacySetupFailureDescription(cause: unknown): string {
-  if (
-    typeof cause === "object" &&
-    cause !== null &&
-    "message" in cause &&
-    typeof cause.message === "string"
-  ) {
-    return cause.message;
-  }
-  return String(cause);
 }
 
 function projectEntriesFailureContext(error: WorkspaceEntries.WorkspaceEntriesError): {
@@ -237,19 +243,6 @@ function projectFileFailureContext(
   }
 }
 
-function projectSetupScriptCompatibilityDetail(
-  error: ProjectSetupScriptRunner.ProjectSetupScriptRunnerError,
-): string {
-  switch (error._tag) {
-    case "ProjectSetupScriptOperationError":
-      return legacySetupFailureDescription(error.cause);
-    case "ProjectSetupScriptProjectNotFoundError":
-      return "Project was not found for setup script execution.";
-    default:
-      return unexpectedCompatibilityError(error);
-  }
-}
-
 function isThreadDetailEvent(event: OrchestrationEvent): event is Extract<
   OrchestrationEvent,
   {
@@ -343,6 +336,14 @@ const RPC_REQUIRED_SCOPE = new Map<string, AuthEnvironmentScope>([
   [WS_METHODS.subscribeServerConfig, AuthOrchestrationReadScope],
   [WS_METHODS.subscribeServerLifecycle, AuthOrchestrationReadScope],
   [WS_METHODS.subscribeAuthAccess, AuthAccessReadScope],
+  [WS_METHODS.projectTriggersList, AuthOrchestrationReadScope],
+  [WS_METHODS.projectTriggersGet, AuthOrchestrationReadScope],
+  [WS_METHODS.projectTriggersListRuns, AuthOrchestrationReadScope],
+  [WS_METHODS.projectTriggersSubscribe, AuthOrchestrationReadScope],
+  [WS_METHODS.projectTriggersCreate, AuthOrchestrationOperateScope],
+  [WS_METHODS.projectTriggersUpdate, AuthOrchestrationOperateScope],
+  [WS_METHODS.projectTriggersDelete, AuthOrchestrationOperateScope],
+  [WS_METHODS.projectTriggersFire, AuthOrchestrationOperateScope],
 ]);
 
 function toAuthAccessStreamEvent(
@@ -392,6 +393,7 @@ const makeWsRpcLayer = (currentSession: EnvironmentAuth.AuthenticatedSession) =>
       const crypto = yield* Crypto.Crypto;
       const projectionSnapshotQuery = yield* ProjectionSnapshotQuery.ProjectionSnapshotQuery;
       const orchestrationEngine = yield* OrchestrationEngine.OrchestrationEngineService;
+      const orchestrationDispatcher = yield* ServerOrchestrationDispatcher;
       const checkpointDiffQuery = yield* CheckpointDiffQuery.CheckpointDiffQuery;
       const keybindings = yield* Keybindings.Keybindings;
       const externalLauncher = yield* ExternalLauncher.ExternalLauncher;
@@ -408,10 +410,8 @@ const makeWsRpcLayer = (currentSession: EnvironmentAuth.AuthenticatedSession) =>
       const config = yield* ServerConfig.ServerConfig;
       const lifecycleEvents = yield* ServerLifecycleEvents.ServerLifecycleEvents;
       const serverSettings = yield* ServerSettings.ServerSettingsService;
-      const startup = yield* ServerRuntimeStartup.ServerRuntimeStartup;
       const workspaceEntries = yield* WorkspaceEntries.WorkspaceEntries;
       const workspaceFileSystem = yield* WorkspaceFileSystem.WorkspaceFileSystem;
-      const projectSetupScriptRunner = yield* ProjectSetupScriptRunner.ProjectSetupScriptRunner;
       const repositoryIdentityResolver =
         yield* RepositoryIdentityResolver.RepositoryIdentityResolver;
       const serverEnvironment = yield* ServerEnvironment.ServerEnvironment;
@@ -432,6 +432,9 @@ const makeWsRpcLayer = (currentSession: EnvironmentAuth.AuthenticatedSession) =>
       const processDiagnostics = yield* ProcessDiagnostics.ProcessDiagnostics;
       const processResourceMonitor = yield* ProcessResourceMonitor.ProcessResourceMonitor;
       const relayClient = yield* RelayClient.RelayClient;
+      const projectTriggerRepository = yield* ProjectTriggerRepository;
+      const projectTriggerService = yield* ProjectTriggerService;
+      const projectTriggerScheduler = yield* ProjectTriggerScheduler;
       const authorizationError = (requiredScope: AuthEnvironmentScope) =>
         new EnvironmentAuthorizationError({
           message: `The authenticated token is missing required scope: ${requiredScope}.`,
@@ -504,9 +507,206 @@ const makeWsRpcLayer = (currentSession: EnvironmentAuth.AuthenticatedSession) =>
           toDispatchCommandError(cause, "Failed to generate orchestration command identifier."),
         ),
       );
-      const serverEventId = randomUUID.pipe(Effect.map(EventId.make));
-      const serverCommandId = (tag: string) =>
-        randomUUID.pipe(Effect.map((uuid) => CommandId.make(`server:${tag}:${uuid}`)));
+
+      type ProjectTriggerStoreOperation =
+        | "list"
+        | "get"
+        | "create"
+        | "update"
+        | "delete"
+        | "fire"
+        | "listRuns"
+        | "subscribe";
+
+      const makeProjectTriggerStoreError = (
+        operation: ProjectTriggerStoreOperation,
+        message: string,
+        cause?: unknown,
+      ) =>
+        new ProjectTriggerStoreError({
+          operation,
+          message,
+          ...(cause === undefined ? {} : { cause }),
+        });
+
+      const failProjectTriggerStore = (
+        operation: ProjectTriggerStoreOperation,
+        message: string,
+        cause?: unknown,
+      ) => Effect.fail(makeProjectTriggerStoreError(operation, message, cause));
+
+      const defaultProjectTriggerModelSelection = () => ({
+        instanceId: ProviderInstanceId.make("codex"),
+        model: DEFAULT_MODEL,
+      });
+
+      const projectTriggerBootstrapFromTemplate = (input: {
+        readonly projectId: ProjectTriggerRow["projectId"];
+        readonly name: ProjectTriggerRow["name"];
+        readonly modelSelection: ProjectTriggerRow["modelSelection"];
+        readonly runtimeMode: ProjectTriggerRow["runtimeMode"];
+        readonly interactionMode: ProjectTriggerRow["interactionMode"];
+        readonly branch?: ProjectTriggerRecord["threadTemplate"]["branch"];
+        readonly worktreePath?: ProjectTriggerRecord["threadTemplate"]["worktreePath"];
+        readonly createdAt: ProjectTriggerRow["createdAt"];
+      }): ProjectTriggerRow["bootstrap"] => {
+        if (input.branch === undefined && input.worktreePath === undefined) {
+          return null;
+        }
+        return {
+          createThread: {
+            projectId: input.projectId,
+            title: input.name,
+            modelSelection: input.modelSelection,
+            runtimeMode: input.runtimeMode,
+            interactionMode: input.interactionMode,
+            branch: input.branch ?? null,
+            worktreePath: input.worktreePath ?? null,
+            createdAt: input.createdAt,
+          },
+        };
+      };
+
+      const projectTriggerLastRunId = (row: ProjectTriggerRow) =>
+        row.lastFireAt === null
+          ? null
+          : makeProjectTriggerRunRow({
+              trigger: row,
+              fireAt: row.lastFireAt,
+              queuedAt: row.lastFireAt,
+            }).runId;
+
+      const toProjectTriggerRecord = (
+        row: ProjectTriggerRow,
+        operation: ProjectTriggerStoreOperation,
+      ): Effect.Effect<ProjectTriggerRecord, ProjectTriggerStoreError> =>
+        Effect.gen(function* () {
+          if (row.scheduleKind !== "cron" || row.scheduleCron === null) {
+            return yield* failProjectTriggerStore(
+              operation,
+              `Project trigger ${row.triggerId} uses unsupported schedule kind: ${row.scheduleKind}.`,
+            );
+          }
+
+          return {
+            id: row.triggerId,
+            projectId: row.projectId,
+            name: row.name,
+            description: null,
+            enabled: row.enabled,
+            schedule: {
+              kind: "cron",
+              expression: row.scheduleCron,
+              timezone: row.timezone,
+              runtime: "local",
+            },
+            threadTemplate: {
+              prompt: row.prompt,
+              ...(row.titleSeed !== null ? { titleSeed: row.titleSeed } : {}),
+              modelSelection: row.modelSelection,
+              runtimeMode: row.runtimeMode,
+              interactionMode: row.interactionMode,
+              branch: row.bootstrap?.createThread?.branch ?? null,
+              worktreePath: row.bootstrap?.createThread?.worktreePath ?? null,
+            },
+            lastRunId: projectTriggerLastRunId(row),
+            nextRunAt: row.nextFireAt,
+            createdAt: row.createdAt,
+            updatedAt: row.updatedAt,
+          } satisfies ProjectTriggerRecord;
+        });
+
+      const projectTriggerRunStatus = (
+        status: ProjectTriggerRunRow["status"],
+      ): ProjectTriggerRunRecord["status"] => {
+        switch (status) {
+          case "queued":
+            return "queued";
+          case "claimed":
+            return "starting";
+          case "dispatched":
+            return "succeeded";
+          case "failed":
+            return "failed";
+          case "skipped":
+            return "cancelled";
+        }
+      };
+
+      const toProjectTriggerRunRecord = (
+        run: ProjectTriggerRunRow,
+        trigger: ProjectTriggerRow,
+        initiator: ProjectTriggerRunRecord["initiator"],
+      ): ProjectTriggerRunRecord => ({
+        id: run.runId,
+        triggerId: run.triggerId,
+        projectId: trigger.projectId,
+        initiator,
+        status: projectTriggerRunStatus(run.status),
+        threadId: run.threadId,
+        scheduledFor: run.fireAt,
+        startedAt: run.claimedAt ?? run.dispatchedAt,
+        completedAt: run.completedAt,
+        error:
+          run.failureDetail !== null
+            ? { message: run.failureDetail }
+            : run.skipReason !== null
+              ? { message: run.skipReason, code: "skipped" }
+              : null,
+        createdAt: run.queuedAt,
+        updatedAt: run.completedAt ?? run.dispatchedAt ?? run.claimedAt ?? run.queuedAt,
+      });
+
+      const getActiveProjectTriggerRow = (
+        triggerId: ProjectTriggerRow["triggerId"],
+        operation: ProjectTriggerStoreOperation,
+      ) =>
+        projectTriggerRepository.getTriggerById({ triggerId }).pipe(
+          Effect.mapError((cause) =>
+            makeProjectTriggerStoreError(operation, "Failed to load project trigger.", cause),
+          ),
+          Effect.flatMap((row) => {
+            if (Option.isNone(row) || row.value.deletedAt !== null) {
+              return Effect.fail(new ProjectTriggerNotFoundError({ triggerId }));
+            }
+            return Effect.succeed(row.value);
+          }),
+        );
+
+      const saveProjectTriggerFromCreateInput = (
+        input: Parameters<typeof projectTriggerService.saveTrigger>[0],
+      ) =>
+        projectTriggerService
+          .saveTrigger(input)
+          .pipe(
+            Effect.mapError((cause) =>
+              makeProjectTriggerStoreError("create", "Failed to create project trigger.", cause),
+            ),
+          );
+
+      const loadProjectTriggerSnapshot = (projectId: ProjectTriggerRow["projectId"]) =>
+        projectTriggerService.listProjectTriggers({ projectId }).pipe(
+          Effect.mapError((cause) =>
+            makeProjectTriggerStoreError("subscribe", "Failed to load project triggers.", cause),
+          ),
+          Effect.flatMap((rows) =>
+            Effect.forEach(rows, (row) => toProjectTriggerRecord(row, "subscribe"), {
+              concurrency: 4,
+            }),
+          ),
+          Effect.map((triggers) => ({
+            projectId,
+            sequence: 0,
+            emittedAt: "",
+            type: "snapshot" as const,
+            triggers,
+            activeRuns: [],
+          })),
+          Effect.zipWith(nowIso, (event, emittedAt) => ({
+            ...event,
+            emittedAt,
+          })),
+        );
 
       const loadAuthAccessSnapshot = () =>
         Effect.all({
@@ -520,48 +720,6 @@ const makeWsRpcLayer = (currentSession: EnvironmentAuth.AuthenticatedSession) =>
               }),
           ),
         );
-
-      const appendSetupScriptActivity = (input: {
-        readonly threadId: ThreadId;
-        readonly kind: "setup-script.requested" | "setup-script.started" | "setup-script.failed";
-        readonly summary: string;
-        readonly createdAt: string;
-        readonly payload: Record<string, unknown>;
-        readonly tone: "info" | "error";
-      }) =>
-        Effect.all({
-          commandId: serverCommandId("setup-script-activity"),
-          activityId: serverEventId,
-        }).pipe(
-          Effect.flatMap(({ commandId, activityId }) =>
-            orchestrationEngine.dispatch({
-              type: "thread.activity.append",
-              commandId,
-              threadId: input.threadId,
-              activity: {
-                id: activityId,
-                tone: input.tone,
-                kind: input.kind,
-                summary: input.summary,
-                payload: input.payload,
-                turnId: null,
-                createdAt: input.createdAt,
-              },
-              createdAt: input.createdAt,
-            }),
-          ),
-        );
-
-      const toBootstrapDispatchCommandCauseError = (cause: Cause.Cause<unknown>) => {
-        const error = Cause.squash(cause);
-        return isOrchestrationDispatchCommandError(error)
-          ? error
-          : new OrchestrationDispatchCommandError({
-              message:
-                error instanceof Error ? error.message : "Failed to bootstrap thread turn start.",
-              cause,
-            });
-      };
 
       const enrichProjectEvent = (
         event: OrchestrationEvent,
@@ -673,234 +831,16 @@ const makeWsRpcLayer = (currentSession: EnvironmentAuth.AuthenticatedSession) =>
         }
       };
 
-      const dispatchBootstrapTurnStart = (
-        command: Extract<OrchestrationCommand, { type: "thread.turn.start" }>,
-      ): Effect.Effect<{ readonly sequence: number }, OrchestrationDispatchCommandError> =>
-        Effect.gen(function* () {
-          const bootstrap = command.bootstrap;
-          const { bootstrap: _bootstrap, ...finalTurnStartCommand } = command;
-          let createdThread = false;
-          let targetProjectId = bootstrap?.createThread?.projectId;
-          let targetProjectCwd = bootstrap?.prepareWorktree?.projectCwd;
-          let targetWorktreePath = bootstrap?.createThread?.worktreePath ?? null;
-
-          const cleanupCreatedThread = () =>
-            createdThread
-              ? serverCommandId("bootstrap-thread-delete").pipe(
-                  Effect.flatMap((commandId) =>
-                    orchestrationEngine.dispatch({
-                      type: "thread.delete",
-                      commandId,
-                      threadId: command.threadId,
-                    }),
-                  ),
-                  Effect.ignoreCause({ log: true }),
-                )
-              : Effect.void;
-
-          const recordSetupScriptLaunchFailure = (input: {
-            readonly error: ProjectSetupScriptRunner.ProjectSetupScriptRunnerError;
-            readonly requestedAt: string;
-            readonly worktreePath: string;
-          }) => {
-            const detail = projectSetupScriptCompatibilityDetail(input.error);
-            return appendSetupScriptActivity({
-              threadId: command.threadId,
-              kind: "setup-script.failed",
-              summary: "Setup script failed to start",
-              createdAt: input.requestedAt,
-              payload: {
-                detail,
-                worktreePath: input.worktreePath,
-              },
-              tone: "error",
-            }).pipe(
-              Effect.ignoreCause({ log: false }),
-              Effect.flatMap(() =>
-                Effect.logWarning("bootstrap turn start failed to launch setup script", {
-                  threadId: command.threadId,
-                  worktreePath: input.worktreePath,
-                  detail,
-                }),
-              ),
-            );
-          };
-
-          const recordSetupScriptStarted = (input: {
-            readonly requestedAt: string;
-            readonly worktreePath: string;
-            readonly scriptId: string;
-            readonly scriptName: string;
-            readonly terminalId: string;
-          }) =>
-            Effect.gen(function* () {
-              const startedAt = yield* nowIso;
-              const payload = {
-                scriptId: input.scriptId,
-                scriptName: input.scriptName,
-                terminalId: input.terminalId,
-                worktreePath: input.worktreePath,
-              };
-              yield* Effect.all([
-                appendSetupScriptActivity({
-                  threadId: command.threadId,
-                  kind: "setup-script.requested",
-                  summary: "Starting setup script",
-                  createdAt: input.requestedAt,
-                  payload,
-                  tone: "info",
-                }),
-                appendSetupScriptActivity({
-                  threadId: command.threadId,
-                  kind: "setup-script.started",
-                  summary: "Setup script started",
-                  createdAt: startedAt,
-                  payload,
-                  tone: "info",
-                }),
-              ]).pipe(
-                Effect.asVoid,
-                Effect.catch((error) =>
-                  Effect.logWarning(
-                    "bootstrap turn start launched setup script but failed to record setup activity",
-                    {
-                      threadId: command.threadId,
-                      worktreePath: input.worktreePath,
-                      scriptId: input.scriptId,
-                      terminalId: input.terminalId,
-                      detail: error.message,
-                    },
-                  ),
-                ),
-              );
-            });
-
-          const runSetupProgram = () =>
-            Effect.gen(function* () {
-              if (!bootstrap?.runSetupScript || !targetWorktreePath) {
-                return;
-              }
-              const worktreePath = targetWorktreePath;
-              const requestedAt = yield* nowIso;
-              yield* projectSetupScriptRunner
-                .runForThread({
-                  threadId: command.threadId,
-                  ...(targetProjectId ? { projectId: targetProjectId } : {}),
-                  ...(targetProjectCwd ? { projectCwd: targetProjectCwd } : {}),
-                  worktreePath,
-                })
-                .pipe(
-                  Effect.matchEffect({
-                    onFailure: (error) =>
-                      recordSetupScriptLaunchFailure({
-                        error,
-                        requestedAt,
-                        worktreePath,
-                      }),
-                    onSuccess: (setupResult) => {
-                      if (setupResult.status !== "started") {
-                        return Effect.void;
-                      }
-                      return recordSetupScriptStarted({
-                        requestedAt,
-                        worktreePath,
-                        scriptId: setupResult.scriptId,
-                        scriptName: setupResult.scriptName,
-                        terminalId: setupResult.terminalId,
-                      });
-                    },
-                  }),
-                );
-            });
-
-          const bootstrapProgram = Effect.gen(function* () {
-            if (bootstrap?.createThread) {
-              yield* orchestrationEngine.dispatch({
-                type: "thread.create",
-                commandId: yield* serverCommandId("bootstrap-thread-create"),
-                threadId: command.threadId,
-                projectId: bootstrap.createThread.projectId,
-                title: bootstrap.createThread.title,
-                modelSelection: bootstrap.createThread.modelSelection,
-                runtimeMode: bootstrap.createThread.runtimeMode,
-                interactionMode: bootstrap.createThread.interactionMode,
-                branch: bootstrap.createThread.branch,
-                worktreePath: bootstrap.createThread.worktreePath,
-                createdAt: bootstrap.createThread.createdAt,
-              });
-              createdThread = true;
-            }
-
-            if (bootstrap?.prepareWorktree) {
-              let worktreeBaseRef = bootstrap.prepareWorktree.baseBranch;
-              if (bootstrap.prepareWorktree.startFromOrigin) {
-                yield* gitWorkflow.fetchRemote({
-                  cwd: bootstrap.prepareWorktree.projectCwd,
-                  remoteName: "origin",
-                });
-                const resolvedRemoteBase = yield* gitWorkflow.resolveRemoteTrackingCommit({
-                  cwd: bootstrap.prepareWorktree.projectCwd,
-                  refName: bootstrap.prepareWorktree.baseBranch,
-                  fallbackRemoteName: "origin",
-                });
-                worktreeBaseRef = resolvedRemoteBase.commitSha;
-              }
-              const worktree = yield* gitWorkflow.createWorktree({
-                cwd: bootstrap.prepareWorktree.projectCwd,
-                refName: worktreeBaseRef,
-                newRefName: bootstrap.prepareWorktree.branch,
-                baseRefName: bootstrap.prepareWorktree.baseBranch,
-                path: null,
-              });
-              targetWorktreePath = worktree.worktree.path;
-              yield* orchestrationEngine.dispatch({
-                type: "thread.meta.update",
-                commandId: yield* serverCommandId("bootstrap-thread-meta-update"),
-                threadId: command.threadId,
-                branch: worktree.worktree.refName,
-                worktreePath: targetWorktreePath,
-              });
-              yield* refreshGitStatus(targetWorktreePath);
-            }
-
-            yield* runSetupProgram();
-
-            return yield* orchestrationEngine.dispatch(finalTurnStartCommand);
-          });
-
-          return yield* bootstrapProgram.pipe(
-            Effect.catchCause((cause) => {
-              const dispatchError = toBootstrapDispatchCommandCauseError(cause);
-              if (Cause.hasInterruptsOnly(cause)) {
-                return Effect.fail(dispatchError);
-              }
-              return cleanupCreatedThread().pipe(Effect.flatMap(() => Effect.fail(dispatchError)));
-            }),
-          );
-        });
-
       const dispatchNormalizedCommand = (
         normalizedCommand: OrchestrationCommand,
-      ): Effect.Effect<{ readonly sequence: number }, OrchestrationDispatchCommandError> => {
-        const dispatchEffect =
-          normalizedCommand.type === "thread.turn.start" && normalizedCommand.bootstrap
-            ? dispatchBootstrapTurnStart(normalizedCommand)
-            : orchestrationEngine
-                .dispatch(normalizedCommand)
-                .pipe(
-                  Effect.mapError((cause) =>
-                    toDispatchCommandError(cause, "Failed to dispatch orchestration command"),
-                  ),
-                );
-
-        return startup
-          .enqueueCommand(dispatchEffect)
+      ): Effect.Effect<{ readonly sequence: number }, OrchestrationDispatchCommandError> =>
+        orchestrationDispatcher
+          .dispatch(normalizedCommand)
           .pipe(
             Effect.mapError((cause) =>
               toDispatchCommandError(cause, "Failed to dispatch orchestration command"),
             ),
           );
-      };
 
       const loadServerConfig = Effect.gen(function* () {
         const keybindingsConfig = yield* keybindings.loadConfigState;
@@ -1171,6 +1111,285 @@ const makeWsRpcLayer = (currentSession: EnvironmentAuth.AuthenticatedSession) =>
           observeRpcEffect(WS_METHODS.serverGetConfig, loadServerConfig, {
             "rpc.aggregate": "server",
           }),
+        [WS_METHODS.projectTriggersList]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.projectTriggersList,
+            projectTriggerService.listProjectTriggers(input).pipe(
+              Effect.mapError((cause) =>
+                makeProjectTriggerStoreError("list", "Failed to list project triggers.", cause),
+              ),
+              Effect.flatMap((rows) =>
+                Effect.forEach(rows, (row) => toProjectTriggerRecord(row, "list"), {
+                  concurrency: 4,
+                }),
+              ),
+              Effect.map((triggers) => ({ triggers })),
+            ),
+            { "rpc.aggregate": "projectTriggers" },
+          ),
+        [WS_METHODS.projectTriggersGet]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.projectTriggersGet,
+            getActiveProjectTriggerRow(input.triggerId, "get").pipe(
+              Effect.flatMap((row) => toProjectTriggerRecord(row, "get")),
+              Effect.map((trigger) => ({ trigger })),
+            ),
+            { "rpc.aggregate": "projectTriggers" },
+          ),
+        [WS_METHODS.projectTriggersCreate]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.projectTriggersCreate,
+            Effect.gen(function* () {
+              const createdAt = yield* nowIso;
+              const modelSelection =
+                input.threadTemplate.modelSelection ?? defaultProjectTriggerModelSelection();
+              const runtimeMode = input.threadTemplate.runtimeMode ?? "full-access";
+              const interactionMode =
+                input.threadTemplate.interactionMode ?? DEFAULT_PROVIDER_INTERACTION_MODE;
+              const triggerId = ProjectTriggerId.make(yield* randomUUID);
+              const row = yield* saveProjectTriggerFromCreateInput({
+                triggerId,
+                projectId: input.projectId,
+                name: input.name,
+                enabled: input.enabled ?? true,
+                scheduleKind: "cron",
+                scheduleCron: input.schedule.expression,
+                scheduleOnceAt: null,
+                timezone: input.schedule.timezone ?? "UTC",
+                prompt: input.threadTemplate.prompt,
+                attachments: [],
+                modelSelection,
+                runtimeMode,
+                interactionMode,
+                dispatchPolicy: null,
+                titleSeed: input.threadTemplate.titleSeed ?? null,
+                bootstrap: projectTriggerBootstrapFromTemplate({
+                  projectId: input.projectId,
+                  name: input.name,
+                  modelSelection,
+                  runtimeMode,
+                  interactionMode,
+                  branch: input.threadTemplate.branch,
+                  worktreePath: input.threadTemplate.worktreePath,
+                  createdAt,
+                }),
+                createdAt,
+                updatedAt: createdAt,
+              });
+              const trigger = yield* toProjectTriggerRecord(row, "create");
+              return { trigger };
+            }).pipe(
+              Effect.mapError((cause) =>
+                isProjectTriggerStoreError(cause)
+                  ? cause
+                  : makeProjectTriggerStoreError(
+                      "create",
+                      "Failed to create project trigger.",
+                      cause,
+                    ),
+              ),
+            ),
+            { "rpc.aggregate": "projectTriggers" },
+          ),
+        [WS_METHODS.projectTriggersUpdate]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.projectTriggersUpdate,
+            Effect.gen(function* () {
+              const existing = yield* getActiveProjectTriggerRow(input.triggerId, "update");
+              const updatedAt = yield* nowIso;
+              const nextName = input.patch.name ?? existing.name;
+              const nextScheduleKind = input.patch.schedule ? "cron" : existing.scheduleKind;
+              const nextScheduleCron = input.patch.schedule
+                ? input.patch.schedule.expression
+                : existing.scheduleCron;
+              const nextTimezone = input.patch.schedule?.timezone ?? existing.timezone;
+              const nextTemplate = input.patch.threadTemplate;
+              const nextModelSelection = nextTemplate?.modelSelection ?? existing.modelSelection;
+              const nextRuntimeMode = nextTemplate?.runtimeMode ?? existing.runtimeMode;
+              const nextInteractionMode = nextTemplate?.interactionMode ?? existing.interactionMode;
+
+              const rowWithoutNextFire: ProjectTriggerRow = {
+                ...existing,
+                name: nextName,
+                enabled: input.patch.enabled ?? existing.enabled,
+                scheduleKind: nextScheduleKind,
+                scheduleCron: nextScheduleCron,
+                scheduleOnceAt: input.patch.schedule ? null : existing.scheduleOnceAt,
+                timezone: nextTimezone,
+                prompt: nextTemplate?.prompt ?? existing.prompt,
+                modelSelection: nextModelSelection,
+                runtimeMode: nextRuntimeMode,
+                interactionMode: nextInteractionMode,
+                titleSeed:
+                  nextTemplate !== undefined
+                    ? (nextTemplate.titleSeed ?? null)
+                    : existing.titleSeed,
+                bootstrap:
+                  nextTemplate !== undefined
+                    ? projectTriggerBootstrapFromTemplate({
+                        projectId: existing.projectId,
+                        name: nextName,
+                        modelSelection: nextModelSelection,
+                        runtimeMode: nextRuntimeMode,
+                        interactionMode: nextInteractionMode,
+                        branch: nextTemplate.branch,
+                        worktreePath: nextTemplate.worktreePath,
+                        createdAt: updatedAt,
+                      })
+                    : existing.bootstrap,
+                updatedAt,
+                nextFireAt: null,
+                scheduleClaimedAt: null,
+                scheduleClaimExpiresAt: null,
+                failureDetail: null,
+              };
+              const nextFireAt = rowWithoutNextFire.enabled
+                ? yield* computeProjectTriggerNextFireAt(
+                    rowWithoutNextFire,
+                    updatedAt,
+                    "initialize",
+                  ).pipe(
+                    Effect.mapError((cause) =>
+                      makeProjectTriggerStoreError(
+                        "update",
+                        "Failed to compute next project trigger fire time.",
+                        cause,
+                      ),
+                    ),
+                  )
+                : null;
+              const row: ProjectTriggerRow = {
+                ...rowWithoutNextFire,
+                nextFireAt,
+              };
+
+              yield* projectTriggerRepository
+                .upsertTrigger(row)
+                .pipe(
+                  Effect.mapError((cause) =>
+                    makeProjectTriggerStoreError(
+                      "update",
+                      "Failed to update project trigger.",
+                      cause,
+                    ),
+                  ),
+                );
+              const trigger = yield* toProjectTriggerRecord(row, "update");
+              return { trigger };
+            }),
+            { "rpc.aggregate": "projectTriggers" },
+          ),
+        [WS_METHODS.projectTriggersDelete]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.projectTriggersDelete,
+            Effect.gen(function* () {
+              const existing = yield* getActiveProjectTriggerRow(input.triggerId, "delete");
+              const deletedAt = yield* nowIso;
+              const deleted = yield* projectTriggerService
+                .deleteTrigger({
+                  triggerId: input.triggerId,
+                  deletedAt,
+                })
+                .pipe(
+                  Effect.mapError((cause) =>
+                    makeProjectTriggerStoreError(
+                      "delete",
+                      "Failed to delete project trigger.",
+                      cause,
+                    ),
+                  ),
+                );
+              if (!deleted) {
+                return yield* new ProjectTriggerNotFoundError({ triggerId: input.triggerId });
+              }
+              return {
+                projectId: existing.projectId,
+                triggerId: input.triggerId,
+                deletedAt,
+              };
+            }),
+            { "rpc.aggregate": "projectTriggers" },
+          ),
+        [WS_METHODS.projectTriggersFire]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.projectTriggersFire,
+            Effect.gen(function* () {
+              const trigger = yield* getActiveProjectTriggerRow(input.triggerId, "fire");
+              const fireAt = yield* nowIso;
+              const run = makeProjectTriggerRunRow({
+                trigger,
+                fireAt,
+                queuedAt: fireAt,
+              });
+
+              const inserted = yield* projectTriggerRepository.insertRun(run).pipe(
+                Effect.mapError(
+                  (cause) =>
+                    new ProjectTriggerFireError({
+                      triggerId: input.triggerId,
+                      message: "Failed to queue project trigger run.",
+                      cause,
+                    }),
+                ),
+              );
+              if (!inserted) {
+                return yield* new ProjectTriggerFireError({
+                  triggerId: input.triggerId,
+                  message: "A project trigger run already exists for this fire time.",
+                });
+              }
+
+              yield* projectTriggerScheduler.tick.pipe(
+                Effect.ignoreCause({ log: true }),
+                Effect.forkDetach,
+              );
+
+              return {
+                run: toProjectTriggerRunRecord(run, trigger, "manual"),
+                threadId: run.threadId,
+              };
+            }),
+            { "rpc.aggregate": "projectTriggers" },
+          ),
+        [WS_METHODS.projectTriggersListRuns]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.projectTriggersListRuns,
+            Effect.gen(function* () {
+              const trigger = yield* getActiveProjectTriggerRow(input.triggerId, "listRuns");
+              const runs = yield* projectTriggerRepository
+                .listRunsByTriggerId({
+                  triggerId: input.triggerId,
+                  limit: input.limit ?? 50,
+                })
+                .pipe(
+                  Effect.mapError((cause) =>
+                    makeProjectTriggerStoreError(
+                      "listRuns",
+                      "Failed to list project trigger runs.",
+                      cause,
+                    ),
+                  ),
+                );
+              return {
+                runs: runs.map((run) =>
+                  toProjectTriggerRunRecord(
+                    run,
+                    trigger,
+                    run.fireAt === run.queuedAt ? "manual" : "cron",
+                  ),
+                ),
+              };
+            }),
+            { "rpc.aggregate": "projectTriggers" },
+          ),
+        [WS_METHODS.projectTriggersSubscribe]: (input) =>
+          observeRpcStreamEffect(
+            WS_METHODS.projectTriggersSubscribe,
+            Effect.map(loadProjectTriggerSnapshot(input.projectId), (snapshot) =>
+              Stream.make(snapshot satisfies ProjectTriggerStreamEvent),
+            ),
+            { "rpc.aggregate": "projectTriggers" },
+          ),
         [WS_METHODS.serverRefreshProviders]: (input) =>
           observeRpcEffect(
             WS_METHODS.serverRefreshProviders,
