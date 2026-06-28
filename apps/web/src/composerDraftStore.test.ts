@@ -65,6 +65,7 @@ import {
   markPromotedDraftThreadByRef,
   markPromotedDraftThreads,
   markPromotedDraftThreadsByRef,
+  type ComposerAttachment,
   type ComposerImageAttachment,
   useComposerDraftStore,
   DraftId,
@@ -101,6 +102,56 @@ function makeImage(input: {
     sizeBytes: file.size,
     previewUrl: input.previewUrl,
     file,
+  };
+}
+
+function makeVideo(input: {
+  id: string;
+  previewUrl: string;
+  name?: string;
+  mimeType?: string;
+  sizeBytes?: number;
+  lastModified?: number;
+}): ComposerAttachment {
+  const name = input.name ?? "clip.mp4";
+  const mimeType = input.mimeType ?? "video/mp4";
+  const sizeBytes = input.sizeBytes ?? 4;
+  const lastModified = input.lastModified ?? 1_700_000_000_000;
+  const file = new File([new Uint8Array(sizeBytes).fill(1)], name, {
+    type: mimeType,
+    lastModified,
+  });
+  return {
+    type: "video",
+    id: input.id,
+    name,
+    mimeType,
+    sizeBytes: file.size,
+    previewUrl: input.previewUrl,
+    file,
+  };
+}
+
+function makeUnsupportedAttachment(input: {
+  id: string;
+  name?: string;
+  mimeType?: string;
+  sizeBytes?: number;
+  reason?: string;
+}): ComposerAttachment {
+  const name = input.name ?? "notes.pdf";
+  const mimeType = input.mimeType ?? "application/pdf";
+  const sizeBytes = input.sizeBytes ?? 4;
+  const file = new File([new Uint8Array(sizeBytes).fill(1)], name, { type: mimeType });
+  return {
+    type: "file",
+    id: input.id,
+    name,
+    mimeType,
+    sizeBytes: file.size,
+    file,
+    status: "unsupported",
+    unsupportedReason: input.reason ?? "Unsupported file type.",
   };
 }
 
@@ -254,6 +305,51 @@ describe("composerDraftStore addImages", () => {
     const draft = draftFor(threadId, TEST_ENVIRONMENT_ID);
     expect(draft?.images.map((image) => image.id)).toEqual(["img-shared"]);
     expect(revokeSpy).not.toHaveBeenCalledWith("blob:shared");
+  });
+});
+
+describe("composerDraftStore addAttachments", () => {
+  const threadId = ThreadId.make("thread-attachments");
+  const threadRef = scopeThreadRef(TEST_ENVIRONMENT_ID, threadId);
+  let originalRevokeObjectUrl: typeof URL.revokeObjectURL;
+  let revokeSpy: ReturnType<typeof vi.fn<(url: string) => void>>;
+
+  beforeEach(() => {
+    resetComposerDraftStore();
+    originalRevokeObjectUrl = URL.revokeObjectURL;
+    revokeSpy = vi.fn();
+    URL.revokeObjectURL = revokeSpy;
+  });
+
+  afterEach(() => {
+    URL.revokeObjectURL = originalRevokeObjectUrl;
+  });
+
+  it("stores mixed composer attachments while preserving image compatibility", () => {
+    const image = makeImage({ id: "img-1", previewUrl: "blob:image" });
+    const video = makeVideo({ id: "video-1", previewUrl: "blob:video" });
+    const unsupported = makeUnsupportedAttachment({ id: "file-1" });
+
+    useComposerDraftStore.getState().addAttachments(threadRef, [image, video, unsupported]);
+
+    const draft = draftFor(threadId, TEST_ENVIRONMENT_ID);
+    expect(draft?.attachments.map((attachment) => attachment.id)).toEqual([
+      "img-1",
+      "video-1",
+      "file-1",
+    ]);
+    expect(draft?.images.map((attachment) => attachment.id)).toEqual(["img-1"]);
+    expect(draft?.nonPersistedAttachmentIds).toEqual(["video-1", "file-1"]);
+  });
+
+  it("removes videos and revokes their preview object URL", () => {
+    const video = makeVideo({ id: "video-remove", previewUrl: "blob:video-remove" });
+    useComposerDraftStore.getState().addAttachment(threadRef, video);
+
+    useComposerDraftStore.getState().removeAttachment(threadRef, video.id);
+
+    expect(draftFor(threadId, TEST_ENVIRONMENT_ID)).toBeUndefined();
+    expect(revokeSpy).toHaveBeenCalledWith("blob:video-remove");
   });
 });
 

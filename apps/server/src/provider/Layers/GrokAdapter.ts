@@ -719,6 +719,9 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
                 input.attachments ?? [],
                 (attachment) =>
                   Effect.gen(function* () {
+                    if (attachment.type !== "image" && attachment.type !== "gif") {
+                      return null;
+                    }
                     const attachmentPath = resolveAttachmentPath({
                       attachmentsDir: serverConfig.attachmentsDir,
                       attachment,
@@ -748,9 +751,12 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
                     } satisfies EffectAcpSchema.ContentBlock;
                   }),
               );
+              const supportedImagePromptParts = imagePromptParts.filter(
+                (part): part is Exclude<(typeof imagePromptParts)[number], null> => part !== null,
+              );
               const promptParts: Array<EffectAcpSchema.ContentBlock> = [
                 ...(text ? [{ type: "text" as const, text }] : []),
-                ...imagePromptParts,
+                ...supportedImagePromptParts,
               ];
 
               if (promptParts.length === 0) {

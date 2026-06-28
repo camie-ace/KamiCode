@@ -103,6 +103,26 @@ function withContentSecurityPolicy(response: Response, policy: string): Response
   });
 }
 
+const PROXY_STRIPPED_REQUEST_HEADERS = [
+  "connection",
+  "host",
+  "keep-alive",
+  "proxy-authenticate",
+  "proxy-authorization",
+  "te",
+  "trailer",
+  "transfer-encoding",
+  "upgrade",
+] as const;
+
+function makeProxiedRequestHeaders(headers: Headers): Headers {
+  const forwarded = new Headers(headers);
+  for (const header of PROXY_STRIPPED_REQUEST_HEADERS) {
+    forwarded.delete(header);
+  }
+  return forwarded;
+}
+
 async function proxyRequest(
   request: Request,
   targetOrigin: URL,
@@ -116,7 +136,7 @@ async function proxyRequest(
   const targetUrl = new URL(`${requestUrl.pathname}${requestUrl.search}`, targetOrigin);
   const init: RequestInit = {
     method: request.method,
-    headers: request.headers,
+    headers: makeProxiedRequestHeaders(request.headers),
   };
   if (request.method !== "GET" && request.method !== "HEAD") {
     init.body = request.body;

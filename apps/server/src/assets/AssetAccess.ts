@@ -14,10 +14,10 @@ import {
   AssetWorkspaceRootNormalizationError,
 } from "@t3tools/contracts";
 import {
-  isWorkspaceImagePreviewPath,
+  isWorkspaceExactFilePreviewPath,
   isWorkspacePreviewEntryPath,
   WORKSPACE_BROWSER_PREVIEW_EXTENSIONS,
-  WORKSPACE_IMAGE_PREVIEW_EXTENSIONS,
+  WORKSPACE_EXACT_FILE_PREVIEW_EXTENSIONS,
 } from "@t3tools/shared/filePreview";
 import * as Clock from "effect/Clock";
 import * as Effect from "effect/Effect";
@@ -46,7 +46,7 @@ const SIGNING_SECRET_NAME = "asset-access-signing-key";
 const ASSET_TOKEN_TTL_MS = 60 * 60 * 1000;
 const PREVIEW_ASSET_EXTENSIONS = new Set([
   ...WORKSPACE_BROWSER_PREVIEW_EXTENSIONS,
-  ...WORKSPACE_IMAGE_PREVIEW_EXTENSIONS,
+  ...WORKSPACE_EXACT_FILE_PREVIEW_EXTENSIONS,
   ".css",
   ".js",
   ".mjs",
@@ -236,7 +236,7 @@ export const issueAssetUrl = Effect.fn("AssetAccess.issueAssetUrl")(function* (i
             }),
         ),
       );
-      claims = isWorkspaceImagePreviewPath(resolved.relativePath)
+      claims = isWorkspaceExactFilePreviewPath(resolved.relativePath)
         ? {
             version: 1,
             kind: "workspace-file-exact",

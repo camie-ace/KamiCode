@@ -58,6 +58,20 @@ describe("hostedPairing", () => {
     expect(url.searchParams.has("next")).toBe(false);
   });
 
+  it("builds hosted dev channel selection URLs", () => {
+    vi.stubEnv("VITE_HOSTED_APP_URL", "https://app.t3.codes");
+
+    const url = new URL(
+      buildHostedChannelSelectionUrl({
+        channel: "dev",
+      }),
+    );
+
+    expect(url.origin).toBe("https://app.t3.codes");
+    expect(url.pathname).toBe("/__t3code/channel");
+    expect(url.searchParams.get("channel")).toBe("dev");
+  });
+
   it("ignores incomplete hosted pairing requests", () => {
     expect(
       hasHostedPairingRequest(new URL("https://app.t3.codes/pair?host=backend.example.com")),
@@ -82,13 +96,13 @@ describe("hostedPairing", () => {
 
   it("detects hosted channel aliases as static apps", () => {
     vi.stubEnv("VITE_HOSTED_APP_URL", "https://app.t3.codes");
-    vi.stubEnv("VITE_HOSTED_APP_CHANNEL", "nightly");
+    vi.stubEnv("VITE_HOSTED_APP_CHANNEL", "dev");
     vi.stubEnv("VITE_HTTP_URL", "");
     vi.stubEnv("VITE_WS_URL", "");
 
-    expect(isHostedStaticApp(new URL("https://nightly.app.t3.codes/"))).toBe(true);
+    expect(isHostedStaticApp(new URL("https://dev.app.t3.codes/"))).toBe(true);
 
     vi.stubEnv("VITE_HTTP_URL", "https://backend.example.com");
-    expect(isHostedStaticApp(new URL("https://nightly.app.t3.codes/"))).toBe(false);
+    expect(isHostedStaticApp(new URL("https://dev.app.t3.codes/"))).toBe(false);
   });
 });

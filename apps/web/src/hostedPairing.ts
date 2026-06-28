@@ -8,7 +8,7 @@ export interface HostedPairingRequest {
   readonly label: string;
 }
 
-export type HostedAppChannel = "latest" | "nightly";
+export type HostedAppChannel = "latest" | "dev" | "nightly";
 
 export function configuredHostedAppUrl(): string {
   return import.meta.env.VITE_HOSTED_APP_URL?.trim() || DEFAULT_HOSTED_APP_URL;
@@ -20,7 +20,7 @@ function configuredBackendUrl(): string {
 
 function configuredHostedAppChannel(): HostedAppChannel | null {
   const channel = import.meta.env.VITE_HOSTED_APP_CHANNEL?.trim().toLowerCase();
-  return channel === "latest" || channel === "nightly" ? channel : null;
+  return channel === "latest" || channel === "dev" || channel === "nightly" ? channel : null;
 }
 
 function originFromUrl(value: string): string | null {

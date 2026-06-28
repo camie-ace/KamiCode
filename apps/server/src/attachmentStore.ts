@@ -1,4 +1,5 @@
 // @effect-diagnostics nodeBuiltinImport:off
+import Mime from "@effect/platform-node/Mime";
 import * as NodeCrypto from "node:crypto";
 import * as NodeFS from "node:fs";
 
@@ -10,7 +11,29 @@ import {
 } from "./attachmentPaths.ts";
 import { inferImageExtension, SAFE_IMAGE_FILE_EXTENSIONS } from "./imageMime.ts";
 
-const ATTACHMENT_FILENAME_EXTENSIONS = [...SAFE_IMAGE_FILE_EXTENSIONS, ".bin"];
+const VIDEO_EXTENSION_BY_MIME_TYPE: Record<string, string> = {
+  "video/mp4": ".mp4",
+  "video/ogg": ".ogv",
+  "video/quicktime": ".mov",
+  "video/webm": ".webm",
+  "video/x-m4v": ".m4v",
+};
+const SAFE_VIDEO_FILE_EXTENSIONS = new Set([".m4v", ".mov", ".mp4", ".ogv", ".webm"]);
+const SAFE_GENERIC_FILE_EXTENSIONS = new Set([
+  ".bin",
+  ".csv",
+  ".json",
+  ".log",
+  ".md",
+  ".pdf",
+  ".txt",
+  ".xml",
+]);
+const ATTACHMENT_FILENAME_EXTENSIONS = [
+  ...SAFE_IMAGE_FILE_EXTENSIONS,
+  ...SAFE_VIDEO_FILE_EXTENSIONS,
+  ...SAFE_GENERIC_FILE_EXTENSIONS,
+];
 const ATTACHMENT_ID_THREAD_SEGMENT_MAX_CHARS = 80;
 const ATTACHMENT_ID_THREAD_SEGMENT_PATTERN = "[a-z0-9_]+(?:-[a-z0-9_]+)*";
 const ATTACHMENT_ID_UUID_PATTERN = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
@@ -54,10 +77,67 @@ export function parseThreadSegmentFromAttachmentId(attachmentId: string): string
   return match[1]?.toLowerCase() ?? null;
 }
 
+function extensionFromFileName(fileName: string | undefined): string {
+  const extensionMatch = /\.([a-z0-9]{1,8})$/i.exec(fileName?.trim() ?? "");
+  return extensionMatch ? `.${extensionMatch[1]!.toLowerCase()}` : "";
+}
+
+function inferVideoExtension(input: { mimeType: string; fileName?: string }): string {
+  const key = input.mimeType.toLowerCase();
+  const fromMime = Object.hasOwn(VIDEO_EXTENSION_BY_MIME_TYPE, key)
+    ? VIDEO_EXTENSION_BY_MIME_TYPE[key]
+    : undefined;
+  if (fromMime) {
+    return fromMime;
+  }
+
+  const fromMimeExtension = Mime.getExtension(input.mimeType);
+  if (fromMimeExtension && SAFE_VIDEO_FILE_EXTENSIONS.has(fromMimeExtension)) {
+    return fromMimeExtension;
+  }
+
+  const fileNameExtension = extensionFromFileName(input.fileName);
+  if (SAFE_VIDEO_FILE_EXTENSIONS.has(fileNameExtension)) {
+    return fileNameExtension;
+  }
+
+  return ".bin";
+}
+
+function inferGenericFileExtension(input: { mimeType: string; fileName?: string }): string {
+  const fromMimeExtension = Mime.getExtension(input.mimeType);
+  if (fromMimeExtension && SAFE_GENERIC_FILE_EXTENSIONS.has(fromMimeExtension)) {
+    return fromMimeExtension;
+  }
+
+  const fileNameExtension = extensionFromFileName(input.fileName);
+  if (SAFE_GENERIC_FILE_EXTENSIONS.has(fileNameExtension)) {
+    return fileNameExtension;
+  }
+
+  return ".bin";
+}
+
 export function attachmentRelativePath(attachment: ChatAttachment): string {
   switch (attachment.type) {
     case "image": {
       const extension = inferImageExtension({
+        mimeType: attachment.mimeType,
+        fileName: attachment.name,
+      });
+      return `${attachment.id}${extension}`;
+    }
+    case "gif":
+      return `${attachment.id}.gif`;
+    case "video": {
+      const extension = inferVideoExtension({
+        mimeType: attachment.mimeType,
+        fileName: attachment.name,
+      });
+      return `${attachment.id}${extension}`;
+    }
+    case "file": {
+      const extension = inferGenericFileExtension({
         mimeType: attachment.mimeType,
         fileName: attachment.name,
       });

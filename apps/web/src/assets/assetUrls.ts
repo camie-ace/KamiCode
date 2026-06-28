@@ -9,6 +9,11 @@ import { usePreparedConnection } from "~/state/session";
 
 export { resolveAssetUrl } from "@t3tools/client-runtime/state/assets";
 
+const FALLBACK_ASSET_RESOURCE: AssetResource = {
+  _tag: "project-favicon",
+  cwd: ".",
+};
+
 export function useAssetUrl(environmentId: EnvironmentId, resource: AssetResource): string | null {
   const preparedConnection = usePreparedConnection(environmentId);
   const result = useAtomValue(
@@ -21,6 +26,14 @@ export function useAssetUrl(environmentId: EnvironmentId, resource: AssetResourc
     return null;
   }
   return resolveAssetUrl(preparedConnection.value.httpBaseUrl, result.value.relativeUrl);
+}
+
+export function useOptionalAssetUrl(
+  environmentId: EnvironmentId,
+  resource: AssetResource | null,
+): string | null {
+  const resolved = useAssetUrl(environmentId, resource ?? FALLBACK_ASSET_RESOURCE);
+  return resource ? resolved : null;
 }
 
 export function useAssetUrls(

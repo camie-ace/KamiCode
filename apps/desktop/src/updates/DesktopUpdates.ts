@@ -326,8 +326,8 @@ export const make = Effect.gen(function* () {
     channel: DesktopUpdateChannel,
   ) {
     yield* Effect.annotateCurrentSpan({ channel });
-    const allowsPrerelease = channel === "nightly";
-    const allowDowngrade = false;
+    const allowsPrerelease = channel !== "latest";
+    const allowDowngrade = channel === "dev";
     yield* electronUpdater.setChannel(channel);
     yield* electronUpdater.setAllowPrerelease(allowsPrerelease);
     yield* electronUpdater.setAllowDowngrade(allowDowngrade);

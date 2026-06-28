@@ -38,6 +38,7 @@ import {
   getLocalEnvironmentBootstrap,
   openExternal,
   pickFolder,
+  revealLocalMediaFile,
   setTheme,
   showContextMenu,
 } from "./methods/window.ts";
@@ -77,6 +78,7 @@ export const installDesktopIpcHandlers = Effect.fn("desktop.ipc.installHandlers"
   yield* ipc.handle(setTheme);
   yield* ipc.handle(showContextMenu);
   yield* ipc.handle(openExternal);
+  yield* ipc.handle(revealLocalMediaFile);
   yield* ipc.handle(getUpdateState);
   yield* ipc.handle(setUpdateChannel);
   yield* ipc.handle(downloadUpdate);

@@ -228,12 +228,13 @@ export const recordThreadWorkflow: (input: RecordThreadWorkflowInput) => Command
   "EnvironmentCommands.recordThreadWorkflow",
 )(function* (input) {
   const metadata = yield* timestampedCommandMetadata(input);
-  return yield* dispatch({
+  const command = {
     ...input,
     type: "thread.workflow.record",
     commandId: metadata.commandId,
     createdAt: metadata.createdAt,
-  });
+  } as ClientOrchestrationCommand;
+  return yield* dispatch(command);
 });
 
 export const interruptThreadTurn: (input: InterruptThreadTurnInput) => CommandEffect = Effect.fn(

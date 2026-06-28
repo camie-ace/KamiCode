@@ -3,6 +3,9 @@ import {
   type OrchestrationCommand,
   type OrchestrationEvent,
   type OrchestrationReadModel,
+  type OrchestrationThread,
+  type WorkflowPlannedPayload,
+  type WorkflowSubAgentPlan,
 } from "@t3tools/contracts";
 import { DEFAULT_TURN_DISPATCH_POLICY } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
@@ -60,19 +63,158 @@ type DecideOrchestrationCommandResult =
   | PlannedOrchestrationEvent
   | ReadonlyArray<PlannedOrchestrationEvent>;
 
-function inferWorkflowInitialLanes(text: string): ReadonlyArray<string> {
+type InferredWorkflowAgentDraft = {
+  readonly role: string;
+  readonly goal: string;
+  readonly prompt: string;
+  readonly startsAfterRoles: ReadonlyArray<string>;
+  readonly model?: string;
+  readonly reasoningEffort?: string;
+  readonly fastMode?: boolean;
+};
+
+const DEFAULT_WORKFLOW_AGENT_MODEL = "Use lead default";
+const DEFAULT_WORKFLOW_AGENT_REASONING_EFFORT = "Use lead default";
+const DEFAULT_WORKFLOW_AGENT_FAST_MODE = false;
+
+function workflowAgentId(role: string, index: number): string {
+  return `workflow-agent-${index + 1}-${role.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
+}
+
+function finalizeWorkflowSubAgents(
+  drafts: ReadonlyArray<InferredWorkflowAgentDraft>,
+): ReadonlyArray<WorkflowSubAgentPlan> {
+  const roleToId = new Map(
+    drafts.map((draft, index) => [draft.role, workflowAgentId(draft.role, index)]),
+  );
+  return drafts.map((draft, index) => ({
+    id: workflowAgentId(draft.role, index),
+    role: draft.role,
+    goal: draft.goal,
+    prompt: draft.prompt,
+    model: draft.model ?? DEFAULT_WORKFLOW_AGENT_MODEL,
+    reasoningEffort: draft.reasoningEffort ?? DEFAULT_WORKFLOW_AGENT_REASONING_EFFORT,
+    fastMode: draft.fastMode ?? DEFAULT_WORKFLOW_AGENT_FAST_MODE,
+    startsAfter: draft.startsAfterRoles.flatMap((role) => {
+      const dependencyId = roleToId.get(role);
+      return dependencyId ? [dependencyId] : [];
+    }),
+  }));
+}
+
+function inferWorkflowSubAgents(text: string): ReadonlyArray<WorkflowSubAgentPlan> {
   const lower = text.toLowerCase();
-  const lanes = ["Lead", "Planner", "Builder", "Verifier"];
+  const agents: InferredWorkflowAgentDraft[] = [];
+  const pushAgent = (agent: InferredWorkflowAgentDraft) => {
+    if (agents.some((entry) => entry.role.toLowerCase() === agent.role.toLowerCase())) {
+      return;
+    }
+    agents.push(agent);
+  };
+
+  pushAgent({
+    role: "Planner",
+    goal: "Turn the user goal into an executable workflow plan and acceptance criteria.",
+    prompt:
+      "Interpret the user objective, define the workflow shape, write concrete acceptance criteria, and clarify sequencing. Do not implement yet.",
+    startsAfterRoles: [],
+    reasoningEffort: "high",
+  });
+
+  if (/\b(research|inspect|explore|compare|investigate|analyze)\b/.test(lower)) {
+    pushAgent({
+      role: "Researcher",
+      goal: "Gather the relevant codebase and product context before implementation decisions.",
+      prompt:
+        "Inspect the codebase, docs, and relevant references. Return concise findings, risks, and recommendations to the Lead.",
+      startsAfterRoles: ["Planner"],
+      reasoningEffort: "high",
+    });
+  }
+
+  if (/\b(ui|ux|frontend|client|react|css|layout|design|responsive)\b/.test(lower)) {
+    pushAgent({
+      role: "UI Builder",
+      goal: "Implement the user-facing interface and interaction changes.",
+      prompt:
+        "Build the required UI or UX changes, preserve consistency with the existing product, and prepare a handoff with changed files and known risks.",
+      startsAfterRoles: agents.some((entry) => entry.role === "Researcher")
+        ? ["Researcher"]
+        : ["Planner"],
+      fastMode: false,
+    });
+  }
+
+  if (/\b(api|backend|server|route|database|db|schema|migration|storage|auth)\b/.test(lower)) {
+    pushAgent({
+      role: "Backend Builder",
+      goal: "Implement the server, API, or data-layer changes needed for the workflow.",
+      prompt:
+        "Implement the required backend or data-layer work, preserve predictable behavior, and prepare a handoff with changed files, tests, and known risks.",
+      startsAfterRoles: agents.some((entry) => entry.role === "Researcher")
+        ? ["Researcher"]
+        : ["Planner"],
+      fastMode: false,
+    });
+  }
+
+  if (!agents.some((entry) => /\bbuilder\b/i.test(entry.role))) {
+    pushAgent({
+      role: "Builder",
+      goal: "Implement the approved scope.",
+      prompt:
+        "Implement the approved scope, preserve predictable behavior, and prepare a handoff with changed files and risks.",
+      startsAfterRoles: agents.some((entry) => entry.role === "Researcher")
+        ? ["Researcher"]
+        : ["Planner"],
+      fastMode: false,
+    });
+  }
+
   if (/\b(doc|document|readme|notes?|memory)\b/.test(lower)) {
-    lanes.push("Documenter");
+    pushAgent({
+      role: "Documenter",
+      goal: "Update durable documentation or project notes where the workflow outcome requires it.",
+      prompt:
+        "Update durable notes or documentation only where the workflow outcome requires it, then hand the changes back to the Lead.",
+      startsAfterRoles: agents
+        .filter((entry) => /\bbuilder\b/i.test(entry.role))
+        .map((entry) => entry.role),
+    });
   }
-  if (/\b(research|inspect|explore|compare|investigate)\b/.test(lower)) {
-    lanes.splice(2, 0, "Researcher");
-  }
+
   if (/\b(red[- ]?team|critic|critique|risk|security|review)\b/.test(lower)) {
-    lanes.push("Critic");
+    pushAgent({
+      role: "Critic",
+      goal: "Review the plan and result for hidden risks, weak assumptions, and safety concerns.",
+      prompt:
+        "Review the workflow plan and outputs for hidden risks, weak assumptions, and safety concerns. Raise explicit objections or alternatives to the Lead.",
+      startsAfterRoles: agents
+        .filter((entry) => /\bbuilder\b/i.test(entry.role))
+        .map((entry) => entry.role),
+      reasoningEffort: "high",
+    });
   }
-  return [...new Set(lanes)];
+
+  pushAgent({
+    role: "Verifier",
+    goal: "Verify the implementation, capture evidence, and block false completion.",
+    prompt:
+      "Run the agreed checks, capture pass/fail evidence, and route blocking fixes back to the Lead.",
+    startsAfterRoles: agents
+      .filter((entry) => /\bbuilder\b/i.test(entry.role))
+      .map((entry) => entry.role),
+    reasoningEffort: "high",
+    fastMode: false,
+  });
+
+  return finalizeWorkflowSubAgents(agents);
+}
+
+function inferWorkflowInitialLanes(
+  subAgents: ReadonlyArray<WorkflowSubAgentPlan>,
+): ReadonlyArray<string> {
+  return ["Lead", ...subAgents.map((agent) => agent.role)];
 }
 
 function inferWorkflowPattern(text: string): string {
@@ -98,6 +240,100 @@ function workflowAcceptanceCriteria(text: string): ReadonlyArray<string> {
     criteria.push("User-facing docs or durable notes are updated when needed.");
   }
   return criteria;
+}
+
+function inferWorkflowPlannedPayload(text: string): WorkflowPlannedPayload {
+  const subAgents = inferWorkflowSubAgents(text);
+  return {
+    goal: text.trim() || "Workflow",
+    launchStatus: "planned",
+    workflowPattern: inferWorkflowPattern(text),
+    initialLanes: inferWorkflowInitialLanes(subAgents),
+    subAgents,
+    acceptanceCriteria: workflowAcceptanceCriteria(text),
+    requireVerifierApproval: true,
+    addRedTeamCritique: /\b(red[- ]?team|critic|critique|risk|security|review)\b/i.test(text),
+    requireTestsBeforeFinal: /\b(test|verify|browser|preview|url)\b/i.test(text),
+    showMemoryAuditNotes: true,
+    exploreParallelApproaches: /\b(compare|alternatives|options|approaches)\b/i.test(text),
+    stopAfterPlanningForApproval: /\b(plan only|planning only|approval)\b/i.test(text),
+  };
+}
+
+const WORKFLOW_RUNTIME_ACTIVITY_KINDS = new Set<string>([
+  "workflow.started",
+  "workflow.lane.guidance",
+  "workflow.lane.stopped",
+  "workflow.lane.control",
+  "workflow.lane.started",
+  "workflow.lane.completed",
+  "workflow.lane.blocked",
+  "workflow.control",
+  "workflow.handoff",
+  "workflow.evidence",
+  "workflow.verifier.result",
+  "workflow.objection",
+  "workflow.route-back",
+  "workflow.lead.synthesis",
+  "workflow.memory.update",
+  "workflow.blocked",
+  "workflow.completed",
+  "workflow.stopped",
+]);
+
+function normalizedWorkflowPrompt(text: string): string {
+  return text.trim().replace(/\s+/g, " ").toLowerCase();
+}
+
+function threadHasWorkflowPlanOrCustomization(thread: OrchestrationThread): boolean {
+  return thread.activities.some(
+    (activity) => activity.kind === "workflow.planned" || activity.kind === "workflow.customized",
+  );
+}
+
+function threadHasWorkflowRuntimeActivity(thread: OrchestrationThread): boolean {
+  return thread.activities.some((activity) => WORKFLOW_RUNTIME_ACTIVITY_KINDS.has(activity.kind));
+}
+
+function isWorkflowRecordedFollowUpPrompt(text: string): boolean {
+  const prompt = normalizedWorkflowPrompt(text);
+  return /^workflow customization updated\b/.test(prompt);
+}
+
+function isWorkflowRuntimeControlPrompt(text: string): boolean {
+  const prompt = normalizedWorkflowPrompt(text);
+  return (
+    /^start\s+(?:the\s+)?(?:approved\s+)?workflow\b/.test(prompt) ||
+    /^launch\s+(?:the\s+)?(?:approved\s+)?workflow\b/.test(prompt) ||
+    /^launch\s+only\s+the\s+planned\s+sub-agents\b/.test(prompt) ||
+    /^workflow guidance for\b/.test(prompt) ||
+    /\bre-trigger\s+(?:this\s+)?(?:sub-agent\s+)?lane\b/.test(prompt) ||
+    /^stop\s+the\s+.+\s+workflow lane\b/.test(prompt) ||
+    /^(?:pause|replace|freeze|collapse)\s+the\s+.+\b(?:workflow|lane)\b/.test(prompt) ||
+    /^continue\s+(?:the\s+)?workflow\s+manually\b/.test(prompt) ||
+    /^continue manually\b/.test(prompt) ||
+    /^apply workflow control\b/.test(prompt)
+  );
+}
+
+function shouldAppendWorkflowPlannedActivity({
+  thread,
+  messageText,
+}: {
+  readonly thread: OrchestrationThread;
+  readonly messageText: string;
+}): boolean {
+  if (
+    threadHasWorkflowRuntimeActivity(thread) ||
+    isWorkflowRecordedFollowUpPrompt(messageText) ||
+    isWorkflowRuntimeControlPrompt(messageText)
+  ) {
+    return false;
+  }
+  if (!threadHasWorkflowPlanOrCustomization(thread)) {
+    return true;
+  }
+  return false;
 }
 
 const decideCommandSequence = Effect.fn("decideCommandSequence")(function* ({
@@ -541,13 +777,22 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       if (command.interactionMode !== "workflow") {
         return [userMessageEvent, turnStartRequestedEvent];
       }
+      if (
+        !shouldAppendWorkflowPlannedActivity({
+          thread: targetThread,
+          messageText: command.message.text,
+        })
+      ) {
+        return [userMessageEvent, turnStartRequestedEvent];
+      }
 
       const activityId = yield* Crypto.Crypto.pipe(
         Effect.flatMap((crypto) => crypto.randomUUIDv4),
         Effect.map(EventId.make),
       );
       const workflowGoal = command.message.text.trim() || command.titleSeed || "Workflow";
-      const workflowStartedEvent: Omit<OrchestrationEvent, "sequence"> = {
+      const plannedWorkflow = inferWorkflowPlannedPayload(workflowGoal);
+      const workflowPlannedEvent: Omit<OrchestrationEvent, "sequence"> = {
         ...(yield* withEventBase({
           aggregateKind: "thread",
           aggregateId: command.threadId,
@@ -561,32 +806,15 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           activity: {
             id: activityId,
             tone: "info",
-            kind: "workflow.started",
-            summary: "Workflow started",
-            payload: {
-              goal: workflowGoal,
-              workflowPattern: inferWorkflowPattern(workflowGoal),
-              initialLanes: inferWorkflowInitialLanes(workflowGoal),
-              acceptanceCriteria: workflowAcceptanceCriteria(workflowGoal),
-              requireVerifierApproval: true,
-              addRedTeamCritique: /\b(red[- ]?team|critic|critique|risk|security|review)\b/i.test(
-                workflowGoal,
-              ),
-              requireTestsBeforeFinal: /\b(test|verify|browser|preview|url)\b/i.test(workflowGoal),
-              showMemoryAuditNotes: true,
-              exploreParallelApproaches: /\b(compare|alternatives|options|approaches)\b/i.test(
-                workflowGoal,
-              ),
-              stopAfterPlanningForApproval: /\b(plan only|planning only|approval)\b/i.test(
-                workflowGoal,
-              ),
-            },
+            kind: "workflow.planned",
+            summary: "Workflow plan drafted",
+            payload: plannedWorkflow,
             turnId: null,
             createdAt: command.createdAt,
           },
         },
       };
-      return [userMessageEvent, turnStartRequestedEvent, workflowStartedEvent];
+      return [userMessageEvent, turnStartRequestedEvent, workflowPlannedEvent];
     }
 
     case "thread.turn.interrupt": {

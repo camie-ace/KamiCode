@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Release version, for example 0.1.0"
+        description: "Release version, for example 0.1.0, 0.1.1-dev.20260627.1, or 0.1.1-nightly.20260627.1"
         required: true
         type: string
 
@@ -54,11 +54,25 @@ jobs:
             throw "Invalid release version: $raw"
           }
 
-          $prerelease = if ($version -match '[.-](alpha|beta|rc|nightly|preview|test)\b') { "true" } else { "false" }
+          if ($version -match '-dev\.\d{8}\.\d+$') {
+            $channel = "dev"
+          } elseif ($version -match '-nightly\.\d{8}\.\d+$') {
+            $channel = "nightly"
+          } else {
+            $channel = "stable"
+          }
+
+          $prerelease = if ($channel -eq "stable" -and $version -notmatch '[.-](alpha|beta|rc|dev|nightly|preview|test)\b') { "false" } else { "true" }
+          $releaseName = switch ($channel) {
+            "dev" { "KamiCode Dev v$version" }
+            "nightly" { "KamiCode Nightly v$version" }
+            default { "KamiCode v$version" }
+          }
 
           "version=$version" >> $env:GITHUB_OUTPUT
           "tag=v$version" >> $env:GITHUB_OUTPUT
-          "release_name=KamiCode v$version" >> $env:GITHUB_OUTPUT
+          "channel=$channel" >> $env:GITHUB_OUTPUT
+          "release_name=$releaseName" >> $env:GITHUB_OUTPUT
           "prerelease=$prerelease" >> $env:GITHUB_OUTPUT
 
       - name: Align package versions

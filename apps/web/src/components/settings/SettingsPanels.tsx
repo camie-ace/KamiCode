@@ -154,6 +154,12 @@ function ProviderLastChecked({ lastCheckedAt }: { lastCheckedAt: string | null }
   );
 }
 
+const DESKTOP_UPDATE_CHANNEL_LABELS = {
+  latest: "Stable",
+  dev: "Dev",
+  nightly: "Nightly",
+} as const satisfies Record<DesktopUpdateChannel, string>;
+
 function AboutVersionTitle() {
   return (
     <span className="inline-flex items-center gap-2">
@@ -311,7 +317,7 @@ function AboutVersionSection() {
       {hasDesktopBridge ? (
         <SettingsRow
           title="Update track"
-          description="Stable follows full releases. Nightly follows the nightly desktop channel and can switch back to stable immediately."
+          description="Stable follows full releases. Dev follows dev prereleases. Nightly follows the nightly desktop channel."
           control={
             <Select
               value={selectedUpdateChannel}
@@ -324,13 +330,14 @@ function AboutVersionSection() {
                 aria-label="Update track"
                 disabled={isChangingUpdateChannel}
               >
-                <SelectValue>
-                  {selectedUpdateChannel === "nightly" ? "Nightly" : "Stable"}
-                </SelectValue>
+                <SelectValue>{DESKTOP_UPDATE_CHANNEL_LABELS[selectedUpdateChannel]}</SelectValue>
               </SelectTrigger>
               <SelectPopup align="end" alignItemWithTrigger={false}>
                 <SelectItem hideIndicator value="latest">
                   Stable
+                </SelectItem>
+                <SelectItem hideIndicator value="dev">
+                  Dev
                 </SelectItem>
                 <SelectItem hideIndicator value="nightly">
                   Nightly
@@ -359,6 +366,9 @@ function AboutVersionSection() {
               <SelectPopup align="end" alignItemWithTrigger={false}>
                 <SelectItem hideIndicator value="latest">
                   Latest
+                </SelectItem>
+                <SelectItem hideIndicator value="dev">
+                  Dev
                 </SelectItem>
                 <SelectItem hideIndicator value="nightly">
                   Nightly

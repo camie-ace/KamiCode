@@ -109,6 +109,27 @@ describe("LocalApi", () => {
     expect(setClientSettings).toHaveBeenCalledWith(DEFAULT_CLIENT_SETTINGS);
   });
 
+  it("delegates local media reveal to the desktop bridge when available", async () => {
+    const revealLocalMediaFile = vi.fn().mockResolvedValue(true);
+    testWindow().desktopBridge = {
+      revealLocalMediaFile,
+    } as unknown as DesktopBridge;
+
+    const { createLocalApi } = await import("./localApi");
+    const input = { path: "/tmp/project/media/hero.png" };
+
+    await expect(createLocalApi().shell.revealLocalMediaFile(input)).resolves.toBe(true);
+    expect(revealLocalMediaFile).toHaveBeenCalledWith(input);
+  });
+
+  it("reports local media reveal as unavailable without a desktop bridge", async () => {
+    const { createLocalApi } = await import("./localApi");
+
+    await expect(
+      createLocalApi().shell.revealLocalMediaFile({ path: "/tmp/project/media/hero.png" }),
+    ).resolves.toBe(false);
+  });
+
   it("persists client settings in browser storage", async () => {
     const { createLocalApi } = await import("./localApi");
     const api = createLocalApi();

@@ -58,6 +58,22 @@ vi.mock("@pierre/diffs/react", () => {
   return { FileDiff: MockFileDiff };
 });
 
+vi.mock("./LocalMediaSearchResults", () => ({
+  LocalMediaSearchResults: (props: {
+    resultSet: {
+      scope: { label: string };
+      results: ReadonlyArray<{ title: string }>;
+    };
+  }) => (
+    <section data-testid="local-media-search-results">
+      <p>{props.resultSet.scope.label}</p>
+      {props.resultSet.results.map((result) => (
+        <p key={result.title}>{result.title}</p>
+      ))}
+    </section>
+  ),
+}));
+
 function matchMedia() {
   return {
     matches: false,
@@ -141,6 +157,23 @@ function buildUserTimelineEntry(text: string) {
     message: {
       id: MessageId.make("message-1"),
       role: "user" as const,
+      text,
+      turnId: null,
+      createdAt: MESSAGE_CREATED_AT,
+      updatedAt: MESSAGE_CREATED_AT,
+      streaming: false,
+    },
+  };
+}
+
+function buildAssistantTimelineEntry(text: string) {
+  return {
+    id: "entry-assistant",
+    kind: "message" as const,
+    createdAt: MESSAGE_CREATED_AT,
+    message: {
+      id: MessageId.make("message-assistant"),
+      role: "assistant" as const,
       text,
       turnId: null,
       createdAt: MESSAGE_CREATED_AT,
@@ -307,6 +340,47 @@ describe("MessagesTimeline", () => {
 
     expect(markup).toContain("Context compacted");
     expect(markup).toContain("Work Log");
+  });
+
+  it("renders local media search result sets instead of raw payloads", async () => {
+    const { MessagesTimeline } = await import("./MessagesTimeline");
+    const payload = {
+      kind: "local-media-search-results",
+      query: "hero",
+      scope: {
+        kind: "explicit-broad-pc",
+        label: "Broad PC search",
+        broadPc: true,
+        rootHints: [String.raw`C:\Users\camie\Pictures`],
+      },
+      results: [
+        {
+          path: String.raw`C:\Users\camie\Pictures\hero.png`,
+          score: 90,
+          modifiedAt: "2026-06-25T10:00:00.000Z",
+        },
+      ],
+    };
+    const markup = renderToStaticMarkup(
+      <MessagesTimeline
+        {...buildProps()}
+        timelineEntries={[
+          buildAssistantTimelineEntry(
+            ["Found candidates.", "", "```json", JSON.stringify(payload, null, 2), "```"].join(
+              "\n",
+            ),
+          ),
+        ]}
+      />,
+    );
+
+    expect(markup).toContain('data-testid="local-media-search-results"');
+    expect(markup).toContain("Broad PC search");
+    expect(markup).toContain("hero.png");
+    expect(markup).toContain("Found candidates.");
+    expect(markup).not.toContain("&quot;kind&quot;");
+    expect(markup).not.toContain("&quot;path&quot;");
+    expect(markup).not.toContain(String.raw`C:\Users\camie\Pictures\hero.png`);
   });
 
   it("formats changed file paths from the workspace root", async () => {

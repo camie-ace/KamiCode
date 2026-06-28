@@ -27,6 +27,7 @@ import {
   resolveDesktopRuntimeDependencies,
   resolveFffNativeDependencies,
   resolveBuildOptions,
+  resolveDesktopArtifactName,
   resolveDesktopBuildIconAssets,
   resolveDesktopProductName,
   resolveDesktopUpdateChannel,
@@ -77,21 +78,33 @@ function iconResizeSpawnerLayer(
 }
 
 it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
-  it("resolves the dedicated nightly updater channel from nightly versions", () => {
+  it("resolves dedicated updater channels from prerelease versions", () => {
+    assert.equal(resolveDesktopUpdateChannel("0.0.17-dev.20260413.42"), "dev");
     assert.equal(resolveDesktopUpdateChannel("0.0.17-nightly.20260413.42"), "nightly");
     assert.equal(resolveDesktopUpdateChannel("0.0.17"), "latest");
   });
 
-  it("switches desktop packaging product names to nightly for nightly builds", () => {
+  it("switches desktop packaging product names for prerelease builds", () => {
     assert.equal(resolveDesktopProductName("0.0.17"), "KamiCode (Alpha)");
+    assert.equal(resolveDesktopProductName("0.0.17-dev.20260413.42"), "KamiCode (Dev)");
     assert.equal(resolveDesktopProductName("0.0.17-nightly.20260413.42"), "KamiCode (Nightly)");
   });
 
-  it("switches desktop packaging icons to the nightly artwork for nightly versions", () => {
+  it("uses KamiCode desktop artifact names", () => {
+    assert.equal(resolveDesktopArtifactName(), "KamiCode-${version}-${arch}.${ext}");
+  });
+
+  it("switches desktop packaging icons for prerelease versions", () => {
     assert.deepStrictEqual(resolveDesktopBuildIconAssets("0.0.17"), {
       macIconPng: BRAND_ASSET_PATHS.productionMacIconPng,
       linuxIconPng: BRAND_ASSET_PATHS.productionLinuxIconPng,
       windowsIconIco: BRAND_ASSET_PATHS.productionWindowsIconIco,
+    });
+
+    assert.deepStrictEqual(resolveDesktopBuildIconAssets("0.0.17-dev.20260413.42"), {
+      macIconPng: BRAND_ASSET_PATHS.developmentDesktopIconPng,
+      linuxIconPng: BRAND_ASSET_PATHS.developmentDesktopIconPng,
+      windowsIconIco: BRAND_ASSET_PATHS.developmentWindowsIconIco,
     });
 
     assert.deepStrictEqual(resolveDesktopBuildIconAssets("0.0.17-nightly.20260413.42"), {
@@ -125,6 +138,17 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
           ),
         ),
       );
+      const devConfig = yield* resolveGitHubPublishConfig("dev").pipe(
+        Effect.provide(
+          ConfigProvider.layer(
+            ConfigProvider.fromEnv({
+              env: {
+                GITHUB_REPOSITORY: "pingdotgg/t3code",
+              },
+            }),
+          ),
+        ),
+      );
 
       assert.deepStrictEqual(latestConfig, {
         provider: "github",
@@ -138,6 +162,13 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
         repo: "t3code",
         releaseType: "prerelease",
         channel: "nightly",
+      });
+      assert.deepStrictEqual(devConfig, {
+        provider: "github",
+        owner: "pingdotgg",
+        repo: "t3code",
+        releaseType: "prerelease",
+        channel: "dev",
       });
     }),
   );
@@ -392,6 +423,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
 
       const mac = config.mac as Record<string, unknown>;
       assert.equal(config.appId, "tech.camie.kamicode");
+      assert.equal(config.artifactName, "KamiCode-${version}-${arch}.${ext}");
       assert.equal(mac.entitlements, "/tmp/entitlements.mac.plist");
       assert.equal(mac.provisioningProfile, "/tmp/t3code.provisionprofile");
       assert.deepStrictEqual(mac.protocols, [
@@ -414,7 +446,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
       const win = config.win as Record<string, unknown>;
 
       assert.equal(config.appId, "tech.camie.kamicode");
-      assert.equal(config.artifactName, "KamiCode-Setup-${arch}.${ext}");
+      assert.equal(config.artifactName, "KamiCode-${version}-${arch}.${ext}");
       assert.equal(win.signAndEditExecutable, false);
     }).pipe(Effect.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env: {} })))),
   );

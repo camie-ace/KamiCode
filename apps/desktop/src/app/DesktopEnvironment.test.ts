@@ -140,6 +140,22 @@ describe("DesktopEnvironment", () => {
     }),
   );
 
+  it.effect("labels packaged dev releases and defaults them to the dev update channel", () =>
+    Effect.gen(function* () {
+      const environment = yield* makeEnvironment({
+        isPackaged: true,
+        appVersion: "0.0.22-dev.20260627.1",
+      });
+
+      assert.deepEqual(environment.branding, {
+        baseName: "KamiCode",
+        stageLabel: "Dev",
+        displayName: "KamiCode (Dev)",
+      });
+      assert.equal(environment.defaultDesktopSettings.updateChannel, "dev");
+    }),
+  );
+
   it.effect("uses a configured app user model id override", () =>
     Effect.gen(function* () {
       const environment = yield* makeEnvironment(

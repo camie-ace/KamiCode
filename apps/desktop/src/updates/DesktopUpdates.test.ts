@@ -37,9 +37,9 @@ const flushCallbacks = Effect.yieldNow;
 
 function makeHarness(options: UpdatesHarnessOptions = {}) {
   let checkCount = 0;
-  let allowDowngrade = false;
-  let allowPrerelease = false;
   let channel = "latest";
+  let allowPrerelease = false;
+  let allowDowngrade = false;
   const feedUrls: ElectronUpdater.ElectronUpdaterFeedUrl[] = [];
   const listeners = new Map<string, Set<(...args: readonly unknown[]) => void>>();
   const sentStates: DesktopUpdateState[] = [];
@@ -184,9 +184,9 @@ function makeHarness(options: UpdatesHarnessOptions = {}) {
   return {
     layer,
     checkCount: () => checkCount,
-    allowDowngrade: () => allowDowngrade,
-    allowPrerelease: () => allowPrerelease,
     channel: () => channel,
+    allowPrerelease: () => allowPrerelease,
+    allowDowngrade: () => allowDowngrade,
     feedUrls: () => feedUrls,
     listenerCount: () =>
       Array.from(listeners.values()).reduce(
@@ -470,11 +470,14 @@ describe("DesktopUpdates", () => {
         const updates = yield* DesktopUpdates.DesktopUpdates;
         yield* updates.configure;
 
-        const state = yield* updates.setChannel("nightly");
+        const state = yield* updates.setChannel("dev");
         const persistedSettings = yield* settings.get;
 
-        assert.equal(state.channel, "nightly");
-        assert.equal(persistedSettings.updateChannel, "nightly");
+        assert.equal(state.channel, "dev");
+        assert.equal(harness.channel(), "dev");
+        assert.isTrue(harness.allowPrerelease());
+        assert.isTrue(harness.allowDowngrade());
+        assert.equal(persistedSettings.updateChannel, "dev");
         assert.equal(persistedSettings.updateChannelConfiguredByUser, true);
       }),
     ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));

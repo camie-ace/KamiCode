@@ -37,6 +37,12 @@ function createBrowserLocalApi(): LocalApi {
 
         window.open(url, "_blank", "noopener,noreferrer");
       },
+      revealLocalMediaFile: async (input) => {
+        if (!window.desktopBridge?.revealLocalMediaFile) {
+          return false;
+        }
+        return window.desktopBridge.revealLocalMediaFile(input);
+      },
     },
     contextMenu: {
       show: async <T extends string>(
