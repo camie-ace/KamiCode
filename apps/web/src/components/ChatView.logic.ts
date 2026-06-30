@@ -3,6 +3,7 @@ import {
   isProviderDriverKind,
   ProjectId,
   type ModelSelection,
+  type OrchestrationQueuedTurn,
   type ProviderDriverKind,
   type ServerProvider,
   type ScopedThreadRef,
@@ -275,6 +276,12 @@ export function threadHasStarted(thread: Thread | null | undefined): boolean {
   return Boolean(
     thread && (thread.latestTurn !== null || thread.messages.length > 0 || thread.session !== null),
   );
+}
+
+export function isPendingQueuedTurn(
+  turn: OrchestrationQueuedTurn,
+): turn is OrchestrationQueuedTurn & { readonly status: "queued" } {
+  return turn.status === "queued";
 }
 
 // `threadProvider` is the open branded driver kind carried by the session.
