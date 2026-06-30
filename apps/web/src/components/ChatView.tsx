@@ -235,6 +235,7 @@ import {
   deriveComposerSendState,
   hasServerAcknowledgedLocalDispatch,
   getStartedThreadModelChangeBlockReason,
+  isPendingQueuedTurn,
   LAST_INVOKED_SCRIPT_BY_PROJECT_KEY,
   LastInvokedScriptByProjectSchema,
   type LocalDispatchSnapshot,
@@ -2713,9 +2714,13 @@ function ChatViewContent(props: ChatViewProps) {
       ),
     [activeThread?.queuedTurns],
   );
+  const pendingQueuedTurns = useMemo(
+    () => activeQueuedTurns.filter(isPendingQueuedTurn),
+    [activeQueuedTurns],
+  );
   const activeQueuedMessageIds = useMemo(() => {
     const ids = new Set<MessageId>();
-    for (const turn of activeQueuedTurns) {
+    for (const turn of pendingQueuedTurns) {
       ids.add(turn.messageId);
     }
     for (const message of optimisticQueuedMessages) {
@@ -2737,11 +2742,11 @@ function ChatViewContent(props: ChatViewProps) {
     }
     return ids;
   }, [
-    activeQueuedTurns,
     activeThread,
     environmentId,
     locallyCancelledQueuedMessageIds,
     optimisticQueuedMessages,
+    pendingQueuedTurns,
     displayServerMessages,
   ]);
   const timelineMessages = useMemo(() => {
@@ -2805,7 +2810,7 @@ function ChatViewContent(props: ChatViewProps) {
   ]);
   const queuedMessageItems = useMemo<ReadonlyArray<QueuedMessageItem>>(() => {
     const messagesById = new Map(displayServerMessages.map((message) => [message.id, message]));
-    const serverItems = activeQueuedTurns.flatMap((turn): QueuedMessageItem[] => {
+    const serverItems = pendingQueuedTurns.flatMap((turn): QueuedMessageItem[] => {
       if (
         activeThread &&
         pendingQueuedMessageDeleteKeys.has(
@@ -2845,11 +2850,11 @@ function ChatViewContent(props: ChatViewProps) {
       left.createdAt.localeCompare(right.createdAt),
     );
   }, [
-    activeQueuedTurns,
     activeThread,
     environmentId,
     locallyCancelledQueuedMessageIds,
     optimisticQueuedMessages,
+    pendingQueuedTurns,
     displayServerMessages,
   ]);
   const timelineEntries = useMemo(

@@ -1,4 +1,12 @@
-import { EnvironmentId, ProjectId, ProviderInstanceId, ThreadId, TurnId } from "@t3tools/contracts";
+import {
+  EnvironmentId,
+  MessageId,
+  type OrchestrationQueuedTurn,
+  ProjectId,
+  ProviderInstanceId,
+  ThreadId,
+  TurnId,
+} from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import type { Thread } from "../types";
@@ -10,6 +18,7 @@ import {
   deriveComposerSendState,
   getStartedThreadModelChangeBlockReason,
   hasServerAcknowledgedLocalDispatch,
+  isPendingQueuedTurn,
   reconcileMountedTerminalThreadIds,
   reconcileRetainedMountedThreadIds,
   resolveMediaFollowUpReferences,
@@ -229,6 +238,28 @@ describe("resolveSendEnvMode", () => {
   it("keeps worktree mode only for git repositories", () => {
     expect(resolveSendEnvMode({ requestedEnvMode: "worktree", isGitRepo: true })).toBe("worktree");
     expect(resolveSendEnvMode({ requestedEnvMode: "worktree", isGitRepo: false })).toBe("local");
+  });
+});
+
+describe("isPendingQueuedTurn", () => {
+  const makeQueuedTurn = (status: OrchestrationQueuedTurn["status"]): OrchestrationQueuedTurn => ({
+    queueId: `queue:${status}`,
+    threadId,
+    messageId: MessageId.make(`message-${status}`),
+    status,
+    requestedAt: now,
+    startedAt: status === "queued" ? null : "2026-03-29T00:00:01.000Z",
+    completedAt: null,
+    turnId: status === "dispatching" ? TurnId.make("turn-dispatching") : null,
+    failureDetail: null,
+  });
+
+  it("keeps only not-yet-dispatched turns in the pending queue UI set", () => {
+    expect(
+      [makeQueuedTurn("queued"), makeQueuedTurn("dispatching")]
+        .filter(isPendingQueuedTurn)
+        .map((turn) => turn.status),
+    ).toEqual(["queued"]);
   });
 });
 
