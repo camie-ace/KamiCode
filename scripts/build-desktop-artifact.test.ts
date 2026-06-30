@@ -432,7 +432,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
     }).pipe(Effect.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env: {} })))),
   );
 
-  it.effect("uses KamiCode artifact metadata for unsigned Windows builds", () =>
+  it.effect("keeps executable resource editing enabled for unsigned Windows builds", () =>
     Effect.gen(function* () {
       const config = yield* createBuildConfig(
         "win",
@@ -447,7 +447,8 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
 
       assert.equal(config.appId, "tech.camie.kamicode");
       assert.equal(config.artifactName, "KamiCode-${version}-${arch}.${ext}");
-      assert.equal(win.signAndEditExecutable, false);
+      assert.equal(win.icon, "icon.ico");
+      assert.notProperty(win, "signAndEditExecutable");
     }).pipe(Effect.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env: {} })))),
   );
 
