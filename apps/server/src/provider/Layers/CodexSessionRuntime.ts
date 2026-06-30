@@ -50,6 +50,12 @@ import {
   isKamiTestHarnessDynamicToolCall,
   runBrowserHarnessDynamicTool,
 } from "../../testing/browserHarnessDynamicTool.ts";
+import {
+  PROJECT_TRIGGER_DYNAMIC_TOOL_SPECS,
+  formatProjectTriggerDynamicToolUnavailable,
+  isProjectTriggerDynamicToolCall,
+  type ProjectTriggerDynamicToolRunner,
+} from "../../projectTriggers/dynamicTools.ts";
 const decodeV2TurnStartResponse = Schema.decodeUnknownEffect(EffectCodexSchema.V2TurnStartResponse);
 const decodeV2ThreadStartResponse = Schema.decodeUnknownEffect(
   EffectCodexSchema.V2ThreadStartResponse,
@@ -122,10 +128,12 @@ export interface CodexSessionRuntimeOptions {
   readonly cwd: string;
   readonly stateDir?: string;
   readonly runtimeMode: RuntimeMode;
+  readonly interactionMode?: ProviderInteractionMode | undefined;
   readonly model?: string;
   readonly serviceTier?: CodexServiceTier | undefined;
   readonly resumeCursor?: CodexResumeCursor;
   readonly issueTestHarnessPairingCredential?: (() => Effect.Effect<string, string>) | undefined;
+  readonly projectTriggerDynamicToolRunner?: ProjectTriggerDynamicToolRunner | undefined;
   readonly appServerArgs?: ReadonlyArray<string>;
 }
 
@@ -309,15 +317,20 @@ function runtimeModeToThreadConfig(input: RuntimeMode): {
 export function buildThreadStartParams(input: {
   readonly cwd: string;
   readonly runtimeMode: RuntimeMode;
+  readonly interactionMode?: ProviderInteractionMode | undefined;
   readonly model: string | undefined;
   readonly serviceTier: CodexServiceTier | undefined;
 }): CodexThreadStartParamsWithDynamicTools {
   const config = runtimeModeToThreadConfig(input.runtimeMode);
+  const dynamicTools =
+    input.interactionMode === "trigger"
+      ? [KAMI_TEST_HARNESS_DYNAMIC_TOOL_SPEC, ...PROJECT_TRIGGER_DYNAMIC_TOOL_SPECS]
+      : [KAMI_TEST_HARNESS_DYNAMIC_TOOL_SPEC];
   return {
     cwd: input.cwd,
     approvalPolicy: config.approvalPolicy,
     sandbox: config.sandbox,
-    dynamicTools: [KAMI_TEST_HARNESS_DYNAMIC_TOOL_SPEC],
+    dynamicTools,
     ...(input.model ? { model: input.model } : {}),
     ...(input.serviceTier ? { serviceTier: input.serviceTier } : {}),
   };
@@ -565,6 +578,7 @@ export const openCodexThread = (input: {
   readonly client: CodexThreadOpenClient;
   readonly threadId: ThreadId;
   readonly runtimeMode: RuntimeMode;
+  readonly interactionMode?: ProviderInteractionMode | undefined;
   readonly cwd: string;
   readonly requestedModel: string | undefined;
   readonly serviceTier: CodexServiceTier | undefined;
@@ -574,6 +588,7 @@ export const openCodexThread = (input: {
   const startParams = buildThreadStartParams({
     cwd: input.cwd,
     runtimeMode: input.runtimeMode,
+    interactionMode: input.interactionMode,
     model: input.requestedModel,
     serviceTier: input.serviceTier,
   });
@@ -1237,7 +1252,10 @@ export const makeCodexSessionRuntime = (
 
     yield* client.handleServerRequest("item/tool/call", (payload) =>
       Effect.gen(function* () {
-        if (!isKamiTestHarnessDynamicToolCall(payload)) {
+        if (
+          !isKamiTestHarnessDynamicToolCall(payload) &&
+          !isProjectTriggerDynamicToolCall(payload)
+        ) {
           return yield* CodexErrors.CodexAppServerRequestError.methodNotFound(
             `item/tool/call:${payload.namespace ? `${payload.namespace}.` : ""}${payload.tool}`,
           );
@@ -1260,16 +1278,29 @@ export const makeCodexSessionRuntime = (
           },
         });
 
-        const response = yield* runBrowserHarnessDynamicTool({
-          rawArguments: payload.arguments,
-          cwd: options.cwd,
-          ...(options.stateDir ? { stateDir: options.stateDir } : {}),
-          ...(options.issueTestHarnessPairingCredential
-            ? {
-                issueKamiCodePairingCredential: options.issueTestHarnessPairingCredential,
-              }
-            : {}),
-        });
+        const response = isKamiTestHarnessDynamicToolCall(payload)
+          ? yield* runBrowserHarnessDynamicTool({
+              rawArguments: payload.arguments,
+              cwd: options.cwd,
+              ...(options.stateDir ? { stateDir: options.stateDir } : {}),
+              ...(options.issueTestHarnessPairingCredential
+                ? {
+                    issueKamiCodePairingCredential: options.issueTestHarnessPairingCredential,
+                  }
+                : {}),
+            })
+          : isProjectTriggerDynamicToolCall(payload) &&
+              options.interactionMode === "trigger" &&
+              options.projectTriggerDynamicToolRunner
+            ? yield* options.projectTriggerDynamicToolRunner({
+                tool: payload.tool,
+                rawArguments: payload.arguments,
+              })
+            : isProjectTriggerDynamicToolCall(payload)
+              ? formatProjectTriggerDynamicToolUnavailable({ tool: payload.tool })
+              : yield* CodexErrors.CodexAppServerRequestError.methodNotFound(
+                  `item/tool/call:${payload.namespace ? `${payload.namespace}.` : ""}${payload.tool}`,
+                );
 
         yield* emitEvent({
           kind: "notification",
@@ -1385,6 +1416,7 @@ export const makeCodexSessionRuntime = (
         client,
         threadId: options.threadId,
         runtimeMode: options.runtimeMode,
+        interactionMode: options.interactionMode,
         cwd: options.cwd,
         requestedModel,
         serviceTier: options.serviceTier,

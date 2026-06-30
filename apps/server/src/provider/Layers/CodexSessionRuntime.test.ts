@@ -26,6 +26,10 @@ import {
   KAMI_TEST_HARNESS_DYNAMIC_TOOL_SPEC,
   KAMI_TEST_HARNESS_TOOL_NAME,
 } from "../../testing/browserHarnessDynamicTool.ts";
+import {
+  PROJECT_TRIGGER_DYNAMIC_TOOL_SPECS,
+  PROJECT_TRIGGER_TOOL_NAMES,
+} from "../../projectTriggers/dynamicTools.ts";
 const isCodexAppServerRequestError = Schema.is(CodexErrors.CodexAppServerRequestError);
 
 describe("CodexSessionRuntimeIdentifierGenerationError", () => {
@@ -363,7 +367,7 @@ describe("buildTurnStartParams", () => {
 });
 
 describe("buildThreadStartParams", () => {
-  it("registers the KamiCode browser harness dynamic tool", () => {
+  it("registers the KamiCode browser harness dynamic tool by default", () => {
     const params = buildThreadStartParams({
       cwd: "/tmp/project",
       runtimeMode: "full-access",
@@ -373,6 +377,25 @@ describe("buildThreadStartParams", () => {
 
     assert.deepStrictEqual(params.dynamicTools, [KAMI_TEST_HARNESS_DYNAMIC_TOOL_SPEC]);
     assert.equal(params.dynamicTools?.[0]?.name, KAMI_TEST_HARNESS_TOOL_NAME);
+  });
+
+  it("registers trigger CRUD dynamic tools in trigger mode", () => {
+    const params = buildThreadStartParams({
+      cwd: "/tmp/project",
+      runtimeMode: "full-access",
+      interactionMode: "trigger",
+      model: "gpt-5.3-codex",
+      serviceTier: undefined,
+    });
+
+    assert.deepStrictEqual(params.dynamicTools, [
+      KAMI_TEST_HARNESS_DYNAMIC_TOOL_SPEC,
+      ...PROJECT_TRIGGER_DYNAMIC_TOOL_SPECS,
+    ]);
+    assert.deepStrictEqual(
+      params.dynamicTools?.slice(1).map((tool) => tool.name),
+      [...PROJECT_TRIGGER_TOOL_NAMES],
+    );
   });
 });
 
@@ -488,6 +511,51 @@ describe("openCodexThread", () => {
         approvalPolicy: "never",
         sandbox: "danger-full-access",
         dynamicTools: [KAMI_TEST_HARNESS_DYNAMIC_TOOL_SPEC],
+        model: "gpt-5.3-codex",
+      });
+    }),
+  );
+
+  it.effect("includes trigger dynamic tools when opening a trigger-mode thread", () =>
+    Effect.gen(function* () {
+      const calls: Array<{ method: "thread/start"; payload: unknown }> = [];
+      const started = makeThreadOpenResponse("fresh-trigger-thread");
+      const client = {
+        raw: {
+          request: (method: "thread/start" | "thread/resume", payload: unknown) => {
+            if (method === "thread/start") {
+              calls.push({ method, payload });
+            }
+            return Effect.succeed(started as unknown);
+          },
+        },
+        request: <M extends "thread/start" | "thread/resume">(
+          _method: M,
+          _payload: CodexRpc.ClientRequestParamsByMethod[M],
+        ) =>
+          Effect.fail(
+            CodexErrors.CodexAppServerRequestError.internalError("typed request was not expected"),
+          ),
+      };
+
+      const opened = yield* openCodexThread({
+        client,
+        threadId: ThreadId.make("thread-trigger"),
+        runtimeMode: "full-access",
+        interactionMode: "trigger",
+        cwd: "/tmp/project",
+        requestedModel: "gpt-5.3-codex",
+        serviceTier: undefined,
+        resumeThreadId: undefined,
+      });
+
+      assert.equal(opened.thread.id, "fresh-trigger-thread");
+      assert.equal(calls.length, 1);
+      assert.deepStrictEqual(calls[0]?.payload, {
+        cwd: "/tmp/project",
+        approvalPolicy: "never",
+        sandbox: "danger-full-access",
+        dynamicTools: [KAMI_TEST_HARNESS_DYNAMIC_TOOL_SPEC, ...PROJECT_TRIGGER_DYNAMIC_TOOL_SPECS],
         model: "gpt-5.3-codex",
       });
     }),

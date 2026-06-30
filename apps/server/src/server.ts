@@ -342,9 +342,12 @@ const ProviderRuntimeLayerLive = ProviderSessionReaperLive.pipe(
   Layer.provideMerge(OrchestrationLayerLive),
 );
 
-const ProjectTriggersLayerLive = ProjectTriggerSchedulerLive().pipe(
-  Layer.provideMerge(ProjectTriggerServiceLive),
+const ProjectTriggerCrudLayerLive = ProjectTriggerServiceLive.pipe(
   Layer.provideMerge(ProjectTriggerRepositoryLive),
+);
+
+const ProjectTriggersLayerLive = ProjectTriggerSchedulerLive().pipe(
+  Layer.provideMerge(ProjectTriggerCrudLayerLive),
   Layer.provideMerge(ServerOrchestrationDispatcherLive),
 );
 
@@ -371,6 +374,7 @@ const RuntimeCoreBaseLive = ReactorLayerLive.pipe(
   Layer.provideMerge(ProviderRuntimeLayerLive),
   Layer.provideMerge(Layer.mergeAll(TerminalLayerLive, PreviewLayerLive)),
   Layer.provideMerge(PersistenceLayerLive),
+  Layer.provideMerge(ProjectTriggerCrudLayerLive),
   Layer.provideMerge(Keybindings.layer),
   Layer.provideMerge(ProviderRegistryLive),
   // The instance registry is the new routing keystone — text generation,

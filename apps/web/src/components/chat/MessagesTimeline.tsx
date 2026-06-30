@@ -31,6 +31,7 @@ import {
   workEntryIndicatesToolSuccess,
   workLogEntryIsToolLike,
   type EvidenceRunWorkEntry,
+  type ProjectTriggerWorkEntry,
 } from "../../session-logic";
 import { type TurnDiffSummary } from "../../types";
 import { summarizeTurnDiffStats } from "../../lib/turnDiffTree";
@@ -55,6 +56,7 @@ import {
   ChevronRightIcon,
   ChevronUpIcon,
   CircleAlertIcon,
+  ClockIcon,
   EyeIcon,
   FileTextIcon,
   GlobeIcon,
@@ -1640,6 +1642,196 @@ function EvidenceArtifactLink(props: {
   );
 }
 
+function formatProjectTriggerToolTitle(tool: ProjectTriggerWorkEntry["tool"]): string {
+  switch (tool) {
+    case "create_trigger":
+      return "Trigger saved";
+    case "update_trigger":
+      return "Trigger updated";
+    case "set_trigger_enabled":
+      return "Trigger status updated";
+    case "delete_trigger":
+      return "Trigger deleted";
+    case "list_triggers":
+      return "Project triggers";
+  }
+}
+
+function formatProjectTriggerDate(value: string | null | undefined): string {
+  if (!value) {
+    return "Not scheduled";
+  }
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return value;
+  }
+  return parsed.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
+}
+
+function formatProjectTriggerRuntime(value: string | undefined): string {
+  if (value === "remote") {
+    return "remote runtime";
+  }
+  if (value === "local") {
+    return "local runtime";
+  }
+  return value ?? "runtime unset";
+}
+
+function ProjectTriggerSummaryCard(props: {
+  trigger: NonNullable<ProjectTriggerWorkEntry["trigger"]>;
+}) {
+  const { trigger } = props;
+  const scheduleParts = [
+    trigger.schedule.expression ?? "No schedule",
+    trigger.schedule.timezone ?? "UTC",
+    formatProjectTriggerRuntime(trigger.schedule.runtime),
+  ];
+  const prompt = trigger.threadTemplate?.prompt?.trim();
+
+  return (
+    <div className="rounded-lg border border-[#2323FF]/30 bg-[#2323FF]/5 p-2.5">
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div className="min-w-0">
+          <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+            <span className="truncate text-xs font-medium text-foreground/90">{trigger.name}</span>
+            <span
+              className={cn(
+                "rounded-full border px-1.5 py-0.5 text-[10px] font-medium",
+                trigger.enabled
+                  ? "border-emerald-400/35 bg-emerald-500/10 text-emerald-200 dark:text-emerald-200"
+                  : "border-border/70 bg-background/65 text-muted-foreground",
+              )}
+            >
+              {trigger.enabled ? "Enabled" : "Disabled"}
+            </span>
+          </div>
+          {trigger.description ? (
+            <p className="mt-1 line-clamp-2 text-xs text-muted-foreground/75">
+              {trigger.description}
+            </p>
+          ) : null}
+        </div>
+        <span className="shrink-0 rounded-md border border-[#2323FF]/25 bg-background/60 px-2 py-0.5 font-mono text-[10px] text-muted-foreground/75">
+          {trigger.id}
+        </span>
+      </div>
+
+      <div className="mt-2 grid gap-1.5 text-[11px] leading-4 text-muted-foreground/78 sm:grid-cols-2">
+        <div>
+          <span className="text-muted-foreground/55">Schedule: </span>
+          <span>{scheduleParts.join(" / ")}</span>
+        </div>
+        <div>
+          <span className="text-muted-foreground/55">Next: </span>
+          <span>{formatProjectTriggerDate(trigger.nextRunAt)}</span>
+        </div>
+        <div>
+          <span className="text-muted-foreground/55">Last: </span>
+          <span>{formatProjectTriggerDate(trigger.lastRunAt)}</span>
+        </div>
+        {trigger.threadTemplate?.runtimeMode ? (
+          <div>
+            <span className="text-muted-foreground/55">Autonomy: </span>
+            <span>{trigger.threadTemplate.runtimeMode}</span>
+          </div>
+        ) : null}
+      </div>
+
+      {prompt ? (
+        <p className="mt-2 line-clamp-3 whitespace-pre-wrap border-t border-[#2323FF]/15 pt-2 text-xs leading-5 text-foreground/78">
+          {prompt}
+        </p>
+      ) : null}
+
+      {trigger.warnings.length > 0 ? (
+        <div className="mt-2 space-y-1">
+          {trigger.warnings.map((warning) => (
+            <div
+              key={`${trigger.id}:warning:${warning}`}
+              className="flex items-start gap-1.5 rounded-md border border-amber-400/25 bg-amber-500/10 px-2 py-1 text-[11px] leading-4 text-amber-200 dark:text-amber-200"
+            >
+              <CircleAlertIcon className="mt-0.5 size-3 shrink-0" />
+              <span>{warning}</span>
+            </div>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function ProjectTriggerToolCard({ result }: { result: ProjectTriggerWorkEntry }) {
+  const visibleTriggers = result.triggers?.slice(0, 4) ?? [];
+  const hiddenTriggerCount = Math.max(0, (result.triggers?.length ?? 0) - visibleTriggers.length);
+  const errorMessage = result.error?.message;
+
+  return (
+    <div className="mt-2 overflow-hidden rounded-lg border border-[#2323FF]/30 bg-background/60">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#2323FF]/20 px-3 py-2">
+        <div className="flex min-w-0 items-center gap-2">
+          <span className="flex size-5 shrink-0 items-center justify-center rounded-md bg-[#2323FF]/12 text-[#2323FF]">
+            <ClockIcon className="size-3.5" />
+          </span>
+          <div className="min-w-0">
+            <p className="truncate text-xs font-medium text-foreground/90">
+              {formatProjectTriggerToolTitle(result.tool)}
+            </p>
+            <p className="truncate text-[10px] text-muted-foreground/58">
+              {result.success ? "Trigger tool completed" : "Trigger tool failed"}
+            </p>
+          </div>
+        </div>
+        <span
+          className={cn(
+            "rounded-full border px-2 py-0.5 text-[10px] font-medium tracking-[0.12em]",
+            result.success
+              ? "border-[#2323FF]/35 bg-[#2323FF]/10 text-[#2323FF]"
+              : "border-destructive/30 bg-destructive/10 text-destructive",
+          )}
+        >
+          {result.success ? "SAVED" : "FAILED"}
+        </span>
+      </div>
+
+      <div className="space-y-2 px-3 py-3">
+        {errorMessage ? (
+          <div className="rounded-md border border-destructive/30 bg-destructive/10 px-2.5 py-2 text-xs text-destructive">
+            {errorMessage}
+          </div>
+        ) : null}
+
+        {result.trigger ? <ProjectTriggerSummaryCard trigger={result.trigger} /> : null}
+
+        {visibleTriggers.length > 0 ? (
+          <div className="space-y-2">
+            {visibleTriggers.map((trigger) => (
+              <ProjectTriggerSummaryCard key={trigger.id} trigger={trigger} />
+            ))}
+            {hiddenTriggerCount > 0 ? (
+              <p className="px-1 text-[11px] text-muted-foreground/60">
+                +{hiddenTriggerCount} more trigger{hiddenTriggerCount === 1 ? "" : "s"}
+              </p>
+            ) : null}
+          </div>
+        ) : null}
+
+        {result.tool === "list_triggers" && visibleTriggers.length === 0 && !errorMessage ? (
+          <p className="text-xs text-muted-foreground/70">No project triggers returned.</p>
+        ) : null}
+
+        {result.tool === "delete_trigger" && !result.trigger && !errorMessage ? (
+          <p className="text-xs text-muted-foreground/70">
+            {result.deleted ? "Deleted" : "No matching trigger was deleted"}
+            {result.triggerId ? `: ${result.triggerId}` : ""}
+            {result.deletedAt ? ` at ${formatProjectTriggerDate(result.deletedAt)}` : ""}
+          </p>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
 function EvidenceRunCard({ evidenceRun }: { evidenceRun: EvidenceRunWorkEntry }) {
   const { onOpenTestsPanel } = use(TimelineRowCtx);
   const visibleScreenshots = evidenceRun.screenshots.slice(-6);
@@ -1992,6 +2184,9 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
           )}
         </div>
       )}
+      {workEntry.projectTrigger ? (
+        <ProjectTriggerToolCard result={workEntry.projectTrigger} />
+      ) : null}
       {workEntry.evidenceRun ? <EvidenceRunCard evidenceRun={workEntry.evidenceRun} /> : null}
     </div>
   );

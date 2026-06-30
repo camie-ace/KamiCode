@@ -79,6 +79,7 @@ export interface WorkLogEntry {
   itemType?: ToolLifecycleItemType;
   requestKind?: PendingApproval["requestKind"];
   evidenceRun?: EvidenceRunWorkEntry;
+  projectTrigger?: ProjectTriggerWorkEntry;
   /** From runtime item / task payload `status` when present (e.g. tool.updated). */
   toolLifecycleStatus?: WorkLogToolLifecycleStatus;
   /** Originating orchestration activity kind (e.g. `user-input.requested`) for row chrome. */
@@ -115,6 +116,55 @@ export interface EvidenceRunWorkEntry {
   }>;
   consoleErrors: ReadonlyArray<string>;
   networkFailures: ReadonlyArray<string>;
+}
+
+export type ProjectTriggerWorkToolName =
+  | "create_trigger"
+  | "update_trigger"
+  | "set_trigger_enabled"
+  | "delete_trigger"
+  | "list_triggers";
+
+export interface ProjectTriggerWorkSummary {
+  id: string;
+  projectId: string;
+  name: string;
+  description?: string | null;
+  enabled: boolean;
+  schedule: {
+    kind?: string | undefined;
+    expression?: string | undefined;
+    timezone?: string | undefined;
+    runtime?: string | undefined;
+  };
+  threadTemplate?: {
+    prompt?: string | undefined;
+    titleSeed?: string | null | undefined;
+    runtimeMode?: string | undefined;
+    interactionMode?: string | undefined;
+    branch?: string | null | undefined;
+    worktreePath?: string | null | undefined;
+    modelSelection?: unknown;
+  };
+  nextRunAt?: string | null | undefined;
+  lastRunAt?: string | null | undefined;
+  updatedAt?: string | undefined;
+  warnings: ReadonlyArray<string>;
+}
+
+export interface ProjectTriggerWorkEntry {
+  tool: ProjectTriggerWorkToolName;
+  success: boolean;
+  trigger?: ProjectTriggerWorkSummary | undefined;
+  triggers?: ReadonlyArray<ProjectTriggerWorkSummary> | undefined;
+  projectId?: string | undefined;
+  triggerId?: string | undefined;
+  deleted?: boolean | undefined;
+  deletedAt?: string | undefined;
+  error?: {
+    code?: string | undefined;
+    message: string;
+  };
 }
 
 export interface PendingApproval {
@@ -714,6 +764,7 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
   const changedFiles = extractChangedFiles(payload);
   const title = extractToolTitle(payload);
   const evidenceRun = extractEvidenceRun(payload);
+  const projectTrigger = extractProjectTriggerWorkEntry(payload);
   const isTaskActivity = activity.kind === "task.progress" || activity.kind === "task.completed";
   const taskSummary =
     isTaskActivity && typeof payload?.summary === "string" && payload.summary.length > 0
@@ -780,6 +831,9 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
   }
   if (evidenceRun) {
     entry.evidenceRun = evidenceRun;
+  }
+  if (projectTrigger) {
+    entry.projectTrigger = projectTrigger;
   }
   if (toolCallId) {
     entry.toolCallId = toolCallId;
@@ -850,6 +904,7 @@ function mergeDerivedWorkLogEntries(
   const itemType = next.itemType ?? previous.itemType;
   const requestKind = next.requestKind ?? previous.requestKind;
   const evidenceRun = next.evidenceRun ?? previous.evidenceRun;
+  const projectTrigger = next.projectTrigger ?? previous.projectTrigger;
   const collapseKey = next.collapseKey ?? previous.collapseKey;
   const toolCallId = next.toolCallId ?? previous.toolCallId;
   const toolLifecycleStatus = next.toolLifecycleStatus ?? previous.toolLifecycleStatus;
@@ -865,6 +920,7 @@ function mergeDerivedWorkLogEntries(
     ...(itemType ? { itemType } : {}),
     ...(requestKind ? { requestKind } : {}),
     ...(evidenceRun ? { evidenceRun } : {}),
+    ...(projectTrigger ? { projectTrigger } : {}),
     ...(collapseKey ? { collapseKey } : {}),
     ...(toolCallId ? { toolCallId } : {}),
     ...(toolLifecycleStatus !== undefined ? { toolLifecycleStatus } : {}),
@@ -1289,6 +1345,179 @@ function extractEvidenceRun(payload: Record<string, unknown> | null): EvidenceRu
   if (durationMs !== null) entry.durationMs = durationMs;
 
   return entry;
+}
+
+const PROJECT_TRIGGER_WORK_TOOL_NAMES: ReadonlySet<ProjectTriggerWorkToolName> = new Set([
+  "create_trigger",
+  "update_trigger",
+  "set_trigger_enabled",
+  "delete_trigger",
+  "list_triggers",
+]);
+
+function isProjectTriggerWorkToolName(value: unknown): value is ProjectTriggerWorkToolName {
+  return (
+    typeof value === "string" &&
+    PROJECT_TRIGGER_WORK_TOOL_NAMES.has(value as ProjectTriggerWorkToolName)
+  );
+}
+
+function toolNameFromMcpName(value: string | null): string | null {
+  if (!value) {
+    return null;
+  }
+  if (value.startsWith("mcp__kamicode__")) {
+    return value.slice("mcp__kamicode__".length);
+  }
+  if (value.startsWith("kamicode.")) {
+    return value.slice("kamicode.".length);
+  }
+  return value;
+}
+
+function asNullableTrimmedString(value: unknown): string | null | undefined {
+  if (value === null) {
+    return null;
+  }
+  return asTrimmedString(value) ?? undefined;
+}
+
+function extractProjectTriggerThreadTemplate(
+  value: unknown,
+): ProjectTriggerWorkSummary["threadTemplate"] | undefined {
+  const record = asRecord(value);
+  if (!record) {
+    return undefined;
+  }
+  const prompt = asTrimmedString(record.prompt);
+  const titleSeed = asNullableTrimmedString(record.titleSeed);
+  const runtimeMode = asTrimmedString(record.runtimeMode);
+  const interactionMode = asTrimmedString(record.interactionMode);
+  const branch = asNullableTrimmedString(record.branch);
+  const worktreePath = asNullableTrimmedString(record.worktreePath);
+  const template: NonNullable<ProjectTriggerWorkSummary["threadTemplate"]> = {};
+  if (prompt) template.prompt = prompt;
+  if (titleSeed !== undefined) template.titleSeed = titleSeed;
+  if (runtimeMode) template.runtimeMode = runtimeMode;
+  if (interactionMode) template.interactionMode = interactionMode;
+  if (branch !== undefined) template.branch = branch;
+  if (worktreePath !== undefined) template.worktreePath = worktreePath;
+  if (record.modelSelection !== undefined) template.modelSelection = record.modelSelection;
+  return Object.keys(template).length > 0 ? template : undefined;
+}
+
+function extractProjectTriggerSummary(value: unknown): ProjectTriggerWorkSummary | null {
+  const record = asRecord(value);
+  const scheduleRecord = asRecord(record?.schedule);
+  if (!record || !scheduleRecord) {
+    return null;
+  }
+
+  const id = asTrimmedString(record.id);
+  const projectId = asTrimmedString(record.projectId);
+  const name = asTrimmedString(record.name);
+  const enabled = asBoolean(record.enabled);
+  if (!id || !projectId || !name || enabled === null) {
+    return null;
+  }
+
+  const kind = asTrimmedString(scheduleRecord.kind);
+  const expression = asTrimmedString(scheduleRecord.expression);
+  const timezone = asTrimmedString(scheduleRecord.timezone);
+  const runtime = asTrimmedString(scheduleRecord.runtime);
+  const description = asNullableTrimmedString(record.description);
+  const threadTemplate = extractProjectTriggerThreadTemplate(record.threadTemplate);
+  const nextRunAt = asNullableTrimmedString(record.nextRunAt);
+  const lastRunAt = asNullableTrimmedString(record.lastRunAt);
+  const updatedAt = asTrimmedString(record.updatedAt);
+
+  return {
+    id,
+    projectId,
+    name,
+    enabled,
+    schedule: {
+      ...(kind ? { kind } : {}),
+      ...(expression ? { expression } : {}),
+      ...(timezone ? { timezone } : {}),
+      ...(runtime ? { runtime } : {}),
+    },
+    warnings: extractStringArray(record.warnings),
+    ...(description !== undefined ? { description } : {}),
+    ...(threadTemplate ? { threadTemplate } : {}),
+    ...(nextRunAt !== undefined ? { nextRunAt } : {}),
+    ...(lastRunAt !== undefined ? { lastRunAt } : {}),
+    ...(updatedAt ? { updatedAt } : {}),
+  };
+}
+
+function extractProjectTriggerSummaries(value: unknown): ReadonlyArray<ProjectTriggerWorkSummary> {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value
+    .map(extractProjectTriggerSummary)
+    .filter((trigger): trigger is ProjectTriggerWorkSummary => trigger !== null);
+}
+
+function extractProjectTriggerWorkEntry(
+  payload: Record<string, unknown> | null,
+): ProjectTriggerWorkEntry | null {
+  if (payload?.itemType !== "dynamic_tool_call") {
+    return null;
+  }
+
+  const data = asRecord(payload.data);
+  const namespace = asTrimmedString(data?.namespace);
+  if (namespace && namespace !== "kamicode") {
+    return null;
+  }
+
+  const result = extractDynamicToolInputTextResult(payload);
+  if (!result) {
+    return null;
+  }
+
+  const payloadTool = toolNameFromMcpName(asTrimmedString(data?.tool ?? data?.toolName));
+  const resultTool = asTrimmedString(result.tool);
+  const tool = isProjectTriggerWorkToolName(resultTool)
+    ? resultTool
+    : isProjectTriggerWorkToolName(payloadTool)
+      ? payloadTool
+      : null;
+  if (!tool) {
+    return null;
+  }
+
+  const errorRecord = asRecord(result.error);
+  const errorMessage = asTrimmedString(errorRecord?.message);
+  const errorCode = asTrimmedString(errorRecord?.code);
+  const success = asBoolean(data?.success) ?? (errorMessage ? false : true);
+  const trigger = extractProjectTriggerSummary(result.trigger);
+  const triggers = extractProjectTriggerSummaries(result.triggers);
+  const projectId = asTrimmedString(result.projectId);
+  const triggerId = asTrimmedString(result.triggerId);
+  const deleted = asBoolean(result.deleted);
+  const deletedAt = asTrimmedString(result.deletedAt);
+
+  return {
+    tool,
+    success,
+    ...(trigger ? { trigger } : {}),
+    ...(triggers.length > 0 ? { triggers } : {}),
+    ...(projectId ? { projectId } : {}),
+    ...(triggerId ? { triggerId } : {}),
+    ...(deleted !== null ? { deleted } : {}),
+    ...(deletedAt ? { deletedAt } : {}),
+    ...(errorMessage
+      ? {
+          error: {
+            message: errorMessage,
+            ...(errorCode ? { code: errorCode } : {}),
+          },
+        }
+      : {}),
+  };
 }
 
 function normalizeInlinePreview(value: string): string {

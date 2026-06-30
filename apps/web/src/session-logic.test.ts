@@ -1243,6 +1243,76 @@ describe("deriveWorkLogEntries", () => {
     expect(entry?.evidenceRun?.networkFailures).toEqual(["GET /missing 404"]);
   });
 
+  it("extracts project trigger cards from trigger dynamic tool results", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "trigger-tool-complete",
+        kind: "tool.completed",
+        summary: "create_trigger",
+        payload: {
+          itemType: "dynamic_tool_call",
+          title: "create_trigger",
+          data: {
+            namespace: "kamicode",
+            tool: "create_trigger",
+            success: true,
+            contentItems: [
+              {
+                type: "inputText",
+                text: `${JSON.stringify({
+                  tool: "create_trigger",
+                  trigger: {
+                    id: "trigger:weekday-triage",
+                    projectId: "project-1",
+                    name: "Weekday triage",
+                    description: "Triage issues every weekday.",
+                    enabled: true,
+                    schedule: {
+                      kind: "cron",
+                      expression: "0 9 * * 1-5",
+                      timezone: "UTC",
+                      runtime: "local",
+                    },
+                    threadTemplate: {
+                      prompt: "Summarize open work.",
+                      runtimeMode: "full-access",
+                      interactionMode: "default",
+                    },
+                    nextRunAt: "2026-07-01T09:00:00.000Z",
+                    lastRunAt: null,
+                    updatedAt: "2026-06-30T18:30:00.000Z",
+                    warnings: ["Local runtime triggers only fire while this runtime is online."],
+                  },
+                })}\n`,
+              },
+            ],
+          },
+        },
+      }),
+    ];
+
+    const [entry] = deriveWorkLogEntries(activities);
+    expect(entry?.projectTrigger).toMatchObject({
+      tool: "create_trigger",
+      success: true,
+      trigger: {
+        id: "trigger:weekday-triage",
+        name: "Weekday triage",
+        enabled: true,
+        schedule: {
+          expression: "0 9 * * 1-5",
+          timezone: "UTC",
+          runtime: "local",
+        },
+        threadTemplate: {
+          prompt: "Summarize open work.",
+          runtimeMode: "full-access",
+        },
+        warnings: ["Local runtime triggers only fire while this runtime is online."],
+      },
+    });
+  });
+
   it("extracts evidence run artifacts from Claude MCP test harness tool results", () => {
     const screenshotPath =
       "C:/Users/THIS PC/.kamicode/userdata/test-harness/projects/cwd-1/runs/run-claude/screenshots/01.png";

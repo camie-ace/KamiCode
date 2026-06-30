@@ -43,6 +43,18 @@ describe("ProviderSessionStartInput", () => {
     expect(getOptionValue(parsed.modelSelection?.options, "fastMode")).toBe(true);
   });
 
+  it("accepts optional interaction mode for session startup", () => {
+    const parsed = decodeProviderSessionStartInput({
+      threadId: "thread-trigger",
+      provider: "codex",
+      cwd: "/tmp/workspace",
+      runtimeMode: "full-access",
+      interactionMode: "trigger",
+    });
+
+    expect(parsed.interactionMode).toBe("trigger");
+  });
+
   it("rejects payloads without runtime mode", () => {
     expect(() =>
       decodeProviderSessionStartInput({

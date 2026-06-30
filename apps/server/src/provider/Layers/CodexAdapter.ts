@@ -29,6 +29,7 @@ import * as Crypto from "effect/Crypto";
 import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
 import * as FileSystem from "effect/FileSystem";
+import * as Option from "effect/Option";
 import * as Queue from "effect/Queue";
 import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
@@ -52,6 +53,12 @@ import {
 import { type CodexAdapterShape } from "../Services/CodexAdapter.ts";
 import { resolveAttachmentPath } from "../../attachmentStore.ts";
 import { ServerConfig } from "../../config.ts";
+import { createProjectTriggerDynamicToolRunner } from "../../projectTriggers/dynamicTools.ts";
+import {
+  ProjectTriggerId,
+  ProjectTriggerRepository,
+} from "../../projectTriggers/Services/ProjectTriggerRepository.ts";
+import { ProjectTriggerService } from "../../projectTriggers/Services/ProjectTriggerService.ts";
 import {
   CodexResumeCursorSchema,
   CodexSessionRuntimeThreadIdMissingError,
@@ -1445,6 +1452,20 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
   const childProcessSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   const crypto = yield* Crypto.Crypto;
   const serverConfig = yield* Effect.service(ServerConfig);
+  const projectTriggerService = yield* Effect.serviceOption(ProjectTriggerService);
+  const projectTriggerRepository = yield* Effect.serviceOption(ProjectTriggerRepository);
+  const projectTriggerDynamicToolRunner =
+    Option.isSome(projectTriggerService) && Option.isSome(projectTriggerRepository)
+      ? createProjectTriggerDynamicToolRunner({
+          service: projectTriggerService.value,
+          repository: projectTriggerRepository.value,
+          defaultProviderInstanceId: boundInstanceId,
+          makeTriggerId: crypto.randomUUIDv4.pipe(
+            Effect.orDie,
+            Effect.map((uuid) => ProjectTriggerId.make(`trigger:${uuid}`)),
+          ),
+        })
+      : undefined;
   const nativeEventLogger =
     options?.nativeEventLogger ??
     (options?.nativeEventLogPath !== undefined
@@ -1489,10 +1510,12 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
           ...(options?.issueTestHarnessPairingCredential
             ? { issueTestHarnessPairingCredential: options.issueTestHarnessPairingCredential }
             : {}),
+          ...(projectTriggerDynamicToolRunner ? { projectTriggerDynamicToolRunner } : {}),
           ...(isCodexResumeCursorSchema(input.resumeCursor)
             ? { resumeCursor: input.resumeCursor }
             : {}),
           runtimeMode: input.runtimeMode,
+          ...(input.interactionMode ? { interactionMode: input.interactionMode } : {}),
           ...(input.modelSelection?.instanceId === boundInstanceId
             ? { model: input.modelSelection.model }
             : {}),
