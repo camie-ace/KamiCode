@@ -15,6 +15,7 @@ import {
   MessageId,
   NonNegativeInt,
   ProjectId,
+  ProjectTriggerId,
   ProviderItemId,
   ThreadId,
   TrimmedNonEmptyString,
@@ -121,9 +122,32 @@ export const RuntimeMode = Schema.Literals([
 ]);
 export type RuntimeMode = typeof RuntimeMode.Type;
 export const DEFAULT_RUNTIME_MODE: RuntimeMode = "full-access";
-export const ProviderInteractionMode = Schema.Literals(["default", "plan", "test", "workflow"]);
+export const ProviderInteractionMode = Schema.Literals([
+  "default",
+  "plan",
+  "test",
+  "workflow",
+  "trigger",
+]);
 export type ProviderInteractionMode = typeof ProviderInteractionMode.Type;
 export const DEFAULT_PROVIDER_INTERACTION_MODE: ProviderInteractionMode = "default";
+export const TriggerEventKind = Schema.Literals([
+  "cron",
+  "github.issue",
+  "github.pull_request",
+  "github.comment",
+]);
+export type TriggerEventKind = typeof TriggerEventKind.Type;
+export const ThreadStartedByTrigger = Schema.Struct({
+  kind: Schema.Literal("trigger"),
+  triggerId: ProjectTriggerId,
+  triggerName: TrimmedNonEmptyString,
+  eventKind: TriggerEventKind,
+  firedAt: IsoDateTime,
+});
+export type ThreadStartedByTrigger = typeof ThreadStartedByTrigger.Type;
+export const ThreadStartedBy = Schema.Union([ThreadStartedByTrigger]);
+export type ThreadStartedBy = typeof ThreadStartedBy.Type;
 export const TurnDispatchPolicy = Schema.Literals(["immediate", "queue"]);
 export type TurnDispatchPolicy = typeof TurnDispatchPolicy.Type;
 export const DEFAULT_TURN_DISPATCH_POLICY: TurnDispatchPolicy = "immediate";
@@ -813,6 +837,7 @@ export const OrchestrationThread = Schema.Struct({
   ),
   branch: Schema.NullOr(TrimmedNonEmptyString),
   worktreePath: Schema.NullOr(TrimmedNonEmptyString),
+  startedBy: Schema.optionalKey(Schema.NullOr(ThreadStartedBy)),
   latestTurn: Schema.NullOr(OrchestrationLatestTurn),
   queuedTurns: Schema.optional(Schema.Array(OrchestrationQueuedTurn)),
   createdAt: IsoDateTime,
@@ -861,6 +886,7 @@ export const OrchestrationThreadShell = Schema.Struct({
   ),
   branch: Schema.NullOr(TrimmedNonEmptyString),
   worktreePath: Schema.NullOr(TrimmedNonEmptyString),
+  startedBy: Schema.optionalKey(Schema.NullOr(ThreadStartedBy)),
   latestTurn: Schema.NullOr(OrchestrationLatestTurn),
   queuedTurnCount: Schema.optional(NonNegativeInt),
   createdAt: IsoDateTime,
@@ -969,6 +995,7 @@ const ThreadCreateCommand = Schema.Struct({
   ),
   branch: Schema.NullOr(TrimmedNonEmptyString),
   worktreePath: Schema.NullOr(TrimmedNonEmptyString),
+  startedBy: Schema.optionalKey(Schema.NullOr(ThreadStartedBy)),
   createdAt: IsoDateTime,
 });
 
@@ -1033,6 +1060,7 @@ const ThreadTurnStartBootstrapCreateThread = Schema.Struct({
   interactionMode: ProviderInteractionMode,
   branch: Schema.NullOr(TrimmedNonEmptyString),
   worktreePath: Schema.NullOr(TrimmedNonEmptyString),
+  startedBy: Schema.optionalKey(Schema.NullOr(ThreadStartedBy)),
   createdAt: IsoDateTime,
 });
 
@@ -1483,6 +1511,7 @@ export const ThreadCreatedPayload = Schema.Struct({
   ),
   branch: Schema.NullOr(TrimmedNonEmptyString),
   worktreePath: Schema.NullOr(TrimmedNonEmptyString),
+  startedBy: Schema.optionalKey(Schema.NullOr(ThreadStartedBy)),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
 });

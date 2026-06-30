@@ -250,6 +250,9 @@ const makeServerOrchestrationDispatcher = Effect.gen(function* () {
             interactionMode: bootstrap.createThread.interactionMode,
             branch: bootstrap.createThread.branch,
             worktreePath: bootstrap.createThread.worktreePath,
+            ...(bootstrap.createThread.startedBy !== undefined
+              ? { startedBy: bootstrap.createThread.startedBy }
+              : {}),
             createdAt: bootstrap.createThread.createdAt,
           });
           createdThread = true;

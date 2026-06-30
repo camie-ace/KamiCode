@@ -33,7 +33,8 @@ export interface ThreadStatusPill {
     | "Completed"
     | "Pending Approval"
     | "Awaiting Input"
-    | "Plan Ready";
+    | "Plan Ready"
+    | "Triggered";
   colorClass: string;
   dotClass: string;
   pulse: boolean;
@@ -45,6 +46,7 @@ const THREAD_STATUS_PRIORITY: Record<ThreadStatusPill["label"], number> = {
   Working: 3,
   Connecting: 3,
   "Plan Ready": 2,
+  Triggered: 2,
   Completed: 1,
 };
 
@@ -56,6 +58,7 @@ type ThreadStatusInput = Pick<
   | "interactionMode"
   | "latestTurn"
   | "session"
+  | "startedBy"
 > & {
   lastVisitedAt?: string | undefined;
 };
@@ -161,6 +164,15 @@ export function hasUnseenCompletion(thread: ThreadStatusInput): boolean {
   const lastVisitedAt = Date.parse(thread.lastVisitedAt);
   if (Number.isNaN(lastVisitedAt)) return true;
   return completedAt > lastVisitedAt;
+}
+
+function hasUnseenTriggerStart(thread: ThreadStatusInput): boolean {
+  if (thread.startedBy?.kind !== "trigger") return false;
+  if (!thread.lastVisitedAt) return true;
+  const lastVisitedAt = Date.parse(thread.lastVisitedAt);
+  const firedAt = Date.parse(thread.startedBy.firedAt);
+  if (Number.isNaN(lastVisitedAt) || Number.isNaN(firedAt)) return true;
+  return firedAt > lastVisitedAt;
 }
 
 export function shouldClearThreadSelectionOnMouseDown(target: HTMLElement | null): boolean {
@@ -408,6 +420,15 @@ export function resolveThreadStatusPill(input: {
       label: "Plan Ready",
       colorClass: "text-violet-600 dark:text-violet-300/90",
       dotClass: "bg-violet-500 dark:bg-violet-300/90",
+      pulse: false,
+    };
+  }
+
+  if (hasUnseenTriggerStart(thread)) {
+    return {
+      label: "Triggered",
+      colorClass: "text-[#2323FF] dark:text-[#7777ff]",
+      dotClass: "bg-[#2323FF] dark:bg-[#7777ff]",
       pulse: false,
     };
   }

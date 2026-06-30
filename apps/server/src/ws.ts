@@ -587,18 +587,33 @@ const makeWsRpcLayer = (currentSession: EnvironmentAuth.AuthenticatedSession) =>
               `Project trigger ${row.triggerId} uses unsupported schedule kind: ${row.scheduleKind}.`,
             );
           }
+          const latestRuns = yield* projectTriggerRepository
+            .listRunsByTriggerId({
+              triggerId: row.triggerId,
+              limit: 1,
+            })
+            .pipe(
+              Effect.mapError((cause) =>
+                makeProjectTriggerStoreError(
+                  operation,
+                  "Failed to load latest project trigger run.",
+                  cause,
+                ),
+              ),
+            );
+          const latestRun = latestRuns[0] ?? null;
 
           return {
             id: row.triggerId,
             projectId: row.projectId,
             name: row.name,
-            description: null,
+            description: row.description,
             enabled: row.enabled,
             schedule: {
               kind: "cron",
               expression: row.scheduleCron,
               timezone: row.timezone,
-              runtime: "local",
+              runtime: row.runtimeTarget,
             },
             threadTemplate: {
               prompt: row.prompt,
@@ -609,7 +624,9 @@ const makeWsRpcLayer = (currentSession: EnvironmentAuth.AuthenticatedSession) =>
               branch: row.bootstrap?.createThread?.branch ?? null,
               worktreePath: row.bootstrap?.createThread?.worktreePath ?? null,
             },
-            lastRunId: projectTriggerLastRunId(row),
+            lastRunId: latestRun?.runId ?? projectTriggerLastRunId(row),
+            lastRunAt: latestRun?.fireAt ?? row.lastFireAt,
+            lastRunStatus: latestRun ? projectTriggerRunStatus(latestRun.status) : null,
             nextRunAt: row.nextFireAt,
             createdAt: row.createdAt,
             updatedAt: row.updatedAt,
@@ -690,17 +707,43 @@ const makeWsRpcLayer = (currentSession: EnvironmentAuth.AuthenticatedSession) =>
             makeProjectTriggerStoreError("subscribe", "Failed to load project triggers.", cause),
           ),
           Effect.flatMap((rows) =>
-            Effect.forEach(rows, (row) => toProjectTriggerRecord(row, "subscribe"), {
-              concurrency: 4,
+            Effect.all({
+              triggers: Effect.forEach(rows, (row) => toProjectTriggerRecord(row, "subscribe"), {
+                concurrency: 4,
+              }),
+              activeRuns: Effect.forEach(
+                rows,
+                (row) =>
+                  projectTriggerRepository
+                    .listRunsByTriggerId({
+                      triggerId: row.triggerId,
+                      limit: 10,
+                    })
+                    .pipe(
+                      Effect.map((runs) =>
+                        runs
+                          .filter((run) => run.status === "queued" || run.status === "claimed")
+                          .map((run) => toProjectTriggerRunRecord(run, row, "cron")),
+                      ),
+                      Effect.mapError((cause) =>
+                        makeProjectTriggerStoreError(
+                          "subscribe",
+                          "Failed to load active project trigger runs.",
+                          cause,
+                        ),
+                      ),
+                    ),
+                { concurrency: 4 },
+              ).pipe(Effect.map((runsByTrigger) => runsByTrigger.flat())),
             }),
           ),
-          Effect.map((triggers) => ({
+          Effect.map(({ activeRuns, triggers }) => ({
             projectId,
             sequence: 0,
             emittedAt: "",
             type: "snapshot" as const,
             triggers,
-            activeRuns: [],
+            activeRuns,
           })),
           Effect.zipWith(nowIso, (event, emittedAt) => ({
             ...event,
@@ -1151,11 +1194,13 @@ const makeWsRpcLayer = (currentSession: EnvironmentAuth.AuthenticatedSession) =>
                 triggerId,
                 projectId: input.projectId,
                 name: input.name,
+                description: input.description ?? null,
                 enabled: input.enabled ?? true,
                 scheduleKind: "cron",
                 scheduleCron: input.schedule.expression,
                 scheduleOnceAt: null,
                 timezone: input.schedule.timezone ?? "UTC",
+                runtimeTarget: input.schedule.runtime,
                 prompt: input.threadTemplate.prompt,
                 attachments: [],
                 modelSelection,
@@ -1198,11 +1243,16 @@ const makeWsRpcLayer = (currentSession: EnvironmentAuth.AuthenticatedSession) =>
               const existing = yield* getActiveProjectTriggerRow(input.triggerId, "update");
               const updatedAt = yield* nowIso;
               const nextName = input.patch.name ?? existing.name;
+              const nextDescription =
+                input.patch.description !== undefined
+                  ? input.patch.description
+                  : existing.description;
               const nextScheduleKind = input.patch.schedule ? "cron" : existing.scheduleKind;
               const nextScheduleCron = input.patch.schedule
                 ? input.patch.schedule.expression
                 : existing.scheduleCron;
               const nextTimezone = input.patch.schedule?.timezone ?? existing.timezone;
+              const nextRuntimeTarget = input.patch.schedule?.runtime ?? existing.runtimeTarget;
               const nextTemplate = input.patch.threadTemplate;
               const nextModelSelection = nextTemplate?.modelSelection ?? existing.modelSelection;
               const nextRuntimeMode = nextTemplate?.runtimeMode ?? existing.runtimeMode;
@@ -1211,11 +1261,13 @@ const makeWsRpcLayer = (currentSession: EnvironmentAuth.AuthenticatedSession) =>
               const rowWithoutNextFire: ProjectTriggerRow = {
                 ...existing,
                 name: nextName,
+                description: nextDescription,
                 enabled: input.patch.enabled ?? existing.enabled,
                 scheduleKind: nextScheduleKind,
                 scheduleCron: nextScheduleCron,
                 scheduleOnceAt: input.patch.schedule ? null : existing.scheduleOnceAt,
                 timezone: nextTimezone,
+                runtimeTarget: nextRuntimeTarget,
                 prompt: nextTemplate?.prompt ?? existing.prompt,
                 modelSelection: nextModelSelection,
                 runtimeMode: nextRuntimeMode,

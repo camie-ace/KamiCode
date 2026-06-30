@@ -288,6 +288,7 @@ export function projectEvent(
             interactionMode: payload.interactionMode,
             branch: payload.branch,
             worktreePath: payload.worktreePath,
+            startedBy: payload.startedBy ?? null,
             latestTurn: null,
             queuedTurns: [],
             createdAt: payload.createdAt,

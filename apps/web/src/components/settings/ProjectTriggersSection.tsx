@@ -52,6 +52,7 @@ type LoadState =
 
 interface TriggerFormState {
   readonly name: string;
+  readonly description: string;
   readonly schedule: string;
   readonly prompt: string;
   readonly enabled: boolean;
@@ -75,6 +76,7 @@ function defaultTimezone(): string {
 function defaultTriggerForm(executionLocation: ProjectTriggerExecutionLocation): TriggerFormState {
   return {
     name: "",
+    description: "",
     schedule: "0 9 * * 1-5",
     prompt: "",
     enabled: true,
@@ -89,17 +91,19 @@ function triggerFormFromTrigger(
 ): TriggerFormState {
   return {
     name: trigger.name,
+    description: trigger.description ?? "",
     schedule: trigger.schedule,
     prompt: trigger.prompt ?? "",
     enabled: trigger.enabled,
     timezone: trigger.timezone ?? defaultTimezone(),
-    executionLocation: fallbackExecutionLocation,
+    executionLocation: trigger.executionLocation ?? fallbackExecutionLocation,
   };
 }
 
 function mutationFromForm(form: TriggerFormState): ProjectTriggerMutationInput {
   return {
     name: form.name.trim(),
+    description: form.description.trim() ? form.description.trim() : null,
     schedule: form.schedule.trim(),
     prompt: form.prompt.trim(),
     enabled: form.enabled,
@@ -115,6 +119,7 @@ function mutationFromTrigger(
 ): ProjectTriggerMutationInput {
   return {
     name: trigger.name,
+    description: trigger.description ?? null,
     schedule: trigger.schedule,
     prompt: trigger.prompt ?? "",
     enabled,
@@ -319,7 +324,14 @@ export default function ProjectTriggersSection({
         setPendingAction(null);
       }
     },
-    [createProjectTrigger, editingTrigger, form, reloadTriggers, selectedProject, updateProjectTrigger],
+    [
+      createProjectTrigger,
+      editingTrigger,
+      form,
+      reloadTriggers,
+      selectedProject,
+      updateProjectTrigger,
+    ],
   );
 
   const toggleTriggerEnabled = useCallback(
@@ -332,7 +344,11 @@ export default function ProjectTriggersSection({
           trigger: {
             projectId: selectedProject.id,
             triggerId: trigger.id,
-            patch: mutationFromTrigger(trigger, selectedExecutionLocation, enabled),
+            patch: mutationFromTrigger(
+              trigger,
+              trigger.executionLocation ?? selectedExecutionLocation,
+              enabled,
+            ),
           },
         });
         await reloadTriggers();
@@ -342,7 +358,13 @@ export default function ProjectTriggersSection({
         setPendingAction(null);
       }
     },
-    [pendingAction, reloadTriggers, selectedExecutionLocation, selectedProject, updateProjectTrigger],
+    [
+      pendingAction,
+      reloadTriggers,
+      selectedExecutionLocation,
+      selectedProject,
+      updateProjectTrigger,
+    ],
   );
 
   const runTrigger = useCallback(
@@ -360,7 +382,9 @@ export default function ProjectTriggersSection({
         toastManager.add({
           type: "success",
           title: "Trigger started",
-          description: `${trigger.name} was sent to ${selectedExecutionLocationLabel}.`,
+          description: `${trigger.name} was sent to ${projectTriggerExecutionLocationLabel(
+            trigger.executionLocation ?? selectedExecutionLocation,
+          )}.`,
         });
         await reloadTriggers();
       } catch (error) {
@@ -373,7 +397,7 @@ export default function ProjectTriggersSection({
       pendingAction,
       reloadTriggers,
       runProjectTriggerNow,
-      selectedExecutionLocationLabel,
+      selectedExecutionLocation,
       selectedProject,
     ],
   );
@@ -496,7 +520,12 @@ export default function ProjectTriggersSection({
                     </span>
                   }
                   description={trigger.schedule}
-                  status={triggerStatusText(trigger, selectedExecutionLocationLabel)}
+                  status={triggerStatusText(
+                    trigger,
+                    projectTriggerExecutionLocationLabel(
+                      trigger.executionLocation ?? selectedExecutionLocation,
+                    ),
+                  )}
                   control={
                     <div className="flex items-center gap-2">
                       <Switch
@@ -584,6 +613,20 @@ export default function ProjectTriggersSection({
                   }
                 />
               </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="project-trigger-description">Description</Label>
+                <Textarea
+                  id="project-trigger-description"
+                  placeholder="Why this trigger exists"
+                  value={form.description}
+                  onChange={(event) =>
+                    setForm((current) => ({
+                      ...current,
+                      description: event.currentTarget.value,
+                    }))
+                  }
+                />
+              </div>
               <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_11rem]">
                 <div className="space-y-1.5">
                   <Label htmlFor="project-trigger-schedule">Schedule</Label>
@@ -613,7 +656,6 @@ export default function ProjectTriggersSection({
                   id="project-trigger-scheduler"
                   className={`${SELECT_CLASS} w-full`}
                   value={form.executionLocation}
-                  disabled
                   onChange={(event) => {
                     const value = event.currentTarget.value;
                     if (value === "this-runtime" || value === "remote-runtime") {

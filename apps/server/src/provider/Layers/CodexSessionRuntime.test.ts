@@ -11,6 +11,7 @@ import {
   CODEX_DEFAULT_MODE_DEVELOPER_INSTRUCTIONS,
   CODEX_PLAN_MODE_DEVELOPER_INSTRUCTIONS,
   CODEX_TEST_MODE_DEVELOPER_INSTRUCTIONS,
+  CODEX_TRIGGER_MODE_DEVELOPER_INSTRUCTIONS,
   CODEX_WORKFLOW_MODE_DEVELOPER_INSTRUCTIONS,
 } from "../CodexDeveloperInstructions.ts";
 import {
@@ -257,6 +258,44 @@ describe("buildTurnStartParams", () => {
           reasoning_effort: "medium",
           developer_instructions: appendProjectMemoryInstructions(
             CODEX_WORKFLOW_MODE_DEVELOPER_INSTRUCTIONS,
+            undefined,
+          ),
+        },
+      },
+    });
+  });
+
+  it("maps trigger mode onto Codex default collaboration mode with trigger instructions", () => {
+    const params = Effect.runSync(
+      buildTurnStartParams({
+        threadId: "provider-thread-1",
+        runtimeMode: "full-access",
+        prompt: "Create a weekday trigger",
+        model: "gpt-5.3-codex",
+        interactionMode: "trigger",
+      }),
+    );
+
+    assert.deepStrictEqual(params, {
+      threadId: "provider-thread-1",
+      approvalPolicy: "never",
+      sandboxPolicy: {
+        type: "dangerFullAccess",
+      },
+      input: [
+        {
+          type: "text",
+          text: "Create a weekday trigger",
+        },
+      ],
+      model: "gpt-5.3-codex",
+      collaborationMode: {
+        mode: "default",
+        settings: {
+          model: "gpt-5.3-codex",
+          reasoning_effort: "medium",
+          developer_instructions: appendProjectMemoryInstructions(
+            CODEX_TRIGGER_MODE_DEVELOPER_INSTRUCTIONS,
             undefined,
           ),
         },

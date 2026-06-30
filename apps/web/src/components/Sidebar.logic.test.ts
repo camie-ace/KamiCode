@@ -648,6 +648,48 @@ describe("resolveThreadStatusPill", () => {
     ).toBeNull();
   });
 
+  it("shows triggered for a trigger-started thread that has not been opened", () => {
+    expect(
+      resolveThreadStatusPill({
+        thread: {
+          ...baseThread,
+          interactionMode: "trigger",
+          lastVisitedAt: undefined,
+          session: {
+            ...baseThread.session,
+            status: "ready",
+            activeTurnId: null,
+          },
+          startedBy: {
+            kind: "trigger",
+            triggerId: "trigger-1" as never,
+            triggerName: "Morning check",
+            eventKind: "cron",
+            firedAt: "2026-03-09T10:05:00.000Z",
+          },
+        },
+      }),
+    ).toMatchObject({ label: "Triggered", pulse: false });
+  });
+
+  it("keeps active work status ahead of triggered provenance", () => {
+    expect(
+      resolveThreadStatusPill({
+        thread: {
+          ...baseThread,
+          interactionMode: "trigger",
+          startedBy: {
+            kind: "trigger",
+            triggerId: "trigger-1" as never,
+            triggerName: "Morning check",
+            eventKind: "cron",
+            firedAt: "2026-03-09T10:05:00.000Z",
+          },
+        },
+      }),
+    ).toMatchObject({ label: "Working", pulse: true });
+  });
+
   it("shows completed when there is an unseen completion and no active blocker", () => {
     expect(
       resolveThreadStatusPill({

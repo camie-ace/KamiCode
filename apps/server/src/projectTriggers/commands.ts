@@ -42,6 +42,13 @@ export function makeProjectTriggerRunCommand(input: {
       interactionMode: createThreadTemplate?.interactionMode ?? input.trigger.interactionMode,
       branch: createThreadTemplate?.branch ?? null,
       worktreePath: createThreadTemplate?.worktreePath ?? null,
+      startedBy: {
+        kind: "trigger",
+        triggerId: input.trigger.triggerId,
+        triggerName: input.trigger.name,
+        eventKind: "cron",
+        firedAt: input.fireAt,
+      } as const,
       createdAt: input.fireAt,
     },
     ...(input.trigger.bootstrap?.prepareWorktree !== undefined

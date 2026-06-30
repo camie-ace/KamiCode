@@ -103,6 +103,7 @@ import {
   LockIcon,
   LockOpenIcon,
   PenLineIcon,
+  ZapIcon,
 } from "lucide-react";
 import { proposedPlanTitle } from "../../proposedPlan";
 import { isChatQueueShortcut, shortcutLabelForCommand } from "../../keybindings";
@@ -173,6 +174,10 @@ const interactionModeConfig: Record<
     description:
       "Workflow mode lets KamiCode coordinate planning, execution, review, and verification.",
   },
+  trigger: {
+    label: "Trigger",
+    description: "Trigger mode lets KamiCode create and manage runtime-started threads.",
+  },
 };
 const COMPOSER_FLOATING_LAYER_SELECTOR = [
   '[data-slot="popover-popup"]',
@@ -235,7 +240,9 @@ const ComposerFooterModeControls = memo(function ComposerFooterModeControls(prop
         ? "test"
         : props.interactionMode === "test"
           ? "workflow"
-          : "default";
+          : props.interactionMode === "workflow"
+            ? "trigger"
+            : "default";
   const interactionModeTooltip = `${interactionModeOption.description} Click to switch to ${interactionModeConfig[nextInteractionMode].label} mode.`;
   const planSidebarTooltip = props.planSidebarOpen
     ? `Hide ${props.planSidebarLabel.toLowerCase()} sidebar`
@@ -257,7 +264,9 @@ const ComposerFooterModeControls = memo(function ComposerFooterModeControls(prop
                     ? "bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/15 hover:text-emerald-300"
                     : props.interactionMode === "workflow"
                       ? "bg-amber-500/10 text-amber-400 hover:bg-amber-500/15 hover:text-amber-300"
-                      : "text-muted-foreground/70 hover:text-foreground/80",
+                      : props.interactionMode === "trigger"
+                        ? "bg-[#2323FF]/10 text-[#5d5dff] hover:bg-[#2323FF]/15 hover:text-[#7777ff]"
+                        : "text-muted-foreground/70 hover:text-foreground/80",
               )}
               size="sm"
               type="button"
@@ -272,6 +281,8 @@ const ComposerFooterModeControls = memo(function ComposerFooterModeControls(prop
             <FlaskConicalIcon className="text-current opacity-100" />
           ) : props.interactionMode === "workflow" ? (
             <ListTodoIcon className="text-current opacity-100" />
+          ) : props.interactionMode === "trigger" ? (
+            <ZapIcon className="text-current opacity-100" />
           ) : (
             <BotIcon />
           )}
@@ -1002,6 +1013,13 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           description: "Switch this thread into workflow mode",
         },
         {
+          id: "slash:trigger",
+          type: "slash-command",
+          command: "trigger",
+          label: "/trigger",
+          description: "Switch this thread into trigger mode",
+        },
+        {
           id: "slash:default",
           type: "slash-command",
           command: "default",
@@ -1638,7 +1656,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           return;
         }
         const nextInteractionMode =
-          item.command === "plan" || item.command === "test" || item.command === "workflow"
+          item.command === "plan" ||
+          item.command === "test" ||
+          item.command === "workflow" ||
+          item.command === "trigger"
             ? item.command
             : "default";
         void handleInteractionModeChange(nextInteractionMode);
@@ -2500,13 +2521,15 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                         ? "Add feedback to refine the plan, or leave this blank to implement it"
                         : interactionMode === "workflow"
                           ? "Describe the outcome you want. KamiCode will coordinate planning, execution, review, and verification."
-                          : environmentUnavailable
-                            ? `${environmentUnavailable.label}: ${connectionStatusText(
-                                environmentUnavailable.connection,
-                              )}`
-                            : phase === "disconnected"
-                              ? "Ask for follow-up changes or attach media"
-                              : "Ask anything, attach media, @tag files/folders, $use skills, or / for commands"
+                          : interactionMode === "trigger"
+                            ? "Describe when this should run and what thread KamiCode should start."
+                            : environmentUnavailable
+                              ? `${environmentUnavailable.label}: ${connectionStatusText(
+                                  environmentUnavailable.connection,
+                                )}`
+                              : phase === "disconnected"
+                                ? "Ask for follow-up changes or attach media"
+                                : "Ask anything, attach media, @tag files/folders, $use skills, or / for commands"
                 }
                 disabled={
                   isConnecting ||

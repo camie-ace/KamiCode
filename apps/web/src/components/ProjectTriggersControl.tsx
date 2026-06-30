@@ -37,6 +37,7 @@ export interface ProjectTrigger {
   readonly id: ProjectTriggerId;
   readonly projectId: ProjectId;
   readonly name: string;
+  readonly description?: string | null;
   readonly schedule: string;
   readonly enabled: boolean;
   readonly prompt?: string | null;
@@ -44,12 +45,13 @@ export interface ProjectTrigger {
   readonly executionLocation?: ProjectTriggerExecutionLocation | null;
   readonly nextFireAt?: string | null;
   readonly lastFiredAt?: string | null;
-  readonly lastRunStatus?: "success" | "failed" | "running" | "unknown" | null;
+  readonly lastRunStatus?: ContractProjectTriggerRecord["lastRunStatus"];
   readonly runtimeLabel?: string | null;
 }
 
 export interface ProjectTriggerMutationInput {
   readonly name: string;
+  readonly description: string | null;
   readonly schedule: string;
   readonly prompt: string;
   readonly enabled: boolean;
@@ -175,14 +177,15 @@ function toProjectTrigger(record: ContractProjectTriggerRecord): ProjectTrigger 
     id: record.id,
     projectId: record.projectId,
     name: record.name,
+    description: record.description,
     schedule: schedule.expression,
     enabled: record.enabled,
     prompt: record.threadTemplate.prompt,
     timezone: schedule.timezone,
     executionLocation: schedule.executionLocation,
     nextFireAt: record.nextRunAt,
-    lastFiredAt: null,
-    lastRunStatus: null,
+    lastFiredAt: record.lastRunAt,
+    lastRunStatus: record.lastRunStatus,
   };
 }
 
@@ -255,6 +258,7 @@ export function useProjectTriggerActions() {
             input: {
               projectId: input.trigger.projectId,
               name: input.trigger.name,
+              description: input.trigger.description,
               enabled: input.trigger.enabled,
               schedule: toContractSchedule(input.trigger),
               threadTemplate: toContractThreadTemplate(input.trigger),
@@ -274,6 +278,7 @@ export function useProjectTriggerActions() {
               triggerId: input.trigger.triggerId,
               patch: {
                 name: input.trigger.patch.name,
+                description: input.trigger.patch.description,
                 enabled: input.trigger.patch.enabled,
                 schedule: toContractSchedule(input.trigger.patch),
                 threadTemplate: toContractThreadTemplate(input.trigger.patch),
@@ -429,7 +434,9 @@ export default function ProjectTriggersControl({
         toastManager.add({
           type: "success",
           title: "Trigger started",
-          description: `${trigger.name} was sent to ${executionLocationLabel}.`,
+          description: `${trigger.name} was sent to ${projectTriggerExecutionLocationLabel(
+            trigger.executionLocation ?? executionLocation,
+          )}.`,
         });
         void refreshTriggers();
       } catch (error) {
@@ -440,6 +447,7 @@ export default function ProjectTriggersControl({
     },
     [
       environmentId,
+      executionLocation,
       executionLocationLabel,
       pendingTriggerId,
       projectId,

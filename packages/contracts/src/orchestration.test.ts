@@ -301,6 +301,25 @@ it.effect("accepts test interaction mode in thread.turn.start", () =>
   }),
 );
 
+it.effect("accepts trigger interaction mode in thread.turn.start", () =>
+  Effect.gen(function* () {
+    const parsed = yield* decodeThreadTurnStartCommand({
+      type: "thread.turn.start",
+      commandId: "cmd-turn-trigger",
+      threadId: "thread-1",
+      message: {
+        messageId: "msg-trigger",
+        role: "user",
+        text: "create a weekday trigger",
+        attachments: [],
+      },
+      interactionMode: "trigger",
+      createdAt: "2026-01-01T00:00:00.000Z",
+    });
+    assert.strictEqual(parsed.interactionMode, "trigger");
+  }),
+);
+
 it.effect("accepts existing image chat attachment metadata", () =>
   Effect.gen(function* () {
     const image = yield* decodeChatAttachment({
@@ -1158,6 +1177,39 @@ it.effect(
       const encoded = yield* encodeThreadCreatedPayload(decoded);
       assert.deepStrictEqual(encoded.modelSelection.options, [{ id: "fastMode", value: true }]);
     }),
+);
+
+it.effect("round-trips trigger provenance on thread.created payloads", () =>
+  Effect.gen(function* () {
+    const decoded = yield* decodeThreadCreatedPayload({
+      threadId: "thread-triggered",
+      projectId: "project-1",
+      title: "Morning check",
+      modelSelection: {
+        provider: "codex",
+        model: "gpt-5.4",
+      },
+      runtimeMode: "full-access",
+      interactionMode: "trigger",
+      branch: null,
+      worktreePath: null,
+      startedBy: {
+        kind: "trigger",
+        triggerId: "trigger-morning",
+        triggerName: "Morning check",
+        eventKind: "cron",
+        firedAt: "2026-01-01T09:00:00.000Z",
+      },
+      createdAt: "2026-01-01T09:00:00.000Z",
+      updatedAt: "2026-01-01T09:00:00.000Z",
+    });
+
+    assert.strictEqual(decoded.startedBy?.kind, "trigger");
+    assert.strictEqual(decoded.startedBy?.triggerName, "Morning check");
+
+    const encoded = yield* encodeThreadCreatedPayload(decoded);
+    assert.deepStrictEqual(encoded.startedBy, decoded.startedBy);
+  }),
 );
 
 it.effect("accepts a title seed in thread.turn.start", () =>

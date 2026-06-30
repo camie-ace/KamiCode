@@ -3699,7 +3699,9 @@ function ChatViewContent(props: ChatViewProps) {
           ? "test"
           : interactionMode === "test"
             ? "workflow"
-            : "default";
+            : interactionMode === "workflow"
+              ? "trigger"
+              : "default";
     handleInteractionModeChange(nextInteractionMode);
   }, [handleInteractionModeChange, interactionMode]);
   const dismissPlanSidebarForCurrentTurn = useCallback(() => {
@@ -6397,6 +6399,7 @@ function ChatViewContent(props: ChatViewProps) {
             activeThreadId={activeThread.id}
             {...(routeKind === "draft" && draftId ? { draftId } : {})}
             activeThreadTitle={activeThread.title}
+            activeThreadStartedBy={activeThread.startedBy ?? null}
             activeProjectId={activeProject?.id}
             activeProjectName={activeProject?.title}
             activeProjectCwd={activeProject?.workspaceRoot}

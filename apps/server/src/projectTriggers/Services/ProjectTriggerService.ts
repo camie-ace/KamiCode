@@ -25,11 +25,13 @@ export interface SaveProjectTriggerInput {
   readonly triggerId: ProjectTriggerId;
   readonly projectId: ProjectId;
   readonly name: ProjectTriggerRow["name"];
+  readonly description?: ProjectTriggerRow["description"];
   readonly enabled: boolean;
   readonly scheduleKind: ProjectTriggerScheduleKind;
   readonly scheduleCron: ProjectTriggerRow["scheduleCron"];
   readonly scheduleOnceAt: IsoDateTime | null;
   readonly timezone?: ProjectTriggerRow["timezone"];
+  readonly runtimeTarget?: ProjectTriggerRow["runtimeTarget"];
   readonly prompt: ProjectTriggerRow["prompt"];
   readonly attachments?: ReadonlyArray<ChatAttachment>;
   readonly modelSelection: ModelSelection;

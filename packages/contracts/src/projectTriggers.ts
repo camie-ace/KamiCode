@@ -58,6 +58,16 @@ export const ProjectTriggerThreadTemplate = Schema.Struct({
 });
 export type ProjectTriggerThreadTemplate = typeof ProjectTriggerThreadTemplate.Type;
 
+export const ProjectTriggerRunStatus = Schema.Literals([
+  "queued",
+  "starting",
+  "running",
+  "succeeded",
+  "failed",
+  "cancelled",
+]);
+export type ProjectTriggerRunStatus = typeof ProjectTriggerRunStatus.Type;
+
 export const ProjectTriggerRecord = Schema.Struct({
   id: ProjectTriggerId,
   projectId: ProjectId,
@@ -69,6 +79,8 @@ export const ProjectTriggerRecord = Schema.Struct({
   schedule: ProjectTriggerSchedule,
   threadTemplate: ProjectTriggerThreadTemplate,
   lastRunId: Schema.NullOr(ProjectTriggerRunId),
+  lastRunAt: Schema.NullOr(IsoDateTime),
+  lastRunStatus: Schema.NullOr(ProjectTriggerRunStatus),
   nextRunAt: Schema.NullOr(IsoDateTime),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
@@ -77,16 +89,6 @@ export type ProjectTriggerRecord = typeof ProjectTriggerRecord.Type;
 
 export const ProjectTriggerRunInitiator = Schema.Literals(["manual", "cron"]);
 export type ProjectTriggerRunInitiator = typeof ProjectTriggerRunInitiator.Type;
-
-export const ProjectTriggerRunStatus = Schema.Literals([
-  "queued",
-  "starting",
-  "running",
-  "succeeded",
-  "failed",
-  "cancelled",
-]);
-export type ProjectTriggerRunStatus = typeof ProjectTriggerRunStatus.Type;
 
 export const ProjectTriggerRunErrorPayload = Schema.Struct({
   message: TrimmedNonEmptyString,

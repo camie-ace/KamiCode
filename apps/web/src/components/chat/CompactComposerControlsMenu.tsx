@@ -59,6 +59,7 @@ export const CompactComposerControlsMenu = memo(function CompactComposerControls
               <MenuRadioItem value="plan">Plan</MenuRadioItem>
               <MenuRadioItem value="test">Test</MenuRadioItem>
               <MenuRadioItem value="workflow">Workflow</MenuRadioItem>
+              <MenuRadioItem value="trigger">Trigger</MenuRadioItem>
             </MenuRadioGroup>
             <MenuDivider />
           </>

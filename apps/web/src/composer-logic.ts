@@ -2,7 +2,7 @@ import { splitPromptIntoComposerSegments } from "./composer-editor-mentions";
 import { INLINE_TERMINAL_CONTEXT_PLACEHOLDER } from "./lib/terminalContext";
 
 export type ComposerTriggerKind = "path" | "slash-command" | "skill";
-export type ComposerSlashCommand = "model" | "plan" | "test" | "workflow" | "default";
+export type ComposerSlashCommand = "model" | "plan" | "test" | "workflow" | "trigger" | "default";
 
 export interface ComposerTrigger {
   kind: ComposerTriggerKind;
@@ -258,7 +258,7 @@ export function detectComposerTrigger(text: string, cursorInput: number): Compos
 export function parseStandaloneComposerSlashCommand(
   text: string,
 ): Exclude<ComposerSlashCommand, "model"> | null {
-  const match = /^\/(plan|test|workflow|default)\s*$/i.exec(text.trim());
+  const match = /^\/(plan|test|workflow|trigger|default)\s*$/i.exec(text.trim());
   if (!match) {
     return null;
   }
@@ -266,6 +266,7 @@ export function parseStandaloneComposerSlashCommand(
   if (command === "plan") return "plan";
   if (command === "test") return "test";
   if (command === "workflow") return "workflow";
+  if (command === "trigger") return "trigger";
   return "default";
 }
 

@@ -54,6 +54,7 @@ import Migration0038 from "./Migrations/038_SharedSessionSnapshots.ts";
 import Migration0039 from "./Migrations/039_ReapplyAuthSessionTables.ts";
 import Migration0040 from "./Migrations/040_ReapplyAuthPairingProofKeyThumbprint.ts";
 import Migration0041 from "./Migrations/041_ProjectTriggers.ts";
+import Migration0042 from "./Migrations/042_ProjectTriggerProvenanceAndRuntime.ts";
 
 /**
  * Migration loader with all migrations defined inline.
@@ -110,6 +111,7 @@ export const migrationEntries = [
   [39, "ReapplyAuthSessionTables", Migration0039],
   [40, "ReapplyAuthPairingProofKeyThumbprint", Migration0040],
   [41, "ProjectTriggers", Migration0041],
+  [42, "ProjectTriggerProvenanceAndRuntime", Migration0042],
 ] as const;
 
 export const makeMigrationLoader = (throughId?: number) =>

@@ -41,6 +41,7 @@ import {
   CODEX_DEFAULT_MODE_DEVELOPER_INSTRUCTIONS,
   CODEX_PLAN_MODE_DEVELOPER_INSTRUCTIONS,
   CODEX_TEST_MODE_DEVELOPER_INSTRUCTIONS,
+  CODEX_TRIGGER_MODE_DEVELOPER_INSTRUCTIONS,
   CODEX_WORKFLOW_MODE_DEVELOPER_INSTRUCTIONS,
 } from "../CodexDeveloperInstructions.ts";
 import { appendProjectMemoryInstructions, readProjectMemory } from "../ProjectMemory.ts";
@@ -361,7 +362,9 @@ function buildCodexCollaborationMode(input: {
         ? CODEX_TEST_MODE_DEVELOPER_INSTRUCTIONS
         : interactionMode === "workflow"
           ? CODEX_WORKFLOW_MODE_DEVELOPER_INSTRUCTIONS
-          : CODEX_DEFAULT_MODE_DEVELOPER_INSTRUCTIONS;
+          : interactionMode === "trigger"
+            ? CODEX_TRIGGER_MODE_DEVELOPER_INSTRUCTIONS
+            : CODEX_DEFAULT_MODE_DEVELOPER_INSTRUCTIONS;
   return {
     mode,
     settings: {

@@ -5,6 +5,7 @@ import {
   type ProjectScript,
   type ProjectId,
   type ResolvedKeybindingsConfig,
+  type ThreadStartedBy,
   type ThreadId,
 } from "@t3tools/contracts";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
@@ -22,12 +23,14 @@ import TestHarnessRunsControl from "../TestHarnessRunsControl";
 import { OpenInPicker } from "./OpenInPicker";
 import { usePrimaryEnvironmentId } from "../../state/environments";
 import { cn } from "~/lib/utils";
+import { ZapIcon } from "lucide-react";
 
 interface ChatHeaderProps {
   activeThreadEnvironmentId: EnvironmentId;
   activeThreadId: ThreadId;
   draftId?: DraftId;
   activeThreadTitle: string;
+  activeThreadStartedBy?: ThreadStartedBy | null;
   activeProjectId: ProjectId | undefined;
   activeProjectName: string | undefined;
   activeProjectCwd: string | undefined;
@@ -67,6 +70,7 @@ export const ChatHeader = memo(function ChatHeader({
   activeThreadId,
   draftId,
   activeThreadTitle,
+  activeThreadStartedBy,
   activeProjectId,
   activeProjectName,
   activeProjectCwd,
@@ -91,6 +95,7 @@ export const ChatHeader = memo(function ChatHeader({
     activeThreadEnvironmentId,
     primaryEnvironmentId,
   });
+  const triggerStartedBy = activeThreadStartedBy?.kind === "trigger" ? activeThreadStartedBy : null;
   return (
     <div className="@container/header-actions flex min-w-0 flex-1 items-center gap-2 sm:gap-3">
       <div className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden sm:gap-3">
@@ -107,6 +112,21 @@ export const ChatHeader = memo(function ChatHeader({
           />
           <TooltipPopup side="top">{activeThreadTitle}</TooltipPopup>
         </Tooltip>
+        {triggerStartedBy ? (
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <span className="inline-flex shrink-0 items-center gap-1 rounded-md bg-[#2323FF]/10 px-1.5 py-0.5 text-[11px] font-medium text-[#2323FF] dark:text-[#7777ff]">
+                  <ZapIcon className="size-3" />
+                  <span className="hidden sm:inline">Triggered</span>
+                </span>
+              }
+            />
+            <TooltipPopup side="top">
+              Started by trigger: {triggerStartedBy.triggerName}
+            </TooltipPopup>
+          </Tooltip>
+        ) : null}
       </div>
       <div
         data-chat-header-actions
