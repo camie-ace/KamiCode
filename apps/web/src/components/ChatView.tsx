@@ -2866,6 +2866,10 @@ function ChatViewContent(props: ChatViewProps) {
     () => collectThreadMediaArtifacts(timelineMessages),
     [timelineMessages],
   );
+  const shelfMediaArtifacts = useMemo(
+    () => threadMediaArtifacts.filter((artifact) => artifact.origin !== "attached"),
+    [threadMediaArtifacts],
+  );
   const selectedThreadMediaArtifact = useMemo(
     () =>
       threadMediaArtifacts.find((artifact) => artifact.dedupeKey === selectedMediaArtifactKey) ??
@@ -6492,7 +6496,7 @@ function ChatViewContent(props: ChatViewProps) {
               <div className="chat-composer-horizontal-inset">
                 <div className="pointer-events-auto relative z-10 isolate">
                   <MediaShelf
-                    artifacts={threadMediaArtifacts}
+                    artifacts={shelfMediaArtifacts}
                     environmentId={activeThread.environmentId}
                     threadRef={activeThreadRef}
                     composerTarget={composerDraftTarget}
