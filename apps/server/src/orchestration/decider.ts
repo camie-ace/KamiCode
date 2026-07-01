@@ -520,6 +520,15 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           interactionMode: command.interactionMode,
           branch: command.branch,
           worktreePath: command.worktreePath,
+          ...(command.workflowParentThreadId !== undefined
+            ? { workflowParentThreadId: command.workflowParentThreadId }
+            : {}),
+          ...(command.workflowLaneId !== undefined
+            ? { workflowLaneId: command.workflowLaneId }
+            : {}),
+          ...(command.workflowLaneRole !== undefined
+            ? { workflowLaneRole: command.workflowLaneRole }
+            : {}),
           createdAt: command.createdAt,
           updatedAt: command.createdAt,
         },

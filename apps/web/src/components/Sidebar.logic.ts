@@ -60,6 +60,16 @@ type ThreadStatusInput = Pick<
   lastVisitedAt?: string | undefined;
 };
 
+export function isWorkflowLaneThread(
+  thread: Pick<SidebarThreadSummary, "title"> & {
+    readonly workflowParentThreadId?: string | null | undefined;
+    readonly workflowLaneId?: string | null | undefined;
+  },
+): boolean {
+  if (thread.workflowParentThreadId) return true;
+  return thread.title.startsWith("Workflow:");
+}
+
 export interface ThreadJumpHintVisibilityController {
   sync: (shouldShow: boolean) => void;
   dispose: () => void;

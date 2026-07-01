@@ -38,7 +38,7 @@ import * as Data from "effect/Data";
 import type * as Effect from "effect/Effect";
 
 import type { OrchestrationEngineService } from "../../orchestration/Services/OrchestrationEngine.ts";
-import type { ProcessRunner } from "../../processRunner.ts";
+import type * as ProcessRunner from "../../processRunner.ts";
 import type { AuthenticatedUser } from "../../userAuth/Services/UserAuth.ts";
 
 export class SharedProjectsError extends Data.TaggedError("SharedProjectsError")<{
@@ -101,7 +101,7 @@ export interface SharedProjectsShape {
   ) => Effect.Effect<
     ImportSharedThreadResult,
     SharedProjectsError,
-    OrchestrationEngineService | ProcessRunner
+    OrchestrationEngineService | ProcessRunner.ProcessRunner
   >;
   readonly importThreadFromLink: (
     user: AuthenticatedUser,
@@ -109,7 +109,7 @@ export interface SharedProjectsShape {
   ) => Effect.Effect<
     ImportSharedThreadResult,
     SharedProjectsError,
-    OrchestrationEngineService | ProcessRunner
+    OrchestrationEngineService | ProcessRunner.ProcessRunner
   >;
   readonly resolveSharedThreadShare: (
     user: AuthenticatedUser,

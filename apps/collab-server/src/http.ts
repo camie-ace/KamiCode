@@ -37,9 +37,7 @@ function sendJson(
   response.end(JSON.stringify(body));
 }
 
-async function readJsonBody(
-  request: NodeHttp.IncomingMessage,
-): Promise<unknown> {
+async function readJsonBody(request: NodeHttp.IncomingMessage): Promise<unknown> {
   if (request.method === "GET" || request.method === "OPTIONS") return null;
   const chunks: Buffer[] = [];
   for await (const chunk of request) {
@@ -96,20 +94,14 @@ export function createCollabHttpServer(config: CollabServerConfig, pool: Pool) {
       "GET /api/shared-projects/detail",
       authenticated((_request, url, context) => {
         const { user } = context as AuthenticatedContext;
-        return store.getDetail(
-          user,
-          projectIdFromQuery(url) as SharedProjectId,
-        );
+        return store.getDetail(user, projectIdFromQuery(url) as SharedProjectId);
       }),
     ],
     [
       "GET /api/shared-projects/bootstrap",
       authenticated((_request, url, context) => {
         const { user } = context as AuthenticatedContext;
-        return store.getBootstrapManifest(
-          user,
-          projectIdFromQuery(url) as SharedProjectId,
-        );
+        return store.getBootstrapManifest(user, projectIdFromQuery(url) as SharedProjectId);
       }),
     ],
     [
@@ -240,10 +232,7 @@ export function createCollabHttpServer(config: CollabServerConfig, pool: Pool) {
         response.end();
         return;
       }
-      const url = new URL(
-        request.url ?? "/",
-        `http://${request.headers.host ?? "localhost"}`,
-      );
+      const url = new URL(request.url ?? "/", `http://${request.headers.host ?? "localhost"}`);
       const routeKey = `${request.method ?? "GET"} ${url.pathname}`;
       const handler = routes.get(routeKey);
       if (!handler) throw new HttpError(404, "Route not found.");

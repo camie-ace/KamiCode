@@ -121,6 +121,7 @@ import * as ProcessDiagnostics from "./diagnostics/ProcessDiagnostics.ts";
 import * as ProcessResourceMonitor from "./diagnostics/ProcessResourceMonitor.ts";
 import * as TraceDiagnostics from "./diagnostics/TraceDiagnostics.ts";
 import * as Data from "effect/Data";
+import * as ProcessRunner from "./processRunner.ts";
 
 const defaultProjectId = ProjectId.make("project-default");
 const defaultThreadId = ThreadId.make("thread-default");
@@ -231,6 +232,8 @@ const makeDefaultSharedProjectsMock = (): SharedProjectsShape => ({
   publishThread: failSharedProjectsTestOperation,
   updateThreadVisibility: failSharedProjectsTestOperation,
   importThread: failSharedProjectsTestOperation,
+  importThreadFromLink: failSharedProjectsTestOperation,
+  resolveSharedThreadShare: failSharedProjectsTestOperation,
   appendThreadMessage: failSharedProjectsTestOperation,
   upsertRuntime: failSharedProjectsTestOperation,
   upsertSshCredential: failSharedProjectsTestOperation,
@@ -607,10 +610,26 @@ const buildAppUnderTest = (options?: {
         }),
       ),
       Layer.provide(
-        Layer.mock(ExternalLauncher.ExternalLauncher)({
-          resolveAvailableEditors: () => Effect.succeed([]),
-          ...options?.layers?.externalLauncher,
-        }),
+        Layer.mergeAll(
+          Layer.mock(ExternalLauncher.ExternalLauncher)({
+            resolveAvailableEditors: () => Effect.succeed([]),
+            ...options?.layers?.externalLauncher,
+          }),
+          Layer.succeed(
+            ProcessRunner.ProcessRunner,
+            ProcessRunner.ProcessRunner.of({
+              run: () =>
+                Effect.succeed({
+                  stdout: "",
+                  stderr: "",
+                  code: ChildProcessSpawner.ExitCode(0),
+                  timedOut: false,
+                  stdoutTruncated: false,
+                  stderrTruncated: false,
+                }),
+            }),
+          ),
+        ),
       ),
       Layer.provide(
         Layer.mock(ProcessDiagnostics.ProcessDiagnostics)({

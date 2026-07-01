@@ -62,10 +62,7 @@ async function decodeSharedProjectResponse<T>(response: Response): Promise<T> {
   throw new Error(message);
 }
 
-function sharedProjectUrl(
-  path: string,
-  params?: Record<string, string>,
-): string {
+function sharedProjectUrl(path: string, params?: Record<string, string>): string {
   const url = new URL(resolvePrimaryEnvironmentHttpUrl(path));
   for (const [key, value] of Object.entries(params ?? {})) {
     url.searchParams.set(key, value);
@@ -130,11 +127,7 @@ export function fetchSharedProjectDetail(
   projectId: SharedProjectId,
   options?: SharedProjectRequestOptions,
 ): Promise<SharedProjectDetail> {
-  return sharedProjectGet(
-    "/api/shared-projects/detail",
-    { projectId },
-    options,
-  );
+  return sharedProjectGet("/api/shared-projects/detail", { projectId }, options);
 }
 
 export function fetchSharedProjectBootstrap(
@@ -183,11 +176,7 @@ export function publishSharedThread(
   input: PublishSharedThreadInput,
   options?: SharedProjectRequestOptions,
 ): Promise<SharedThread> {
-  return sharedProjectPost(
-    "/api/shared-projects/threads/publish",
-    input,
-    options,
-  );
+  return sharedProjectPost("/api/shared-projects/threads/publish", input, options);
 }
 
 export function updateSharedThreadVisibility(
@@ -200,33 +189,21 @@ export function importSharedThread(
   input: ImportSharedThreadInput,
   options?: SharedProjectRequestOptions,
 ): Promise<ImportSharedThreadResult> {
-  return sharedProjectPost(
-    "/api/shared-projects/threads/import",
-    input,
-    options,
-  );
+  return sharedProjectPost("/api/shared-projects/threads/import", input, options);
 }
 
 export function resolveSharedThreadShare(
   input: ResolveSharedThreadShareInput,
   options?: SharedProjectRequestOptions,
 ): Promise<ResolvedSharedThreadShare> {
-  return sharedProjectPost(
-    "/api/shared-projects/threads/resolve",
-    input,
-    options,
-  );
+  return sharedProjectPost("/api/shared-projects/threads/resolve", input, options);
 }
 
 export function importSharedThreadLink(
   input: ImportSharedThreadLinkInput,
   options?: SharedProjectRequestOptions,
 ): Promise<ImportSharedThreadResult> {
-  return sharedProjectPost(
-    "/api/shared-projects/threads/import-link",
-    input,
-    options,
-  );
+  return sharedProjectPost("/api/shared-projects/threads/import-link", input, options);
 }
 
 export function appendSharedThreadMessage(
@@ -235,9 +212,7 @@ export function appendSharedThreadMessage(
   return sharedProjectPost("/api/shared-projects/threads/messages", input);
 }
 
-export function upsertSharedRuntime(
-  input: UpsertSharedRuntimeInput,
-): Promise<SharedRuntime> {
+export function upsertSharedRuntime(input: UpsertSharedRuntimeInput): Promise<SharedRuntime> {
   return sharedProjectPost("/api/shared-projects/runtimes", input);
 }
 
@@ -250,10 +225,7 @@ export function upsertSharedSshCredential(
 export function removeSharedSshCredential(
   input: RemoveSharedSshCredentialInput,
 ): Promise<SharedProjectDetail> {
-  return sharedProjectPost(
-    "/api/shared-projects/ssh-credentials/remove",
-    input,
-  );
+  return sharedProjectPost("/api/shared-projects/ssh-credentials/remove", input);
 }
 
 export function upsertSharedEnvironment(

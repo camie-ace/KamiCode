@@ -30,7 +30,7 @@ import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 
 import { OrchestrationEngineService } from "../orchestration/Services/OrchestrationEngine.ts";
-import { ProcessRunner } from "../processRunner.ts";
+import * as ProcessRunner from "../processRunner.ts";
 import {
   prepareSharedThreadImportBranch,
   sharedImportStashLabel,
@@ -158,7 +158,7 @@ export const importSharedThreadSnapshot = (input: {
 }): Effect.Effect<
   ImportSharedThreadResult,
   SharedProjectsError,
-  OrchestrationEngineService | ProcessRunner
+  OrchestrationEngineService | ProcessRunner.ProcessRunner
 > =>
   Effect.gen(function* () {
     const orchestrationEngine = yield* OrchestrationEngineService;

@@ -374,6 +374,7 @@ const RuntimeCoreDependenciesLive = RuntimeCoreBaseLive.pipe(
   Layer.provideMerge(WorkspaceLayerLive),
   Layer.provideMerge(ProjectFaviconResolverLayerLive),
   Layer.provideMerge(RepositoryIdentityResolver.layer),
+  Layer.provideMerge(ProcessRunner.layer),
   Layer.provideMerge(ServerEnvironment.layer),
   Layer.provideMerge(AuthLayerLive),
   Layer.provideMerge(UserAuthLayerLive),

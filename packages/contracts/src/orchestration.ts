@@ -813,6 +813,9 @@ export const OrchestrationThread = Schema.Struct({
   ),
   branch: Schema.NullOr(TrimmedNonEmptyString),
   worktreePath: Schema.NullOr(TrimmedNonEmptyString),
+  workflowParentThreadId: Schema.optional(Schema.NullOr(ThreadId)),
+  workflowLaneId: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+  workflowLaneRole: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   latestTurn: Schema.NullOr(OrchestrationLatestTurn),
   queuedTurns: Schema.optional(Schema.Array(OrchestrationQueuedTurn)),
   createdAt: IsoDateTime,
@@ -861,6 +864,9 @@ export const OrchestrationThreadShell = Schema.Struct({
   ),
   branch: Schema.NullOr(TrimmedNonEmptyString),
   worktreePath: Schema.NullOr(TrimmedNonEmptyString),
+  workflowParentThreadId: Schema.optional(Schema.NullOr(ThreadId)),
+  workflowLaneId: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+  workflowLaneRole: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   latestTurn: Schema.NullOr(OrchestrationLatestTurn),
   queuedTurnCount: Schema.optional(NonNegativeInt),
   createdAt: IsoDateTime,
@@ -969,6 +975,9 @@ const ThreadCreateCommand = Schema.Struct({
   ),
   branch: Schema.NullOr(TrimmedNonEmptyString),
   worktreePath: Schema.NullOr(TrimmedNonEmptyString),
+  workflowParentThreadId: Schema.optional(Schema.NullOr(ThreadId)),
+  workflowLaneId: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+  workflowLaneRole: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   createdAt: IsoDateTime,
 });
 
@@ -1033,6 +1042,9 @@ const ThreadTurnStartBootstrapCreateThread = Schema.Struct({
   interactionMode: ProviderInteractionMode,
   branch: Schema.NullOr(TrimmedNonEmptyString),
   worktreePath: Schema.NullOr(TrimmedNonEmptyString),
+  workflowParentThreadId: Schema.optional(Schema.NullOr(ThreadId)),
+  workflowLaneId: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+  workflowLaneRole: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   createdAt: IsoDateTime,
 });
 
@@ -1483,6 +1495,9 @@ export const ThreadCreatedPayload = Schema.Struct({
   ),
   branch: Schema.NullOr(TrimmedNonEmptyString),
   worktreePath: Schema.NullOr(TrimmedNonEmptyString),
+  workflowParentThreadId: Schema.optional(Schema.NullOr(ThreadId)),
+  workflowLaneId: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+  workflowLaneRole: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
 });

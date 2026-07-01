@@ -223,11 +223,10 @@ export async function runMigrations(pool: Pool): Promise<void> {
       if (applied.length > 0) continue;
 
       await query(client, migration.sql);
-      await query(
-        client,
-        "INSERT INTO collab_migrations (id, name) VALUES ($1, $2)",
-        [migration.id, migration.name],
-      );
+      await query(client, "INSERT INTO collab_migrations (id, name) VALUES ($1, $2)", [
+        migration.id,
+        migration.name,
+      ]);
     }
   });
 }

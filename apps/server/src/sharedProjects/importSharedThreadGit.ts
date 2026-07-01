@@ -1,6 +1,7 @@
 import * as Effect from "effect/Effect";
+import * as DateTime from "effect/DateTime";
 
-import { ProcessRunner } from "../processRunner.ts";
+import * as ProcessRunner from "../processRunner.ts";
 import { SharedProjectsError } from "./Services/SharedProjects.ts";
 
 function sanitizeBranchSegment(value: string): string {
@@ -28,7 +29,7 @@ export function sharedSessionBranchName(input: {
 }
 
 async function runGit(
-  processRunner: ProcessRunner,
+  processRunner: ProcessRunner.ProcessRunner["Service"],
   cwd: string,
   args: ReadonlyArray<string>,
 ): Promise<string> {
@@ -62,10 +63,10 @@ export const prepareSharedThreadImportBranch = (input: {
     readonly stashName: string | null;
   },
   SharedProjectsError,
-  ProcessRunner
+  ProcessRunner.ProcessRunner
 > =>
   Effect.gen(function* () {
-    const processRunner = yield* ProcessRunner;
+    const processRunner = yield* ProcessRunner.ProcessRunner;
     const statusResult = yield* processRunner
       .run({
         command: "git",
@@ -102,7 +103,7 @@ export const prepareSharedThreadImportBranch = (input: {
             "push",
             "--include-untracked",
             "--message",
-            stashName,
+            input.stashLabel,
           ]),
         catch: (cause) =>
           cause instanceof SharedProjectsError
@@ -157,5 +158,5 @@ export const prepareSharedThreadImportBranch = (input: {
   });
 
 export async function sharedImportStashLabel(title: string): Promise<string> {
-  return `kamicode-shared-import:${sanitizeBranchSegment(title) || "session"}:${new Date().toISOString()}`;
+  return `kamicode-shared-import:${sanitizeBranchSegment(title) || "session"}:${DateTime.formatIso(DateTime.nowUnsafe())}`;
 }

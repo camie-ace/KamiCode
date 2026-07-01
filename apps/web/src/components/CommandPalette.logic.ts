@@ -6,6 +6,7 @@ import { type ReactNode } from "react";
 import { sortThreads } from "../lib/threadSort";
 import { formatRelativeTimeLabel } from "../timestampFormat";
 import { type Project, type SidebarThreadSummary, type Thread } from "../types";
+import { isWorkflowLaneThread } from "./Sidebar.logic";
 
 export const RECENT_THREAD_LIMIT = 12;
 export const ITEM_ICON_CLASS = "size-4 text-muted-foreground/80";
@@ -113,7 +114,15 @@ export function buildProjectActionItems(input: {
 
 export type BuildThreadActionItemsThread = Pick<
   SidebarThreadSummary,
-  "archivedAt" | "branch" | "createdAt" | "environmentId" | "id" | "projectId" | "title"
+  | "archivedAt"
+  | "branch"
+  | "createdAt"
+  | "environmentId"
+  | "id"
+  | "projectId"
+  | "title"
+  | "workflowParentThreadId"
+  | "workflowLaneId"
 > & {
   updatedAt: string;
   latestUserMessageAt?: string | null;
@@ -133,7 +142,7 @@ export function buildThreadActionItems<TThread extends BuildThreadActionItemsThr
   limit?: number;
 }): CommandPaletteActionItem[] {
   const sortedThreads = sortThreads(
-    input.threads.filter((thread) => thread.archivedAt === null),
+    input.threads.filter((thread) => thread.archivedAt === null && !isWorkflowLaneThread(thread)),
     input.sortOrder,
   );
   const visibleThreads =

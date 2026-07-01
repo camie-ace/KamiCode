@@ -81,10 +81,7 @@ import {
 } from "../../sharedSessionSnapshot";
 import { readLocalApi } from "../../localApi";
 import { resolveInitialPrimaryEnvironmentDescriptor } from "../../environments/primary";
-import {
-  usePrimarySettings,
-  useUpdatePrimarySettings,
-} from "../../hooks/useSettings";
+import { usePrimarySettings, useUpdatePrimarySettings } from "../../hooks/useSettings";
 import { newMessageId, newProjectId, newThreadId } from "../../lib/utils";
 import { projectEnvironment } from "../../state/projects";
 import { threadEnvironment } from "../../state/threads";
@@ -95,11 +92,7 @@ import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Textarea } from "../ui/textarea";
-import {
-  SettingsPageContainer,
-  SettingsRow,
-  SettingsSection,
-} from "./settingsLayout";
+import { SettingsPageContainer, SettingsRow, SettingsSection } from "./settingsLayout";
 
 const SELECT_CLASS =
   "h-7 rounded-md border border-input bg-background px-2 text-xs text-foreground shadow-xs/5 outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/24";
@@ -120,10 +113,7 @@ type CollabReachabilityState =
   | { readonly status: "success"; readonly message: string }
   | { readonly status: "error"; readonly message: string };
 
-type CurrentSharedUser = Extract<
-  UserAuthSessionState,
-  { readonly authenticated: true }
->["user"];
+type CurrentSharedUser = Extract<UserAuthSessionState, { readonly authenticated: true }>["user"];
 type CollabDeployFailure = {
   readonly rawMessage: string;
   readonly displayMessage: string;
@@ -139,21 +129,9 @@ const environmentTypes: readonly SharedEnvironmentType[] = [
   "production",
   "custom",
 ];
-const runtimeTypes: readonly SharedRuntimeType[] = [
-  "local",
-  "ssh-vps",
-  "hosted-worker",
-];
-const runtimeHealthOptions: readonly SharedRuntimeHealth[] = [
-  "healthy",
-  "unknown",
-  "unavailable",
-];
-const sshAuthTypes: readonly SharedSshAuthType[] = [
-  "agent",
-  "password",
-  "private-key",
-];
+const runtimeTypes: readonly SharedRuntimeType[] = ["local", "ssh-vps", "hosted-worker"];
+const runtimeHealthOptions: readonly SharedRuntimeHealth[] = ["healthy", "unknown", "unavailable"];
+const sshAuthTypes: readonly SharedSshAuthType[] = ["agent", "password", "private-key"];
 const COLLAB_DEPLOY_REPAIR_PROJECT_TITLE = "KamiCode deploy repair";
 type SavedEnvironmentRecord = PersistedSavedEnvironmentRecord;
 
@@ -175,24 +153,14 @@ function normalizeCollabDeployError(error: unknown): string {
   if (isMissingDockerCollabDeployError(error)) {
     return "Docker is not installed on the selected SSH target. Run the guided repair from this screen, or save an existing collaboration server URL and token.";
   }
-  if (
-    /Remote deploy repair requires root access or passwordless sudo/i.test(
-      message,
-    )
-  ) {
+  if (/Remote deploy repair requires root access or passwordless sudo/i.test(message)) {
     return "Guided deploy repair needs root access or passwordless sudo on the selected SSH server. Connect as root/admin or install the missing prerequisites manually, then deploy again.";
   }
   if (/Automatic deploy repair cannot install/i.test(message)) {
-    return message.replace(
-      /^Error invoking remote method 'desktop:deploy-collab-server':\s*/u,
-      "",
-    );
+    return message.replace(/^Error invoking remote method 'desktop:deploy-collab-server':\s*/u, "");
   }
   if (/Deploy repair attempted to install/i.test(message)) {
-    return message.replace(
-      /^Error invoking remote method 'desktop:deploy-collab-server':\s*/u,
-      "",
-    );
+    return message.replace(/^Error invoking remote method 'desktop:deploy-collab-server':\s*/u, "");
   }
   if (/Missing required command on SSH target:\s*git/i.test(message)) {
     return "Git is not installed on the selected SSH target. Install Git on that server, then deploy again.";
@@ -209,17 +177,10 @@ function normalizeCollabDeployError(error: unknown): string {
   if (/requires a Linux SSH target/i.test(message)) {
     return "Collaboration server auto-deploy currently requires a Linux SSH target.";
   }
-  if (
-    /permission denied|authentication failed|too many authentication failures/i.test(
-      message,
-    )
-  ) {
+  if (/permission denied|authentication failed|too many authentication failures/i.test(message)) {
     return "SSH authentication failed for the selected connection. Check the password or saved SSH key, then deploy again.";
   }
-  return message.replace(
-    /^Error invoking remote method 'desktop:deploy-collab-server':\s*/u,
-    "",
-  );
+  return message.replace(/^Error invoking remote method 'desktop:deploy-collab-server':\s*/u, "");
 }
 
 function normalizeInstallDockerDeployError(error: unknown): string {
@@ -237,9 +198,7 @@ function formatActionError(key: string, error: unknown): string {
   if (key === "deploy-collab-server") {
     return normalizeCollabDeployError(error);
   }
-  return error instanceof Error
-    ? error.message
-    : "Shared project action failed.";
+  return error instanceof Error ? error.message : "Shared project action failed.";
 }
 
 function formatTimestamp(value: string | null | undefined): string {
@@ -256,9 +215,7 @@ function shortSha(value: string | null | undefined): string {
   return value ? value.slice(0, 8) : "unknown";
 }
 
-function roleBadgeVariant(
-  role: SharedProjectRole,
-): "default" | "secondary" | "outline" {
+function roleBadgeVariant(role: SharedProjectRole): "default" | "secondary" | "outline" {
   if (role === "owner") return "default";
   if (role === "admin") return "secondary";
   return "outline";
@@ -278,10 +235,7 @@ function localProjectMatchesSharedProject(
   sharedProject: SharedProjectDetail["project"] | null,
 ): boolean {
   if (!sharedProject) return false;
-  if (
-    sharedProject.sourceProjectId !== null &&
-    project.id === sharedProject.sourceProjectId
-  ) {
+  if (sharedProject.sourceProjectId !== null && project.id === sharedProject.sourceProjectId) {
     return true;
   }
   const sharedCanonicalKey = sharedProject.repository.canonicalKey;
@@ -317,9 +271,7 @@ function formatSavedSshConnection(record: SavedEnvironmentRecord): string {
   return `${record.label} (${user}${host}${port})`;
 }
 
-function defaultCollabPublicBaseUrl(
-  record: SavedEnvironmentRecord | null,
-): string {
+function defaultCollabPublicBaseUrl(record: SavedEnvironmentRecord | null): string {
   const target = record?.desktopSsh;
   if (!target) return "";
   const host = target.hostname || target.alias;
@@ -341,9 +293,7 @@ function buildCollabDeployAiRepairPrompt(input: {
   readonly project: Project | null;
 }): string {
   const target = input.connection?.desktopSsh;
-  const connectionLabel = input.connection
-    ? formatSavedSshConnection(input.connection)
-    : "None";
+  const connectionLabel = input.connection ? formatSavedSshConnection(input.connection) : "None";
   const targetHost = target
     ? `${target.username ? `${target.username}@` : ""}${target.hostname || target.alias}:${target.port ?? 22}`
     : "Unknown";
@@ -397,22 +347,14 @@ function localThreadsForProject(
 ): ThreadShell[] {
   if (!sourceProjectId) return [];
   return threads.filter(
-    (thread) =>
-      thread.projectId === sourceProjectId && thread.archivedAt === null,
+    (thread) => thread.projectId === sourceProjectId && thread.archivedAt === null,
   );
 }
 
-function ProjectStatusBadge({
-  detail,
-}: {
-  readonly detail: SharedProjectDetail;
-}) {
+function ProjectStatusBadge({ detail }: { readonly detail: SharedProjectDetail }) {
   return (
     <div className="flex flex-wrap gap-1.5">
-      <Badge
-        variant={detail.project.repository.dirty ? "warning" : "success"}
-        size="sm"
-      >
+      <Badge variant={detail.project.repository.dirty ? "warning" : "success"} size="sm">
         {detail.project.repository.dirty ? "Dirty work" : "Clean HEAD"}
       </Badge>
       <Badge variant="outline" size="sm">
@@ -435,9 +377,7 @@ function EmptyRow({ children }: { readonly children: ReactNode }) {
 
 export function SharedProjectsSettings() {
   const navigate = useNavigate();
-  const hostedCollaboration = usePrimarySettings(
-    (settings) => settings.hostedCollaboration,
-  );
+  const hostedCollaboration = usePrimarySettings((settings) => settings.hostedCollaboration);
   const updatePrimarySettings = useUpdatePrimarySettings();
   const createProject = useAtomCommand(projectEnvironment.create, {
     reportFailure: false,
@@ -450,22 +390,15 @@ export function SharedProjectsSettings() {
   });
   const localProjects = useProjects();
   const localThreads = useThreadShells();
-  const savedEnvironmentById = useMemo<Record<string, SavedEnvironmentRecord>>(
-    () => ({}),
-    [],
-  );
-  const [currentUser, setCurrentUser] = useState<CurrentSharedUser | null>(
-    null,
-  );
-  const [githubSessionState, setGitHubSessionState] =
-    useState<GitHubSessionLoadState>({
-      status: "loading",
-    });
+  const savedEnvironmentById = useMemo<Record<string, SavedEnvironmentRecord>>(() => ({}), []);
+  const [currentUser, setCurrentUser] = useState<CurrentSharedUser | null>(null);
+  const [githubSessionState, setGitHubSessionState] = useState<GitHubSessionLoadState>({
+    status: "loading",
+  });
   const [sharedProjects, setSharedProjects] = useState<
     ReadonlyArray<SharedProjectDetail["project"]>
   >([]);
-  const [selectedProjectId, setSelectedProjectId] =
-    useState<SharedProjectId | null>(null);
+  const [selectedProjectId, setSelectedProjectId] = useState<SharedProjectId | null>(null);
   const [detail, setDetail] = useState<SharedProjectDetail | null>(null);
   const [loadState, setLoadState] = useState<LoadState>({ status: "loading" });
   const [pendingAction, setPendingAction] = useState<string | null>(null);
@@ -473,10 +406,8 @@ export function SharedProjectsSettings() {
   const [inviteLogin, setInviteLogin] = useState("");
   const [inviteRole, setInviteRole] = useState<SharedProjectRole>("member");
   const [lastInviteCode, setLastInviteCode] = useState<string | null>(null);
-  const [
-    stopSharingConfirmationProjectId,
-    setStopSharingConfirmationProjectId,
-  ] = useState<SharedProjectId | null>(null);
+  const [stopSharingConfirmationProjectId, setStopSharingConfirmationProjectId] =
+    useState<SharedProjectId | null>(null);
   const [newRuntime, setNewRuntime] = useState({
     type: "ssh-vps" as SharedRuntimeType,
     label: "VPS runtime",
@@ -484,9 +415,7 @@ export function SharedProjectsSettings() {
     health: "healthy" as SharedRuntimeHealth,
     sshCredentialId: "",
   });
-  const [editingSshCredentialId, setEditingSshCredentialId] = useState<
-    string | null
-  >(null);
+  const [editingSshCredentialId, setEditingSshCredentialId] = useState<string | null>(null);
   const [sshCredentialForm, setSshCredentialForm] = useState({
     label: "VPS SSH",
     host: "",
@@ -509,9 +438,7 @@ export function SharedProjectsSettings() {
     deployUrl: "",
     deployedSha: "",
   });
-  const [importTargetProjectId, setImportTargetProjectId] = useState<
-    ProjectId | ""
-  >("");
+  const [importTargetProjectId, setImportTargetProjectId] = useState<ProjectId | "">("");
   const [acceptedBootstrap, setAcceptedBootstrap] = useState<
     Awaited<ReturnType<typeof claimSharedProjectInvite>>["bootstrap"] | null
   >(null);
@@ -528,23 +455,17 @@ export function SharedProjectsSettings() {
   const [collabDeployPendingMode, setCollabDeployPendingMode] = useState<
     "deploy" | "install-docker"
   >("deploy");
-  const collabDeployPendingModeRef = useRef<"deploy" | "install-docker">(
-    "deploy",
-  );
+  const collabDeployPendingModeRef = useRef<"deploy" | "install-docker">("deploy");
   const [lastCollabDeployFailure, setLastCollabDeployFailure] =
     useState<CollabDeployFailure | null>(null);
-  const [collabDeployRepairPromptCopied, setCollabDeployRepairPromptCopied] =
-    useState(false);
-  const [collabReachability, setCollabReachability] =
-    useState<CollabReachabilityState>({
-      status: "idle",
-    });
+  const [collabDeployRepairPromptCopied, setCollabDeployRepairPromptCopied] = useState(false);
+  const [collabReachability, setCollabReachability] = useState<CollabReachabilityState>({
+    status: "idle",
+  });
 
   const selectedLocalProject = useMemo(
     () =>
-      localProjects.find(
-        (project) => project.id === detail?.project.sourceProjectId,
-      ) ??
+      localProjects.find((project) => project.id === detail?.project.sourceProjectId) ??
       localProjects.find((project) =>
         localProjectMatchesSharedProject(project, detail?.project ?? null),
       ) ??
@@ -567,27 +488,18 @@ export function SharedProjectsSettings() {
     [importTargetProjectId, localProjects, preferredImportTargetProject],
   );
   const sharedProjectBySourceProjectId = useMemo(
-    () =>
-      new Map(
-        sharedProjects.map(
-          (project) => [project.sourceProjectId, project] as const,
-        ),
-      ),
+    () => new Map(sharedProjects.map((project) => [project.sourceProjectId, project] as const)),
     [sharedProjects],
   );
   const activeLocalThreads = useMemo(
-    () =>
-      localThreadsForProject(localThreads, selectedLocalProject?.id ?? null),
+    () => localThreadsForProject(localThreads, selectedLocalProject?.id ?? null),
     [localThreads, selectedLocalProject?.id],
   );
   const sharedThreadsByLocalId = useMemo(() => {
     const result = new Map<string, SharedThread[]>();
     for (const thread of detail?.threads ?? []) {
       if (thread.localThreadId === null) continue;
-      result.set(thread.localThreadId, [
-        ...(result.get(thread.localThreadId) ?? []),
-        thread,
-      ]);
+      result.set(thread.localThreadId, [...(result.get(thread.localThreadId) ?? []), thread]);
     }
     return result;
   }, [detail?.threads]);
@@ -596,9 +508,7 @@ export function SharedProjectsSettings() {
   const sshCredentialById = useMemo(
     () =>
       new Map<string, SharedProjectDetail["sshCredentials"][number]>(
-        (detail?.sshCredentials ?? []).map(
-          (credential) => [credential.id, credential] as const,
-        ),
+        (detail?.sshCredentials ?? []).map((credential) => [credential.id, credential] as const),
       ),
     [detail?.sshCredentials],
   );
@@ -611,18 +521,14 @@ export function SharedProjectsSettings() {
   );
   const selectedDeployConnection =
     savedSshConnections.find(
-      (record) =>
-        record.environmentId === collabServerForm.selectedEnvironmentId,
+      (record) => record.environmentId === collabServerForm.selectedEnvironmentId,
     ) ??
     savedSshConnections[0] ??
     null;
-  const hasDesktopBridge =
-    typeof window !== "undefined" && Boolean(window.desktopBridge);
+  const hasDesktopBridge = typeof window !== "undefined" && Boolean(window.desktopBridge);
   const hasHostedCollabConfig =
-    hostedCollaboration.url.trim().length > 0 &&
-    hostedCollaboration.tokenRedacted;
-  const effectiveCollabUrl =
-    collabServerForm.url.trim() || hostedCollaboration.url.trim();
+    hostedCollaboration.url.trim().length > 0 && hostedCollaboration.tokenRedacted;
+  const effectiveCollabUrl = collabServerForm.url.trim() || hostedCollaboration.url.trim();
   const isDeployingCollabServer = pendingAction === "deploy-collab-server";
   const isOpeningCollabDeployAiRepairThread =
     pendingAction === "open-collab-deploy-ai-repair-thread";
@@ -631,10 +537,7 @@ export function SharedProjectsSettings() {
       ? "Repairing known deploy prerequisites on the SSH server, then deploying the collaboration server. This can take a few minutes."
       : "Deploying the collaboration server on the selected SSH server. This can take a few minutes.";
   const collabDeployAiRepairProject =
-    selectedLocalProject ??
-    preferredImportTargetProject ??
-    localProjects[0] ??
-    null;
+    selectedLocalProject ?? preferredImportTargetProject ?? localProjects[0] ?? null;
   const collabDeployAiRepairPrompt = lastCollabDeployFailure
     ? buildCollabDeployAiRepairPrompt({
         connection: selectedDeployConnection,
@@ -650,9 +553,7 @@ export function SharedProjectsSettings() {
     setDetail(nextDetail);
     setSelectedProjectId(nextDetail.project.id);
     setSharedProjects((current) => {
-      const without = current.filter(
-        (project) => project.id !== nextDetail.project.id,
-      );
+      const without = current.filter((project) => project.id !== nextDetail.project.id);
       return [nextDetail.project, ...without].toSorted((left, right) =>
         right.updatedAt.localeCompare(left.updatedAt),
       );
@@ -676,9 +577,7 @@ export function SharedProjectsSettings() {
         setCurrentUser(session.user);
         const listResult = await listSharedProjects();
         setSharedProjects(listResult.projects);
-        const projectIds = new Set(
-          listResult.projects.map((project) => project.id),
-        );
+        const projectIds = new Set(listResult.projects.map((project) => project.id));
         const requestedProjectId = preferredProjectId ?? selectedProjectId;
         const nextSelectedId =
           requestedProjectId && projectIds.has(requestedProjectId)
@@ -700,10 +599,7 @@ export function SharedProjectsSettings() {
         }
         setLoadState({ status: "loaded" });
       } catch (error) {
-        const message =
-          error instanceof Error
-            ? error.message
-            : "Failed to load shared projects.";
+        const message = error instanceof Error ? error.message : "Failed to load shared projects.";
         if (currentUser === null) {
           setGitHubSessionState({ status: "error", message });
           setSharedProjects([]);
@@ -737,8 +633,7 @@ export function SharedProjectsSettings() {
     if (
       collabServerForm.selectedEnvironmentId &&
       savedSshConnections.some(
-        (record) =>
-          record.environmentId === collabServerForm.selectedEnvironmentId,
+        (record) => record.environmentId === collabServerForm.selectedEnvironmentId,
       )
     ) {
       return;
@@ -747,8 +642,7 @@ export function SharedProjectsSettings() {
     setCollabServerForm((current) => ({
       ...current,
       selectedEnvironmentId: nextConnection?.environmentId ?? "",
-      publicBaseUrl:
-        current.publicBaseUrl || defaultCollabPublicBaseUrl(nextConnection),
+      publicBaseUrl: current.publicBaseUrl || defaultCollabPublicBaseUrl(nextConnection),
     }));
   }, [collabServerForm.selectedEnvironmentId, savedSshConnections]);
 
@@ -766,50 +660,43 @@ export function SharedProjectsSettings() {
     setImportTargetProjectId(preferredImportTargetProject?.id ?? "");
   }, [importTargetProjectId, localProjects, preferredImportTargetProject?.id]);
 
-  const runAction = useCallback(
-    async (key: string, action: () => Promise<void>) => {
-      setPendingAction(key);
-      setLoadState({ status: "loaded" });
-      try {
-        await action();
-        if (key === "deploy-collab-server") {
-          setCollabDeployRecoveryAction(null);
-          setLastCollabDeployFailure(null);
-          setCollabDeployRepairPromptCopied(false);
-        }
-      } catch (error) {
-        const mode = collabDeployPendingModeRef.current;
-        const displayMessage =
-          key === "deploy-collab-server" && mode === "install-docker"
-            ? normalizeInstallDockerDeployError(error)
-            : formatActionError(key, error);
-        if (key === "deploy-collab-server") {
-          setCollabDeployRecoveryAction(collabDeployRecovery(error));
-          setLastCollabDeployFailure({
-            rawMessage: rawErrorMessage(error),
-            displayMessage,
-            mode,
-            occurredAt: new Date().toISOString(),
-          });
-          setCollabDeployRepairPromptCopied(false);
-        }
-        setLoadState({
-          status: "error",
-          message: displayMessage,
-        });
-      } finally {
-        setPendingAction(null);
+  const runAction = useCallback(async (key: string, action: () => Promise<void>) => {
+    setPendingAction(key);
+    setLoadState({ status: "loaded" });
+    try {
+      await action();
+      if (key === "deploy-collab-server") {
+        setCollabDeployRecoveryAction(null);
+        setLastCollabDeployFailure(null);
+        setCollabDeployRepairPromptCopied(false);
       }
-    },
-    [],
-  );
+    } catch (error) {
+      const mode = collabDeployPendingModeRef.current;
+      const displayMessage =
+        key === "deploy-collab-server" && mode === "install-docker"
+          ? normalizeInstallDockerDeployError(error)
+          : formatActionError(key, error);
+      if (key === "deploy-collab-server") {
+        setCollabDeployRecoveryAction(collabDeployRecovery(error));
+        setLastCollabDeployFailure({
+          rawMessage: rawErrorMessage(error),
+          displayMessage,
+          mode,
+          occurredAt: new Date().toISOString(),
+        });
+        setCollabDeployRepairPromptCopied(false);
+      }
+      setLoadState({
+        status: "error",
+        message: displayMessage,
+      });
+    } finally {
+      setPendingAction(null);
+    }
+  }, []);
 
   const updateHostedCollaborationSettings = useCallback(
-    async (
-      hostedCollaborationPatch: NonNullable<
-        ServerSettingsPatch["hostedCollaboration"]
-      >,
-    ) => {
+    async (hostedCollaborationPatch: NonNullable<ServerSettingsPatch["hostedCollaboration"]>) => {
       const nextHostedCollaboration = {
         ...hostedCollaboration,
         ...hostedCollaborationPatch,
@@ -838,10 +725,7 @@ export function SharedProjectsSettings() {
     } catch (error) {
       setGitHubSessionState({
         status: "error",
-        message:
-          error instanceof Error
-            ? error.message
-            : "Failed to start GitHub sign-in.",
+        message: error instanceof Error ? error.message : "Failed to start GitHub sign-in.",
       });
       setPendingAction(null);
     }
@@ -891,9 +775,7 @@ export function SharedProjectsSettings() {
           redirect: "follow",
         });
         if (!response.ok) {
-          throw new Error(
-            `Health check failed with status ${response.status}.`,
-          );
+          throw new Error(`Health check failed with status ${response.status}.`);
         }
         setCollabReachability({
           status: "success",
@@ -993,19 +875,14 @@ export function SharedProjectsSettings() {
   );
 
   const deployCollabServer = useCallback(
-    (options?: {
-      readonly installDocker?: boolean;
-      readonly confirmRepair?: boolean;
-    }) => {
+    (options?: { readonly installDocker?: boolean; readonly confirmRepair?: boolean }) => {
       if (!selectedDeployConnection) return undefined;
       const mode = options?.installDocker ? "install-docker" : "deploy";
       collabDeployPendingModeRef.current = mode;
       setCollabDeployPendingMode(mode);
       return runAction("deploy-collab-server", async () => {
         if (!window.desktopBridge) {
-          throw new Error(
-            "Desktop SSH deployment is only available in the desktop app.",
-          );
+          throw new Error("Desktop SSH deployment is only available in the desktop app.");
         }
         const target = selectedDeployConnection.desktopSsh;
         if (!target) {
@@ -1060,9 +937,7 @@ export function SharedProjectsSettings() {
     () =>
       runAction("copy-collab-deploy-ai-repair-prompt", async () => {
         if (!collabDeployAiRepairPrompt) {
-          throw new Error(
-            "No collaboration deploy failure is available to copy.",
-          );
+          throw new Error("No collaboration deploy failure is available to copy.");
         }
         await navigator.clipboard.writeText(collabDeployAiRepairPrompt);
         setCollabDeployRepairPromptCopied(true);
@@ -1074,9 +949,7 @@ export function SharedProjectsSettings() {
     () =>
       runAction("open-collab-deploy-ai-repair-thread", async () => {
         if (!lastCollabDeployFailure || !collabDeployAiRepairPrompt) {
-          throw new Error(
-            "No collaboration deploy failure is available for AI repair.",
-          );
+          throw new Error("No collaboration deploy failure is available for AI repair.");
         }
         const workspaceProject = collabDeployAiRepairProject;
         const descriptor = workspaceProject
@@ -1084,13 +957,9 @@ export function SharedProjectsSettings() {
           : await resolveInitialPrimaryEnvironmentDescriptor();
         const localApi = readLocalApi();
         const serverConfig =
-          workspaceProject || !localApi
-            ? null
-            : await localApi.server.getConfig();
-        const environmentId =
-          workspaceProject?.environmentId ?? descriptor?.environmentId ?? null;
-        const workspaceRoot =
-          workspaceProject?.workspaceRoot ?? serverConfig?.cwd ?? null;
+          workspaceProject || !localApi ? null : await localApi.server.getConfig();
+        const environmentId = workspaceProject?.environmentId ?? descriptor?.environmentId ?? null;
+        const workspaceRoot = workspaceProject?.workspaceRoot ?? serverConfig?.cwd ?? null;
         if (!environmentId || !workspaceRoot) {
           throw new Error(
             "Cannot find a workspace for the AI repair thread. Open any local project once, then click Ask AI to repair again.",
@@ -1166,9 +1035,7 @@ export function SharedProjectsSettings() {
         }
         await navigate({
           to: "/$environmentId/$threadId",
-          params: buildThreadRouteParams(
-            scopeThreadRef(environmentId, threadId),
-          ),
+          params: buildThreadRouteParams(scopeThreadRef(environmentId, threadId)),
         });
       }),
     [
@@ -1206,11 +1073,7 @@ export function SharedProjectsSettings() {
             setSharedProjects(listResult.projects);
             const nextProjectId = listResult.projects[0]?.id ?? null;
             setSelectedProjectId(nextProjectId);
-            setDetail(
-              nextProjectId
-                ? await fetchSharedProjectDetail(nextProjectId)
-                : null,
-            );
+            setDetail(nextProjectId ? await fetchSharedProjectDetail(nextProjectId) : null);
           })
         : undefined,
     [detail, runAction, stopSharingConfirmationProjectId],
@@ -1248,9 +1111,7 @@ export function SharedProjectsSettings() {
               title: threadDetail.title,
               visibility,
               codeState: {
-                branch:
-                  threadDetail.branch ??
-                  detail.project.repository.currentBranch,
+                branch: threadDetail.branch ?? detail.project.repository.currentBranch,
                 headSha: detail.project.repository.headSha,
                 dirty: detail.project.repository.dirty,
                 patchAttached: false,
@@ -1262,12 +1123,7 @@ export function SharedProjectsSettings() {
               current
                 ? {
                     ...current,
-                    threads: [
-                      shared,
-                      ...current.threads.filter(
-                        (entry) => entry.id !== shared.id,
-                      ),
-                    ],
+                    threads: [shared, ...current.threads.filter((entry) => entry.id !== shared.id)],
                   }
                 : current,
             );
@@ -1288,10 +1144,7 @@ export function SharedProjectsSettings() {
             await navigate({
               to: "/$environmentId/$threadId",
               params: buildThreadRouteParams(
-                scopeThreadRef(
-                  importTargetProject.environmentId,
-                  result.threadId,
-                ),
+                scopeThreadRef(importTargetProject.environmentId, result.threadId),
               ),
             });
           })
@@ -1366,9 +1219,7 @@ export function SharedProjectsSettings() {
               projectId: detail.project.id,
               ...(editingSshCredentialId
                 ? {
-                    credentialId: SharedSshCredentialId.make(
-                      editingSshCredentialId,
-                    ),
+                    credentialId: SharedSshCredentialId.make(editingSshCredentialId),
                   }
                 : {}),
               label: sshCredentialForm.label.trim(),
@@ -1377,13 +1228,11 @@ export function SharedProjectsSettings() {
               username: sshCredentialForm.username.trim(),
               authType: sshCredentialForm.authType,
               ...(sshCredentialForm.authType === "password" &&
-              (!editingSshCredentialId ||
-                sshCredentialForm.password.trim().length > 0)
+              (!editingSshCredentialId || sshCredentialForm.password.trim().length > 0)
                 ? { password: sshCredentialForm.password }
                 : {}),
               ...(sshCredentialForm.authType === "private-key" &&
-              (!editingSshCredentialId ||
-                sshCredentialForm.privateKey.trim().length > 0)
+              (!editingSshCredentialId || sshCredentialForm.privateKey.trim().length > 0)
                 ? { privateKey: sshCredentialForm.privateKey }
                 : {}),
               ...(sshCredentialForm.authType === "private-key" &&
@@ -1422,9 +1271,7 @@ export function SharedProjectsSettings() {
                   ? SharedSshCredentialId.make(newRuntime.sshCredentialId)
                   : null,
               unavailableReason:
-                newRuntime.health === "unavailable"
-                  ? "Provider or runtime unavailable"
-                  : null,
+                newRuntime.health === "unavailable" ? "Provider or runtime unavailable" : null,
             });
             setNewRuntime({
               type: "ssh-vps",
@@ -1466,16 +1313,13 @@ export function SharedProjectsSettings() {
     () =>
       detail
         ? runAction("add-deploy", async () => {
-            const environmentId =
-              deployForm.environmentId || defaultEnvironment?.id;
+            const environmentId = deployForm.environmentId || defaultEnvironment?.id;
             if (!environmentId) return;
             commitDetail(
               await upsertSharedDeployAssociation({
                 projectId: detail.project.id,
                 branch:
-                  deployForm.branch.trim() ||
-                  detail.project.repository.currentBranch ||
-                  "main",
+                  deployForm.branch.trim() || detail.project.repository.currentBranch || "main",
                 environmentId: SharedProjectEnvironmentId.make(environmentId),
                 deployUrl: deployForm.deployUrl,
                 deployedSha: deployForm.deployedSha.trim() || null,
@@ -1503,15 +1347,8 @@ export function SharedProjectsSettings() {
         title="Shared Projects"
         icon={<Share2Icon className="size-3.5 text-muted-foreground/70" />}
         headerAction={
-          <Button
-            size="xs"
-            variant="outline"
-            disabled={isPending}
-            onClick={() => void load()}
-          >
-            <RefreshCwIcon
-              className={isPending ? "size-3.5 animate-spin" : "size-3.5"}
-            />
+          <Button size="xs" variant="outline" disabled={isPending} onClick={() => void load()}>
+            <RefreshCwIcon className={isPending ? "size-3.5 animate-spin" : "size-3.5"} />
             Refresh
           </Button>
         }
@@ -1529,9 +1366,7 @@ export function SharedProjectsSettings() {
           }
           status={
             githubSessionState.status === "error" ? (
-              <span className="text-destructive">
-                {githubSessionState.message}
-              </span>
+              <span className="text-destructive">{githubSessionState.message}</span>
             ) : loadState.status === "error" ? (
               <span className="text-destructive">{loadState.message}</span>
             ) : null
@@ -1544,9 +1379,7 @@ export function SharedProjectsSettings() {
                   size="xs"
                   variant="outline"
                   disabled={isPending}
-                  onClick={() =>
-                    void openGitHubProfile(currentUser.githubLogin)
-                  }
+                  onClick={() => void openGitHubProfile(currentUser.githubLogin)}
                 >
                   <ExternalLinkIcon className="size-3.5" />
                   Open
@@ -1568,11 +1401,7 @@ export function SharedProjectsSettings() {
             ) : (
               <>
                 <Badge variant="warning">Unavailable</Badge>
-                <Button
-                  size="xs"
-                  disabled={isPending}
-                  onClick={() => void connectGitHub()}
-                >
+                <Button size="xs" disabled={isPending} onClick={() => void connectGitHub()}>
                   <GitHubIcon className="size-3.5" />
                   Connect GitHub
                 </Button>
@@ -1611,21 +1440,15 @@ export function SharedProjectsSettings() {
                 </p>
               </div>
               <div>
-                <span className="font-medium text-foreground">
-                  Clone from GitHub
-                </span>
+                <span className="font-medium text-foreground">Clone from GitHub</span>
                 <p className="mt-1">
-                  {acceptedBootstrap.project.repository.remoteUrl ??
-                    "Repo URL unavailable"}
+                  {acceptedBootstrap.project.repository.remoteUrl ?? "Repo URL unavailable"}
                 </p>
               </div>
               <div>
-                <span className="font-medium text-foreground">
-                  Attach runtime
-                </span>
+                <span className="font-medium text-foreground">Attach runtime</span>
                 <p className="mt-1">
-                  {acceptedBootstrap.runtimes.length} runtime record(s)
-                  available.
+                  {acceptedBootstrap.runtimes.length} runtime record(s) available.
                 </p>
               </div>
             </div>
@@ -1633,10 +1456,7 @@ export function SharedProjectsSettings() {
         </SettingsRow>
       </SettingsSection>
 
-      <SettingsSection
-        title="Collaboration server"
-        icon={<ServerIcon className="size-3.5" />}
-      >
+      <SettingsSection title="Collaboration server" icon={<ServerIcon className="size-3.5" />}>
         <SettingsRow
           title="Hosted control plane"
           description={
@@ -1652,9 +1472,9 @@ export function SharedProjectsSettings() {
                 <Badge variant="warning">Local only</Badge>
               )}
               <span>
-                This screen only uses the saved URL/token. KamiCode shared
-                projects are not auto-discovered unless a hosted server is
-                configured here or injected by backend environment config.
+                This screen only uses the saved URL/token. KamiCode shared projects are not
+                auto-discovered unless a hosted server is configured here or injected by backend
+                environment config.
               </span>
             </div>
           }
@@ -1696,13 +1516,9 @@ export function SharedProjectsSettings() {
           }
           status={
             collabReachability.status === "success" ? (
-              <span className="text-emerald-400">
-                {collabReachability.message}
-              </span>
+              <span className="text-emerald-400">{collabReachability.message}</span>
             ) : collabReachability.status === "error" ? (
-              <span className="text-destructive">
-                {collabReachability.message}
-              </span>
+              <span className="text-destructive">{collabReachability.message}</span>
             ) : collabReachability.status === "pending" ? (
               <span>Checking collaboration server health...</span>
             ) : null
@@ -1721,8 +1537,7 @@ export function SharedProjectsSettings() {
               disabled={
                 isPending ||
                 collabServerForm.url.trim().length === 0 ||
-                (!hostedCollaboration.tokenRedacted &&
-                  collabServerForm.token.trim().length === 0)
+                (!hostedCollaboration.tokenRedacted && collabServerForm.token.trim().length === 0)
               }
               onClick={() => void saveCollabServerConfig()}
             >
@@ -1775,15 +1590,10 @@ export function SharedProjectsSettings() {
             <Button
               size="xs"
               variant="outline"
-              disabled={
-                isPending ||
-                !hasDesktopBridge ||
-                !selectedDeployConnection?.desktopSsh
-              }
+              disabled={isPending || !hasDesktopBridge || !selectedDeployConnection?.desktopSsh}
               onClick={() => void deployCollabServer()}
             >
-              {isDeployingCollabServer &&
-              collabDeployPendingMode === "deploy" ? (
+              {isDeployingCollabServer && collabDeployPendingMode === "deploy" ? (
                 <RefreshCwIcon className="size-3.5 animate-spin" />
               ) : (
                 <ServerIcon className="size-3.5" />
@@ -1798,15 +1608,11 @@ export function SharedProjectsSettings() {
             <select
               className={SELECT_CLASS}
               value={selectedDeployConnection?.environmentId ?? ""}
-              disabled={
-                isDeployingCollabServer || savedSshConnections.length === 0
-              }
+              disabled={isDeployingCollabServer || savedSshConnections.length === 0}
               onChange={(event) => {
                 const value = event.currentTarget.value;
                 const nextConnection =
-                  savedSshConnections.find(
-                    (record) => record.environmentId === value,
-                  ) ?? null;
+                  savedSshConnections.find((record) => record.environmentId === value) ?? null;
                 setCollabServerForm((current) => ({
                   ...current,
                   selectedEnvironmentId: value,
@@ -1860,27 +1666,21 @@ export function SharedProjectsSettings() {
           {collabDeployRecoveryAction === "install-docker" ? (
             <div className="mb-3 flex flex-col gap-3 rounded-md border border-warning/40 bg-warning/5 p-3 text-xs text-warning sm:flex-row sm:items-center">
               <span className="flex-1">
-                Docker is missing on this SSH server. KamiCode can run a bounded
-                repair for known prerequisites, then retry the deployment.
+                Docker is missing on this SSH server. KamiCode can run a bounded repair for known
+                prerequisites, then retry the deployment.
               </span>
               <Button
                 size="xs"
                 variant="outline"
-                disabled={
-                  isPending ||
-                  !hasDesktopBridge ||
-                  !selectedDeployConnection?.desktopSsh
-                }
+                disabled={isPending || !hasDesktopBridge || !selectedDeployConnection?.desktopSsh}
                 onClick={() => void deployCollabServer({ installDocker: true })}
               >
-                {isDeployingCollabServer &&
-                collabDeployPendingMode === "install-docker" ? (
+                {isDeployingCollabServer && collabDeployPendingMode === "install-docker" ? (
                   <RefreshCwIcon className="size-3.5 animate-spin" />
                 ) : (
                   <ServerIcon className="size-3.5" />
                 )}
-                {isDeployingCollabServer &&
-                collabDeployPendingMode === "install-docker"
+                {isDeployingCollabServer && collabDeployPendingMode === "install-docker"
                   ? "Repairing..."
                   : "Repair & deploy"}
               </Button>
@@ -1889,23 +1689,17 @@ export function SharedProjectsSettings() {
           {lastCollabDeployFailure && !isDeployingCollabServer ? (
             <div className="mb-3 flex flex-col gap-3 rounded-md border border-border bg-muted/20 p-3 text-xs">
               <div className="flex flex-col gap-1">
-                <span className="font-medium text-foreground">
-                  Deploy repair
-                </span>
+                <span className="font-medium text-foreground">Deploy repair</span>
                 <span className="text-muted-foreground">
-                  First run the bounded repair and retry deployment from this
-                  screen so the one-time SSH password stays in memory. Open an
-                  AI repair thread only if the retry still cannot finish.
+                  First run the bounded repair and retry deployment from this screen so the one-time
+                  SSH password stays in memory. Open an AI repair thread only if the retry still
+                  cannot finish.
                 </span>
               </div>
               <div className="flex flex-wrap gap-2">
                 <Button
                   size="xs"
-                  disabled={
-                    isPending ||
-                    !hasDesktopBridge ||
-                    !selectedDeployConnection?.desktopSsh
-                  }
+                  disabled={isPending || !hasDesktopBridge || !selectedDeployConnection?.desktopSsh}
                   onClick={() =>
                     void deployCollabServer({
                       installDocker: true,
@@ -1919,9 +1713,7 @@ export function SharedProjectsSettings() {
                 <Button
                   size="xs"
                   variant="outline"
-                  disabled={
-                    isPending || collabDeployAiRepairPrompt.length === 0
-                  }
+                  disabled={isPending || collabDeployAiRepairPrompt.length === 0}
                   onClick={() => void copyCollabDeployAiRepairPrompt()}
                 >
                   <LinkIcon className="size-3.5" />
@@ -1929,9 +1721,7 @@ export function SharedProjectsSettings() {
                 </Button>
                 <Button
                   size="xs"
-                  disabled={
-                    isPending || collabDeployAiRepairPrompt.length === 0
-                  }
+                  disabled={isPending || collabDeployAiRepairPrompt.length === 0}
                   onClick={() => void openCollabDeployAiRepairThread()}
                 >
                   {isOpeningCollabDeployAiRepairThread ? (
@@ -1939,9 +1729,7 @@ export function SharedProjectsSettings() {
                   ) : (
                     <MessagesSquareIcon className="size-3.5" />
                   )}
-                  {isOpeningCollabDeployAiRepairThread
-                    ? "Opening..."
-                    : "Open AI repair thread"}
+                  {isOpeningCollabDeployAiRepairThread ? "Opening..." : "Open AI repair thread"}
                 </Button>
               </div>
             </div>
@@ -1949,10 +1737,7 @@ export function SharedProjectsSettings() {
         </SettingsRow>
       </SettingsSection>
 
-      <SettingsSection
-        title="Project sharing enablement"
-        icon={<Code2Icon className="size-3.5" />}
-      >
+      <SettingsSection title="Project sharing enablement" icon={<Code2Icon className="size-3.5" />}>
         {localProjects.map((project) => {
           const shared = sharedProjectBySourceProjectId.get(project.id) ?? null;
           return (
@@ -1971,11 +1756,7 @@ export function SharedProjectsSettings() {
               }
               control={
                 shared ? (
-                  <Button
-                    size="xs"
-                    variant="outline"
-                    onClick={() => void load(shared.id)}
-                  >
+                  <Button size="xs" variant="outline" onClick={() => void load(shared.id)}>
                     Open
                   </Button>
                 ) : (
@@ -1992,9 +1773,7 @@ export function SharedProjectsSettings() {
             />
           );
         })}
-        {localProjects.length === 0 ? (
-          <EmptyRow>No local projects are loaded.</EmptyRow>
-        ) : null}
+        {localProjects.length === 0 ? <EmptyRow>No local projects are loaded.</EmptyRow> : null}
       </SettingsSection>
 
       <SettingsSection
@@ -2004,18 +1783,12 @@ export function SharedProjectsSettings() {
         {sharedProjects.length > 0 ? (
           <SettingsRow
             title="Active project"
-            description={
-              detail
-                ? projectRepoLabel(detail.project)
-                : "Select a shared project."
-            }
+            description={detail ? projectRepoLabel(detail.project) : "Select a shared project."}
             control={
               <select
                 className={SELECT_CLASS}
                 value={selectedProjectId ?? ""}
-                onChange={(event) =>
-                  void load(event.currentTarget.value as SharedProjectId)
-                }
+                onChange={(event) => void load(event.currentTarget.value as SharedProjectId)}
               >
                 {sharedProjects.map((project) => (
                   <option key={project.id} value={project.id}>
@@ -2031,8 +1804,8 @@ export function SharedProjectsSettings() {
                 {canStopSharing ? (
                   <div className="mt-3 flex flex-col gap-2 border-t border-border/50 pt-3 sm:flex-row sm:items-center sm:justify-between">
                     <p className="min-w-0 text-xs text-muted-foreground">
-                      Stop sharing removes the shared project for all members.
-                      Local projects and sessions stay on this machine.
+                      Stop sharing removes the shared project for all members. Local projects and
+                      sessions stay on this machine.
                     </p>
                     <Button
                       size="xs"
@@ -2057,10 +1830,7 @@ export function SharedProjectsSettings() {
 
       {detail ? (
         <>
-          <SettingsSection
-            title="Context bundle"
-            icon={<GitBranchIcon className="size-3.5" />}
-          >
+          <SettingsSection title="Context bundle" icon={<GitBranchIcon className="size-3.5" />}>
             <SettingsRow
               title="Project context"
               description={`Last synced: ${formatTimestamp(detail.project.contextSyncedAt)}`}
@@ -2083,15 +1853,9 @@ export function SharedProjectsSettings() {
             >
               {detail.contextBundle ? (
                 <div className="mt-3 grid gap-2 border-t border-border/50 py-3 text-xs text-muted-foreground sm:grid-cols-3">
-                  <div>
-                    {detail.contextBundle.instructions.length} instruction
-                    file(s)
-                  </div>
+                  <div>{detail.contextBundle.instructions.length} instruction file(s)</div>
                   <div>{detail.contextBundle.scripts.length} script(s)</div>
-                  <div>
-                    {detail.contextBundle.environmentVariables.length} env var
-                    name(s)
-                  </div>
+                  <div>{detail.contextBundle.environmentVariables.length} env var name(s)</div>
                 </div>
               ) : null}
             </SettingsRow>
@@ -2109,28 +1873,22 @@ export function SharedProjectsSettings() {
                 status={`Joined ${formatTimestamp(member.joinedAt)}`}
                 control={
                   <div className="flex items-center gap-2">
-                    <Badge variant={roleBadgeVariant(member.role)}>
-                      {member.role}
-                    </Badge>
+                    <Badge variant={roleBadgeVariant(member.role)}>{member.role}</Badge>
                     {member.role !== "owner" && canManage ? (
                       <>
                         <select
                           className={SELECT_CLASS}
                           value={member.role}
                           onChange={(event) =>
-                            void runAction(
-                              `role:${member.userId}`,
-                              async () => {
-                                commitDetail(
-                                  await updateSharedProjectMemberRole({
-                                    projectId: detail.project.id,
-                                    userId: member.userId,
-                                    role: event.currentTarget
-                                      .value as SharedProjectRole,
-                                  }),
-                                );
-                              },
-                            )
+                            void runAction(`role:${member.userId}`, async () => {
+                              commitDetail(
+                                await updateSharedProjectMemberRole({
+                                  projectId: detail.project.id,
+                                  userId: member.userId,
+                                  role: event.currentTarget.value as SharedProjectRole,
+                                }),
+                              );
+                            })
                           }
                         >
                           {roleOptions.map((role) => (
@@ -2144,17 +1902,14 @@ export function SharedProjectsSettings() {
                           variant="destructive-outline"
                           disabled={isPending}
                           onClick={() =>
-                            void runAction(
-                              `remove:${member.userId}`,
-                              async () => {
-                                commitDetail(
-                                  await removeSharedProjectMember({
-                                    projectId: detail.project.id,
-                                    userId: member.userId,
-                                  }),
-                                );
-                              },
-                            )
+                            void runAction(`remove:${member.userId}`, async () => {
+                              commitDetail(
+                                await removeSharedProjectMember({
+                                  projectId: detail.project.id,
+                                  userId: member.userId,
+                                }),
+                              );
+                            })
                           }
                         >
                           Remove
@@ -2169,26 +1924,20 @@ export function SharedProjectsSettings() {
               <SettingsRow
                 title="Create invite"
                 description="Codes are one-time, expiring, and bound to a GitHub handle."
-                status={
-                  lastInviteCode ? `Latest code: ${lastInviteCode}` : null
-                }
+                status={lastInviteCode ? `Latest code: ${lastInviteCode}` : null}
                 control={
                   <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
                     <Input
                       className="h-7 text-xs sm:w-44"
                       value={inviteLogin}
                       placeholder="@octo-user"
-                      onChange={(event) =>
-                        setInviteLogin(event.currentTarget.value)
-                      }
+                      onChange={(event) => setInviteLogin(event.currentTarget.value)}
                     />
                     <select
                       className={SELECT_CLASS}
                       value={inviteRole}
                       onChange={(event) =>
-                        setInviteRole(
-                          event.currentTarget.value as SharedProjectRole,
-                        )
+                        setInviteRole(event.currentTarget.value as SharedProjectRole)
                       }
                     >
                       {roleOptions.map((role) => (
@@ -2216,11 +1965,7 @@ export function SharedProjectsSettings() {
                 description={`Role: ${invite.role}`}
                 status={`Status: ${invite.status}. Expires ${formatTimestamp(invite.expiresAt)}.`}
                 control={
-                  <Badge
-                    variant={
-                      invite.status === "pending" ? "warning" : "outline"
-                    }
-                  >
+                  <Badge variant={invite.status === "pending" ? "warning" : "outline"}>
                     {invite.status}
                   </Badge>
                 }
@@ -2236,12 +1981,9 @@ export function SharedProjectsSettings() {
               <div className="border-b border-border/60 px-4 py-3 sm:px-5">
                 <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
                   <div className="min-w-0 flex-1">
-                    <p className="text-xs font-medium text-foreground">
-                      Import target
-                    </p>
+                    <p className="text-xs font-medium text-foreground">Import target</p>
                     <p className="text-xs text-muted-foreground">
-                      Imported sessions become new local sessions in this
-                      project.
+                      Imported sessions become new local sessions in this project.
                     </p>
                   </div>
                   <select
@@ -2249,19 +1991,14 @@ export function SharedProjectsSettings() {
                     value={importTargetProject?.id ?? ""}
                     disabled={localProjects.length === 0}
                     onChange={(event) =>
-                      setImportTargetProjectId(
-                        event.currentTarget.value as ProjectId,
-                      )
+                      setImportTargetProjectId(event.currentTarget.value as ProjectId)
                     }
                   >
                     {localProjects.length === 0 ? (
                       <option value="">Open a local project first</option>
                     ) : null}
                     {localProjects.map((project) => (
-                      <option
-                        key={`${project.environmentId}:${project.id}`}
-                        value={project.id}
-                      >
+                      <option key={`${project.environmentId}:${project.id}`} value={project.id}>
                         {project.title}
                       </option>
                     ))}
@@ -2270,8 +2007,7 @@ export function SharedProjectsSettings() {
               </div>
             ) : null}
             {activeLocalThreads.map((thread) => {
-              const sharedSnapshots =
-                sharedThreadsByLocalId.get(thread.id) ?? [];
+              const sharedSnapshots = sharedThreadsByLocalId.get(thread.id) ?? [];
               const latestSnapshot = sharedSnapshots.toSorted((left, right) =>
                 right.createdAt.localeCompare(left.createdAt),
               )[0];
@@ -2288,8 +2024,8 @@ export function SharedProjectsSettings() {
                     detail.project.repository.dirty ? (
                       <span className="inline-flex items-center gap-1 text-warning">
                         <TriangleAlertIcon className="size-3" />
-                        Dirty local code is not bundled. Push code to Git before
-                        sharing if the receiver needs it.
+                        Dirty local code is not bundled. Push code to Git before sharing if the
+                        receiver needs it.
                       </span>
                     ) : null
                   }
@@ -2306,22 +2042,11 @@ export function SharedProjectsSettings() {
                   {latestSnapshot ? (
                     <div className="mt-3 space-y-3 border-t border-border/50 py-3">
                       <div className="grid gap-2 text-xs text-muted-foreground sm:grid-cols-4">
+                        <span>Latest branch {latestSnapshot.codeState.branch ?? "unknown"}</span>
+                        <span>SHA {shortSha(latestSnapshot.codeState.headSha)}</span>
+                        <span>{latestSnapshot.codeState.dirty ? "Dirty work" : "Clean"}</span>
                         <span>
-                          Latest branch{" "}
-                          {latestSnapshot.codeState.branch ?? "unknown"}
-                        </span>
-                        <span>
-                          SHA {shortSha(latestSnapshot.codeState.headSha)}
-                        </span>
-                        <span>
-                          {latestSnapshot.codeState.dirty
-                            ? "Dirty work"
-                            : "Clean"}
-                        </span>
-                        <span>
-                          {latestSnapshot.codeState.patchAttached
-                            ? "Patch attached"
-                            : "No patch"}
+                          {latestSnapshot.codeState.patchAttached ? "Patch attached" : "No patch"}
                         </span>
                       </div>
                       <div className="text-xs text-muted-foreground">
@@ -2332,16 +2057,9 @@ export function SharedProjectsSettings() {
                       {latestSnapshot.messages.length > 0 ? (
                         <div className="space-y-1 text-xs">
                           {latestSnapshot.messages.slice(-4).map((message) => (
-                            <div
-                              key={message.id}
-                              className="rounded-md bg-muted/40 px-2 py-1.5"
-                            >
-                              <span className="font-medium text-foreground">
-                                {message.role}
-                              </span>{" "}
-                              <span className="text-muted-foreground">
-                                {message.text}
-                              </span>
+                            <div key={message.id} className="rounded-md bg-muted/40 px-2 py-1.5">
+                              <span className="font-medium text-foreground">{message.role}</span>{" "}
+                              <span className="text-muted-foreground">{message.text}</span>
                             </div>
                           ))}
                         </div>
@@ -2353,9 +2071,8 @@ export function SharedProjectsSettings() {
             })}
             {activeLocalThreads.length === 0 ? (
               <EmptyRow>
-                No matching local sessions are available. Import a shared
-                snapshot into a local project, then continue it locally and
-                create a new snapshot share when ready.
+                No matching local sessions are available. Import a shared snapshot into a local
+                project, then continue it locally and create a new snapshot share when ready.
               </EmptyRow>
             ) : null}
             {detail.threads.length > 0 ? (
@@ -2365,8 +2082,7 @@ export function SharedProjectsSettings() {
                 </p>
                 <div className="mt-3 space-y-2">
                   {detail.threads.map((shared) => {
-                    const isImporting =
-                      pendingAction === `import-thread:${shared.id}`;
+                    const isImporting = pendingAction === `import-thread:${shared.id}`;
                     return (
                       <div
                         key={shared.id}
@@ -2396,8 +2112,7 @@ export function SharedProjectsSettings() {
                               onChange={(event) =>
                                 void setThreadVisibility(
                                   shared,
-                                  event.currentTarget
-                                    .value as SharedThreadVisibility,
+                                  event.currentTarget.value as SharedThreadVisibility,
                                 )
                               }
                             >
@@ -2426,10 +2141,7 @@ export function SharedProjectsSettings() {
             ) : null}
           </SettingsSection>
 
-          <SettingsSection
-            title="SSH"
-            icon={<KeyRoundIcon className="size-3.5" />}
-          >
+          <SettingsSection title="SSH" icon={<KeyRoundIcon className="size-3.5" />}>
             {detail.sshCredentials.map((credential) => (
               <SettingsRow
                 key={credential.id}
@@ -2460,17 +2172,14 @@ export function SharedProjectsSettings() {
                           variant="destructive-outline"
                           disabled={isPending}
                           onClick={() =>
-                            void runAction(
-                              `remove-ssh:${credential.id}`,
-                              async () => {
-                                commitDetail(
-                                  await removeSharedSshCredential({
-                                    projectId: detail.project.id,
-                                    credentialId: credential.id,
-                                  }),
-                                );
-                              },
-                            )
+                            void runAction(`remove-ssh:${credential.id}`, async () => {
+                              commitDetail(
+                                await removeSharedSshCredential({
+                                  projectId: detail.project.id,
+                                  credentialId: credential.id,
+                                }),
+                              );
+                            })
                           }
                         >
                           Remove
@@ -2481,38 +2190,14 @@ export function SharedProjectsSettings() {
                 }
               >
                 <div className="mt-3 flex flex-wrap gap-1.5 border-t border-border/50 py-3">
-                  <Badge
-                    variant={
-                      credential.secretState.hasPassword
-                        ? "secondary"
-                        : "outline"
-                    }
-                  >
-                    {credential.secretState.hasPassword
-                      ? "password saved"
-                      : "no password"}
+                  <Badge variant={credential.secretState.hasPassword ? "secondary" : "outline"}>
+                    {credential.secretState.hasPassword ? "password saved" : "no password"}
                   </Badge>
-                  <Badge
-                    variant={
-                      credential.secretState.hasPrivateKey
-                        ? "secondary"
-                        : "outline"
-                    }
-                  >
-                    {credential.secretState.hasPrivateKey
-                      ? "key saved"
-                      : "no key"}
+                  <Badge variant={credential.secretState.hasPrivateKey ? "secondary" : "outline"}>
+                    {credential.secretState.hasPrivateKey ? "key saved" : "no key"}
                   </Badge>
-                  <Badge
-                    variant={
-                      credential.secretState.hasPassphrase
-                        ? "secondary"
-                        : "outline"
-                    }
-                  >
-                    {credential.secretState.hasPassphrase
-                      ? "passphrase saved"
-                      : "no passphrase"}
+                  <Badge variant={credential.secretState.hasPassphrase ? "secondary" : "outline"}>
+                    {credential.secretState.hasPassphrase ? "passphrase saved" : "no passphrase"}
                   </Badge>
                 </div>
               </SettingsRow>
@@ -2522,11 +2207,7 @@ export function SharedProjectsSettings() {
             ) : null}
             {canManage ? (
               <SettingsRow
-                title={
-                  editingSshCredentialId
-                    ? "Edit SSH credential"
-                    : "Add SSH credential"
-                }
+                title={editingSshCredentialId ? "Edit SSH credential" : "Add SSH credential"}
                 description="Secrets are encrypted by the main backend before SQLite persistence."
                 status={
                   editingSshCredentialId
@@ -2618,8 +2299,7 @@ export function SharedProjectsSettings() {
                     onChange={(event) =>
                       setSshCredentialForm((current) => ({
                         ...current,
-                        authType: event.currentTarget
-                          .value as SharedSshAuthType,
+                        authType: event.currentTarget.value as SharedSshAuthType,
                       }))
                     }
                   >
@@ -2637,9 +2317,7 @@ export function SharedProjectsSettings() {
                       type="password"
                       value={sshCredentialForm.password}
                       placeholder={
-                        editingSshCredentialId
-                          ? "Leave blank to keep saved password"
-                          : "Password"
+                        editingSshCredentialId ? "Leave blank to keep saved password" : "Password"
                       }
                       onChange={(event) =>
                         setSshCredentialForm((current) => ({
@@ -2685,10 +2363,7 @@ export function SharedProjectsSettings() {
             ) : null}
           </SettingsSection>
 
-          <SettingsSection
-            title="Runtimes"
-            icon={<ServerIcon className="size-3.5" />}
-          >
+          <SettingsSection title="Runtimes" icon={<ServerIcon className="size-3.5" />}>
             {detail.runtimes.map((runtime) => (
               <SettingsRow
                 key={runtime.id}
@@ -2724,9 +2399,7 @@ export function SharedProjectsSettings() {
                           ...current,
                           type: event.currentTarget.value as SharedRuntimeType,
                           sshCredentialId:
-                            event.currentTarget.value === "ssh-vps"
-                              ? current.sshCredentialId
-                              : "",
+                            event.currentTarget.value === "ssh-vps" ? current.sshCredentialId : "",
                         }))
                       }
                     >
@@ -2760,10 +2433,7 @@ export function SharedProjectsSettings() {
                     <select
                       className={SELECT_CLASS}
                       value={newRuntime.sshCredentialId}
-                      disabled={
-                        newRuntime.type !== "ssh-vps" ||
-                        detail.sshCredentials.length === 0
-                      }
+                      disabled={newRuntime.type !== "ssh-vps" || detail.sshCredentials.length === 0}
                       onChange={(event) =>
                         setNewRuntime((current) => ({
                           ...current,
@@ -2784,8 +2454,7 @@ export function SharedProjectsSettings() {
                       onChange={(event) =>
                         setNewRuntime((current) => ({
                           ...current,
-                          health: event.currentTarget
-                            .value as SharedRuntimeHealth,
+                          health: event.currentTarget.value as SharedRuntimeHealth,
                         }))
                       }
                     >
@@ -2795,11 +2464,7 @@ export function SharedProjectsSettings() {
                         </option>
                       ))}
                     </select>
-                    <Button
-                      size="xs"
-                      disabled={isPending}
-                      onClick={() => void addRuntime()}
-                    >
+                    <Button size="xs" disabled={isPending} onClick={() => void addRuntime()}>
                       Add
                     </Button>
                   </div>
@@ -2808,10 +2473,7 @@ export function SharedProjectsSettings() {
             ) : null}
           </SettingsSection>
 
-          <SettingsSection
-            title="Environments"
-            icon={<LinkIcon className="size-3.5" />}
-          >
+          <SettingsSection title="Environments" icon={<LinkIcon className="size-3.5" />}>
             {detail.environments.map((environment) => (
               <EnvironmentRow
                 key={environment.id}
@@ -2855,8 +2517,7 @@ export function SharedProjectsSettings() {
                       onChange={(event) =>
                         setNewEnvironment((current) => ({
                           ...current,
-                          type: event.currentTarget
-                            .value as SharedEnvironmentType,
+                          type: event.currentTarget.value as SharedEnvironmentType,
                         }))
                       }
                     >
@@ -2879,9 +2540,7 @@ export function SharedProjectsSettings() {
                     />
                     <Button
                       size="xs"
-                      disabled={
-                        isPending || newEnvironment.baseUrl.trim().length === 0
-                      }
+                      disabled={isPending || newEnvironment.baseUrl.trim().length === 0}
                       onClick={() => void addEnvironment()}
                     >
                       Add
@@ -2892,16 +2551,9 @@ export function SharedProjectsSettings() {
             ) : null}
           </SettingsSection>
 
-          <SettingsSection
-            title="Deploy associations"
-            icon={<CloudIcon className="size-3.5" />}
-          >
+          <SettingsSection title="Deploy associations" icon={<CloudIcon className="size-3.5" />}>
             {detail.deploys.map((deploy) => (
-              <DeployRow
-                key={deploy.id}
-                deploy={deploy}
-                environments={detail.environments}
-              />
+              <DeployRow key={deploy.id} deploy={deploy} environments={detail.environments} />
             ))}
             {detail.deploys.length === 0 ? (
               <EmptyRow>No deploy associations defined.</EmptyRow>
@@ -2916,9 +2568,7 @@ export function SharedProjectsSettings() {
                       <Input
                         className="h-7 text-xs"
                         value={deployForm.branch}
-                        placeholder={
-                          detail.project.repository.currentBranch ?? "branch"
-                        }
+                        placeholder={detail.project.repository.currentBranch ?? "branch"}
                         onChange={(event) =>
                           setDeployForm((current) => ({
                             ...current,
@@ -2928,11 +2578,7 @@ export function SharedProjectsSettings() {
                       />
                       <select
                         className={SELECT_CLASS}
-                        value={
-                          deployForm.environmentId ||
-                          defaultEnvironment?.id ||
-                          ""
-                        }
+                        value={deployForm.environmentId || defaultEnvironment?.id || ""}
                         onChange={(event) =>
                           setDeployForm((current) => ({
                             ...current,
@@ -2960,9 +2606,7 @@ export function SharedProjectsSettings() {
                       <Input
                         className="h-7 text-xs"
                         value={deployForm.deployedSha}
-                        placeholder={shortSha(
-                          detail.project.repository.headSha,
-                        )}
+                        placeholder={shortSha(detail.project.repository.headSha)}
                         onChange={(event) =>
                           setDeployForm((current) => ({
                             ...current,
@@ -3046,12 +2690,7 @@ function EnvironmentRow({
             {environment.isDefault ? "default" : environment.validationStatus}
           </Badge>
           {canManage && !environment.isDefault ? (
-            <Button
-              size="xs"
-              variant="outline"
-              disabled={isPending}
-              onClick={onSetDefault}
-            >
+            <Button size="xs" variant="outline" disabled={isPending} onClick={onSetDefault}>
               Set default
             </Button>
           ) : null}
@@ -3068,9 +2707,7 @@ function DeployRow({
   readonly deploy: SharedDeployAssociation;
   readonly environments: readonly SharedProjectEnvironment[];
 }) {
-  const environment = environments.find(
-    (entry) => entry.id === deploy.environmentId,
-  );
+  const environment = environments.find((entry) => entry.id === deploy.environmentId);
   return (
     <SettingsRow
       title={deploy.branch}

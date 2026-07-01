@@ -128,7 +128,7 @@ import { RightPanelTabs } from "./RightPanelTabs";
 import { DiffWorkerPoolProvider } from "./DiffWorkerPoolProvider";
 import { BranchToolbar } from "./BranchToolbar";
 import { resolveShortcutCommand, shortcutLabelForCommand } from "../keybindings";
-import PlanSidebar from "./PlanSidebar";
+import PlanSidebar, { type WorkflowLaneRunDetail } from "./PlanSidebar";
 import ThreadTerminalDrawer from "./ThreadTerminalDrawer";
 import {
   ChevronDownIcon,
@@ -775,6 +775,58 @@ function workflowChildCompletionObservations(input: {
         childAssistantMessageId: latestTurn.assistantMessageId,
         summary,
         detail,
+      },
+    ];
+  });
+}
+
+function workflowLaneRunDetails(input: {
+  parentThread: Thread;
+  childThreadForId: (childThreadId: ThreadId) => Thread | null;
+}): WorkflowLaneRunDetail[] {
+  return workflowStartedChildLanes(input.parentThread.activities).flatMap((started) => {
+    const childThread = input.childThreadForId(started.childThreadId);
+    if (!childThread) return [];
+    const latestTurn = childThread.latestTurn ?? null;
+    const settled = latestTurn ? isLatestTurnSettled(latestTurn, childThread.session) : false;
+    const failed = latestTurn?.state === "error";
+    const latestAssistantText = latestTurn
+      ? latestAssistantTextForTurn(childThread, latestTurn.turnId, latestTurn.assistantMessageId)
+      : null;
+    const messages = childThread.messages
+      .filter((message) => message.text.trim().length > 0)
+      .toSorted((left, right) => left.createdAt.localeCompare(right.createdAt))
+      .slice(-8)
+      .map((message) => ({
+        id: message.id,
+        role: message.role,
+        text: message.text.trim(),
+        streaming: message.streaming,
+        createdAt: message.createdAt,
+      }));
+    const activities = childThread.activities
+      .toSorted((left, right) => right.createdAt.localeCompare(left.createdAt))
+      .slice(0, 8)
+      .map((activity) => ({
+        id: activity.id,
+        kind: activity.kind,
+        summary: activity.summary,
+        createdAt: activity.createdAt,
+      }));
+
+    return [
+      {
+        laneId: started.laneId,
+        laneRole: started.laneRole,
+        runId: started.childThreadId,
+        title: childThread.title,
+        startedAt: started.createdAt,
+        status: failed ? "Failed" : settled ? "Done" : latestTurn ? "Running" : "Waiting",
+        latestSummary: latestAssistantText
+          ? truncate(latestAssistantText.replace(/\s+/g, " "), 220)
+          : null,
+        messages,
+        activities,
       },
     ];
   });
@@ -2440,6 +2492,23 @@ function ChatViewContent(props: ChatViewProps) {
     [activeThread, routeThreadKey],
   );
   const workflowChildCompletions = useAtomValue(workflowChildCompletionsAtom);
+  const workflowLaneRunDetailsAtom = useMemo(
+    () =>
+      Atom.make((get): WorkflowLaneRunDetail[] => {
+        if (!activeThread) return [];
+        return workflowLaneRunDetails({
+          parentThread: activeThread,
+          childThreadForId: (childThreadId) =>
+            get(
+              environmentThreadDetails.detailAtom(
+                scopeThreadRef(activeThread.environmentId, childThreadId),
+              ),
+            ),
+        });
+      }).pipe(Atom.withLabel(`workflow-lane-run-details:${routeThreadKey}`)),
+    [activeThread, routeThreadKey],
+  );
+  const workflowLaneRunDetailsForSidebar = useAtomValue(workflowLaneRunDetailsAtom);
   const workflowSidebarActive = interactionMode === "workflow";
   const planSidebarLabel = workflowSidebarActive
     ? "Workflow"
@@ -4155,6 +4224,9 @@ function ChatViewContent(props: ChatViewProps) {
             interactionMode: "default",
             branch: activeThread.branch,
             worktreePath: activeThread.worktreePath,
+            workflowParentThreadId: activeThread.id,
+            workflowLaneId: input.lane.id,
+            workflowLaneRole: input.lane.role,
             createdAt: childTurnRequestedAt,
           },
         });
@@ -6254,6 +6326,7 @@ function ChatViewContent(props: ChatViewProps) {
         activePlan={activePlan}
         activeProposedPlan={sidebarProposedPlan}
         activities={threadActivities}
+        workflowLaneRunDetails={workflowLaneRunDetailsForSidebar}
         label={planSidebarLabel}
         workflowActive={workflowSidebarActive}
         currentModelSelection={activeThread?.modelSelection}

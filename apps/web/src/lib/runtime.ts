@@ -10,28 +10,19 @@ import { primaryEnvironmentHttpLayer } from "../environments/primary/httpLayer";
 
 import { browserCryptoLayer } from "../cloud/dpop";
 import { managedRelayClientLayer } from "../cloud/managedRelayLayer";
-import {
-  resolveCloudPublicConfig,
-  resolveRelayTracingConfig,
-} from "../cloud/publicConfig";
+import { resolveCloudPublicConfig, resolveRelayTracingConfig } from "../cloud/publicConfig";
 
 function configuredRelayUrl(): string {
   return resolveCloudPublicConfig().relayUrl ?? "http://relay.invalid";
 }
 
 const httpClientLayer = remoteHttpClientLayer(globalThis.fetch);
-const relayTracingLayer = makeRelayClientTracingLayer(
-  resolveRelayTracingConfig(),
-  {
-    serviceName: "t3-web-relay-client",
-    runtime: "browser",
-    client:
-      typeof window !== "undefined" && window.desktopBridge ? "desktop" : "web",
-    ...(import.meta.env.APP_VERSION
-      ? { serviceVersion: import.meta.env.APP_VERSION }
-      : {}),
-  },
-).pipe(Layer.provide(httpClientLayer));
+const relayTracingLayer = makeRelayClientTracingLayer(resolveRelayTracingConfig(), {
+  serviceName: "t3-web-relay-client",
+  runtime: "browser",
+  client: typeof window !== "undefined" && window.desktopBridge ? "desktop" : "web",
+  ...(import.meta.env.APP_VERSION ? { serviceVersion: import.meta.env.APP_VERSION } : {}),
+}).pipe(Layer.provide(httpClientLayer));
 
 type RuntimeLayerSource =
   | typeof httpClientLayer
@@ -43,17 +34,11 @@ type RuntimeLayerSource =
 export const remoteHttpRuntime = ManagedRuntime.make(httpClientLayer);
 
 const primaryHttpRuntime = ManagedRuntime.make(
-  PrimaryEnvironmentHttpClient.layer.pipe(
-    Layer.provide(primaryEnvironmentHttpLayer),
-  ),
+  PrimaryEnvironmentHttpClient.layer.pipe(Layer.provide(primaryEnvironmentHttpLayer)),
 );
 
 export type PrimaryHttpEffectRunner = <A, E>(
-  effect: Effect.Effect<
-    A,
-    E,
-    PrimaryEnvironmentHttpClient.PrimaryEnvironmentHttpClient
-  >,
+  effect: Effect.Effect<A, E, PrimaryEnvironmentHttpClient.PrimaryEnvironmentHttpClient>,
 ) => Promise<A>;
 
 const livePrimaryHttpRunner: PrimaryHttpEffectRunner = (effect) =>
@@ -62,16 +47,10 @@ const livePrimaryHttpRunner: PrimaryHttpEffectRunner = (effect) =>
 let primaryHttpRunner = livePrimaryHttpRunner;
 
 export const runPrimaryHttp = <A, E>(
-  effect: Effect.Effect<
-    A,
-    E,
-    PrimaryEnvironmentHttpClient.PrimaryEnvironmentHttpClient
-  >,
+  effect: Effect.Effect<A, E, PrimaryEnvironmentHttpClient.PrimaryEnvironmentHttpClient>,
 ) => primaryHttpRunner(effect);
 
-export function __setPrimaryHttpRunnerForTests(
-  runner?: PrimaryHttpEffectRunner,
-): void {
+export function __setPrimaryHttpRunnerForTests(runner?: PrimaryHttpEffectRunner): void {
   primaryHttpRunner = runner ?? livePrimaryHttpRunner;
 }
 
