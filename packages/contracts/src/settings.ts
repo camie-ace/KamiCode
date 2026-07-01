@@ -39,6 +39,51 @@ export const SidebarThreadPreviewCount = Schema.Int.check(
 export type SidebarThreadPreviewCount = typeof SidebarThreadPreviewCount.Type;
 export const DEFAULT_SIDEBAR_THREAD_PREVIEW_COUNT: SidebarThreadPreviewCount = 6;
 
+export const SharedCollaborationInstanceId = TrimmedNonEmptyString.pipe(
+  Schema.brand("SharedCollaborationInstanceId"),
+);
+export type SharedCollaborationInstanceId = typeof SharedCollaborationInstanceId.Type;
+
+export const SharedCollaborationTargetMode = Schema.Literals(["kamicode", "profile"]);
+export type SharedCollaborationTargetMode = typeof SharedCollaborationTargetMode.Type;
+
+export const SharedCollaborationProjectTargetMode = Schema.Literals([
+  "default",
+  "kamicode",
+  "profile",
+]);
+export type SharedCollaborationProjectTargetMode = typeof SharedCollaborationProjectTargetMode.Type;
+
+export const SharedCollaborationProfile = Schema.Struct({
+  id: SharedCollaborationInstanceId,
+  label: TrimmedNonEmptyString,
+  url: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
+  token: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
+  tokenRedacted: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  deploymentTargetKey: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
+});
+export type SharedCollaborationProfile = typeof SharedCollaborationProfile.Type;
+
+export const SharedCollaborationDefaultTarget = Schema.Struct({
+  mode: SharedCollaborationTargetMode.pipe(
+    Schema.withDecodingDefault(Effect.succeed("kamicode" as const)),
+  ),
+  profileId: Schema.NullOr(SharedCollaborationInstanceId).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+});
+export type SharedCollaborationDefaultTarget = typeof SharedCollaborationDefaultTarget.Type;
+
+export const SharedCollaborationProjectTarget = Schema.Struct({
+  mode: SharedCollaborationProjectTargetMode.pipe(
+    Schema.withDecodingDefault(Effect.succeed("default" as const)),
+  ),
+  profileId: Schema.NullOr(SharedCollaborationInstanceId).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+});
+export type SharedCollaborationProjectTarget = typeof SharedCollaborationProjectTarget.Type;
+
 export const ClientSettingsSchema = Schema.Struct({
   autoOpenPlanSidebar: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   confirmThreadArchive: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
@@ -83,6 +128,10 @@ export const ClientSettingsSchema = Schema.Struct({
   sidebarProjectSortOrder: SidebarProjectSortOrder.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_SIDEBAR_PROJECT_SORT_ORDER)),
   ),
+  sharedCollaborationProjectTargets: Schema.Record(
+    TrimmedNonEmptyString,
+    SharedCollaborationProjectTarget,
+  ).pipe(Schema.withDecodingDefault(Effect.succeed({}))),
   sidebarThreadSortOrder: SidebarThreadSortOrder.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_SIDEBAR_THREAD_SORT_ORDER)),
   ),
@@ -420,6 +469,12 @@ export const ServerSettings = Schema.Struct({
   hostedCollaboration: HostedCollaborationSettings.pipe(
     Schema.withDecodingDefault(Effect.succeed({})),
   ),
+  sharedCollaborationProfiles: Schema.Array(SharedCollaborationProfile).pipe(
+    Schema.withDecodingDefault(Effect.succeed([])),
+  ),
+  sharedCollaborationDefaultTarget: SharedCollaborationDefaultTarget.pipe(
+    Schema.withDecodingDefault(Effect.succeed({})),
+  ),
 });
 export type ServerSettings = typeof ServerSettings.Type;
 
@@ -535,6 +590,13 @@ export const ServerSettingsPatch = Schema.Struct({
       deploymentTargetKey: Schema.optionalKey(TrimmedString),
     }),
   ),
+  sharedCollaborationProfiles: Schema.optionalKey(Schema.Array(SharedCollaborationProfile)),
+  sharedCollaborationDefaultTarget: Schema.optionalKey(
+    Schema.Struct({
+      mode: Schema.optionalKey(SharedCollaborationTargetMode),
+      profileId: Schema.optionalKey(Schema.NullOr(SharedCollaborationInstanceId)),
+    }),
+  ),
   providers: Schema.optionalKey(
     Schema.Struct({
       codex: Schema.optionalKey(CodexSettingsPatch),
@@ -578,6 +640,9 @@ export const ClientSettingsPatch = Schema.Struct({
         ),
       }),
     ),
+  ),
+  sharedCollaborationProjectTargets: Schema.optionalKey(
+    Schema.Record(TrimmedNonEmptyString, SharedCollaborationProjectTarget),
   ),
   sidebarProjectGroupingMode: Schema.optionalKey(SidebarProjectGroupingMode),
   sidebarProjectGroupingOverrides: Schema.optionalKey(

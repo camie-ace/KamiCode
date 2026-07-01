@@ -30,6 +30,12 @@ import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 
 import { OrchestrationEngineService } from "../orchestration/Services/OrchestrationEngine.ts";
+import { ProcessRunner } from "../processRunner.ts";
+import {
+  prepareSharedThreadImportBranch,
+  sharedImportStashLabel,
+  sharedSessionBranchName,
+} from "./importSharedThreadGit.ts";
 import { SharedProjectsError } from "./Services/SharedProjects.ts";
 
 const IMPORTED_SHARED_SESSION_TITLE_PREFIX = "Imported: ";
@@ -147,7 +153,13 @@ export const importSharedThreadSnapshot = (input: {
   readonly request: ImportSharedThreadInput;
   readonly title: string;
   readonly snapshot: SharedSessionSnapshot;
-}): Effect.Effect<ImportSharedThreadResult, SharedProjectsError, OrchestrationEngineService> =>
+  readonly sourceSharedThreadId: string;
+  readonly targetProjectCwd?: string | undefined;
+}): Effect.Effect<
+  ImportSharedThreadResult,
+  SharedProjectsError,
+  OrchestrationEngineService | ProcessRunner
+> =>
   Effect.gen(function* () {
     const orchestrationEngine = yield* OrchestrationEngineService;
     const modelSelection = yield* Effect.try({
@@ -162,6 +174,34 @@ export const importSharedThreadSnapshot = (input: {
     const importedAt = yield* nowIso;
     const importedThreadId = newLocalThreadId();
     const importedTitle = importThreadTitle(input.snapshot.title || input.title);
+    const branchName = sharedSessionBranchName({
+      title: input.snapshot.title || input.title,
+      sourceSharedThreadId: input.sourceSharedThreadId,
+      suggestedBranch: input.snapshot.suggestedBranch,
+    });
+    const preparedBranch = input.targetProjectCwd
+      ? yield* Effect.tryPromise({
+          try: () => sharedImportStashLabel(input.title),
+          catch: (cause) =>
+            new SharedProjectsError({
+              message: "Failed to prepare the imported shared session branch.",
+              status: 500,
+              cause,
+            }),
+        }).pipe(
+          Effect.flatMap((stashLabel) =>
+            prepareSharedThreadImportBranch({
+              cwd: input.targetProjectCwd!,
+              branchName,
+              stashLabel,
+            }),
+          ),
+        )
+      : {
+          branch: branchName,
+          stashedChanges: false,
+          stashName: null,
+        };
     const messageIdBySource = new Map<string, MessageId>();
     const commands: OrchestrationCommand[] = [
       {
@@ -173,10 +213,7 @@ export const importSharedThreadSnapshot = (input: {
         modelSelection,
         runtimeMode: runtimeModeOrDefault(input.snapshot.runtimeMode),
         interactionMode: interactionModeOrDefault(input.snapshot.interactionMode),
-        branch:
-          input.snapshot.branch && input.snapshot.branch.trim().length > 0
-            ? (input.snapshot.branch.trim() as never)
-            : null,
+        branch: preparedBranch.branch as never,
         worktreePath: null,
         createdAt: importedAt,
       },
@@ -291,5 +328,8 @@ export const importSharedThreadSnapshot = (input: {
       projectId: input.request.targetProjectId,
       threadId: importedThreadId,
       sourceSharedThreadId: input.request.threadId,
+      branch: preparedBranch.branch as never,
+      stashedChanges: preparedBranch.stashedChanges,
+      stashName: preparedBranch.stashName as never,
     } satisfies ImportSharedThreadResult;
   });

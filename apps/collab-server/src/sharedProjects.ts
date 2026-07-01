@@ -2,6 +2,7 @@
 import type {
   KamiUserId,
   ProjectId,
+  ResolvedSharedThreadShare,
   SharedContextBundle,
   SharedDeployAssociation,
   SharedDeployAssociationId,
@@ -122,6 +123,8 @@ interface ThreadRow {
   readonly createdByUserId: string;
   readonly title: string;
   readonly visibility: string;
+  readonly shareCode?: string | null;
+  readonly allowedGithubLoginsJson?: unknown;
   readonly codeStateJson: unknown;
   readonly messagesJson: unknown;
   readonly sessionSnapshotJson: unknown | null;
@@ -226,17 +229,27 @@ function newInviteCode(): SharedProjectInviteCode {
   return `spc_${NodeCrypto.randomUUID().replaceAll("-", "").slice(0, 24)}` as SharedProjectInviteCode;
 }
 
+function newShareCode(): string {
+  return `share_${NodeCrypto.randomUUID().replaceAll("-", "")}`;
+}
+
 function normalizeGitHubLogin(login: string): string {
   return login.trim().replace(/^@/u, "").toLowerCase();
 }
 
 function roleFromDb(value: string): SharedProjectRole {
-  return value === "owner" || value === "admin" || value === "member" || value === "viewer"
+  return value === "owner" ||
+    value === "admin" ||
+    value === "member" ||
+    value === "viewer"
     ? value
     : "viewer";
 }
 
-function roleAtLeast(role: SharedProjectRole, minimum: SharedProjectRole): boolean {
+function roleAtLeast(
+  role: SharedProjectRole,
+  minimum: SharedProjectRole,
+): boolean {
   return ROLE_RANK[role] >= ROLE_RANK[minimum];
 }
 
@@ -248,10 +261,13 @@ function canEditSharedWork(role: SharedProjectRole): boolean {
   return roleAtLeast(role, "member");
 }
 
-function validateSharedEnvironmentUrl(url: string): SharedEnvironmentValidationStatus {
+function validateSharedEnvironmentUrl(
+  url: string,
+): SharedEnvironmentValidationStatus {
   try {
     const parsed = new URL(url);
-    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return "invalid-url";
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:")
+      return "invalid-url";
     return "unknown";
   } catch {
     return "invalid-url";
@@ -294,7 +310,8 @@ function readString(input: JsonRecord, key: string): string {
 function readOptionalString(input: JsonRecord, key: string): string | null {
   const value = input[key];
   if (value === undefined || value === null) return null;
-  if (typeof value !== "string") throw new HttpError(400, `${key} must be a string.`);
+  if (typeof value !== "string")
+    throw new HttpError(400, `${key} must be a string.`);
   const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed : null;
 }
@@ -302,7 +319,9 @@ function readOptionalString(input: JsonRecord, key: string): string | null {
 function readStringArray(input: JsonRecord, key: string): readonly string[] {
   const value = input[key];
   if (!Array.isArray(value)) return [];
-  return value.filter((entry): entry is string => typeof entry === "string" && entry.length > 0);
+  return value.filter(
+    (entry): entry is string => typeof entry === "string" && entry.length > 0,
+  );
 }
 
 function readRepository(input: JsonRecord): SharedRepositoryState {
@@ -312,11 +331,15 @@ function readRepository(input: JsonRecord): SharedRepositoryState {
   }
   const record = value as JsonRecord;
   return {
-    canonicalKey: typeof record.canonicalKey === "string" ? record.canonicalKey : null,
+    canonicalKey:
+      typeof record.canonicalKey === "string" ? record.canonicalKey : null,
     remoteUrl: typeof record.remoteUrl === "string" ? record.remoteUrl : null,
-    remoteName: typeof record.remoteName === "string" ? record.remoteName : null,
-    defaultBranch: typeof record.defaultBranch === "string" ? record.defaultBranch : null,
-    currentBranch: typeof record.currentBranch === "string" ? record.currentBranch : null,
+    remoteName:
+      typeof record.remoteName === "string" ? record.remoteName : null,
+    defaultBranch:
+      typeof record.defaultBranch === "string" ? record.defaultBranch : null,
+    currentBranch:
+      typeof record.currentBranch === "string" ? record.currentBranch : null,
     headSha: typeof record.headSha === "string" ? record.headSha : null,
     dirty: record.dirty === true,
   };
@@ -370,7 +393,8 @@ function toRepositoryState(row: SharedProjectRow): SharedRepositoryState {
 function toProjectSummary(row: ProjectAccessRow): SharedProjectSummary {
   return {
     id: row.sharedProjectId as SharedProjectId,
-    sourceProjectId: row.sourceProjectId === null ? null : (row.sourceProjectId as ProjectId),
+    sourceProjectId:
+      row.sourceProjectId === null ? null : (row.sourceProjectId as ProjectId),
     name: row.name,
     ownerUserId: row.ownerUserId as KamiUserId,
     ownerGithubLogin: row.ownerGithubLogin,
@@ -392,7 +416,8 @@ function toMember(row: MemberRow): SharedProjectMember {
     avatarUrl: row.avatarUrl,
     role: roleFromDb(row.role),
     joinedAt: iso(row.joinedAt) ?? row.joinedAt.toString(),
-    invitedByUserId: row.invitedByUserId === null ? null : (row.invitedByUserId as KamiUserId),
+    invitedByUserId:
+      row.invitedByUserId === null ? null : (row.invitedByUserId as KamiUserId),
   };
 }
 
@@ -407,7 +432,8 @@ function toInvite(row: InviteRow, now: string): SharedProjectInvite {
     createdAt: iso(row.createdAt) ?? row.createdAt.toString(),
     expiresAt: iso(row.expiresAt) ?? row.expiresAt.toString(),
     claimedAt: iso(row.claimedAt),
-    claimedByUserId: row.claimedByUserId === null ? null : (row.claimedByUserId as KamiUserId),
+    claimedByUserId:
+      row.claimedByUserId === null ? null : (row.claimedByUserId as KamiUserId),
     revokedAt: iso(row.revokedAt),
     status: "pending" as const,
   };
@@ -418,17 +444,33 @@ function toThread(row: ThreadRow): SharedThread {
   return {
     id: row.sharedThreadId as SharedThreadId,
     projectId: row.sharedProjectId as SharedProjectId,
-    localThreadId: row.localThreadId === null ? null : (row.localThreadId as ThreadId),
+    localThreadId:
+      row.localThreadId === null ? null : (row.localThreadId as ThreadId),
     createdByUserId: row.createdByUserId as KamiUserId,
     title: row.title,
     visibility: row.visibility === "shared" ? "shared" : "private",
-    codeState: jsonRecord(row.codeStateJson) as unknown as SharedThreadCodeState,
-    messages: jsonArray<SharedThreadMessage>(row.messagesJson, []) as SharedThreadMessage[],
+    shareCode: typeof row.shareCode === "string" ? row.shareCode : null,
+    allowedGithubLogins: jsonArray<string>(
+      row.allowedGithubLoginsJson ?? [],
+      [],
+    ) as string[],
+    codeState: jsonRecord(
+      row.codeStateJson,
+    ) as unknown as SharedThreadCodeState,
+    messages: jsonArray<SharedThreadMessage>(
+      row.messagesJson,
+      [],
+    ) as SharedThreadMessage[],
     sessionSnapshot:
       row.sessionSnapshotJson === null
         ? null
-        : (jsonRecord(row.sessionSnapshotJson) as unknown as SharedSessionSnapshot),
-    lastRuntimeId: row.lastRuntimeId === null ? null : (row.lastRuntimeId as SharedRuntimeId),
+        : (jsonRecord(
+            row.sessionSnapshotJson,
+          ) as unknown as SharedSessionSnapshot),
+    lastRuntimeId:
+      row.lastRuntimeId === null
+        ? null
+        : (row.lastRuntimeId as SharedRuntimeId),
     createdAt: iso(row.createdAt) ?? row.createdAt.toString(),
     updatedAt: iso(row.updatedAt) ?? row.updatedAt.toString(),
   };
@@ -440,7 +482,9 @@ function toRuntime(row: RuntimeRow): SharedRuntime {
       ? row.runtimeType
       : "local";
   const health: SharedRuntimeHealth =
-    row.health === "healthy" || row.health === "unavailable" ? row.health : "unknown";
+    row.health === "healthy" || row.health === "unavailable"
+      ? row.health
+      : "unknown";
   return {
     id: row.runtimeId as SharedRuntimeId,
     projectId: row.sharedProjectId as SharedProjectId,
@@ -482,7 +526,10 @@ function toEnvironment(row: EnvironmentRow): SharedProjectEnvironment {
     isDefault: row.isDefault,
     validationStatus,
     lastValidatedAt: iso(row.lastValidatedAt),
-    source: row.source === "runtime-sync" || row.source === "deploy-sync" ? row.source : "manual",
+    source:
+      row.source === "runtime-sync" || row.source === "deploy-sync"
+        ? row.source
+        : "manual",
     createdAt: iso(row.createdAt) ?? row.createdAt.toString(),
     updatedAt: iso(row.updatedAt) ?? row.updatedAt.toString(),
   };
@@ -496,7 +543,10 @@ function toDeploy(row: DeployRow): SharedDeployAssociation {
     environmentId: row.environmentId as SharedProjectEnvironmentId,
     deployUrl: row.deployUrl,
     deployedSha: row.deployedSha,
-    source: row.source === "runtime-sync" || row.source === "deploy-sync" ? row.source : "manual",
+    source:
+      row.source === "runtime-sync" || row.source === "deploy-sync"
+        ? row.source
+        : "manual",
     state:
       row.lastCheckedState === "current" || row.lastCheckedState === "stale"
         ? row.lastCheckedState
@@ -545,7 +595,11 @@ export class SharedProjectsStore {
           AND m.removed_at IS NULL
         ORDER BY p.updated_at DESC
       `,
-      [user.user.userId, user.user.githubId, normalizeGitHubLogin(user.user.githubLogin)],
+      [
+        user.user.userId,
+        user.user.githubId,
+        normalizeGitHubLogin(user.user.githubLogin),
+      ],
     );
     return { projects: rows.map(toProjectSummary) };
   }
@@ -577,7 +631,8 @@ export class SharedProjectsStore {
             [user.user.userId, sourceProjectId],
           );
 
-    const projectId = (existingRows[0]?.sharedProjectId ?? newId("sp")) as SharedProjectId;
+    const projectId = (existingRows[0]?.sharedProjectId ??
+      newId("sp")) as SharedProjectId;
 
     await withTransaction(this.#pool, async (client) => {
       if (existingRows.length === 0) {
@@ -688,7 +743,9 @@ export class SharedProjectsStore {
     return {
       project: detail.project,
       contextBundle: detail.contextBundle,
-      threads: detail.threads.filter((thread) => thread.visibility === "shared"),
+      threads: detail.threads.filter(
+        (thread) => thread.visibility === "shared",
+      ),
       runtimes: detail.runtimes,
       sshCredentials: [],
       environments: detail.environments,
@@ -745,12 +802,18 @@ export class SharedProjectsStore {
     return this.getDetail(user, projectId);
   }
 
-  async createInvite(user: AuthenticatedUser, rawInput: unknown): Promise<SharedProjectInvite> {
+  async createInvite(
+    user: AuthenticatedUser,
+    rawInput: unknown,
+  ): Promise<SharedProjectInvite> {
     const input = readRecord(rawInput);
     const projectId = readString(input, "projectId") as SharedProjectId;
     const role = readString(input, "role") as SharedProjectRole;
     if (role === "owner") {
-      throw new HttpError(400, "Invitees cannot be granted owner access with an invite code.");
+      throw new HttpError(
+        400,
+        "Invitees cannot be granted owner access with an invite code.",
+      );
     }
     await this.#requireRole(
       user,
@@ -779,7 +842,16 @@ export class SharedProjectsStore {
         )
         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
       `,
-      [code, projectId, githubLogin, githubId, role, user.user.userId, createdAt, expiresAt],
+      [
+        code,
+        projectId,
+        githubLogin,
+        githubId,
+        role,
+        user.user.userId,
+        createdAt,
+        expiresAt,
+      ],
     );
 
     const rows = await this.#loadInviteRows("WHERE invite_code = $1", [code]);
@@ -790,11 +862,15 @@ export class SharedProjectsStore {
     user: AuthenticatedUser,
     rawInput: unknown,
   ): Promise<
-    SharedProjectClaimResult & { readonly bootstrap: HostedSharedProjectBootstrapManifest }
+    SharedProjectClaimResult & {
+      readonly bootstrap: HostedSharedProjectBootstrapManifest;
+    }
   > {
     const input = readRecord(rawInput);
     const code = readString(input, "code") as SharedProjectInviteCode;
-    const rows = await this.#loadInviteRows("WHERE invite_code = $1 LIMIT 1", [code]);
+    const rows = await this.#loadInviteRows("WHERE invite_code = $1 LIMIT 1", [
+      code,
+    ]);
     const inviteRow = rows[0];
     if (!inviteRow) throw new HttpError(404, "Invite code was not found.");
 
@@ -821,7 +897,8 @@ export class SharedProjectsStore {
     const invitedLogin = normalizeGitHubLogin(inviteRow.invitedGithubLogin);
     const actualLogin = normalizeGitHubLogin(user.user.githubLogin);
     if (
-      (inviteRow.invitedGithubId !== null && inviteRow.invitedGithubId !== user.user.githubId) ||
+      (inviteRow.invitedGithubId !== null &&
+        inviteRow.invitedGithubId !== user.user.githubId) ||
       invitedLogin !== actualLogin
     ) {
       throw new HttpError(
@@ -860,7 +937,9 @@ export class SharedProjectsStore {
       bootstrap: {
         project: detail.project,
         contextBundle: detail.contextBundle,
-        threads: detail.threads.filter((thread) => thread.visibility === "shared"),
+        threads: detail.threads.filter(
+          (thread) => thread.visibility === "shared",
+        ),
         runtimes: detail.runtimes,
         sshCredentials: [],
         environments: detail.environments,
@@ -878,7 +957,8 @@ export class SharedProjectsStore {
     const projectId = readString(input, "projectId") as SharedProjectId;
     const targetUserId = readString(input, "userId");
     const role = readString(input, "role") as SharedProjectRole;
-    if (role === "owner") throw new HttpError(400, "Project ownership transfer is not available.");
+    if (role === "owner")
+      throw new HttpError(400, "Project ownership transfer is not available.");
     await this.#requireRole(
       user,
       projectId,
@@ -899,7 +979,8 @@ export class SharedProjectsStore {
     );
     const target = rows[0];
     if (!target) throw new HttpError(404, "Member was not found.");
-    if (target.role === "owner") throw new HttpError(400, "The owner role cannot be changed.");
+    if (target.role === "owner")
+      throw new HttpError(400, "The owner role cannot be changed.");
     await query(
       this.#pool,
       "UPDATE shared_project_members SET role = $3 WHERE shared_project_id = $1 AND user_id = $2",
@@ -935,7 +1016,8 @@ export class SharedProjectsStore {
     );
     const target = rows[0];
     if (!target) throw new HttpError(404, "Member was not found.");
-    if (target.role === "owner") throw new HttpError(400, "The project owner cannot be removed.");
+    if (target.role === "owner")
+      throw new HttpError(400, "The project owner cannot be removed.");
     const removedAt = nowIso();
     await withTransaction(this.#pool, async (client) => {
       await query(
@@ -963,7 +1045,10 @@ export class SharedProjectsStore {
     return this.getDetail(user, projectId);
   }
 
-  async deleteProject(user: AuthenticatedUser, rawInput: unknown): Promise<{ readonly ok: true }> {
+  async deleteProject(
+    user: AuthenticatedUser,
+    rawInput: unknown,
+  ): Promise<{ readonly ok: true }> {
     const input = readRecord(rawInput);
     const projectId = readString(input, "projectId") as SharedProjectId;
     await this.#requireRole(
@@ -984,7 +1069,10 @@ export class SharedProjectsStore {
     return { ok: true };
   }
 
-  async publishThread(user: AuthenticatedUser, rawInput: unknown): Promise<SharedThread> {
+  async publishThread(
+    user: AuthenticatedUser,
+    rawInput: unknown,
+  ): Promise<SharedThread> {
     const input = readRecord(rawInput);
     const projectId = readString(input, "projectId") as SharedProjectId;
     await this.#requireRole(
@@ -995,7 +1083,8 @@ export class SharedProjectsStore {
     );
     const localThreadId = readOptionalString(input, "localThreadId");
     const title = readString(input, "title");
-    const visibility = readString(input, "visibility") === "private" ? "private" : "shared";
+    const visibility =
+      readString(input, "visibility") === "private" ? "private" : "shared";
     const codeState =
       typeof input.codeState === "object" && input.codeState !== null
         ? (input.codeState as SharedThreadCodeState)
@@ -1006,54 +1095,105 @@ export class SharedProjectsStore {
             patchAttached: false,
           } satisfies SharedThreadCodeState);
     const messages = Array.isArray(input.messages) ? input.messages : [];
+    const allowedGithubLogins = readStringArray(
+      input,
+      "allowedGithubLogins",
+    ).map(normalizeGitHubLogin);
     const updatedAt = nowIso();
 
-    const threadId = newId("st") as SharedThreadId;
+    const existingRows =
+      localThreadId === null
+        ? []
+        : await this.#loadThreadRows(
+            "WHERE shared_project_id = $1 AND local_thread_id = $2 LIMIT 1",
+            [projectId, localThreadId],
+          );
+    const existing = existingRows[0];
+    const threadId = (existing?.sharedThreadId ??
+      newId("st")) as SharedThreadId;
+    const shareCode = existing?.shareCode ?? newShareCode();
     const sessionSnapshot =
       input.sessionSnapshot === null || input.sessionSnapshot === undefined
         ? null
         : jsonRecord(input.sessionSnapshot);
 
-    await query(
-      this.#pool,
-      `
-        INSERT INTO shared_threads (
-          shared_thread_id,
-          shared_project_id,
-          local_thread_id,
-          created_by_user_id,
+    if (existing) {
+      await query(
+        this.#pool,
+        `
+          UPDATE shared_threads
+          SET title = $2,
+              visibility = $3,
+              allowed_github_logins_json = $4,
+              code_state_json = $5,
+              messages_json = $6,
+              session_snapshot_json = $7,
+              updated_at = $8
+          WHERE shared_thread_id = $1
+        `,
+        [
+          threadId,
           title,
           visibility,
-          code_state_json,
-          messages_json,
-          session_snapshot_json,
-          created_at,
-          updated_at
-        )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $10)
-      `,
-      [
-        threadId,
-        projectId,
-        localThreadId,
-        user.user.userId,
-        title,
-        visibility,
-        jsonbParam(codeState),
-        jsonbParam(messages),
-        jsonbParam(sessionSnapshot),
-        updatedAt,
-      ],
-    );
-    const rows = await this.#loadThreadRows("WHERE shared_thread_id = $1", [threadId]);
+          jsonbParam(allowedGithubLogins),
+          jsonbParam(codeState),
+          jsonbParam(messages),
+          jsonbParam(sessionSnapshot),
+          updatedAt,
+        ],
+      );
+    } else {
+      await query(
+        this.#pool,
+        `
+          INSERT INTO shared_threads (
+            shared_thread_id,
+            shared_project_id,
+            local_thread_id,
+            created_by_user_id,
+            title,
+            visibility,
+            share_code,
+            allowed_github_logins_json,
+            code_state_json,
+            messages_json,
+            session_snapshot_json,
+            created_at,
+            updated_at
+          )
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $12)
+        `,
+        [
+          threadId,
+          projectId,
+          localThreadId,
+          user.user.userId,
+          title,
+          visibility,
+          shareCode,
+          jsonbParam(allowedGithubLogins),
+          jsonbParam(codeState),
+          jsonbParam(messages),
+          jsonbParam(sessionSnapshot),
+          updatedAt,
+        ],
+      );
+    }
+    const rows = await this.#loadThreadRows("WHERE shared_thread_id = $1", [
+      threadId,
+    ]);
     return toThread(rows[0]!);
   }
 
-  async updateThreadVisibility(user: AuthenticatedUser, rawInput: unknown): Promise<SharedThread> {
+  async updateThreadVisibility(
+    user: AuthenticatedUser,
+    rawInput: unknown,
+  ): Promise<SharedThread> {
     const input = readRecord(rawInput);
     const projectId = readString(input, "projectId") as SharedProjectId;
     const threadId = readString(input, "threadId") as SharedThreadId;
-    const visibility = readString(input, "visibility") === "private" ? "private" : "shared";
+    const visibility =
+      readString(input, "visibility") === "private" ? "private" : "shared";
     const { role } = await this.#requireRole(
       user,
       projectId,
@@ -1066,7 +1206,10 @@ export class SharedProjectsStore {
     );
     const thread = rows[0];
     if (!thread) throw new HttpError(404, "Shared thread was not found.");
-    if (!roleAtLeast(role, "admin") && thread.createdByUserId !== user.user.userId) {
+    if (
+      !roleAtLeast(role, "admin") &&
+      thread.createdByUserId !== user.user.userId
+    ) {
       throw new HttpError(
         403,
         "Only the thread publisher, project admins, and owners can change this thread visibility.",
@@ -1081,14 +1224,56 @@ export class SharedProjectsStore {
     return toThread({ ...thread, visibility, updatedAt });
   }
 
-  async appendThreadMessage(_user: AuthenticatedUser, _rawInput: unknown): Promise<SharedThread> {
+  async appendThreadMessage(
+    _user: AuthenticatedUser,
+    _rawInput: unknown,
+  ): Promise<SharedThread> {
     throw new HttpError(
       400,
       "Shared sessions are snapshot-only. Import the snapshot locally, continue locally, then create a new snapshot share.",
     );
   }
 
-  async upsertRuntime(user: AuthenticatedUser, rawInput: unknown): Promise<SharedRuntime> {
+  async resolveThreadShare(
+    user: AuthenticatedUser,
+    rawInput: unknown,
+  ): Promise<ResolvedSharedThreadShare> {
+    const input = readRecord(rawInput);
+    const shareCode = readString(input, "shareCode");
+    const rows = await this.#loadThreadRows("WHERE share_code = $1 LIMIT 1", [
+      shareCode,
+    ]);
+    const row = rows[0];
+    if (!row) {
+      throw new HttpError(404, "Shared session link was not found.");
+    }
+    const thread = toThread(row);
+    const normalizedGithubLogin = normalizeGitHubLogin(user.user.githubLogin);
+    if (
+      thread.allowedGithubLogins.length > 0 &&
+      !thread.allowedGithubLogins.includes(normalizedGithubLogin)
+    ) {
+      throw new HttpError(
+        403,
+        "This shared session link is not available to your GitHub account.",
+      );
+    }
+    if (
+      thread.visibility !== "shared" &&
+      thread.createdByUserId !== user.user.userId
+    ) {
+      throw new HttpError(403, "This shared session is private.");
+    }
+    return {
+      projectId: thread.projectId,
+      thread,
+    };
+  }
+
+  async upsertRuntime(
+    user: AuthenticatedUser,
+    rawInput: unknown,
+  ): Promise<SharedRuntime> {
     const input = readRecord(rawInput);
     const projectId = readString(input, "projectId") as SharedProjectId;
     await this.#requireRole(
@@ -1098,7 +1283,8 @@ export class SharedProjectsStore {
       "Viewers cannot attach runtimes to a shared project.",
     );
     const updatedAt = nowIso();
-    const runtimeId = (readOptionalString(input, "runtimeId") ?? newId("rt")) as SharedRuntimeId;
+    const runtimeId = (readOptionalString(input, "runtimeId") ??
+      newId("rt")) as SharedRuntimeId;
     const type = readString(input, "type");
     const label = readString(input, "label");
     const endpointLabel = readOptionalString(input, "endpointLabel");
@@ -1151,11 +1337,15 @@ export class SharedProjectsStore {
         updatedAt,
       ],
     );
-    const rows = await this.#loadRuntimeRows("WHERE runtime_id = $1 AND shared_project_id = $2", [
-      runtimeId,
-      projectId,
-    ]);
-    if (!rows[0]) throw new HttpError(409, "Runtime id is already used by another project.");
+    const rows = await this.#loadRuntimeRows(
+      "WHERE runtime_id = $1 AND shared_project_id = $2",
+      [runtimeId, projectId],
+    );
+    if (!rows[0])
+      throw new HttpError(
+        409,
+        "Runtime id is already used by another project.",
+      );
     return toRuntime(rows[0]!);
   }
 
@@ -1185,7 +1375,8 @@ export class SharedProjectsStore {
         "SELECT COUNT(*) AS count FROM shared_project_environments WHERE shared_project_id = $1",
         [projectId],
       );
-      const shouldBeDefault = isDefault || Number.parseInt(countRows[0]?.count ?? "0", 10) === 0;
+      const shouldBeDefault =
+        isDefault || Number.parseInt(countRows[0]?.count ?? "0", 10) === 0;
       if (shouldBeDefault) {
         await query(
           client,
@@ -1237,7 +1428,11 @@ export class SharedProjectsStore {
       "WHERE environment_id = $1 AND shared_project_id = $2",
       [environmentId, projectId],
     );
-    if (!rows[0]) throw new HttpError(409, "Environment id is already used by another project.");
+    if (!rows[0])
+      throw new HttpError(
+        409,
+        "Environment id is already used by another project.",
+      );
     return toEnvironment(rows[0]!);
   }
 
@@ -1247,7 +1442,10 @@ export class SharedProjectsStore {
   ): Promise<HostedSharedProjectDetail> {
     const input = readRecord(rawInput);
     const projectId = readString(input, "projectId") as SharedProjectId;
-    const environmentId = readString(input, "environmentId") as SharedProjectEnvironmentId;
+    const environmentId = readString(
+      input,
+      "environmentId",
+    ) as SharedProjectEnvironmentId;
     await this.#requireRole(
       user,
       projectId,
@@ -1287,7 +1485,10 @@ export class SharedProjectsStore {
       canManageSharedProject,
       "Only owners and admins can change branch deploy associations.",
     );
-    const environmentId = readString(input, "environmentId") as SharedProjectEnvironmentId;
+    const environmentId = readString(
+      input,
+      "environmentId",
+    ) as SharedProjectEnvironmentId;
     const envRows = await this.#loadEnvironmentRows(
       "WHERE shared_project_id = $1 AND environment_id = $2 LIMIT 1",
       [projectId, environmentId],
@@ -1299,7 +1500,10 @@ export class SharedProjectsStore {
     const deployId = (readOptionalString(input, "deployId") ??
       newId("dep")) as SharedDeployAssociationId;
     const updatedAt = nowIso();
-    const state = resolveDeployState({ currentHeadSha: row.currentHeadSha, deployedSha });
+    const state = resolveDeployState({
+      currentHeadSha: row.currentHeadSha,
+      deployedSha,
+    });
     await query(
       this.#pool,
       `
@@ -1327,14 +1531,26 @@ export class SharedProjectsStore {
                       updated_at = excluded.updated_at
         WHERE shared_deploy_associations.shared_project_id = excluded.shared_project_id
       `,
-      [deployId, projectId, branch, environmentId, deployUrl, deployedSha, state, updatedAt],
+      [
+        deployId,
+        projectId,
+        branch,
+        environmentId,
+        deployUrl,
+        deployedSha,
+        state,
+        updatedAt,
+      ],
     );
-    const rows = await this.#loadDeployRows("WHERE deploy_id = $1 AND shared_project_id = $2", [
-      deployId,
-      projectId,
-    ]);
+    const rows = await this.#loadDeployRows(
+      "WHERE deploy_id = $1 AND shared_project_id = $2",
+      [deployId, projectId],
+    );
     if (!rows[0])
-      throw new HttpError(409, "Deploy association id is already used by another project.");
+      throw new HttpError(
+        409,
+        "Deploy association id is already used by another project.",
+      );
     return this.getDetail(user, projectId);
   }
 
@@ -1368,7 +1584,10 @@ export class SharedProjectsStore {
           validateSharedEnvironmentUrl(runtime.endpointLabel) !== "invalid-url",
       );
     if (candidates.length === 0) {
-      throw new HttpError(404, "No healthy remote runtime with a valid endpoint was found.");
+      throw new HttpError(
+        404,
+        "No healthy remote runtime with a valid endpoint was found.",
+      );
     }
     const updatedAt = nowIso();
     await withTransaction(this.#pool, async (client) => {
@@ -1424,7 +1643,10 @@ export class SharedProjectsStore {
     return this.getDetail(user, projectId);
   }
 
-  async upsertArtifact(user: AuthenticatedUser, rawInput: unknown): Promise<SharedProjectArtifact> {
+  async upsertArtifact(
+    user: AuthenticatedUser,
+    rawInput: unknown,
+  ): Promise<SharedProjectArtifact> {
     const input = readRecord(rawInput);
     const projectId = readString(input, "projectId") as SharedProjectId;
     await this.#requireRole(
@@ -1481,11 +1703,15 @@ export class SharedProjectsStore {
         updatedAt,
       ],
     );
-    const rows = await this.#loadArtifactRows("WHERE artifact_id = $1 AND shared_project_id = $2", [
-      artifactId,
-      projectId,
-    ]);
-    if (!rows[0]) throw new HttpError(409, "Artifact id is already used by another project.");
+    const rows = await this.#loadArtifactRows(
+      "WHERE artifact_id = $1 AND shared_project_id = $2",
+      [artifactId, projectId],
+    );
+    if (!rows[0])
+      throw new HttpError(
+        409,
+        "Artifact id is already used by another project.",
+      );
     return toArtifact(rows[0]!);
   }
 
@@ -1530,7 +1756,10 @@ export class SharedProjectsStore {
     projectId: SharedProjectId,
     predicate: (role: SharedProjectRole) => boolean,
     message: string,
-  ): Promise<{ readonly row: ProjectAccessRow; readonly role: SharedProjectRole }> {
+  ): Promise<{
+    readonly row: ProjectAccessRow;
+    readonly role: SharedProjectRole;
+  }> {
     const row = await this.#loadProjectAccess(user, projectId);
     const role = roleFromDb(row.role);
     if (!predicate(role)) throw new HttpError(403, message);
@@ -1554,23 +1783,40 @@ export class SharedProjectsStore {
     ] = await Promise.all([
       this.#loadMemberRows(projectId),
       canManageSharedProject(role)
-        ? this.#loadInviteRows("WHERE shared_project_id = $1 ORDER BY created_at DESC", [projectId])
+        ? this.#loadInviteRows(
+            "WHERE shared_project_id = $1 ORDER BY created_at DESC",
+            [projectId],
+          )
         : Promise.resolve([]),
-      this.#loadThreadRows("WHERE shared_project_id = $1 ORDER BY updated_at DESC", [projectId]),
-      this.#loadRuntimeRows("WHERE shared_project_id = $1 ORDER BY created_at ASC", [projectId]),
+      this.#loadThreadRows(
+        "WHERE shared_project_id = $1 ORDER BY updated_at DESC",
+        [projectId],
+      ),
+      this.#loadRuntimeRows(
+        "WHERE shared_project_id = $1 ORDER BY created_at ASC",
+        [projectId],
+      ),
       this.#loadEnvironmentRows(
         "WHERE shared_project_id = $1 ORDER BY is_default DESC, created_at ASC",
         [projectId],
       ),
-      this.#loadDeployRows("WHERE shared_project_id = $1 ORDER BY updated_at DESC", [projectId]),
-      this.#loadArtifactRows("WHERE shared_project_id = $1 ORDER BY updated_at DESC", [projectId]),
+      this.#loadDeployRows(
+        "WHERE shared_project_id = $1 ORDER BY updated_at DESC",
+        [projectId],
+      ),
+      this.#loadArtifactRows(
+        "WHERE shared_project_id = $1 ORDER BY updated_at DESC",
+        [projectId],
+      ),
     ]);
     const now = nowIso();
     const canSeePrivateThreads = roleAtLeast(role, "admin");
     return {
       project: toProjectSummary(access),
       contextBundle:
-        access.contextJson === null ? null : (access.contextJson as SharedContextBundle),
+        access.contextJson === null
+          ? null
+          : (access.contextJson as SharedContextBundle),
       members: memberRows.map(toMember),
       invites: inviteRows.map((row) => toInvite(row, now)),
       threads: threadRows
@@ -1673,7 +1919,10 @@ export class SharedProjectsStore {
     );
   }
 
-  async #ensureEnvironmentDefault(client: DbClient, projectId: SharedProjectId): Promise<void> {
+  async #ensureEnvironmentDefault(
+    client: DbClient,
+    projectId: SharedProjectId,
+  ): Promise<void> {
     const defaultRows = await query<{ environmentId: string }>(
       client,
       `
@@ -1729,7 +1978,10 @@ export class SharedProjectsStore {
     );
   }
 
-  async #loadInviteRows(whereSql: string, values: readonly unknown[]): Promise<InviteRow[]> {
+  async #loadInviteRows(
+    whereSql: string,
+    values: readonly unknown[],
+  ): Promise<InviteRow[]> {
     return query<InviteRow>(
       this.#pool,
       `
@@ -1751,7 +2003,10 @@ export class SharedProjectsStore {
     );
   }
 
-  async #loadThreadRows(whereSql: string, values: readonly unknown[]): Promise<ThreadRow[]> {
+  async #loadThreadRows(
+    whereSql: string,
+    values: readonly unknown[],
+  ): Promise<ThreadRow[]> {
     return query<ThreadRow>(
       this.#pool,
       `
@@ -1761,6 +2016,8 @@ export class SharedProjectsStore {
                created_by_user_id AS "createdByUserId",
                title,
                visibility,
+               share_code AS "shareCode",
+               allowed_github_logins_json AS "allowedGithubLoginsJson",
                code_state_json AS "codeStateJson",
                messages_json AS "messagesJson",
                session_snapshot_json AS "sessionSnapshotJson",
@@ -1774,7 +2031,10 @@ export class SharedProjectsStore {
     );
   }
 
-  async #loadRuntimeRows(whereSql: string, values: readonly unknown[]): Promise<RuntimeRow[]> {
+  async #loadRuntimeRows(
+    whereSql: string,
+    values: readonly unknown[],
+  ): Promise<RuntimeRow[]> {
     return query<RuntimeRow>(
       this.#pool,
       `
@@ -1823,7 +2083,10 @@ export class SharedProjectsStore {
     );
   }
 
-  async #loadDeployRows(whereSql: string, values: readonly unknown[]): Promise<DeployRow[]> {
+  async #loadDeployRows(
+    whereSql: string,
+    values: readonly unknown[],
+  ): Promise<DeployRow[]> {
     return query<DeployRow>(
       this.#pool,
       `
@@ -1845,7 +2108,10 @@ export class SharedProjectsStore {
     );
   }
 
-  async #loadArtifactRows(whereSql: string, values: readonly unknown[]): Promise<ArtifactRow[]> {
+  async #loadArtifactRows(
+    whereSql: string,
+    values: readonly unknown[],
+  ): Promise<ArtifactRow[]> {
     return query<ArtifactRow>(
       this.#pool,
       `

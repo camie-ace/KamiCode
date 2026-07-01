@@ -5,6 +5,7 @@ import type {
   DeleteSharedProjectInput,
   DeleteSharedProjectResult,
   ImportSharedThreadInput,
+  ImportSharedThreadLinkInput,
   ImportSharedThreadResult,
   PublishLocalProjectInput,
   PublishSharedThreadInput,
@@ -18,6 +19,7 @@ import type {
   SharedProjectId,
   SharedProjectInvite,
   SharedProjectListResult,
+  ResolvedSharedThreadShare,
   SharedProjectSshCredential,
   SharedProjectSummary,
   SharedRuntime,
@@ -36,6 +38,7 @@ import * as Data from "effect/Data";
 import type * as Effect from "effect/Effect";
 
 import type { OrchestrationEngineService } from "../../orchestration/Services/OrchestrationEngine.ts";
+import type { ProcessRunner } from "../../processRunner.ts";
 import type { AuthenticatedUser } from "../../userAuth/Services/UserAuth.ts";
 
 export class SharedProjectsError extends Data.TaggedError("SharedProjectsError")<{
@@ -95,7 +98,23 @@ export interface SharedProjectsShape {
   readonly importThread: (
     user: AuthenticatedUser,
     input: ImportSharedThreadInput,
-  ) => Effect.Effect<ImportSharedThreadResult, SharedProjectsError, OrchestrationEngineService>;
+  ) => Effect.Effect<
+    ImportSharedThreadResult,
+    SharedProjectsError,
+    OrchestrationEngineService | ProcessRunner
+  >;
+  readonly importThreadFromLink: (
+    user: AuthenticatedUser,
+    input: ImportSharedThreadLinkInput,
+  ) => Effect.Effect<
+    ImportSharedThreadResult,
+    SharedProjectsError,
+    OrchestrationEngineService | ProcessRunner
+  >;
+  readonly resolveSharedThreadShare: (
+    user: AuthenticatedUser,
+    shareCode: string,
+  ) => Effect.Effect<ResolvedSharedThreadShare, SharedProjectsError>;
   readonly appendThreadMessage: (
     user: AuthenticatedUser,
     input: AppendSharedThreadMessageInput,
