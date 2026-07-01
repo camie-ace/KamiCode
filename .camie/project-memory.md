@@ -95,3 +95,4 @@
 - `apps/web/src/components/settings/SharedProjectsSettings.tsx` now treats GitHub auth and shared-project loading separately: the page can show `Connect GitHub`, `Open`, and `Sign out` controls even when shared-project fetches fail, and hosted collaboration URL save/clear should go through the awaitable local `server.updateSettings` RPC when available.
 - Shared Projects settings now exposes a hosted server reachability test against `/healthz` using the typed or saved collaboration URL; this is a raw health check only and does not validate the bearer token or GitHub auth.
 - Dev release `v0.0.28-dev.20260701.2` was triggered from commit `95419c40` to publish the Shared Projects settings diagnostics/reachability/GitHub auth controls.
+- Dev release `v0.0.28-dev.20260701.3` was built successfully from commit `4522b8e9` and includes the Workflow sub-agent visibility changes; GitHub Actions run `28543686917` published the Windows x64 installer.
