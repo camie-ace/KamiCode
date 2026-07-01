@@ -35,6 +35,10 @@ import * as Stream from "effect/Stream";
 import * as CodexErrors from "effect-codex-app-server/errors";
 
 import { ServerConfig } from "../../config.ts";
+import { SqlitePersistenceMemory } from "../../persistence/Layers/Sqlite.ts";
+import type { ProjectTriggerDynamicToolRunner } from "../../projectTriggers/dynamicTools.ts";
+import { ProjectTriggerRepositoryLive } from "../../projectTriggers/Layers/ProjectTriggerRepository.ts";
+import { ProjectTriggerServiceLive } from "../../projectTriggers/Layers/ProjectTriggerService.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { ProviderAdapterValidationError } from "../Errors.ts";
 import type { CodexAdapterShape } from "../Services/CodexAdapter.ts";
@@ -219,6 +223,10 @@ const providerSessionDirectoryTestLayer = Layer.succeed(ProviderSessionDirectory
   listThreadIds: () => Effect.succeed([]),
   listBindings: () => Effect.succeed([]),
 });
+const projectTriggerCrudTestLayer = ProjectTriggerServiceLive.pipe(
+  Layer.provideMerge(ProjectTriggerRepositoryLive),
+  Layer.provideMerge(SqlitePersistenceMemory),
+);
 
 const validationRuntimeFactory = makeRuntimeFactory();
 const validationLayer = it.layer(
@@ -315,6 +323,79 @@ validationLayer("CodexAdapterLive validation", (it) => {
     }),
   );
 });
+
+it.effect("passes supplied project trigger dynamic tool runner into runtime options", () =>
+  Effect.gen(function* () {
+    const runtimeFactory = makeRuntimeFactory();
+    const projectTriggerDynamicToolRunner: ProjectTriggerDynamicToolRunner = () =>
+      Effect.succeed({
+        success: true,
+        contentItems: [{ type: "inputText", text: "ok\n" }],
+      });
+    const layer = Layer.effect(
+      CodexAdapter,
+      Effect.gen(function* () {
+        const codexConfig = decodeCodexSettings({});
+        return yield* makeCodexAdapter(codexConfig, {
+          makeRuntime: runtimeFactory.factory,
+          projectTriggerDynamicToolRunner,
+        });
+      }),
+    ).pipe(
+      Layer.provideMerge(ServerConfig.layerTest(process.cwd(), process.cwd())),
+      Layer.provideMerge(ServerSettingsService.layerTest()),
+      Layer.provideMerge(providerSessionDirectoryTestLayer),
+      Layer.provideMerge(NodeServices.layer),
+    );
+
+    const adapter = yield* Effect.service(CodexAdapter).pipe(Effect.provide(layer));
+    yield* adapter.startSession({
+      provider: ProviderDriverKind.make("codex"),
+      threadId: asThreadId("thread-trigger-runner"),
+      runtimeMode: "full-access",
+      interactionMode: "trigger",
+    });
+
+    NodeAssert.equal(
+      runtimeFactory.factory.mock.calls[0]?.[0].projectTriggerDynamicToolRunner,
+      projectTriggerDynamicToolRunner,
+    );
+  }),
+);
+
+it.effect("passes ambient project trigger dynamic tool runner into runtime options", () =>
+  Effect.gen(function* () {
+    const runtimeFactory = makeRuntimeFactory();
+    const layer = Layer.effect(
+      CodexAdapter,
+      Effect.gen(function* () {
+        const codexConfig = decodeCodexSettings({});
+        return yield* makeCodexAdapter(codexConfig, {
+          makeRuntime: runtimeFactory.factory,
+        });
+      }),
+    ).pipe(
+      Layer.provideMerge(ServerConfig.layerTest(process.cwd(), process.cwd())),
+      Layer.provideMerge(ServerSettingsService.layerTest()),
+      Layer.provideMerge(providerSessionDirectoryTestLayer),
+      Layer.provideMerge(projectTriggerCrudTestLayer),
+      Layer.provideMerge(NodeServices.layer),
+    );
+
+    const adapter = yield* Effect.service(CodexAdapter).pipe(Effect.provide(layer));
+    yield* adapter.startSession({
+      provider: ProviderDriverKind.make("codex"),
+      threadId: asThreadId("thread-trigger-runner-ambient"),
+      runtimeMode: "full-access",
+      interactionMode: "trigger",
+    });
+
+    NodeAssert.equal(
+      typeof runtimeFactory.factory.mock.calls[0]?.[0].projectTriggerDynamicToolRunner,
+      "function",
+    );
+  }),
+);
 
 const sessionRuntimeFactory = makeRuntimeFactory();
 const sessionErrorLayer = it.layer(

@@ -346,6 +346,9 @@ const ProjectTriggerCrudLayerLive = ProjectTriggerServiceLive.pipe(
   Layer.provideMerge(ProjectTriggerRepositoryLive),
 );
 
+const ProviderInstanceRegistryHydrationWithProjectTriggersLive =
+  ProviderInstanceRegistryHydrationLive.pipe(Layer.provideMerge(ProjectTriggerCrudLayerLive));
+
 const ProjectTriggersLayerLive = ProjectTriggerSchedulerLive().pipe(
   Layer.provideMerge(ProjectTriggerCrudLayerLive),
   Layer.provideMerge(ServerOrchestrationDispatcherLive),
@@ -382,7 +385,7 @@ const RuntimeCoreBaseLive = ReactorLayerLive.pipe(
   // through this layer. Built-in drivers come from `BUILT_IN_DRIVERS`;
   // `providerInstances` hydration merges `settings.providers.<kind>`
   // with explicit `providerInstances` entries on boot.
-  Layer.provideMerge(ProviderInstanceRegistryHydrationLive),
+  Layer.provideMerge(ProviderInstanceRegistryHydrationWithProjectTriggersLive),
   // Shared native/canonical NDJSON writers used by both the per-instance
   // drivers (native stream, written from inside each `<X>Adapter`) and
   // `ProviderService` (canonical stream, written after event normalization).

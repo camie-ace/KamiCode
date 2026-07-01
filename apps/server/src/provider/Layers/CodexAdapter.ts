@@ -53,7 +53,10 @@ import {
 import { type CodexAdapterShape } from "../Services/CodexAdapter.ts";
 import { resolveAttachmentPath } from "../../attachmentStore.ts";
 import { ServerConfig } from "../../config.ts";
-import { createProjectTriggerDynamicToolRunner } from "../../projectTriggers/dynamicTools.ts";
+import {
+  createProjectTriggerDynamicToolRunner,
+  type ProjectTriggerDynamicToolRunner,
+} from "../../projectTriggers/dynamicTools.ts";
 import {
   ProjectTriggerId,
   ProjectTriggerRepository,
@@ -90,6 +93,7 @@ export interface CodexAdapterLiveOptions {
   readonly nativeEventLogPath?: string;
   readonly nativeEventLogger?: EventNdjsonLogger;
   readonly issueTestHarnessPairingCredential?: (() => Effect.Effect<string, string>) | undefined;
+  readonly projectTriggerDynamicToolRunner?: ProjectTriggerDynamicToolRunner | undefined;
 }
 
 interface CodexAdapterSessionContext {
@@ -1455,7 +1459,8 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
   const projectTriggerService = yield* Effect.serviceOption(ProjectTriggerService);
   const projectTriggerRepository = yield* Effect.serviceOption(ProjectTriggerRepository);
   const projectTriggerDynamicToolRunner =
-    Option.isSome(projectTriggerService) && Option.isSome(projectTriggerRepository)
+    options?.projectTriggerDynamicToolRunner ??
+    (Option.isSome(projectTriggerService) && Option.isSome(projectTriggerRepository)
       ? createProjectTriggerDynamicToolRunner({
           service: projectTriggerService.value,
           repository: projectTriggerRepository.value,
@@ -1465,7 +1470,7 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
             Effect.map((uuid) => ProjectTriggerId.make(`trigger:${uuid}`)),
           ),
         })
-      : undefined;
+      : undefined);
   const nativeEventLogger =
     options?.nativeEventLogger ??
     (options?.nativeEventLogPath !== undefined
