@@ -1283,6 +1283,40 @@ routing.layer("ProviderServiceLive routing", (it) => {
     }),
   );
 
+  it.effect("persists and lists provider session interaction mode", () =>
+    Effect.gen(function* () {
+      const provider = yield* ProviderService.ProviderService;
+      const runtimeRepository = yield* ProviderSessionRuntime.ProviderSessionRuntimeRepository;
+
+      const threadId = asThreadId("thread-trigger-session");
+      const session = yield* provider.startSession(threadId, {
+        provider: ProviderDriverKind.make("codex"),
+        providerInstanceId: codexInstanceId,
+        threadId,
+        runtimeMode: "full-access",
+        interactionMode: "trigger",
+      });
+
+      assert.equal(session.interactionMode, "trigger");
+
+      const runtime = yield* runtimeRepository.getByThreadId({
+        threadId,
+      });
+      assert.equal(Option.isSome(runtime), true);
+      if (Option.isSome(runtime)) {
+        const payload = runtime.value.runtimePayload;
+        assert.equal(payload !== null && typeof payload === "object", true);
+        if (payload !== null && typeof payload === "object" && !Array.isArray(payload)) {
+          assert.equal((payload as { interactionMode?: unknown }).interactionMode, "trigger");
+        }
+      }
+
+      const sessions = yield* provider.listSessions();
+      const listed = sessions.find((entry) => entry.threadId === threadId);
+      assert.equal(listed?.interactionMode, "trigger");
+    }),
+  );
+
   it.effect("reuses persisted resume cursor when startSession is called after a restart", () =>
     Effect.gen(function* () {
       const tempDir = NodeFS.mkdtempSync(

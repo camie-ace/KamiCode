@@ -10,8 +10,10 @@
  * @module ProviderServiceLive
  */
 import {
+  DEFAULT_PROVIDER_INTERACTION_MODE,
   ModelSelection,
   NonNegativeInt,
+  ProviderInteractionMode,
   ThreadId,
   ProviderInterruptTurnInput,
   ProviderRespondToRequestInput,
@@ -56,6 +58,7 @@ import * as AnalyticsService from "../../telemetry/AnalyticsService.ts";
 import * as McpProviderSession from "../../mcp/McpProviderSession.ts";
 import * as McpSessionRegistry from "../../mcp/McpSessionRegistry.ts";
 const isModelSelection = Schema.is(ModelSelection);
+const isProviderInteractionMode = Schema.is(ProviderInteractionMode);
 
 /**
  * Hook for tests that want to override the canonical event logger pulled
@@ -130,6 +133,7 @@ function toRuntimePayloadFromSession(
   return {
     cwd: session.cwd ?? null,
     model: session.model ?? null,
+    interactionMode: session.interactionMode ?? DEFAULT_PROVIDER_INTERACTION_MODE,
     activeTurnId: session.activeTurnId ?? null,
     lastError: session.lastError ?? null,
     ...(extra?.modelSelection !== undefined ? { modelSelection: extra.modelSelection } : {}),
@@ -138,6 +142,16 @@ function toRuntimePayloadFromSession(
       ? { lastRuntimeEventAt: extra.lastRuntimeEventAt }
       : {}),
   };
+}
+
+function readPersistedInteractionMode(
+  runtimePayload: ProviderSessionDirectory.ProviderRuntimeBinding["runtimePayload"],
+): ProviderSession["interactionMode"] | undefined {
+  if (!runtimePayload || typeof runtimePayload !== "object" || Array.isArray(runtimePayload)) {
+    return undefined;
+  }
+  const raw = "interactionMode" in runtimePayload ? runtimePayload.interactionMode : undefined;
+  return isProviderInteractionMode(raw) ? raw : undefined;
 }
 
 function readPersistedModelSelection(
@@ -374,8 +388,12 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
           (session) => session.threadId === input.binding.threadId,
         );
         if (existing) {
+          const interactionMode =
+            existing.interactionMode ??
+            readPersistedInteractionMode(input.binding.runtimePayload) ??
+            DEFAULT_PROVIDER_INTERACTION_MODE;
           yield* upsertSessionBinding(
-            { ...existing, providerInstanceId: bindingInstanceId },
+            { ...existing, providerInstanceId: bindingInstanceId, interactionMode },
             input.binding.threadId,
           );
           yield* analytics.record("provider.session.recovered", {
@@ -396,6 +414,9 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
 
       const persistedCwd = readPersistedCwd(input.binding.runtimePayload);
       const persistedModelSelection = readPersistedModelSelection(input.binding.runtimePayload);
+      const persistedInteractionMode =
+        readPersistedInteractionMode(input.binding.runtimePayload) ??
+        DEFAULT_PROVIDER_INTERACTION_MODE;
 
       yield* prepareMcpSession(input.binding.threadId, bindingInstanceId);
       const resumed = yield* adapter
@@ -407,6 +428,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
           ...(persistedModelSelection ? { modelSelection: persistedModelSelection } : {}),
           ...(hasResumeCursor ? { resumeCursor: input.binding.resumeCursor } : {}),
           runtimeMode: input.binding.runtimeMode ?? "full-access",
+          interactionMode: persistedInteractionMode,
         })
         .pipe(Effect.onError(() => clearMcpSession(input.binding.threadId)));
       if (resumed.provider !== adapter.provider) {
@@ -418,7 +440,11 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
       }
 
       yield* upsertSessionBinding(
-        { ...resumed, providerInstanceId: bindingInstanceId },
+        {
+          ...resumed,
+          providerInstanceId: bindingInstanceId,
+          interactionMode: persistedInteractionMode,
+        },
         input.binding.threadId,
       );
       yield* analytics.record("provider.session.recovered", {
@@ -610,6 +636,8 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         const sessionWithInstance = {
           ...session,
           providerInstanceId: resolvedInstanceId,
+          interactionMode:
+            input.interactionMode ?? session.interactionMode ?? DEFAULT_PROVIDER_INTERACTION_MODE,
         };
 
         yield* stopStaleSessionsForThread({
@@ -622,6 +650,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         yield* analytics.record("provider.session.started", {
           provider: sessionWithInstance.provider,
           runtimeMode: input.runtimeMode,
+          interactionMode: sessionWithInstance.interactionMode,
           hasResumeCursor: sessionWithInstance.resumeCursor !== undefined,
           hasCwd: typeof effectiveCwd === "string" && effectiveCwd.trim().length > 0,
           hasModel:
@@ -688,6 +717,9 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         ...(turn.resumeCursor !== undefined ? { resumeCursor: turn.resumeCursor } : {}),
         runtimePayload: {
           ...(input.modelSelection !== undefined ? { modelSelection: input.modelSelection } : {}),
+          ...(input.interactionMode !== undefined
+            ? { interactionMode: input.interactionMode }
+            : {}),
           activeTurnId: turn.turnId,
           lastRuntimeEvent: "provider.sendTurn",
           lastRuntimeEventAt: yield* nowIso,
@@ -929,6 +961,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         const overrides: {
           resumeCursor?: ProviderSession["resumeCursor"];
           runtimeMode?: ProviderSession["runtimeMode"];
+          interactionMode?: ProviderSession["interactionMode"];
           providerInstanceId?: ProviderSession["providerInstanceId"];
         } = {};
         overrides.providerInstanceId = dieOnMissingBindingInstanceId(
@@ -955,6 +988,10 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         if (binding.runtimeMode !== undefined) {
           overrides.runtimeMode = binding.runtimeMode;
         }
+        overrides.interactionMode =
+          readPersistedInteractionMode(binding.runtimePayload) ??
+          session.interactionMode ??
+          DEFAULT_PROVIDER_INTERACTION_MODE;
         sessions.push(Object.assign({}, session, overrides));
       }
       return sessions;

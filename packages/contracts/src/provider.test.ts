@@ -198,6 +198,21 @@ describe("providerInstanceId routing key (slice-2 invariant)", () => {
     expect(session.providerInstanceId).toBe("codex_work");
   });
 
+  it("propagates interactionMode through ProviderSession decode", () => {
+    const session = decodeProviderSession({
+      provider: "codex",
+      providerInstanceId: "codex_work",
+      status: "ready",
+      runtimeMode: "full-access",
+      interactionMode: "trigger",
+      threadId: "thread-1",
+      createdAt: "2024-01-01T00:00:00Z",
+      updatedAt: "2024-01-01T00:00:00Z",
+    });
+
+    expect(session.interactionMode).toBe("trigger");
+  });
+
   it("decodes ProviderSession for fork-provided driver kinds", () => {
     const session = decodeProviderSession({
       provider: "ollama",

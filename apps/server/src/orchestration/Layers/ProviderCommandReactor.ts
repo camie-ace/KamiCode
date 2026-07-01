@@ -1,6 +1,7 @@
 import {
   type ChatAttachment,
   CommandId,
+  DEFAULT_PROVIDER_INTERACTION_MODE,
   EventId,
   type ModelSelection,
   type OrchestrationProjectShell,
@@ -580,6 +581,10 @@ const make = Effect.gen(function* () {
       thread.session && thread.session.status !== "stopped" && activeSession ? thread.id : null;
     if (existingSessionThreadId) {
       const runtimeModeChanged = thread.runtimeMode !== thread.session?.runtimeMode;
+      const currentInteractionMode =
+        activeSession?.interactionMode ?? DEFAULT_PROVIDER_INTERACTION_MODE;
+      const desiredInteractionMode = thread.interactionMode ?? DEFAULT_PROVIDER_INTERACTION_MODE;
+      const interactionModeChanged = currentInteractionMode !== desiredInteractionMode;
       const cwdChanged = effectiveCwd !== activeSession?.cwd;
       const sessionModelSwitch = (yield* providerService.getCapabilities(desiredInstanceId))
         .sessionModelSwitch;
@@ -598,6 +603,7 @@ const make = Effect.gen(function* () {
 
       if (
         !runtimeModeChanged &&
+        !interactionModeChanged &&
         !cwdChanged &&
         !instanceChanged &&
         !shouldRestartForModelChange &&
@@ -620,6 +626,9 @@ const make = Effect.gen(function* () {
         currentRuntimeMode: thread.session?.runtimeMode,
         desiredRuntimeMode: thread.runtimeMode,
         runtimeModeChanged,
+        currentInteractionMode,
+        desiredInteractionMode,
+        interactionModeChanged,
         previousCwd: activeSession?.cwd,
         desiredCwd: effectiveCwd,
         cwdChanged,

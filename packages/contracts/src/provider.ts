@@ -39,6 +39,7 @@ export const ProviderSession = Schema.Struct({
   providerInstanceId: Schema.optional(ProviderInstanceId),
   status: ProviderSessionStatus,
   runtimeMode: RuntimeMode,
+  interactionMode: Schema.optional(ProviderInteractionMode),
   cwd: Schema.optional(TrimmedNonEmptyString),
   model: Schema.optional(TrimmedNonEmptyString),
   threadId: ThreadId,

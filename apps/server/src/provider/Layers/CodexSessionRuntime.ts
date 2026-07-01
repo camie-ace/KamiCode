@@ -1,6 +1,7 @@
 import {
   ApprovalRequestId,
   DEFAULT_MODEL,
+  DEFAULT_PROVIDER_INTERACTION_MODE,
   EventId,
   ProviderDriverKind,
   ProviderItemId,
@@ -908,6 +909,7 @@ export const makeCodexSessionRuntime = (
       ...(options.providerInstanceId ? { providerInstanceId: options.providerInstanceId } : {}),
       status: "connecting",
       runtimeMode: options.runtimeMode,
+      interactionMode: options.interactionMode ?? DEFAULT_PROVIDER_INTERACTION_MODE,
       cwd: options.cwd,
       ...(options.model ? { model: options.model } : {}),
       threadId: options.threadId,
