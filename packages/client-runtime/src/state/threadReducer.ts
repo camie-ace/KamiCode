@@ -274,6 +274,29 @@ export function applyThreadDetailEvent(
       };
     }
 
+    // Message edits
+    case "thread.message-updated": {
+      let didUpdate = false;
+      const messages = Arr.map(thread.messages, (message) => {
+        if (message.id !== event.payload.messageId) return message;
+        didUpdate = true;
+        return {
+          ...message,
+          text: event.payload.text,
+          updatedAt: event.payload.updatedAt,
+        };
+      });
+      if (!didUpdate) return { kind: "unchanged" };
+      return {
+        kind: "updated",
+        thread: {
+          ...thread,
+          messages,
+          updatedAt: event.occurredAt,
+        },
+      };
+    }
+
     // ── Session ─────────────────────────────────────────────────────
     case "thread.session-set": {
       // Leaving the "running" session status is the turn-end signal: settle a

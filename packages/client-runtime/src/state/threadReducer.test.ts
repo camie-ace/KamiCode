@@ -338,6 +338,59 @@ describe("applyThreadDetailEvent", () => {
     });
   });
 
+  describe("thread.message-updated", () => {
+    it("updates an existing message text without changing queue state", () => {
+      const threadWithQueuedMessage: OrchestrationThread = {
+        ...baseThread,
+        queuedTurns: [
+          {
+            queueId: "queue:event-queued",
+            threadId: ThreadId.make("thread-1"),
+            messageId: MessageId.make("msg-queued"),
+            status: "queued",
+            requestedAt: "2026-04-01T06:00:00.000Z",
+            startedAt: null,
+            completedAt: null,
+            turnId: null,
+            failureDetail: null,
+          },
+        ],
+        messages: [
+          {
+            id: MessageId.make("msg-queued"),
+            role: "user",
+            text: "Original queued text",
+            turnId: null,
+            streaming: false,
+            createdAt: "2026-04-01T06:00:00.000Z",
+            updatedAt: "2026-04-01T06:00:00.000Z",
+          },
+        ],
+      };
+
+      const result = applyThreadDetailEvent(threadWithQueuedMessage, {
+        ...baseEventFields,
+        sequence: 9,
+        occurredAt: "2026-04-01T06:01:00.000Z",
+        aggregateKind: "thread",
+        aggregateId: ThreadId.make("thread-1"),
+        type: "thread.message-updated",
+        payload: {
+          threadId: ThreadId.make("thread-1"),
+          messageId: MessageId.make("msg-queued"),
+          text: "Edited queued text",
+          updatedAt: "2026-04-01T06:01:00.000Z",
+        },
+      });
+
+      expect(result.kind).toBe("updated");
+      if (result.kind === "updated") {
+        expect(result.thread.messages[0]?.text).toBe("Edited queued text");
+        expect(result.thread.queuedTurns?.[0]?.status).toBe("queued");
+      }
+    });
+  });
+
   describe("thread.session-set", () => {
     it("settles a running latestTurn when the session leaves the running status", () => {
       const threadWithRunningTurn: OrchestrationThread = {

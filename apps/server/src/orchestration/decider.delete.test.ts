@@ -139,6 +139,88 @@ function normalizeDeleteEvent(event: PlannedEvent | ReadonlyArray<PlannedEvent>)
 }
 
 it.layer(NodeServices.layer)("decider deletion flows", (it) => {
+  it.effect("updates a queued turn user message before it is dispatched", () =>
+    Effect.gen(function* () {
+      const now = "2026-01-01T00:00:00.000Z";
+      const threadId = asThreadId("thread-delete-1");
+      const messageId = asMessageId("message-update-queued");
+      const withMessage = yield* projectEvent(yield* seedReadModel, {
+        sequence: 4,
+        eventId: asEventId("evt-update-queued-message-sent"),
+        aggregateKind: "thread",
+        aggregateId: threadId,
+        type: "thread.message-sent",
+        occurredAt: now,
+        commandId: asCommandId("cmd-update-queued-message-sent"),
+        causationEventId: null,
+        correlationId: asCommandId("cmd-update-queued-message-sent"),
+        metadata: {},
+        payload: {
+          threadId,
+          messageId,
+          role: "user",
+          text: "queued text",
+          turnId: null,
+          streaming: false,
+          createdAt: now,
+          updatedAt: now,
+        },
+      });
+      const readModel = yield* projectEvent(withMessage, {
+        sequence: 5,
+        eventId: asEventId("evt-queued-update-start-requested"),
+        aggregateKind: "thread",
+        aggregateId: threadId,
+        type: "thread.turn-start-requested",
+        occurredAt: now,
+        commandId: asCommandId("cmd-queued-update-start"),
+        causationEventId: null,
+        correlationId: asCommandId("cmd-queued-update-start"),
+        metadata: {},
+        payload: {
+          threadId,
+          messageId,
+          runtimeMode: "approval-required",
+          interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+          dispatchPolicy: "queue",
+          createdAt: now,
+        },
+      });
+
+      const result = yield* decideOrchestrationCommand({
+        command: {
+          type: "thread.queued-turn.update",
+          commandId: asCommandId("cmd-update-queued"),
+          threadId,
+          messageId,
+          text: "edited queued text",
+          createdAt: "2026-01-01T00:00:01.000Z",
+        },
+        readModel,
+      });
+
+      const events = Array.isArray(result) ? result : [result];
+      expect(events).toHaveLength(1);
+      const event = events[0];
+      expect(event?.type).toBe("thread.message-updated");
+      if (event?.type !== "thread.message-updated") return;
+      expect(event.payload).toMatchObject({
+        threadId,
+        messageId,
+        text: "edited queued text",
+        updatedAt: "2026-01-01T00:00:01.000Z",
+      });
+
+      const projected = yield* projectEvent(readModel, { ...event, sequence: 6 });
+      const thread = projected.threads.find((entry) => entry.id === threadId);
+      expect(thread?.messages.find((message) => message.id === messageId)?.text).toBe(
+        "edited queued text",
+      );
+      expect(thread?.queuedTurns?.[0]?.messageId).toBe(messageId);
+      expect(thread?.queuedTurns?.[0]?.status).toBe("queued");
+    }),
+  );
+
   it.effect("deletes a queued turn by message id when queue id is not known yet", () =>
     Effect.gen(function* () {
       const now = "2026-01-01T00:00:00.000Z";

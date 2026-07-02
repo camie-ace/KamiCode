@@ -18,6 +18,7 @@ import {
   type StartThreadTurnInput,
   type StopThreadSessionInput,
   type UnarchiveThreadInput,
+  type UpdateThreadQueuedTurnInput,
   type UpdateThreadMetadataInput,
   archiveThread,
   appendThreadActivity,
@@ -34,6 +35,7 @@ import {
   startThreadTurn,
   stopThreadSession,
   unarchiveThread,
+  updateThreadQueuedTurn,
   updateThreadMetadata,
 } from "../operations/commands.ts";
 import type { EnvironmentRegistry } from "../connection/registry.ts";
@@ -51,6 +53,7 @@ export type {
   StartThreadTurnInput,
   StopThreadSessionInput,
   UnarchiveThreadInput,
+  UpdateThreadQueuedTurnInput,
   UpdateThreadMetadataInput,
   DeleteThreadQueuedTurnInput,
   AppendThreadActivityInput,
@@ -112,6 +115,12 @@ export function createThreadEnvironmentAtoms<R, E>(
     deleteQueuedTurn: createEnvironmentCommand(runtime, {
       label: "environment-data:commands:thread:delete-queued-turn",
       execute: (input: DeleteThreadQueuedTurnInput) => deleteThreadQueuedTurn(input),
+      scheduler,
+      concurrency,
+    }),
+    updateQueuedTurn: createEnvironmentCommand(runtime, {
+      label: "environment-data:commands:thread:update-queued-turn",
+      execute: (input: UpdateThreadQueuedTurnInput) => updateThreadQueuedTurn(input),
       scheduler,
       concurrency,
     }),
