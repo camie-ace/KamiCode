@@ -34,8 +34,8 @@ import {
 import {
   confirm,
   getAppBranding,
+  getLocalEnvironmentBootstraps,
   getLocalEnvironmentBearerToken,
-  getLocalEnvironmentBootstrap,
   openExternal,
   pickFolder,
   revealLocalMediaFile,
@@ -43,13 +43,14 @@ import {
   showContextMenu,
 } from "./methods/window.ts";
 import * as PreviewIpc from "./methods/preview.ts";
+import { getWslState, setWslBackendEnabled, setWslDistro, setWslOnly } from "./methods/wsl.ts";
 
 export const installDesktopIpcHandlers = Effect.fn("desktop.ipc.installHandlers")(function* () {
   const ipc = yield* DesktopIpc.DesktopIpc;
   yield* PreviewIpc.installPreviewEventForwarding();
 
   yield* ipc.handleSync(getAppBranding);
-  yield* ipc.handleSync(getLocalEnvironmentBootstrap);
+  yield* ipc.handleSync(getLocalEnvironmentBootstraps);
   yield* ipc.handle(getLocalEnvironmentBearerToken);
 
   yield* ipc.handle(getClientSettings);
@@ -72,6 +73,11 @@ export const installDesktopIpcHandlers = Effect.fn("desktop.ipc.installHandlers"
   yield* ipc.handle(setServerExposureMode);
   yield* ipc.handle(setTailscaleServeEnabled);
   yield* ipc.handle(getAdvertisedEndpoints);
+
+  yield* ipc.handle(getWslState);
+  yield* ipc.handle(setWslBackendEnabled);
+  yield* ipc.handle(setWslDistro);
+  yield* ipc.handle(setWslOnly);
 
   yield* ipc.handle(pickFolder);
   yield* ipc.handle(confirm);

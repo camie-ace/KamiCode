@@ -77,13 +77,18 @@ const MAX_TEST_HARNESS_RUN_LIMIT = 50;
 const requireFromHttp = NodeModule.createRequire(import.meta.url);
 const hostProcessPlatform = Effect.runSync(HostProcessPlatform);
 let playwrightTraceViewerRoot: string | undefined;
+const DESKTOP_RENDERER_ORIGINS = ["t3code://app", "t3code-dev://app"];
 
 export const browserApiCorsLayer = Layer.unwrap(
   Effect.gen(function* () {
     const config = yield* ServerConfig.ServerConfig;
     const devOrigin = config.devUrl?.origin;
+    // Dev uses credentialed requests from Vite or the Electron custom origin, so both must be
+    // explicit. Packaged desktop omits credentials and uses Effect's default wildcard origin.
     return HttpRouter.cors({
-      ...(devOrigin ? { allowedOrigins: [devOrigin], credentials: true } : {}),
+      ...(devOrigin
+        ? { allowedOrigins: [devOrigin, ...DESKTOP_RENDERER_ORIGINS], credentials: true }
+        : {}),
       allowedMethods: browserApiCorsAllowedMethods,
       allowedHeaders: browserApiCorsAllowedHeaders,
       maxAge: 600,

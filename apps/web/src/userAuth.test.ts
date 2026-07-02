@@ -1,4 +1,4 @@
-import type { DesktopBridge } from "@t3tools/contracts";
+import { PRIMARY_LOCAL_ENVIRONMENT_ID, type DesktopBridge } from "@t3tools/contracts";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 function jsonResponse(body: unknown, init?: ResponseInit) {
@@ -160,6 +160,15 @@ describe("user auth bootstrap", () => {
         httpBaseUrl: "http://localhost:3773",
         wsBaseUrl: "ws://localhost:3773",
       }),
+      getLocalEnvironmentBootstraps: () => [
+        {
+          id: PRIMARY_LOCAL_ENVIRONMENT_ID,
+          label: "Local environment",
+          httpBaseUrl: "http://localhost:3773",
+          wsBaseUrl: "ws://localhost:3773",
+          bootstrapToken: "desktop-bootstrap-token",
+        },
+      ],
       openExternal,
     } as unknown as DesktopBridge;
     const user = {

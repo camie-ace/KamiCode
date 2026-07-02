@@ -1,5 +1,7 @@
+// @effect-diagnostics nodeBuiltinImport:off
 import { sha256 } from "@noble/hashes/sha2";
 import * as NodeServices from "@effect/platform-node/NodeServices";
+import * as NodePath from "node:path";
 import { describe, expect, it } from "@effect/vitest";
 import * as ConfigProvider from "effect/ConfigProvider";
 import * as Effect from "effect/Effect";
@@ -18,10 +20,14 @@ import {
   makeCloudflaredRelayClient,
 } from "./relayClient.ts";
 
+const testPlatform = process.platform as NodeJS.Platform;
+const testArch = "x64";
+const cloudflaredExecutableName = testPlatform === "win32" ? "cloudflared.exe" : "cloudflared";
+
 const hostRuntimeLayer = (env: Record<string, string> = {}) =>
   Layer.mergeAll(
-    Layer.succeed(HostProcessPlatform, "linux"),
-    Layer.succeed(HostProcessArchitecture, "x64"),
+    Layer.succeed(HostProcessPlatform, testPlatform),
+    Layer.succeed(HostProcessArchitecture, testArch),
     ConfigProvider.layer(ConfigProvider.fromEnv({ env })),
   );
 
@@ -69,7 +75,7 @@ describe("RelayClient", () => {
       const baseDir = yield* fileSystem.makeTempDirectoryScoped({
         prefix: "t3-cloudflared-test-",
       });
-      const overridePath = `${baseDir}/override-cloudflared`;
+      const overridePath = NodePath.join(baseDir, "override-cloudflared");
       yield* fileSystem.writeFileString(overridePath, "override");
       yield* fileSystem.chmod(overridePath, 0o755);
       const manager = yield* makeCloudflaredRelayClient({
@@ -128,7 +134,14 @@ describe("RelayClient", () => {
           }
         }),
       );
-      const managedPath = `${baseDir}/tools/cloudflared/${CLOUDFLARED_VERSION}/linux-x64/cloudflared`;
+      const managedPath = NodePath.join(
+        baseDir,
+        "tools",
+        "cloudflared",
+        CLOUDFLARED_VERSION,
+        `${testPlatform}-${testArch}`,
+        cloudflaredExecutableName,
+      );
       expect(installed).toEqual({
         status: "available",
         executablePath: managedPath,
@@ -234,8 +247,8 @@ describe("RelayClient", () => {
       const baseDir = yield* fileSystem.makeTempDirectoryScoped({
         prefix: "t3-cloudflared-test-",
       });
-      const binDir = `${baseDir}/bin`;
-      const executablePath = `${binDir}/cloudflared`;
+      const binDir = NodePath.join(baseDir, "bin");
+      const executablePath = NodePath.join(binDir, cloudflaredExecutableName);
       const manager = yield* makeCloudflaredRelayClient({
         baseDir,
       });

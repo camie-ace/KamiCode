@@ -1,6 +1,7 @@
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as NodeTimersPromises from "node:timers/promises";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
@@ -104,21 +105,32 @@ function withContentSecurityPolicy(response: Response, policy: string): Response
 }
 
 const PROXY_STRIPPED_REQUEST_HEADERS = [
+  "accept-encoding",
   "connection",
+  "content-length",
   "host",
   "keep-alive",
+  "origin",
   "proxy-authenticate",
   "proxy-authorization",
+  "referer",
   "te",
   "trailer",
   "transfer-encoding",
   "upgrade",
+  "upgrade-insecure-requests",
 ] as const;
 
 function makeProxiedRequestHeaders(headers: Headers): Headers {
   const forwarded = new Headers(headers);
-  for (const header of PROXY_STRIPPED_REQUEST_HEADERS) {
-    forwarded.delete(header);
+  const headersToRemove: string[] = [];
+  for (const name of forwarded.keys()) {
+    if (name.startsWith("sec-fetch-") || PROXY_STRIPPED_REQUEST_HEADERS.includes(name as never)) {
+      headersToRemove.push(name);
+    }
+  }
+  for (const name of headersToRemove) {
+    forwarded.delete(name);
   }
   return forwarded;
 }
@@ -142,8 +154,31 @@ async function proxyRequest(
     init.body = request.body;
     (init as RequestInit & { duplex: "half" }).duplex = "half";
   }
-  const response = await Electron.net.fetch(targetUrl.toString(), init);
+  const response =
+    request.method === "GET" || request.method === "HEAD"
+      ? await fetchWithTransientRetry(targetUrl.toString(), init)
+      : await Electron.net.fetch(targetUrl.toString(), init);
   return withContentSecurityPolicy(response, contentSecurityPolicy);
+}
+
+const TRANSIENT_FETCH_RETRY_DELAYS_MS = [0, 50, 150] as const;
+
+async function fetchWithTransientRetry(url: string, init: RequestInit): Promise<Response> {
+  let lastError: unknown;
+
+  for (const delayMs of TRANSIENT_FETCH_RETRY_DELAYS_MS) {
+    if (delayMs > 0) {
+      await NodeTimersPromises.setTimeout(delayMs);
+    }
+
+    try {
+      return await Electron.net.fetch(url, init);
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  throw lastError;
 }
 
 export const make = Effect.gen(function* () {

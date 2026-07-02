@@ -27,6 +27,7 @@ import {
 const encoder = new TextEncoder();
 const tailscaleStatusJson = `{"Self":{"DNSName":"desktop.tail.ts.net.","TailscaleIPs":["100.100.100.100","fd7a:115c:a1e0::1","192.168.1.20"]}}`;
 const tailscaleStatusWithSingleIpJson = `{"Self":{"DNSName":"desktop.tail.ts.net.","TailscaleIPs":["100.90.1.2"]}}`;
+const tailscaleExecutable = process.platform === "win32" ? "tailscale.exe" : "tailscale";
 
 function mockHandle(result: { stdout?: string; stderr?: string; code?: number }) {
   return ChildProcessSpawner.makeHandle({
@@ -132,7 +133,7 @@ describe("tailscale", () => {
 
   it.effect("reads tailscale status through the process spawner service", () => {
     const layer = mockSpawnerLayer((command, args) => {
-      assert.equal(command, "tailscale");
+      assert.equal(command, tailscaleExecutable);
       assert.deepEqual(args, ["status", "--json"]);
       return {
         stdout: tailscaleStatusWithSingleIpJson,
@@ -165,7 +166,7 @@ describe("tailscale", () => {
       const error = yield* readTailscaleStatus.pipe(Effect.flip, Effect.provide(layer));
 
       assert.instanceOf(error, TailscaleCommandSpawnError);
-      assert.equal(error.executable, "tailscale");
+      assert.equal(error.executable, tailscaleExecutable);
       assert.equal(error.subcommand, "status");
       assert.equal(error.argumentCount, 2);
       assert.strictEqual(error.cause, cause);
@@ -184,7 +185,7 @@ describe("tailscale", () => {
       const error = yield* readTailscaleStatus.pipe(Effect.flip, Effect.provide(layer));
 
       assert.instanceOf(error, TailscaleCommandExitError);
-      assert.equal(error.executable, "tailscale");
+      assert.equal(error.executable, tailscaleExecutable);
       assert.equal(error.subcommand, "status");
       assert.equal(error.argumentCount, 2);
       assert.equal(error.exitCode, 7);
@@ -213,7 +214,7 @@ describe("tailscale", () => {
       const error = yield* Fiber.join(fiber);
 
       assert.instanceOf(error, TailscaleCommandTimeoutError);
-      assert.equal(error.executable, "tailscale");
+      assert.equal(error.executable, tailscaleExecutable);
       assert.equal(error.subcommand, "status");
       assert.equal(error.argumentCount, 2);
       assert.equal(error.timeoutMs, 1_500);
@@ -224,7 +225,7 @@ describe("tailscale", () => {
 
   it.effect("configures tailscale serve through the process spawner service", () => {
     const layer = mockSpawnerLayer((command, args) => {
-      assert.equal(command, "tailscale");
+      assert.equal(command, tailscaleExecutable);
       assert.deepEqual(args, ["serve", "--bg", "--https=8443", "http://127.0.0.1:13773"]);
       return {};
     });
@@ -245,7 +246,7 @@ describe("tailscale", () => {
       );
 
       assert.instanceOf(error, TailscaleCommandExitError);
-      assert.equal(error.executable, "tailscale");
+      assert.equal(error.executable, tailscaleExecutable);
       assert.equal(error.subcommand, "serve");
       assert.equal(error.argumentCount, 4);
       assert.equal(error.exitCode, 1);
@@ -263,7 +264,7 @@ describe("tailscale", () => {
     }[] = [];
     const layer = mockSpawnerLayer((command, args) => {
       commands.push({ command, args });
-      assert.equal(command, "tailscale");
+      assert.equal(command, tailscaleExecutable);
       assert.deepEqual(args, ["serve", "--https=8443", "off"]);
       return {};
     });
@@ -271,7 +272,7 @@ describe("tailscale", () => {
     return Effect.gen(function* () {
       yield* disableTailscaleServe({ servePort: 8443 }).pipe(Effect.provide(layer));
       assert.deepEqual(commands, [
-        { command: "tailscale", args: ["serve", "--https=8443", "off"] },
+        { command: tailscaleExecutable, args: ["serve", "--https=8443", "off"] },
       ]);
     });
   });

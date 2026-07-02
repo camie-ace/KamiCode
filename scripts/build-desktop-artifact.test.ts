@@ -241,10 +241,20 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
         cpu: ["x64"],
       },
     });
+    // Windows artifacts also bundle the same-architecture WSL (Linux, glibc) backend, so the
+    // staged install must fetch its native optional deps (e.g. ffi-rs) too.
+    assert.deepStrictEqual(createStageWorkspaceConfig("win", "x64"), {
+      supportedArchitectures: {
+        os: ["win32", "linux"],
+        cpu: ["x64"],
+        libc: ["glibc"],
+      },
+    });
     assert.deepStrictEqual(createStageWorkspaceConfig("win", "arm64"), {
       supportedArchitectures: {
-        os: ["win32"],
+        os: ["win32", "linux"],
         cpu: ["arm64"],
+        libc: ["glibc"],
       },
     });
     assert.deepStrictEqual(createStageWorkspaceConfig("mac", "universal"), {
@@ -448,7 +458,8 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
       assert.equal(config.appId, "tech.camie.kamicode");
       assert.equal(config.artifactName, "KamiCode-${version}-${arch}.${ext}");
       assert.equal(win.icon, "icon.ico");
-      assert.notProperty(win, "signAndEditExecutable");
+      assert.equal(win.signAndEditExecutable, true);
+      assert.notProperty(win, "azureSignOptions");
     }).pipe(Effect.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env: {} })))),
   );
 
@@ -492,6 +503,10 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
     });
     assert.deepStrictEqual(resolveFffNativeDependencies("win", "x64", "0.9.4"), {
       "@ff-labs/fff-bin-win32-x64": "0.9.4",
+    });
+    assert.deepStrictEqual(resolveFffNativeDependencies("linux", "x64", "0.9.4"), {
+      "@ff-labs/fff-bin-linux-x64-gnu": "0.9.4",
+      "@ff-labs/fff-bin-linux-x64-musl": "0.9.4",
     });
     assert.deepStrictEqual(resolveFffNativeDependencies("linux", "arm64", "0.9.4"), {
       "@ff-labs/fff-bin-linux-arm64-gnu": "0.9.4",
@@ -578,6 +593,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
         verbose: Option.none(),
         mockUpdates: Option.none(),
         mockUpdateServerPort: Option.none(),
+        wslPrebuild: Option.none(),
       }).pipe(
         Effect.provide(
           Layer.mergeAll(
@@ -615,6 +631,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
         verbose: Option.some(false),
         mockUpdates: Option.some(false),
         mockUpdateServerPort: Option.none(),
+        wslPrebuild: Option.none(),
       }).pipe(
         Effect.provide(
           ConfigProvider.layer(

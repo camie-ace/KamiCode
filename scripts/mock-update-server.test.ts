@@ -89,7 +89,22 @@ it.layer(NodeServices.layer)("mock-update-server", (it) => {
 
       yield* fileSystem.writeFileString(outsideFile, "version: outside\n");
       yield* fileSystem.makeDirectory(linksDir, { recursive: true });
-      yield* fileSystem.symlink(outsideFile, symlinkPath);
+      const symlinkCreated = yield* fileSystem.symlink(outsideFile, symlinkPath).pipe(
+        Effect.as(true),
+        Effect.catchTag("PlatformError", (error) => {
+          const cause = error.cause;
+          if (
+            process.platform === "win32" &&
+            cause instanceof Error &&
+            "code" in cause &&
+            cause.code === "EPERM"
+          ) {
+            return Effect.succeed(false);
+          }
+          return Effect.fail(error);
+        }),
+      );
+      if (!symlinkCreated) return;
 
       yield* withMockUpdateServer(
         rootRealPath,
