@@ -138,6 +138,8 @@ const MEDIA_EXTENSIONS = new Set([...IMAGE_EXTENSIONS, ...GIF_EXTENSIONS, ...VID
 const AUDIO_EXTENSIONS = new Set(["aac", "flac", "m4a", "mp3", "oga", "opus", "wav", "weba"]);
 const LOCAL_SEARCH_MEDIA_EXTENSIONS = new Set([...MEDIA_EXTENSIONS, ...AUDIO_EXTENSIONS]);
 
+const MARKDOWN_ANGLE_LINK_RE =
+  /\[[^\]]*?\]\(<(?<target>[^>\r\n]*?\.(?<ext>[a-z0-9]{2,5})(?:[#?][^>\r\n]*)?)>\)/giu;
 const MARKDOWN_LINK_RE =
   /\[[^\]]*?\]\((?<target>[^)\s]+?\.(?<ext>[a-z0-9]{2,5})(?:[#?][^)]*)?)\)/giu;
 const RAW_MEDIA_RE =
@@ -236,8 +238,9 @@ export function createMediaArtifact(input: {
 export function extractMediaArtifactsFromText(text: string): MediaArtifact[] {
   const artifacts: MediaArtifact[] = [];
   const seenTargets = new Set<string>();
+  const markdownLinkRanges: Array<readonly [number, number]> = [];
 
-  const collect = (match: RegExpExecArray) => {
+  const collect = (match: RegExpExecArray, options: { readonly markdownLink?: boolean } = {}) => {
     const groups = match.groups;
     const target = groups?.target?.trim();
     const extension = groups?.ext?.toLowerCase();
@@ -249,7 +252,7 @@ export function extractMediaArtifactsFromText(text: string): MediaArtifact[] {
       markdownTargetStart >= 0
         ? rawNormalizedTarget.slice(markdownTargetStart + 2)
         : rawNormalizedTarget;
-    const normalizedTarget = normalizeProsePrefixedTarget(markdownNormalizedTarget);
+    const normalizedTarget = normalizeExtractedMediaTarget(markdownNormalizedTarget);
     if (seenTargets.has(normalizedTarget)) return;
     seenTargets.add(normalizedTarget);
 
@@ -261,13 +264,22 @@ export function extractMediaArtifactsFromText(text: string): MediaArtifact[] {
     });
     if (artifact) {
       artifacts.push(artifact);
+      if (options.markdownLink && match.index !== undefined) {
+        markdownLinkRanges.push([match.index, match.index + match[0].length]);
+      }
     }
   };
 
+  for (const match of text.matchAll(MARKDOWN_ANGLE_LINK_RE)) {
+    collect(match, { markdownLink: true });
+  }
   for (const match of text.matchAll(MARKDOWN_LINK_RE)) {
-    collect(match);
+    collect(match, { markdownLink: true });
   }
   for (const match of text.matchAll(RAW_MEDIA_RE)) {
+    if (match.index !== undefined && isInsideRange(match.index, markdownLinkRanges)) {
+      continue;
+    }
     collect(match);
   }
 
@@ -844,6 +856,26 @@ function normalizeProsePrefixedTarget(target: string): string {
   const prefix = target.slice(0, firstSeparator);
   const lastWhitespace = Math.max(prefix.lastIndexOf(" "), prefix.lastIndexOf("\t"));
   return lastWhitespace >= 0 ? target.slice(lastWhitespace + 1) : target;
+}
+
+function normalizeExtractedMediaTarget(target: string): string {
+  const normalized = normalizeProsePrefixedTarget(target);
+  const decoded = isLocalFilesystemMediaPath(normalized)
+    ? safeDecodeMediaTarget(normalized)
+    : normalized;
+  return decoded.replace(/^\/([A-Za-z]:[\\/])/u, "$1");
+}
+
+function safeDecodeMediaTarget(target: string): string {
+  try {
+    return decodeURIComponent(target);
+  } catch {
+    return target;
+  }
+}
+
+function isInsideRange(index: number, ranges: ReadonlyArray<readonly [number, number]>): boolean {
+  return ranges.some(([start, end]) => index >= start && index < end);
 }
 
 function sourceForMediaTarget(target: string, isHttpUrl: boolean): MediaArtifactSource {
