@@ -1052,6 +1052,16 @@ const ThreadQueuedTurnDeleteCommand = Schema.Struct({
   createdAt: IsoDateTime,
 });
 
+const ThreadQueuedTurnUpdateCommand = Schema.Struct({
+  type: Schema.Literal("thread.queued-turn.update"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  queueId: Schema.optional(TrimmedNonEmptyString),
+  messageId: MessageId,
+  text: Schema.String,
+  createdAt: IsoDateTime,
+});
+
 const ThreadTurnStartBootstrapCreateThread = Schema.Struct({
   projectId: ProjectId,
   title: TrimmedNonEmptyString,
@@ -1318,6 +1328,7 @@ const DispatchableClientOrchestrationCommand = Schema.Union([
   ThreadRuntimeModeSetCommand,
   ThreadInteractionModeSetCommand,
   ThreadQueuedTurnDeleteCommand,
+  ThreadQueuedTurnUpdateCommand,
   ThreadTurnStartCommand,
   ThreadTurnInterruptCommand,
   ThreadApprovalRespondCommand,
@@ -1342,6 +1353,7 @@ export const ClientOrchestrationCommand = Schema.Union([
   ThreadRuntimeModeSetCommand,
   ThreadInteractionModeSetCommand,
   ThreadQueuedTurnDeleteCommand,
+  ThreadQueuedTurnUpdateCommand,
   ClientThreadTurnStartCommand,
   ThreadTurnInterruptCommand,
   ThreadApprovalRespondCommand,
@@ -1453,6 +1465,7 @@ export const OrchestrationEventType = Schema.Literals([
   "thread.runtime-mode-set",
   "thread.interaction-mode-set",
   "thread.message-sent",
+  "thread.message-updated",
   "thread.turn-start-requested",
   "thread.queued-turn-deleted",
   "thread.turn-interrupt-requested",
@@ -1564,6 +1577,13 @@ export const ThreadMessageSentPayload = Schema.Struct({
   turnId: Schema.NullOr(TurnId),
   streaming: Schema.Boolean,
   createdAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+});
+
+export const ThreadMessageUpdatedPayload = Schema.Struct({
+  threadId: ThreadId,
+  messageId: MessageId,
+  text: Schema.String,
   updatedAt: IsoDateTime,
 });
 
@@ -1728,6 +1748,11 @@ export const OrchestrationEvent = Schema.Union([
     ...EventBaseFields,
     type: Schema.Literal("thread.message-sent"),
     payload: ThreadMessageSentPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.message-updated"),
+    payload: ThreadMessageUpdatedPayload,
   }),
   Schema.Struct({
     ...EventBaseFields,

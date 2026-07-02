@@ -19,6 +19,7 @@ import {
   ThreadCreatedPayload,
   ThreadDeletedPayload,
   ThreadInteractionModeSetPayload,
+  ThreadMessageUpdatedPayload,
   ThreadMetaUpdatedPayload,
   ThreadProposedPlanUpsertedPayload,
   ThreadQueuedTurnDeletedPayload,
@@ -444,6 +445,44 @@ export function projectEvent(
           ...nextBase,
           threads: updateThread(nextBase.threads, payload.threadId, {
             messages: cappedMessages,
+            updatedAt: event.occurredAt,
+          }),
+        };
+      });
+
+    case "thread.message-updated":
+      return Effect.gen(function* () {
+        const payload = yield* decodeForEvent(
+          ThreadMessageUpdatedPayload,
+          event.payload,
+          event.type,
+          "payload",
+        );
+        const thread = nextBase.threads.find((entry) => entry.id === payload.threadId);
+        if (!thread) {
+          return nextBase;
+        }
+
+        let didUpdate = false;
+        const messages = thread.messages.map((message) => {
+          if (message.id !== payload.messageId) {
+            return message;
+          }
+          didUpdate = true;
+          return {
+            ...message,
+            text: payload.text,
+            updatedAt: payload.updatedAt,
+          };
+        });
+        if (!didUpdate) {
+          return nextBase;
+        }
+
+        return {
+          ...nextBase,
+          threads: updateThread(nextBase.threads, payload.threadId, {
+            messages,
             updatedAt: event.occurredAt,
           }),
         };

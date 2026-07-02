@@ -143,6 +143,7 @@ import ThreadTerminalDrawer from "./ThreadTerminalDrawer";
 import {
   ChevronDownIcon,
   ListOrderedIcon,
+  PencilIcon,
   TriangleAlertIcon,
   WifiOffIcon,
   XIcon,
@@ -255,6 +256,7 @@ import { RightPanelSheet } from "./RightPanelSheet";
 import { previewEnvironment } from "../state/preview";
 import { useAtomCommand } from "../state/use-atom-command";
 import { Button } from "./ui/button";
+import { Textarea } from "./ui/textarea";
 import {
   buildVersionMismatchDismissalKey,
   dismissVersionMismatch,
@@ -897,45 +899,161 @@ function queuedMessagePreview(text: string): string {
 const QueuedMessagesPanel = memo(function QueuedMessagesPanel(props: {
   items: ReadonlyArray<QueuedMessageItem>;
   onDelete: (item: QueuedMessageItem) => void;
+  onEdit: (item: QueuedMessageItem, text: string) => Promise<boolean>;
 }) {
-  if (props.items.length === 0) return null;
+  const { items, onDelete, onEdit } = props;
+  const [editingMessageId, setEditingMessageId] = useState<MessageId | null>(null);
+  const [draftText, setDraftText] = useState("");
+  const [savingMessageId, setSavingMessageId] = useState<MessageId | null>(null);
+  const editingItem = useMemo(
+    () => items.find((item) => item.id === editingMessageId) ?? null,
+    [editingMessageId, items],
+  );
+  const isSaving = savingMessageId !== null;
+
+  useEffect(() => {
+    if (editingMessageId !== null && !items.some((item) => item.id === editingMessageId)) {
+      setEditingMessageId(null);
+      setDraftText("");
+    }
+  }, [editingMessageId, items]);
+
+  const beginEdit = useCallback((item: QueuedMessageItem) => {
+    if (item.status !== "queued" || item.queueId === null) return;
+    setEditingMessageId(item.id);
+    setDraftText(item.text);
+  }, []);
+
+  const cancelEdit = useCallback(() => {
+    setEditingMessageId(null);
+    setDraftText("");
+  }, []);
+
+  const saveEdit = useCallback(async () => {
+    if (!editingItem) return;
+    if (draftText.trim().length === 0) return;
+    if (draftText === editingItem.text) {
+      cancelEdit();
+      return;
+    }
+    setSavingMessageId(editingItem.id);
+    try {
+      const didSave = await onEdit(editingItem, draftText);
+      if (didSave) {
+        cancelEdit();
+      }
+    } finally {
+      setSavingMessageId(null);
+    }
+  }, [cancelEdit, draftText, editingItem, onEdit]);
+
+  if (items.length === 0) return null;
 
   return (
     <div className="mx-auto mb-2 w-full min-w-0 max-w-208 rounded-lg border border-border/60 bg-card/80 px-3 py-2 shadow-sm backdrop-blur">
       <div className="mb-1.5 flex items-center gap-2 text-muted-foreground text-xs">
         <ListOrderedIcon className="size-3.5" aria-hidden="true" />
         <span className="font-medium text-foreground">Queued</span>
-        <span>{props.items.length}</span>
+        <span>{items.length}</span>
       </div>
       <div className="grid gap-1.5">
-        {props.items.map((item, index) => (
-          <div
-            key={item.id}
-            className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)_auto_auto] items-center gap-2 rounded-md bg-muted/45 px-2 py-1.5 text-xs"
-          >
-            <span className="tabular-nums text-muted-foreground">{index + 1}</span>
-            <span className="min-w-0 truncate text-foreground/90">
-              {queuedMessagePreview(item.text)}
-            </span>
-            <span className="rounded-full border border-border/70 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-muted-foreground">
-              {item.status === "dispatching" ? "Sending" : "Queued"}
-            </span>
-            <button
-              type="button"
-              className="flex size-5 items-center justify-center rounded-full text-muted-foreground transition-colors enabled:hover:bg-background enabled:hover:text-foreground disabled:opacity-30"
-              disabled={item.status !== "queued"}
-              onClick={() => props.onDelete(item)}
-              aria-label="Delete queued message"
-              title={
-                item.status === "queued"
-                  ? "Delete queued message"
-                  : "This message is already being sent"
-              }
+        {items.map((item, index) => {
+          const isEditing = editingMessageId === item.id;
+          const isRowSaving = savingMessageId === item.id;
+          const canEdit = item.status === "queued" && item.queueId !== null && !isSaving;
+          const saveDisabled =
+            isRowSaving ||
+            draftText.trim().length === 0 ||
+            (editingItem !== null && draftText === editingItem.text);
+          return (
+            <div
+              key={item.id}
+              className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)_auto_auto_auto] items-center gap-2 rounded-md bg-muted/45 px-2 py-1.5 text-xs"
             >
-              <XIcon className="size-3.5" aria-hidden="true" />
-            </button>
-          </div>
-        ))}
+              <span className="tabular-nums text-muted-foreground">{index + 1}</span>
+              {isEditing ? (
+                <div className="min-w-0 space-y-1.5">
+                  <Textarea
+                    autoFocus
+                    size="sm"
+                    value={draftText}
+                    onChange={(event) => setDraftText(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Escape") {
+                        event.preventDefault();
+                        cancelEdit();
+                        return;
+                      }
+                      if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
+                        event.preventDefault();
+                        void saveEdit();
+                      }
+                    }}
+                    rows={2}
+                    disabled={isRowSaving}
+                    aria-label="Queued message text"
+                    className="min-h-14 text-xs"
+                  />
+                  <div className="flex justify-end gap-1.5">
+                    <button
+                      type="button"
+                      className="rounded-md px-2 py-1 text-muted-foreground transition-colors hover:bg-background hover:text-foreground disabled:opacity-40"
+                      disabled={isRowSaving}
+                      onClick={cancelEdit}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      className="rounded-md bg-primary px-2 py-1 font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-40"
+                      disabled={saveDisabled}
+                      onClick={() => void saveEdit()}
+                    >
+                      {isRowSaving ? "Saving" : "Save"}
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <span className="min-w-0 truncate text-foreground/90">
+                  {queuedMessagePreview(item.text)}
+                </span>
+              )}
+              <span className="rounded-full border border-border/70 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-muted-foreground">
+                {item.status === "dispatching" ? "Sending" : "Queued"}
+              </span>
+              <button
+                type="button"
+                className="flex size-5 items-center justify-center rounded-full text-muted-foreground transition-colors enabled:hover:bg-background enabled:hover:text-foreground disabled:opacity-30"
+                disabled={!canEdit}
+                onClick={() => beginEdit(item)}
+                aria-label="Edit queued message"
+                title={
+                  item.queueId === null
+                    ? "This queued message is still being saved"
+                    : item.status === "queued"
+                      ? "Edit queued message"
+                      : "This message is already being sent"
+                }
+              >
+                <PencilIcon className="size-3.5" aria-hidden="true" />
+              </button>
+              <button
+                type="button"
+                className="flex size-5 items-center justify-center rounded-full text-muted-foreground transition-colors enabled:hover:bg-background enabled:hover:text-foreground disabled:opacity-30"
+                disabled={item.status !== "queued" || isRowSaving}
+                onClick={() => onDelete(item)}
+                aria-label="Delete queued message"
+                title={
+                  item.status === "queued"
+                    ? "Delete queued message"
+                    : "This message is already being sent"
+                }
+              >
+                <XIcon className="size-3.5" aria-hidden="true" />
+              </button>
+            </div>
+          );
+        })}
       </div>
     </div>
   );
@@ -1662,6 +1780,9 @@ function ChatViewContent(props: ChatViewProps) {
   const deleteThreadQueuedTurn = useAtomCommand(threadEnvironment.deleteQueuedTurn, {
     reportFailure: false,
   });
+  const updateThreadQueuedTurn = useAtomCommand(threadEnvironment.updateQueuedTurn, {
+    reportFailure: false,
+  });
   const startThreadTurn = useAtomCommand(threadEnvironment.startTurn, {
     reportFailure: false,
   });
@@ -1769,6 +1890,7 @@ function ChatViewContent(props: ChatViewProps) {
     ReadonlySet<MessageId>
   >(() => new Set());
   const queuedDeleteInFlightByQueueIdRef = useRef<Set<string>>(new Set());
+  const queuedUpdateInFlightByQueueIdRef = useRef<Set<string>>(new Set());
   const [localDraftErrorsByDraftId, setLocalDraftErrorsByDraftId] = useState<
     Record<string, string | null>
   >({});
@@ -3068,6 +3190,56 @@ function ChatViewContent(props: ChatViewProps) {
   const focusComposer = useCallback(() => {
     composerRef.current?.focusAtEnd();
   }, [composerRef]);
+  const updateQueuedMessage = useCallback(
+    async (item: QueuedMessageItem, text: string): Promise<boolean> => {
+      const threadId = activeThread?.id;
+      if (!threadId) return false;
+      if (text.trim().length === 0) {
+        setThreadError(threadId, "Queued message cannot be empty.");
+        return false;
+      }
+      if (item.queueId === null) {
+        setThreadError(threadId, "This queued message is still being saved.");
+        return false;
+      }
+      const inFlightKey = item.queueId;
+      if (queuedUpdateInFlightByQueueIdRef.current.has(inFlightKey)) return false;
+      queuedUpdateInFlightByQueueIdRef.current.add(inFlightKey);
+      try {
+        const result = await updateThreadQueuedTurn({
+          environmentId,
+          input: {
+            threadId,
+            queueId: item.queueId,
+            messageId: item.id,
+            text,
+            createdAt: new Date().toISOString(),
+          },
+        });
+        if (result._tag !== "Failure") {
+          setThreadError(threadId, null);
+          return true;
+        }
+        if (!isAtomCommandInterrupted(result)) {
+          const error = squashAtomCommandFailure(result);
+          setThreadError(
+            threadId,
+            error instanceof Error ? error.message : "Failed to edit queued message.",
+          );
+        }
+        return false;
+      } catch (err: unknown) {
+        setThreadError(
+          threadId,
+          err instanceof Error ? err.message : "Failed to edit queued message.",
+        );
+        return false;
+      } finally {
+        queuedUpdateInFlightByQueueIdRef.current.delete(inFlightKey);
+      }
+    },
+    [activeThread?.id, environmentId, setThreadError, updateThreadQueuedTurn],
+  );
   const dispatchQueuedMessageDelete = useCallback(
     (input: { queueId: string | null; messageId: MessageId }) => {
       const threadId = activeThread?.id;
@@ -4576,6 +4748,7 @@ function ChatViewContent(props: ChatViewProps) {
     });
     setLocallyCancelledQueuedMessageIds(new Set());
     queuedDeleteInFlightByQueueIdRef.current.clear();
+    queuedUpdateInFlightByQueueIdRef.current.clear();
     resetLocalDispatch();
     setExpandedImage(null);
   }, [draftId, resetLocalDispatch, threadId]);
@@ -6494,7 +6667,11 @@ function ChatViewContent(props: ChatViewProps) {
               <div className="chat-composer-horizontal-inset">
                 <div className="pointer-events-auto relative z-10 isolate">
                   <ComposerBannerStack className="relative z-0" items={composerBannerItems} />
-                  <QueuedMessagesPanel items={queuedMessageItems} onDelete={deleteQueuedMessage} />
+                  <QueuedMessagesPanel
+                    items={queuedMessageItems}
+                    onDelete={deleteQueuedMessage}
+                    onEdit={updateQueuedMessage}
+                  />
                   <div className="relative z-10">
                     <ChatComposer
                       composerRef={composerRef}
