@@ -55,6 +55,19 @@ describe("mediaArtifacts", () => {
     });
   });
 
+  it("extracts angle-wrapped markdown media links with spaces in Windows paths", () => {
+    const artifacts = extractMediaArtifactsFromText(
+      "Saved here: [2026-07-02-268b-leak-linkedin-gpt-image-2.png](</C:/Users/THIS PC/T3 Projects/Camie AI/Camie AI Marketing/output/imagegen/2026-07-02-268b-leak-linkedin-gpt-image-2.png>)",
+    );
+
+    expect(artifacts).toHaveLength(1);
+    expect(artifacts[0]).toMatchObject({
+      kind: "image",
+      title: "2026-07-02-268b-leak-linkedin-gpt-image-2.png",
+      path: "C:/Users/THIS PC/T3 Projects/Camie AI/Camie AI Marketing/output/imagegen/2026-07-02-268b-leak-linkedin-gpt-image-2.png",
+    });
+  });
+
   it("collects and dedupes thread media from assistant text and user attachments", () => {
     const artifacts = collectThreadMediaArtifacts([
       {
