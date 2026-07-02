@@ -215,7 +215,6 @@ import { ExpandedImageDialog } from "./chat/ExpandedImageDialog";
 import { PullRequestThreadDialog } from "./PullRequestThreadDialog";
 import { MessagesTimeline } from "./chat/MessagesTimeline";
 import { MediaPanel } from "./chat/MediaPanel";
-import { MediaShelf } from "./chat/MediaShelf";
 import { ChatHeader } from "./chat/ChatHeader";
 import { PanelLayoutControls, RightPanelMaximizeControl } from "./chat/PanelLayoutControls";
 import { type ExpandedImagePreview } from "./chat/ExpandedImagePreview";
@@ -2865,10 +2864,6 @@ function ChatViewContent(props: ChatViewProps) {
   const threadMediaArtifacts = useMemo(
     () => collectThreadMediaArtifacts(timelineMessages),
     [timelineMessages],
-  );
-  const shelfMediaArtifacts = useMemo(
-    () => threadMediaArtifacts.filter((artifact) => artifact.origin !== "attached"),
-    [threadMediaArtifacts],
   );
   const selectedThreadMediaArtifact = useMemo(
     () =>
@@ -6498,16 +6493,6 @@ function ChatViewContent(props: ChatViewProps) {
               </div>
               <div className="chat-composer-horizontal-inset">
                 <div className="pointer-events-auto relative z-10 isolate">
-                  <MediaShelf
-                    artifacts={shelfMediaArtifacts}
-                    environmentId={activeThread.environmentId}
-                    threadRef={activeThreadRef}
-                    composerTarget={composerDraftTarget}
-                    activeArtifactKey={selectedMediaArtifactKey}
-                    onActiveArtifactKeyChange={setSelectedMediaArtifactKey}
-                    onOpenMediaPanel={openMediaPanel}
-                    className="relative z-0 mb-2"
-                  />
                   <ComposerBannerStack className="relative z-0" items={composerBannerItems} />
                   <QueuedMessagesPanel items={queuedMessageItems} onDelete={deleteQueuedMessage} />
                   <div className="relative z-10">
