@@ -54,6 +54,7 @@ import * as ManagedRuntime from "effect/ManagedRuntime";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as PubSub from "effect/PubSub";
+import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import * as TestClock from "effect/testing/TestClock";
 import { ChildProcessSpawner } from "effect/unstable/process";
@@ -72,6 +73,9 @@ import * as Socket from "effect/unstable/socket/Socket";
 import { vi } from "vite-plus/test";
 
 const TEST_EPOCH = DateTime.makeUnsafe("1970-01-01T00:00:00.000Z");
+const isProjectSetupScriptOperationError = Schema.is(
+  ProjectSetupScriptRunner.ProjectSetupScriptOperationError,
+);
 
 const messageFromUnknown = (value: unknown) => {
   if (value instanceof Error) return value.message;
@@ -81,7 +85,7 @@ const messageFromUnknown = (value: unknown) => {
 };
 
 const setupScriptFailureDetail = (error: unknown) => {
-  if (error instanceof ProjectSetupScriptRunner.ProjectSetupScriptOperationError) {
+  if (isProjectSetupScriptOperationError(error)) {
     return messageFromUnknown(error.cause) ?? error.message;
   }
   return messageFromUnknown(error) ?? "Unknown setup failure.";

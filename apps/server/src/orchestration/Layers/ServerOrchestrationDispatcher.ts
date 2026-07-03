@@ -22,6 +22,9 @@ import {
 } from "../Services/ServerOrchestrationDispatcher.ts";
 
 const isOrchestrationDispatchCommandError = Schema.is(OrchestrationDispatchCommandError);
+const isProjectSetupScriptOperationError = Schema.is(
+  ProjectSetupScriptRunner.ProjectSetupScriptOperationError,
+);
 const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
 
 const childCommandId = (
@@ -60,7 +63,7 @@ const messageFromUnknown = (value: unknown) => {
 };
 
 const setupScriptFailureDetail = (error: unknown) => {
-  if (error instanceof ProjectSetupScriptRunner.ProjectSetupScriptOperationError) {
+  if (isProjectSetupScriptOperationError(error)) {
     return messageFromUnknown(error.cause) ?? error.message;
   }
   return messageFromUnknown(error) ?? "Unknown setup failure.";
