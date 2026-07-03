@@ -545,6 +545,9 @@ jobs:
           }
 
           if [[ "${{ matrix.platform }}" == "mac" ]]; then
+            ulimit -n 16384 || ulimit -n 8192 || true
+            echo "macOS open file limit: $(ulimit -n)"
+
             if has_all "$CSC_LINK" "$CSC_KEY_PASSWORD" "$APPLE_API_KEY" "$APPLE_API_KEY_ID" "$APPLE_API_ISSUER"; then
               if ! has_all "$APPLE_TEAM_ID" "$MACOS_PROVISIONING_PROFILE"; then
                 echo "macOS signing is configured, but APPLE_TEAM_ID or MACOS_PROVISIONING_PROFILE is missing." >&2
