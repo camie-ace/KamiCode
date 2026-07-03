@@ -52,6 +52,20 @@ const toBootstrapDispatchCommandCauseError = (cause: Cause.Cause<unknown>) => {
       });
 };
 
+const messageFromUnknown = (value: unknown) => {
+  if (value instanceof Error) return value.message;
+  if (typeof value !== "object" || value === null || !("message" in value)) return null;
+  const message = (value as { readonly message?: unknown }).message;
+  return typeof message === "string" ? message : null;
+};
+
+const setupScriptFailureDetail = (error: unknown) => {
+  if (error instanceof ProjectSetupScriptRunner.ProjectSetupScriptOperationError) {
+    return messageFromUnknown(error.cause) ?? error.message;
+  }
+  return messageFromUnknown(error) ?? "Unknown setup failure.";
+};
+
 const makeServerOrchestrationDispatcher = Effect.gen(function* () {
   const orchestrationEngine = yield* OrchestrationEngineService;
   const gitWorkflow = yield* GitWorkflowService;
@@ -126,8 +140,7 @@ const makeServerOrchestrationDispatcher = Effect.gen(function* () {
         readonly requestedAt: string;
         readonly worktreePath: string;
       }) => {
-        const detail =
-          input.error instanceof Error ? input.error.message : "Unknown setup failure.";
+        const detail = setupScriptFailureDetail(input.error);
         return appendSetupScriptActivity({
           activityKey: "failed",
           kind: "setup-script.failed",
@@ -267,14 +280,38 @@ const makeServerOrchestrationDispatcher = Effect.gen(function* () {
           createdThread = true;
         }
 
-        if (bootstrap?.prepareWorktree) {
+        const prepareWorktree = bootstrap?.prepareWorktree;
+        if (prepareWorktree) {
+          const worktreeRef = yield* Effect.gen(function* () {
+            if (prepareWorktree.startFromOrigin !== true) {
+              return {
+                refName: prepareWorktree.baseBranch,
+                baseRefName: undefined,
+              };
+            }
+
+            yield* gitWorkflow.fetchRemote({
+              cwd: prepareWorktree.projectCwd,
+              remoteName: "origin",
+            });
+            const resolvedBase = yield* gitWorkflow.resolveRemoteTrackingCommit({
+              cwd: prepareWorktree.projectCwd,
+              refName: prepareWorktree.baseBranch,
+              fallbackRemoteName: "origin",
+            });
+            return {
+              refName: resolvedBase.commitSha,
+              baseRefName: prepareWorktree.baseBranch,
+            };
+          });
           const worktree = yield* gitWorkflow.createWorktree({
-            cwd: bootstrap.prepareWorktree.projectCwd,
-            refName: bootstrap.prepareWorktree.baseBranch,
-            newRefName: bootstrap.prepareWorktree.branch,
+            cwd: prepareWorktree.projectCwd,
+            refName: worktreeRef.refName,
+            newRefName: prepareWorktree.branch,
+            ...(worktreeRef.baseRefName ? { baseRefName: worktreeRef.baseRefName } : {}),
             path: null,
           });
-          targetProjectCwd = bootstrap.prepareWorktree.projectCwd;
+          targetProjectCwd = prepareWorktree.projectCwd;
           targetWorktreePath = worktree.worktree.path;
           yield* orchestrationEngine.dispatch({
             type: "thread.meta.update",

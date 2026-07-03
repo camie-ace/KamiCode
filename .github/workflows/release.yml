@@ -164,6 +164,9 @@ jobs:
       - name: Typecheck
         run: vp run typecheck
 
+      - name: Install browser test runtime
+        run: vp run --filter t3 test:browser:install
+
       - name: Test
         run: vp run test
 
