@@ -218,6 +218,20 @@ jobs:
         name: Read production relay tracing config
         shell: bash
         run: |
+          set -euo pipefail
+
+          missing=()
+          for name in CLOUDFLARE_ACCOUNT_ID CLOUDFLARE_API_TOKEN; do
+            if [[ -z "${!name:-}" ]]; then
+              missing+=("$name")
+            fi
+          done
+          if (( ${#missing[@]} > 0 )); then
+            printf 'Skipping relay tracing config lookup; missing: %s\n' "${missing[*]}" >&2
+            : > "$RUNNER_TEMP/relay-client-tracing.env"
+            exit 0
+          fi
+
           vp run --filter t3code-relay deploy \
             --stage prod \
             --read-state \
@@ -255,8 +269,12 @@ jobs:
             fi
           done
           if (( ${#missing[@]} > 0 )); then
-            printf 'Missing required relay deployment configuration: %s\n' "${missing[*]}" >&2
-            exit 1
+            printf 'Continuing without relay public config; missing: %s\n' "${missing[*]}" >&2
+            echo "clerk_publishable_key=" >> "$GITHUB_OUTPUT"
+            echo "clerk_jwt_template=" >> "$GITHUB_OUTPUT"
+            echo "clerk_cli_oauth_client_id=" >> "$GITHUB_OUTPUT"
+            echo "relay_url=" >> "$GITHUB_OUTPUT"
+            exit 0
           fi
 
           echo "clerk_publishable_key=$CLERK_PUBLISHABLE_KEY" >> "$GITHUB_OUTPUT"
