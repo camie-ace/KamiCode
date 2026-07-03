@@ -5,6 +5,7 @@ import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
 import { HttpClient, HttpRouter } from "effect/unstable/http";
+import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
 
 import { makeMockUpdateRouteLayer } from "./mock-update-server.ts";
 
@@ -86,6 +87,7 @@ it.layer(NodeServices.layer)("mock-update-server", (it) => {
       const outsideFile = path.join(outside, "outside.yml");
       const linksDir = path.join(root, "links");
       const symlinkPath = path.join(linksDir, "outside.yml");
+      const hostPlatform = yield* HostProcessPlatform;
 
       yield* fileSystem.writeFileString(outsideFile, "version: outside\n");
       yield* fileSystem.makeDirectory(linksDir, { recursive: true });
@@ -94,7 +96,7 @@ it.layer(NodeServices.layer)("mock-update-server", (it) => {
         Effect.catchTag("PlatformError", (error) => {
           const cause = error.cause;
           if (
-            process.platform === "win32" &&
+            hostPlatform === "win32" &&
             cause instanceof Error &&
             "code" in cause &&
             cause.code === "EPERM"

@@ -20,13 +20,14 @@ import {
   makeCloudflaredRelayClient,
 } from "./relayClient.ts";
 
-const testPlatform = process.platform as NodeJS.Platform;
 const testArch = "x64";
-const cloudflaredExecutableName = testPlatform === "win32" ? "cloudflared.exe" : "cloudflared";
+
+function cloudflaredExecutableName(platform: NodeJS.Platform): string {
+  return platform === "win32" ? "cloudflared.exe" : "cloudflared";
+}
 
 const hostRuntimeLayer = (env: Record<string, string> = {}) =>
   Layer.mergeAll(
-    Layer.succeed(HostProcessPlatform, testPlatform),
     Layer.succeed(HostProcessArchitecture, testArch),
     ConfigProvider.layer(ConfigProvider.fromEnv({ env })),
   );
@@ -113,6 +114,7 @@ describe("RelayClient", () => {
   it.effect("downloads, verifies, validates, and atomically installs the managed executable", () =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
+      const platform = yield* HostProcessPlatform;
       const baseDir = yield* fileSystem.makeTempDirectoryScoped({
         prefix: "t3-cloudflared-test-",
       });
@@ -139,8 +141,8 @@ describe("RelayClient", () => {
         "tools",
         "cloudflared",
         CLOUDFLARED_VERSION,
-        `${testPlatform}-${testArch}`,
-        cloudflaredExecutableName,
+        `${platform}-${testArch}`,
+        cloudflaredExecutableName(platform),
       );
       expect(installed).toEqual({
         status: "available",
@@ -244,11 +246,12 @@ describe("RelayClient", () => {
     const env = { PATH: "" };
     return Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
+      const platform = yield* HostProcessPlatform;
       const baseDir = yield* fileSystem.makeTempDirectoryScoped({
         prefix: "t3-cloudflared-test-",
       });
       const binDir = NodePath.join(baseDir, "bin");
-      const executablePath = NodePath.join(binDir, cloudflaredExecutableName);
+      const executablePath = NodePath.join(binDir, cloudflaredExecutableName(platform));
       const manager = yield* makeCloudflaredRelayClient({
         baseDir,
       });
