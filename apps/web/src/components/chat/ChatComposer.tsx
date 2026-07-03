@@ -77,6 +77,7 @@ import { ComposerPendingApprovalPanel } from "./ComposerPendingApprovalPanel";
 import { ComposerPendingUserInputPanel } from "./ComposerPendingUserInputPanel";
 import { ComposerPlanFollowUpBanner } from "./ComposerPlanFollowUpBanner";
 import { ComposerAttachmentStrip } from "./ComposerAttachmentStrip";
+import { shouldDisableComposerPromptEditor } from "./ChatComposer.logic";
 import { resolveComposerMenuActiveItemId } from "./composerMenuHighlight";
 import { searchSlashCommandItems } from "./composerSlashCommandSearch";
 import {
@@ -1204,6 +1205,12 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const collapsedComposerPrimaryActionLabel = workflowSendLabel ?? "Send message";
   const showMobilePendingAnswerActions =
     isMobileViewport && !isComposerCollapsedMobile && pendingPrimaryAction !== null;
+  const composerPromptEditorDisabled = shouldDisableComposerPromptEditor({
+    isComposerApprovalState,
+    isConnecting,
+    isEnvironmentUnavailable: environmentUnavailable !== null,
+    hasActivePendingProgress: activePendingProgress !== null,
+  });
 
   // ------------------------------------------------------------------
   // Prompt helpers
@@ -2531,11 +2538,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                                 ? "Ask for follow-up changes or attach media"
                                 : "Ask anything, attach media, @tag files/folders, $use skills, or / for commands"
                 }
-                disabled={
-                  isConnecting ||
-                  isComposerApprovalState ||
-                  (environmentUnavailable !== null && activePendingProgress === null)
-                }
+                disabled={composerPromptEditorDisabled}
               />
               {showMobilePendingAnswerActions ? (
                 <div
