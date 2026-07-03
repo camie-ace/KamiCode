@@ -16,12 +16,12 @@ function configuredRelayUrl(): string {
   return resolveCloudPublicConfig().relayUrl ?? "http://relay.invalid";
 }
 
-const httpClientLayer = remoteHttpClientLayer((input, init) => globalThis.fetch(input, init));
+const httpClientLayer = remoteHttpClientLayer(globalThis.fetch);
 const relayTracingLayer = makeRelayClientTracingLayer(resolveRelayTracingConfig(), {
   serviceName: "t3-web-relay-client",
-  serviceVersion: import.meta.env.APP_VERSION,
   runtime: "browser",
   client: typeof window !== "undefined" && window.desktopBridge ? "desktop" : "web",
+  ...(import.meta.env.APP_VERSION ? { serviceVersion: import.meta.env.APP_VERSION } : {}),
 }).pipe(Layer.provide(httpClientLayer));
 
 type RuntimeLayerSource =

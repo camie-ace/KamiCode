@@ -184,6 +184,21 @@ const migrations: readonly Migration[] = [
         ADD COLUMN IF NOT EXISTS session_snapshot_json JSONB;
     `,
   },
+  {
+    id: 4,
+    name: "shared-thread-links",
+    sql: `
+      ALTER TABLE shared_threads
+        ADD COLUMN IF NOT EXISTS share_code TEXT;
+
+      ALTER TABLE shared_threads
+        ADD COLUMN IF NOT EXISTS allowed_github_logins_json JSONB NOT NULL DEFAULT '[]'::jsonb;
+
+      CREATE UNIQUE INDEX IF NOT EXISTS shared_threads_share_code_idx
+        ON shared_threads(share_code)
+        WHERE share_code IS NOT NULL;
+    `,
+  },
 ];
 
 export async function runMigrations(pool: Pool): Promise<void> {

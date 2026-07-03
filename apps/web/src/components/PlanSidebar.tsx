@@ -130,6 +130,29 @@ interface WorkflowRecord {
   readonly overrides: ReadonlyArray<string>;
 }
 
+export interface WorkflowLaneRunDetail {
+  readonly laneId: string;
+  readonly laneRole: string;
+  readonly runId: string;
+  readonly title: string;
+  readonly startedAt: string;
+  readonly status: "Waiting" | "Running" | "Done" | "Failed";
+  readonly latestSummary: string | null;
+  readonly messages: ReadonlyArray<{
+    readonly id: string;
+    readonly role: "user" | "assistant" | "system";
+    readonly text: string;
+    readonly streaming: boolean;
+    readonly createdAt: string;
+  }>;
+  readonly activities: ReadonlyArray<{
+    readonly id: string;
+    readonly kind: string;
+    readonly summary: string;
+    readonly createdAt: string;
+  }>;
+}
+
 function workflowActivityPayload(
   activity: OrchestrationThreadActivity,
 ): Record<string, unknown> | null {
@@ -560,6 +583,7 @@ interface PlanSidebarProps {
   activePlan: ActivePlanState | null;
   activeProposedPlan: LatestProposedPlanState | null;
   activities?: ReadonlyArray<OrchestrationThreadActivity>;
+  workflowLaneRunDetails?: ReadonlyArray<WorkflowLaneRunDetail>;
   label?: string;
   workflowActive?: boolean;
   currentModelSelection?: ModelSelection | undefined;
@@ -598,6 +622,7 @@ const PlanSidebar = memo(function PlanSidebar({
   activePlan,
   activeProposedPlan,
   activities = EMPTY_PLAN_SIDEBAR_ACTIVITIES,
+  workflowLaneRunDetails = [],
   label = "Plan",
   workflowActive = false,
   currentModelSelection,
@@ -735,6 +760,13 @@ const PlanSidebar = memo(function PlanSidebar({
   }, [detailRecords, laneRuntimeRecords, selectedWorkflowLane]);
   const selectedLaneWorkflowRecord =
     selectedWorkflowLaneRecords.find((record) => record.id === selectedLaneRecordId) ?? null;
+  const selectedWorkflowLaneRuns = useMemo(() => {
+    if (!selectedWorkflowLane || selectedWorkflowLane.id === "lead") return [];
+    return workflowLaneRunDetails
+      .filter((run) => run.laneId === selectedWorkflowLane.id)
+      .toSorted((left, right) => right.startedAt.localeCompare(left.startedAt));
+  }, [selectedWorkflowLane, workflowLaneRunDetails]);
+  const selectedWorkflowLaneRun = selectedWorkflowLaneRuns[0] ?? null;
   const leadWorkflowLane = workflowLanes.find((lane) => lane.id === "lead") ?? null;
   const workflowRuntimeLabel = workflowStarted
     ? (leadWorkflowLane?.status ?? "Running")
@@ -1175,6 +1207,75 @@ const PlanSidebar = memo(function PlanSidebar({
                     <span className="font-medium text-foreground/75">Open need:</span>{" "}
                     {selectedWorkflowLane.nextNeed}
                   </p>
+                  {selectedWorkflowLaneRun ? (
+                    <div className="mt-3 space-y-2 rounded-lg border border-blue-500/20 bg-blue-500/5 p-2.5">
+                      <div className="flex items-center justify-between gap-2">
+                        <div>
+                          <p className="text-[10px] font-semibold tracking-widest text-blue-300/80 uppercase">
+                            Live sub-agent run
+                          </p>
+                          <p className="mt-0.5 text-[11px] leading-snug text-muted-foreground/60">
+                            {selectedWorkflowLaneRun.title}
+                          </p>
+                        </div>
+                        <Badge
+                          variant="secondary"
+                          size="sm"
+                          className="rounded-md px-1.5 py-0 text-[10px]"
+                        >
+                          {selectedWorkflowLaneRun.status}
+                        </Badge>
+                      </div>
+                      {selectedWorkflowLaneRun.latestSummary ? (
+                        <p className="rounded-md border border-border/40 bg-background/35 px-2 py-1.5 text-[11px] leading-snug text-muted-foreground/75">
+                          {selectedWorkflowLaneRun.latestSummary}
+                        </p>
+                      ) : null}
+                      {selectedWorkflowLaneRun.messages.length ? (
+                        <div className="space-y-1.5">
+                          <p className="text-[10px] font-semibold tracking-widest text-muted-foreground/40 uppercase">
+                            Messages
+                          </p>
+                          {selectedWorkflowLaneRun.messages.map((message) => (
+                            <div
+                              key={message.id}
+                              className="rounded-md border border-border/40 bg-background/45 p-2"
+                            >
+                              <div className="flex items-center justify-between gap-2 text-[10px] text-muted-foreground/45">
+                                <span className="font-semibold uppercase">{message.role}</span>
+                                <span>
+                                  {message.streaming
+                                    ? "Streaming"
+                                    : formatTimestamp(message.createdAt, timestampFormat)}
+                                </span>
+                              </div>
+                              <p className="mt-1 max-h-44 overflow-auto whitespace-pre-wrap text-[11px] leading-snug text-muted-foreground/75">
+                                {message.text}
+                              </p>
+                            </div>
+                          ))}
+                        </div>
+                      ) : null}
+                      {selectedWorkflowLaneRun.activities.length ? (
+                        <div className="space-y-1">
+                          <p className="text-[10px] font-semibold tracking-widest text-muted-foreground/40 uppercase">
+                            Internal activity
+                          </p>
+                          {selectedWorkflowLaneRun.activities.map((activity) => (
+                            <p
+                              key={activity.id}
+                              className="text-[11px] leading-snug text-muted-foreground/60"
+                            >
+                              <span className="font-medium text-foreground/65">
+                                {activity.kind}:
+                              </span>{" "}
+                              {activity.summary}
+                            </p>
+                          ))}
+                        </div>
+                      ) : null}
+                    </div>
+                  ) : null}
                   {renderStringList("Artifacts", selectedWorkflowLane.artifacts)}
                   {renderStringList("Open questions", selectedWorkflowLane.openQuestions)}
                   {renderStringList("Activity log", selectedWorkflowLane.activityLog)}

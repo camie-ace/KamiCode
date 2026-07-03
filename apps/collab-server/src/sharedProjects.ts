@@ -2,6 +2,7 @@
 import type {
   KamiUserId,
   ProjectId,
+  ResolvedSharedThreadShare,
   SharedContextBundle,
   SharedDeployAssociation,
   SharedDeployAssociationId,
@@ -122,6 +123,8 @@ interface ThreadRow {
   readonly createdByUserId: string;
   readonly title: string;
   readonly visibility: string;
+  readonly shareCode?: string | null;
+  readonly allowedGithubLoginsJson?: unknown;
   readonly codeStateJson: unknown;
   readonly messagesJson: unknown;
   readonly sessionSnapshotJson: unknown | null;
@@ -224,6 +227,10 @@ function newId(prefix: string): string {
 
 function newInviteCode(): SharedProjectInviteCode {
   return `spc_${NodeCrypto.randomUUID().replaceAll("-", "").slice(0, 24)}` as SharedProjectInviteCode;
+}
+
+function newShareCode(): string {
+  return `share_${NodeCrypto.randomUUID().replaceAll("-", "")}`;
 }
 
 function normalizeGitHubLogin(login: string): string {
@@ -422,6 +429,8 @@ function toThread(row: ThreadRow): SharedThread {
     createdByUserId: row.createdByUserId as KamiUserId,
     title: row.title,
     visibility: row.visibility === "shared" ? "shared" : "private",
+    shareCode: typeof row.shareCode === "string" ? row.shareCode : null,
+    allowedGithubLogins: jsonArray<string>(row.allowedGithubLoginsJson ?? [], []) as string[],
     codeState: jsonRecord(row.codeStateJson) as unknown as SharedThreadCodeState,
     messages: jsonArray<SharedThreadMessage>(row.messagesJson, []) as SharedThreadMessage[],
     sessionSnapshot:
@@ -790,7 +799,9 @@ export class SharedProjectsStore {
     user: AuthenticatedUser,
     rawInput: unknown,
   ): Promise<
-    SharedProjectClaimResult & { readonly bootstrap: HostedSharedProjectBootstrapManifest }
+    SharedProjectClaimResult & {
+      readonly bootstrap: HostedSharedProjectBootstrapManifest;
+    }
   > {
     const input = readRecord(rawInput);
     const code = readString(input, "code") as SharedProjectInviteCode;
@@ -1006,45 +1017,88 @@ export class SharedProjectsStore {
             patchAttached: false,
           } satisfies SharedThreadCodeState);
     const messages = Array.isArray(input.messages) ? input.messages : [];
+    const allowedGithubLogins = readStringArray(input, "allowedGithubLogins").map(
+      normalizeGitHubLogin,
+    );
     const updatedAt = nowIso();
 
-    const threadId = newId("st") as SharedThreadId;
+    const existingRows =
+      localThreadId === null
+        ? []
+        : await this.#loadThreadRows(
+            "WHERE shared_project_id = $1 AND local_thread_id = $2 LIMIT 1",
+            [projectId, localThreadId],
+          );
+    const existing = existingRows[0];
+    const threadId = (existing?.sharedThreadId ?? newId("st")) as SharedThreadId;
+    const shareCode = existing?.shareCode ?? newShareCode();
     const sessionSnapshot =
       input.sessionSnapshot === null || input.sessionSnapshot === undefined
         ? null
         : jsonRecord(input.sessionSnapshot);
 
-    await query(
-      this.#pool,
-      `
-        INSERT INTO shared_threads (
-          shared_thread_id,
-          shared_project_id,
-          local_thread_id,
-          created_by_user_id,
+    if (existing) {
+      await query(
+        this.#pool,
+        `
+          UPDATE shared_threads
+          SET title = $2,
+              visibility = $3,
+              allowed_github_logins_json = $4,
+              code_state_json = $5,
+              messages_json = $6,
+              session_snapshot_json = $7,
+              updated_at = $8
+          WHERE shared_thread_id = $1
+        `,
+        [
+          threadId,
           title,
           visibility,
-          code_state_json,
-          messages_json,
-          session_snapshot_json,
-          created_at,
-          updated_at
-        )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $10)
-      `,
-      [
-        threadId,
-        projectId,
-        localThreadId,
-        user.user.userId,
-        title,
-        visibility,
-        jsonbParam(codeState),
-        jsonbParam(messages),
-        jsonbParam(sessionSnapshot),
-        updatedAt,
-      ],
-    );
+          jsonbParam(allowedGithubLogins),
+          jsonbParam(codeState),
+          jsonbParam(messages),
+          jsonbParam(sessionSnapshot),
+          updatedAt,
+        ],
+      );
+    } else {
+      await query(
+        this.#pool,
+        `
+          INSERT INTO shared_threads (
+            shared_thread_id,
+            shared_project_id,
+            local_thread_id,
+            created_by_user_id,
+            title,
+            visibility,
+            share_code,
+            allowed_github_logins_json,
+            code_state_json,
+            messages_json,
+            session_snapshot_json,
+            created_at,
+            updated_at
+          )
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $12)
+        `,
+        [
+          threadId,
+          projectId,
+          localThreadId,
+          user.user.userId,
+          title,
+          visibility,
+          shareCode,
+          jsonbParam(allowedGithubLogins),
+          jsonbParam(codeState),
+          jsonbParam(messages),
+          jsonbParam(sessionSnapshot),
+          updatedAt,
+        ],
+      );
+    }
     const rows = await this.#loadThreadRows("WHERE shared_thread_id = $1", [threadId]);
     return toThread(rows[0]!);
   }
@@ -1086,6 +1140,34 @@ export class SharedProjectsStore {
       400,
       "Shared sessions are snapshot-only. Import the snapshot locally, continue locally, then create a new snapshot share.",
     );
+  }
+
+  async resolveThreadShare(
+    user: AuthenticatedUser,
+    rawInput: unknown,
+  ): Promise<ResolvedSharedThreadShare> {
+    const input = readRecord(rawInput);
+    const shareCode = readString(input, "shareCode");
+    const rows = await this.#loadThreadRows("WHERE share_code = $1 LIMIT 1", [shareCode]);
+    const row = rows[0];
+    if (!row) {
+      throw new HttpError(404, "Shared session link was not found.");
+    }
+    const thread = toThread(row);
+    const normalizedGithubLogin = normalizeGitHubLogin(user.user.githubLogin);
+    if (
+      thread.allowedGithubLogins.length > 0 &&
+      !thread.allowedGithubLogins.includes(normalizedGithubLogin)
+    ) {
+      throw new HttpError(403, "This shared session link is not available to your GitHub account.");
+    }
+    if (thread.visibility !== "shared" && thread.createdByUserId !== user.user.userId) {
+      throw new HttpError(403, "This shared session is private.");
+    }
+    return {
+      projectId: thread.projectId,
+      thread,
+    };
   }
 
   async upsertRuntime(user: AuthenticatedUser, rawInput: unknown): Promise<SharedRuntime> {
@@ -1299,7 +1381,10 @@ export class SharedProjectsStore {
     const deployId = (readOptionalString(input, "deployId") ??
       newId("dep")) as SharedDeployAssociationId;
     const updatedAt = nowIso();
-    const state = resolveDeployState({ currentHeadSha: row.currentHeadSha, deployedSha });
+    const state = resolveDeployState({
+      currentHeadSha: row.currentHeadSha,
+      deployedSha,
+    });
     await query(
       this.#pool,
       `
@@ -1530,7 +1615,10 @@ export class SharedProjectsStore {
     projectId: SharedProjectId,
     predicate: (role: SharedProjectRole) => boolean,
     message: string,
-  ): Promise<{ readonly row: ProjectAccessRow; readonly role: SharedProjectRole }> {
+  ): Promise<{
+    readonly row: ProjectAccessRow;
+    readonly role: SharedProjectRole;
+  }> {
     const row = await this.#loadProjectAccess(user, projectId);
     const role = roleFromDb(row.role);
     if (!predicate(role)) throw new HttpError(403, message);
@@ -1761,6 +1849,8 @@ export class SharedProjectsStore {
                created_by_user_id AS "createdByUserId",
                title,
                visibility,
+               share_code AS "shareCode",
+               allowed_github_logins_json AS "allowedGithubLoginsJson",
                code_state_json AS "codeStateJson",
                messages_json AS "messagesJson",
                session_snapshot_json AS "sessionSnapshotJson",

@@ -15,6 +15,20 @@ import type { Thread } from "./types";
 const THREAD_DETAIL_SHARE_WAIT_MS = 4_000;
 const THREAD_DETAIL_SHARE_POLL_MS = 100;
 
+function suggestedSharedSessionBranch(thread: Thread): string | null {
+  const titleSegment = thread.title
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/gu, "-")
+    .replace(/^-+|-+$/gu, "")
+    .slice(0, 36);
+  const idSegment = String(thread.id)
+    .replace(/[^a-zA-Z0-9]/gu, "")
+    .slice(-8)
+    .toLowerCase();
+  const branch = `shared/${titleSegment || "session"}-${idSegment || "import"}`;
+  return branch.length > 0 ? branch : null;
+}
+
 function waitForThreadSharePoll(delayMs: number): Promise<void> {
   return new Promise((resolve) => {
     window.setTimeout(resolve, delayMs);
@@ -104,6 +118,7 @@ export function toSharedSessionSnapshot(
     error: thread.session?.lastError ?? null,
     repository,
     branch: thread.branch,
+    suggestedBranch: suggestedSharedSessionBranch(thread),
     modelSelection: thread.modelSelection,
     runtimeMode: thread.runtimeMode,
     interactionMode: thread.interactionMode,

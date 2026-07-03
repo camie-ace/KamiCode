@@ -28,6 +28,9 @@ import {
   SharedSshCredentialId,
   SharedThreadId,
   SharedThreadVisibility,
+  type ImportSharedThreadLinkInput,
+  type ResolveSharedThreadShareInput,
+  type ResolvedSharedThreadShare,
   ThreadId,
   TurnId,
   type ModelSelection,
@@ -72,6 +75,7 @@ import { OrchestrationEngineService } from "../../orchestration/Services/Orchest
 import * as ProcessRunner from "../../processRunner.ts";
 import { RepositoryIdentityResolver } from "../../project/RepositoryIdentityResolver.ts";
 import type { AuthenticatedUser } from "../../userAuth/Services/UserAuth.ts";
+import { importSharedThreadSnapshot } from "../importSharedThreadSnapshot.ts";
 import {
   canEditSharedWork,
   canManageSharedProject,
@@ -202,6 +206,8 @@ type ThreadRow = {
   readonly createdByUserId: string;
   readonly title: string;
   readonly visibility: string;
+  readonly shareCode: string | null;
+  readonly allowedGithubLoginsJson: string;
   readonly codeStateJson: string;
   readonly messagesJson: string;
   readonly sessionSnapshotJson: string | null;
@@ -209,6 +215,10 @@ type ThreadRow = {
   readonly createdAt: string;
   readonly updatedAt: string;
 };
+
+function newShareCode(): string {
+  return `share_${randomUUID().replace(/-/gu, "")}`;
+}
 
 type RuntimeRow = {
   readonly runtimeId: string;
@@ -515,6 +525,8 @@ function toThread(row: ThreadRow): SharedThread {
     createdByUserId: KamiUserId.make(row.createdByUserId),
     title: row.title,
     visibility: threadVisibilityFromDb(row.visibility),
+    shareCode: row.shareCode,
+    allowedGithubLogins: decodeJsonOr(decodeStringArrayJson, row.allowedGithubLoginsJson, []),
     codeState: decodeJsonOr(decodeThreadCodeStateJson, row.codeStateJson, {
       branch: null,
       headSha: null,
@@ -1090,6 +1102,8 @@ export const makeSharedProjects = Effect.fn("makeSharedProjects")(function* () {
             created_by_user_id AS "createdByUserId",
             title,
             visibility,
+            share_code AS "shareCode",
+            allowed_github_logins_json AS "allowedGithubLoginsJson",
             code_state_json AS "codeStateJson",
             messages_json AS "messagesJson",
             session_snapshot_json AS "sessionSnapshotJson",
@@ -1751,39 +1765,84 @@ export const makeSharedProjects = Effect.fn("makeSharedProjects")(function* () {
         "Viewers cannot publish shared session snapshots.",
       );
       const updatedAt = yield* nowIso;
-      const threadId = SharedThreadId.make(newId("st"));
-      const messages = input.messages ?? [];
-      const sessionSnapshot = input.sessionSnapshot ?? null;
-      yield* sql`
-        INSERT INTO shared_threads (
-          shared_thread_id,
-          shared_project_id,
-          local_thread_id,
-          created_by_user_id,
+      const existingRows = yield* sql<ThreadRow>`
+        SELECT
+          shared_thread_id AS "sharedThreadId",
+          shared_project_id AS "sharedProjectId",
+          local_thread_id AS "localThreadId",
+          created_by_user_id AS "createdByUserId",
           title,
           visibility,
-          code_state_json,
-          messages_json,
-          session_snapshot_json,
-          last_runtime_id,
-          created_at,
-          updated_at
-        )
-        VALUES (
-          ${threadId},
-          ${input.projectId},
-          ${input.localThreadId},
-          ${user.user.userId},
-          ${input.title},
-          ${input.visibility},
-          ${encodeThreadCodeStateJson(input.codeState)},
-          ${encodeThreadMessagesJson(messages)},
-          ${sessionSnapshot === null ? null : encodeSessionSnapshotJson(sessionSnapshot)},
-          NULL,
-          ${updatedAt},
-          ${updatedAt}
-        )
+          share_code AS "shareCode",
+          allowed_github_logins_json AS "allowedGithubLoginsJson",
+          code_state_json AS "codeStateJson",
+          messages_json AS "messagesJson",
+          session_snapshot_json AS "sessionSnapshotJson",
+          last_runtime_id AS "lastRuntimeId",
+          created_at AS "createdAt",
+          updated_at AS "updatedAt"
+        FROM shared_threads
+        WHERE shared_project_id = ${input.projectId}
+          AND local_thread_id = ${input.localThreadId}
+        LIMIT 1
       `;
+      const existingThread = existingRows[0] ?? null;
+      const threadId = existingThread
+        ? SharedThreadId.make(existingThread.sharedThreadId)
+        : SharedThreadId.make(newId("st"));
+      const messages = input.messages ?? [];
+      const sessionSnapshot = input.sessionSnapshot ?? null;
+      const normalizedGithubLogins = Array.from(
+        new Set((input.allowedGithubLogins ?? []).map((login) => normalizeGitHubLogin(login))),
+      );
+      if (existingThread) {
+        yield* sql`
+          UPDATE shared_threads
+          SET title = ${input.title},
+              visibility = ${input.visibility},
+              allowed_github_logins_json = ${encodeStringArrayJson(normalizedGithubLogins)},
+              code_state_json = ${encodeThreadCodeStateJson(input.codeState)},
+              messages_json = ${encodeThreadMessagesJson(messages)},
+              session_snapshot_json = ${sessionSnapshot === null ? null : encodeSessionSnapshotJson(sessionSnapshot)},
+              updated_at = ${updatedAt}
+          WHERE shared_thread_id = ${threadId}
+        `;
+      } else {
+        yield* sql`
+          INSERT INTO shared_threads (
+            shared_thread_id,
+            shared_project_id,
+            local_thread_id,
+            created_by_user_id,
+            title,
+            visibility,
+            share_code,
+            allowed_github_logins_json,
+            code_state_json,
+            messages_json,
+            session_snapshot_json,
+            last_runtime_id,
+            created_at,
+            updated_at
+          )
+          VALUES (
+            ${threadId},
+            ${input.projectId},
+            ${input.localThreadId},
+            ${user.user.userId},
+            ${input.title},
+            ${input.visibility},
+            ${newShareCode()},
+            ${encodeStringArrayJson(normalizedGithubLogins)},
+            ${encodeThreadCodeStateJson(input.codeState)},
+            ${encodeThreadMessagesJson(messages)},
+            ${sessionSnapshot === null ? null : encodeSessionSnapshotJson(sessionSnapshot)},
+            NULL,
+            ${updatedAt},
+            ${updatedAt}
+          )
+        `;
+      }
       const rows = yield* sql<ThreadRow>`
         SELECT
           shared_thread_id AS "sharedThreadId",
@@ -1792,6 +1851,8 @@ export const makeSharedProjects = Effect.fn("makeSharedProjects")(function* () {
           created_by_user_id AS "createdByUserId",
           title,
           visibility,
+          share_code AS "shareCode",
+          allowed_github_logins_json AS "allowedGithubLoginsJson",
           code_state_json AS "codeStateJson",
           messages_json AS "messagesJson",
           session_snapshot_json AS "sessionSnapshotJson",
@@ -1820,6 +1881,8 @@ export const makeSharedProjects = Effect.fn("makeSharedProjects")(function* () {
           created_by_user_id AS "createdByUserId",
           title,
           visibility,
+          share_code AS "shareCode",
+          allowed_github_logins_json AS "allowedGithubLoginsJson",
           code_state_json AS "codeStateJson",
           messages_json AS "messagesJson",
           session_snapshot_json AS "sessionSnapshotJson",
@@ -1857,7 +1920,6 @@ export const makeSharedProjects = Effect.fn("makeSharedProjects")(function* () {
 
   const importThread: SharedProjectsShape["importThread"] = (user, input) =>
     Effect.gen(function* () {
-      const orchestrationEngine = yield* OrchestrationEngineService;
       const access = yield* loadProjectAccess(user, input.projectId);
       const role = roleFromDb(access.role);
       const rows = yield* sql<ThreadRow>`
@@ -1868,6 +1930,8 @@ export const makeSharedProjects = Effect.fn("makeSharedProjects")(function* () {
           created_by_user_id AS "createdByUserId",
           title,
           visibility,
+          share_code AS "shareCode",
+          allowed_github_logins_json AS "allowedGithubLoginsJson",
           code_state_json AS "codeStateJson",
           messages_json AS "messagesJson",
           session_snapshot_json AS "sessionSnapshotJson",
@@ -1909,150 +1973,89 @@ export const makeSharedProjects = Effect.fn("makeSharedProjects")(function* () {
           status: 400,
         });
       }
-
-      const modelSelection = yield* Effect.try({
-        try: (): ModelSelection => decodeModelSelection(snapshot.modelSelection),
-        catch: (cause) =>
-          new SharedProjectsError({
-            message: "Shared session snapshot has an invalid model selection.",
-            status: 400,
-            cause,
-          }),
-      });
-      const importedAt = yield* nowIso;
-      const importedThreadId = newLocalThreadId();
-      const importedTitle = importThreadTitle(snapshot.title || thread.title);
-      const messageIdBySource = new Map<string, MessageId>();
-      const commands: OrchestrationCommand[] = [
-        {
-          type: "thread.create",
-          commandId: newCommandId("thread-create"),
-          threadId: importedThreadId,
-          projectId: input.targetProjectId,
-          title: importedTitle,
-          modelSelection,
-          runtimeMode: runtimeModeOrDefault(snapshot.runtimeMode),
-          interactionMode: interactionModeOrDefault(snapshot.interactionMode),
-          branch:
-            snapshot.branch && snapshot.branch.trim().length > 0
-              ? (snapshot.branch.trim() as never)
-              : null,
-          worktreePath: null,
-          createdAt: importedAt,
-        },
-      ];
-
-      for (const message of snapshot.messages) {
-        const localMessageId = newLocalMessageId();
-        const attachments = message.attachments
-          .map(normalizeMessageAttachment)
-          .filter((attachment): attachment is ChatAttachment => attachment !== null);
-        messageIdBySource.set(message.id, localMessageId);
-        commands.push({
-          type: "thread.message.import",
-          commandId: newCommandId("message"),
-          threadId: importedThreadId,
-          messageId: localMessageId,
-          role: message.role,
-          text: message.text,
-          ...(attachments.length > 0 ? { attachments } : {}),
-          turnId: message.turnId === null ? null : TurnId.make(message.turnId),
-          createdAt: message.createdAt,
-          updatedAt: message.completedAt ?? message.createdAt,
-        });
-      }
-
-      for (const rawPlan of snapshot.proposedPlans) {
-        const proposedPlan = decodeImportedProposedPlan(rawPlan);
-        if (!proposedPlan) {
-          continue;
-        }
-        commands.push({
-          type: "thread.proposed-plan.upsert",
-          commandId: newCommandId("proposed-plan"),
-          threadId: importedThreadId,
-          proposedPlan,
-          createdAt: proposedPlan.createdAt,
-        });
-      }
-
-      for (const activity of snapshot.activities) {
-        commands.push({
-          type: "thread.activity.append",
-          commandId: newCommandId("activity"),
-          threadId: importedThreadId,
-          activity: {
-            id: newLocalEventId(),
-            tone: activityToneOrDefault(activity.tone),
-            kind: activity.kind,
-            summary: activity.summary.trim().length > 0 ? activity.summary : activity.kind,
-            payload: activity.payload,
-            turnId: activity.turnId === null ? null : TurnId.make(activity.turnId),
-            ...(activity.sequence !== undefined && activity.sequence >= 0
-              ? { sequence: Math.floor(activity.sequence) as never }
-              : {}),
-            createdAt: activity.createdAt,
-          },
-          createdAt: activity.createdAt,
-        });
-      }
-
-      for (const checkpoint of snapshot.checkpoints) {
-        const files = checkpoint.files
-          .map(normalizeCheckpointFile)
-          .filter((file): file is OrchestrationCheckpointFile => file !== null);
-        commands.push({
-          type: "thread.turn.diff.complete",
-          commandId: newCommandId("checkpoint"),
-          threadId: importedThreadId,
-          turnId: TurnId.make(checkpoint.turnId),
-          completedAt: checkpoint.completedAt ?? importedAt,
-          checkpointRef:
-            checkpoint.checkpointRef && checkpoint.checkpointRef.trim().length > 0
-              ? CheckpointRef.make(checkpoint.checkpointRef)
-              : CheckpointRef.make(`shared-import:${randomUUID()}`),
-          status: checkpointStatusOrDefault(checkpoint.status),
-          files,
-          ...(checkpoint.assistantMessageId
-            ? { assistantMessageId: messageIdBySource.get(checkpoint.assistantMessageId) }
-            : {}),
-          checkpointTurnCount:
-            checkpoint.checkpointTurnCount >= 0
-              ? (Math.floor(checkpoint.checkpointTurnCount) as never)
-              : 0,
-          createdAt: checkpoint.completedAt ?? importedAt,
-        });
-      }
-
-      commands.push({
-        type: "thread.meta.update",
-        commandId: newCommandId("touch"),
-        threadId: importedThreadId,
-        title: importedTitle,
-      });
-
-      yield* Effect.forEach(
-        commands,
-        (command) =>
-          orchestrationEngine.dispatch(command).pipe(
-            Effect.mapError(
-              (cause) =>
-                new SharedProjectsError({
-                  message: "Failed to import shared session into the local project.",
-                  status: 500,
-                  cause,
-                }),
-            ),
-          ),
-        { concurrency: 1 },
-      );
-
-      return {
-        projectId: input.targetProjectId,
-        threadId: importedThreadId,
+      return yield* importSharedThreadSnapshot({
+        request: input,
+        title: thread.title,
+        snapshot,
         sourceSharedThreadId: input.threadId,
-      } satisfies ImportSharedThreadResult;
+      });
     }).pipe(Effect.mapError(asSharedProjectsError("import shared thread")));
+
+  const resolveSharedThreadShare: SharedProjectsShape["resolveSharedThreadShare"] = (
+    user,
+    shareCode,
+  ) =>
+    Effect.gen(function* () {
+      const rows = yield* sql<ThreadRow>`
+        SELECT
+          shared_thread_id AS "sharedThreadId",
+          shared_project_id AS "sharedProjectId",
+          local_thread_id AS "localThreadId",
+          created_by_user_id AS "createdByUserId",
+          title,
+          visibility,
+          share_code AS "shareCode",
+          allowed_github_logins_json AS "allowedGithubLoginsJson",
+          code_state_json AS "codeStateJson",
+          messages_json AS "messagesJson",
+          session_snapshot_json AS "sessionSnapshotJson",
+          last_runtime_id AS "lastRuntimeId",
+          created_at AS "createdAt",
+          updated_at AS "updatedAt"
+        FROM shared_threads
+        WHERE share_code = ${shareCode}
+        LIMIT 1
+      `;
+      const row = rows[0];
+      if (!row) {
+        return yield* new SharedProjectsError({
+          message: "Shared session link was not found.",
+          status: 404,
+        });
+      }
+      const thread = toThread(row);
+      if (
+        thread.allowedGithubLogins.length > 0 &&
+        !thread.allowedGithubLogins.includes(normalizeGitHubLogin(user.user.githubLogin))
+      ) {
+        return yield* new SharedProjectsError({
+          message: "This shared session link is not available to your GitHub account.",
+          status: 403,
+        });
+      }
+      if (thread.visibility !== "shared" && thread.createdByUserId !== user.user.userId) {
+        return yield* new SharedProjectsError({
+          message: "This shared session is private.",
+          status: 403,
+        });
+      }
+      return {
+        projectId: thread.projectId,
+        thread,
+      } satisfies ResolvedSharedThreadShare;
+    }).pipe(Effect.mapError(asSharedProjectsError("resolve shared thread link")));
+
+  const importThreadFromLink: SharedProjectsShape["importThreadFromLink"] = (user, input) =>
+    Effect.gen(function* () {
+      const resolved = yield* resolveSharedThreadShare(user, input.shareCode);
+      if (!resolved.thread.sessionSnapshot) {
+        return yield* new SharedProjectsError({
+          message: "This shared session does not have an importable snapshot yet.",
+          status: 400,
+        });
+      }
+      return yield* importSharedThreadSnapshot({
+        request: {
+          projectId: resolved.projectId,
+          threadId: resolved.thread.id,
+          targetProjectId: input.targetProjectId,
+        },
+        title: resolved.thread.title,
+        snapshot: resolved.thread.sessionSnapshot,
+        sourceSharedThreadId: resolved.thread.id,
+        targetProjectCwd: input.targetProjectCwd,
+      });
+    }).pipe(Effect.mapError(asSharedProjectsError("import shared thread link")));
 
   const appendThreadMessage: SharedProjectsShape["appendThreadMessage"] = () =>
     Effect.fail(
@@ -2692,6 +2695,8 @@ export const makeSharedProjects = Effect.fn("makeSharedProjects")(function* () {
     publishThread,
     updateThreadVisibility,
     importThread,
+    importThreadFromLink,
+    resolveSharedThreadShare,
     appendThreadMessage,
     upsertRuntime,
     upsertSshCredential,

@@ -53,6 +53,10 @@ import * as ServerSecretStore from "./auth/ServerSecretStore.ts";
 
 const HOSTED_COLLABORATION_TOKEN_SECRET_NAME = "hosted-collaboration-token";
 
+function sharedCollaborationProfileTokenSecretName(profileId: string): string {
+  return `shared-collaboration-profile-token-${Buffer.from(profileId, "utf8").toString("base64url")}`;
+}
+
 const encodeServerSettings = Schema.encodeEffect(ServerSettings);
 const encodeServerSettingsJson = Schema.encodeUnknownEffect(fromJsonStringPretty(ServerSettings));
 const decodeServerSettings = Schema.decodeUnknownEffect(ServerSettings);
@@ -112,7 +116,17 @@ export function redactServerSettingsForClient(settings: ServerSettings): ServerS
     settings.hostedCollaboration.token.length > 0 || settings.hostedCollaboration.tokenRedacted
       ? { ...settings.hostedCollaboration, token: "", tokenRedacted: true }
       : settings.hostedCollaboration;
-  return { ...settings, providerInstances, hostedCollaboration };
+  const sharedCollaborationProfiles = settings.sharedCollaborationProfiles.map((profile) =>
+    profile.token.length > 0 || profile.tokenRedacted
+      ? { ...profile, token: "", tokenRedacted: true }
+      : profile,
+  );
+  return {
+    ...settings,
+    providerInstances,
+    hostedCollaboration,
+    sharedCollaborationProfiles,
+  };
 }
 
 export class ServerSettingsService extends Context.Service<
@@ -397,6 +411,31 @@ const make = Effect.gen(function* () {
       };
     });
 
+  const materializeSharedCollaborationProfileTokens = (
+    settings: ServerSettings,
+  ): Effect.Effect<ServerSettings, ServerSettingsError> =>
+    Effect.gen(function* () {
+      const sharedCollaborationProfiles = [];
+      for (const profile of settings.sharedCollaborationProfiles) {
+        if (!profile.tokenRedacted) {
+          sharedCollaborationProfiles.push(profile);
+          continue;
+        }
+        const secret = yield* secretStore
+          .get(sharedCollaborationProfileTokenSecretName(profile.id))
+          .pipe(Effect.mapError((cause) => toSecretSettingsError("read-secret", cause)));
+        sharedCollaborationProfiles.push({
+          ...profile,
+          token: Option.isSome(secret) ? textDecoder.decode(secret.value) : "",
+          tokenRedacted: Option.isSome(secret),
+        });
+      }
+      return {
+        ...settings,
+        sharedCollaborationProfiles,
+      };
+    });
+
   const persistProviderEnvironmentSecrets = (
     current: ServerSettings,
     next: ServerSettings,
@@ -539,6 +578,54 @@ const make = Effect.gen(function* () {
       };
     });
 
+  const persistSharedCollaborationProfileTokens = (
+    current: ServerSettings,
+    next: ServerSettings,
+  ): Effect.Effect<ServerSettings, ServerSettingsError> =>
+    Effect.gen(function* () {
+      const persistedProfiles = [];
+      const nextProfileIds = new Set(next.sharedCollaborationProfiles.map((profile) => profile.id));
+      for (const profile of next.sharedCollaborationProfiles) {
+        const secretName = sharedCollaborationProfileTokenSecretName(profile.id);
+        const token = profile.token.trim();
+        if (profile.tokenRedacted) {
+          persistedProfiles.push({ ...profile, token: "" });
+          continue;
+        }
+        if (token.length === 0) {
+          yield* secretStore
+            .remove(secretName)
+            .pipe(Effect.mapError((cause) => toSecretSettingsError("remove-secret", cause)));
+          persistedProfiles.push({
+            ...profile,
+            token: "",
+            tokenRedacted: false,
+          });
+          continue;
+        }
+        yield* secretStore
+          .set(secretName, textEncoder.encode(token))
+          .pipe(Effect.mapError((cause) => toSecretSettingsError("write-secret", cause)));
+        persistedProfiles.push({
+          ...profile,
+          token: "",
+          tokenRedacted: true,
+        });
+      }
+      for (const profile of current.sharedCollaborationProfiles) {
+        if (nextProfileIds.has(profile.id)) {
+          continue;
+        }
+        yield* secretStore
+          .remove(sharedCollaborationProfileTokenSecretName(profile.id))
+          .pipe(Effect.mapError((cause) => toSecretSettingsError("remove-stale-secret", cause)));
+      }
+      return {
+        ...next,
+        sharedCollaborationProfiles: persistedProfiles,
+      };
+    });
+
   const writeSettingsAtomically = Effect.fnUntraced(
     function* (settings: ServerSettings) {
       const sparseSettingsJson = yield* encodeServerSettingsJson(
@@ -637,6 +724,7 @@ const make = Effect.gen(function* () {
     getSettings: getSettingsFromCache.pipe(
       Effect.flatMap(materializeProviderEnvironmentSecrets),
       Effect.flatMap(materializeHostedCollaborationToken),
+      Effect.flatMap(materializeSharedCollaborationProfileTokens),
       Effect.map(resolveTextGenerationProvider),
     ),
     updateSettings: (patch) =>
@@ -646,13 +734,19 @@ const make = Effect.gen(function* () {
           const nextPersisted = yield* persistProviderEnvironmentSecrets(
             current,
             applyServerSettingsPatch(current, patch),
-          ).pipe(Effect.flatMap(persistHostedCollaborationToken));
+          ).pipe(
+            Effect.flatMap(persistHostedCollaborationToken),
+            Effect.flatMap((settings) =>
+              persistSharedCollaborationProfileTokens(current, settings),
+            ),
+          );
           const next = yield* normalizeServerSettings(nextPersisted);
           yield* writeSettingsAtomically(next);
           yield* Cache.set(settingsCache, cacheKey, next);
           yield* emitChange(next);
           const materialized = yield* materializeProviderEnvironmentSecrets(next).pipe(
             Effect.flatMap(materializeHostedCollaborationToken),
+            Effect.flatMap(materializeSharedCollaborationProfileTokens),
           );
           return resolveTextGenerationProvider(materialized);
         }),
@@ -662,6 +756,7 @@ const make = Effect.gen(function* () {
         Stream.mapEffect((settings) =>
           materializeProviderEnvironmentSecrets(settings).pipe(
             Effect.flatMap(materializeHostedCollaborationToken),
+            Effect.flatMap(materializeSharedCollaborationProfileTokens),
             Effect.catch((error: ServerSettingsError) =>
               Effect.logWarning("failed to materialize server settings secrets", {
                 message: error.message,

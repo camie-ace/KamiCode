@@ -5,9 +5,11 @@ import type {
   DeleteSharedProjectInput,
   DeleteSharedProjectResult,
   ImportSharedThreadInput,
+  ImportSharedThreadLinkInput,
   ImportSharedThreadResult,
   PublishLocalProjectInput,
   PublishSharedThreadInput,
+  ResolveSharedThreadShareInput,
   RemoveSharedProjectMemberInput,
   RemoveSharedSshCredentialInput,
   SetSharedDefaultEnvironmentInput,
@@ -21,6 +23,7 @@ import type {
   SharedProjectListResult,
   SharedProjectSshCredential,
   SharedRuntime,
+  ResolvedSharedThreadShare,
   SharedThread,
   SyncSharedProjectContextInput,
   SyncSharedRemoteRuntimeInput,
@@ -36,6 +39,10 @@ import { resolvePrimaryEnvironmentHttpUrl } from "./environments/primary/target"
 
 type SharedProjectApiErrorBody = {
   readonly error?: unknown;
+};
+
+type SharedProjectRequestOptions = {
+  readonly profileId?: string | null | undefined;
 };
 
 async function decodeSharedProjectResponse<T>(response: Response): Promise<T> {
@@ -63,19 +70,37 @@ function sharedProjectUrl(path: string, params?: Record<string, string>): string
   return url.toString();
 }
 
-async function sharedProjectGet<T>(path: string, params?: Record<string, string>): Promise<T> {
+async function sharedProjectGet<T>(
+  path: string,
+  params?: Record<string, string>,
+  options?: SharedProjectRequestOptions,
+): Promise<T> {
+  const headers =
+    options?.profileId && options.profileId.trim().length > 0
+      ? { "x-kamicode-shared-collaboration-profile-id": options.profileId }
+      : null;
   const response = await fetch(sharedProjectUrl(path, params), {
     credentials: "include",
     redirect: "manual",
+    ...(headers ? { headers } : {}),
   });
   return decodeSharedProjectResponse<T>(response);
 }
 
-async function sharedProjectPost<T>(path: string, body: unknown): Promise<T> {
+async function sharedProjectPost<T>(
+  path: string,
+  body: unknown,
+  options?: SharedProjectRequestOptions,
+): Promise<T> {
   const response = await fetch(sharedProjectUrl(path), {
     credentials: "include",
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: {
+      "content-type": "application/json",
+      ...(options?.profileId && options.profileId.trim().length > 0
+        ? { "x-kamicode-shared-collaboration-profile-id": options.profileId }
+        : {}),
+    },
     body: JSON.stringify(body),
   });
   return decodeSharedProjectResponse<T>(response);
@@ -85,16 +110,24 @@ export function fetchSharedProjectCurrentUser(): Promise<SharedProjectCurrentUse
   return sharedProjectGet("/api/shared-projects/current-user");
 }
 
-export function listSharedProjects(): Promise<SharedProjectListResult> {
-  return sharedProjectGet("/api/shared-projects");
+export function listSharedProjects(
+  options?: SharedProjectRequestOptions,
+): Promise<SharedProjectListResult> {
+  return sharedProjectGet("/api/shared-projects", undefined, options);
 }
 
-export function publishLocalProject(input: PublishLocalProjectInput): Promise<SharedProjectDetail> {
-  return sharedProjectPost("/api/shared-projects/publish", input);
+export function publishLocalProject(
+  input: PublishLocalProjectInput,
+  options?: SharedProjectRequestOptions,
+): Promise<SharedProjectDetail> {
+  return sharedProjectPost("/api/shared-projects/publish", input, options);
 }
 
-export function fetchSharedProjectDetail(projectId: SharedProjectId): Promise<SharedProjectDetail> {
-  return sharedProjectGet("/api/shared-projects/detail", { projectId });
+export function fetchSharedProjectDetail(
+  projectId: SharedProjectId,
+  options?: SharedProjectRequestOptions,
+): Promise<SharedProjectDetail> {
+  return sharedProjectGet("/api/shared-projects/detail", { projectId }, options);
 }
 
 export function fetchSharedProjectBootstrap(
@@ -139,8 +172,11 @@ export function deleteSharedProject(
   return sharedProjectPost("/api/shared-projects/delete", input);
 }
 
-export function publishSharedThread(input: PublishSharedThreadInput): Promise<SharedThread> {
-  return sharedProjectPost("/api/shared-projects/threads/publish", input);
+export function publishSharedThread(
+  input: PublishSharedThreadInput,
+  options?: SharedProjectRequestOptions,
+): Promise<SharedThread> {
+  return sharedProjectPost("/api/shared-projects/threads/publish", input, options);
 }
 
 export function updateSharedThreadVisibility(
@@ -151,8 +187,23 @@ export function updateSharedThreadVisibility(
 
 export function importSharedThread(
   input: ImportSharedThreadInput,
+  options?: SharedProjectRequestOptions,
 ): Promise<ImportSharedThreadResult> {
-  return sharedProjectPost("/api/shared-projects/threads/import", input);
+  return sharedProjectPost("/api/shared-projects/threads/import", input, options);
+}
+
+export function resolveSharedThreadShare(
+  input: ResolveSharedThreadShareInput,
+  options?: SharedProjectRequestOptions,
+): Promise<ResolvedSharedThreadShare> {
+  return sharedProjectPost("/api/shared-projects/threads/resolve", input, options);
+}
+
+export function importSharedThreadLink(
+  input: ImportSharedThreadLinkInput,
+  options?: SharedProjectRequestOptions,
+): Promise<ImportSharedThreadResult> {
+  return sharedProjectPost("/api/shared-projects/threads/import-link", input, options);
 }
 
 export function appendSharedThreadMessage(

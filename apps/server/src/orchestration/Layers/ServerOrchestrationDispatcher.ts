@@ -253,6 +253,15 @@ const makeServerOrchestrationDispatcher = Effect.gen(function* () {
             ...(bootstrap.createThread.startedBy !== undefined
               ? { startedBy: bootstrap.createThread.startedBy }
               : {}),
+            ...(bootstrap.createThread.workflowParentThreadId !== undefined
+              ? { workflowParentThreadId: bootstrap.createThread.workflowParentThreadId }
+              : {}),
+            ...(bootstrap.createThread.workflowLaneId !== undefined
+              ? { workflowLaneId: bootstrap.createThread.workflowLaneId }
+              : {}),
+            ...(bootstrap.createThread.workflowLaneRole !== undefined
+              ? { workflowLaneRole: bootstrap.createThread.workflowLaneRole }
+              : {}),
             createdAt: bootstrap.createThread.createdAt,
           });
           createdThread = true;

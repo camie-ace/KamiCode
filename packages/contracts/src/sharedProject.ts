@@ -233,6 +233,7 @@ export const SharedSessionSnapshot = Schema.Struct({
   error: Schema.NullOr(Schema.String),
   repository: SharedRepositoryState,
   branch: Schema.NullOr(Schema.String),
+  suggestedBranch: Schema.NullOr(TrimmedNonEmptyString),
   modelSelection: Schema.Unknown,
   runtimeMode: Schema.String,
   interactionMode: Schema.String,
@@ -262,6 +263,8 @@ export const SharedThread = Schema.Struct({
   createdByUserId: KamiUserId,
   title: TrimmedNonEmptyString,
   visibility: SharedThreadVisibility,
+  shareCode: Schema.NullOr(TrimmedNonEmptyString),
+  allowedGithubLogins: Schema.Array(TrimmedNonEmptyString),
   codeState: SharedThreadCodeState,
   messages: Schema.Array(SharedThreadMessage),
   sessionSnapshot: Schema.NullOr(SharedSessionSnapshot),
@@ -421,6 +424,7 @@ export const PublishSharedThreadInput = Schema.Struct({
   localThreadId: ThreadId,
   title: TrimmedNonEmptyString,
   visibility: SharedThreadVisibility,
+  allowedGithubLogins: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
   codeState: SharedThreadCodeState,
   messages: Schema.optional(Schema.Array(SharedThreadMessage)),
   sessionSnapshot: Schema.optional(Schema.NullOr(SharedSessionSnapshot)),
@@ -445,8 +449,29 @@ export const ImportSharedThreadResult = Schema.Struct({
   projectId: ProjectId,
   threadId: ThreadId,
   sourceSharedThreadId: SharedThreadId,
+  branch: Schema.NullOr(TrimmedNonEmptyString),
+  stashedChanges: Schema.Boolean,
+  stashName: Schema.NullOr(TrimmedNonEmptyString),
 });
 export type ImportSharedThreadResult = typeof ImportSharedThreadResult.Type;
+
+export const ImportSharedThreadLinkInput = Schema.Struct({
+  shareCode: TrimmedNonEmptyString,
+  targetProjectId: ProjectId,
+  targetProjectCwd: TrimmedNonEmptyString,
+});
+export type ImportSharedThreadLinkInput = typeof ImportSharedThreadLinkInput.Type;
+
+export const ResolveSharedThreadShareInput = Schema.Struct({
+  shareCode: TrimmedNonEmptyString,
+});
+export type ResolveSharedThreadShareInput = typeof ResolveSharedThreadShareInput.Type;
+
+export const ResolvedSharedThreadShare = Schema.Struct({
+  projectId: SharedProjectId,
+  thread: SharedThread,
+});
+export type ResolvedSharedThreadShare = typeof ResolvedSharedThreadShare.Type;
 
 export const AppendSharedThreadMessageInput = Schema.Struct({
   projectId: SharedProjectId,

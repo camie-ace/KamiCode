@@ -168,6 +168,13 @@ export function createCollabHttpServer(config: CollabServerConfig, pool: Pool) {
       }),
     ],
     [
+      "POST /api/shared-projects/threads/resolve",
+      authenticated((_request, _url, context) => {
+        const { body, user } = context as AuthenticatedContext;
+        return store.resolveThreadShare(user, body);
+      }),
+    ],
+    [
       "POST /api/shared-projects/threads/messages",
       authenticated((_request, _url, context) => {
         const { body, user } = context as AuthenticatedContext;
@@ -234,7 +241,9 @@ export function createCollabHttpServer(config: CollabServerConfig, pool: Pool) {
       sendJson(config, response, 200, result);
     } catch (error) {
       const httpError = asHttpError(error);
-      sendJson(config, response, httpError.status, { error: httpError.message });
+      sendJson(config, response, httpError.status, {
+        error: httpError.message,
+      });
     }
   });
 }

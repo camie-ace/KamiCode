@@ -69,6 +69,8 @@ import { Link, useLocation, useNavigate, useParams, useRouter } from "@tanstack/
 import {
   MAX_SIDEBAR_THREAD_PREVIEW_COUNT,
   MIN_SIDEBAR_THREAD_PREVIEW_COUNT,
+  type SharedCollaborationInstanceId,
+  type SharedCollaborationProjectTarget,
   type SidebarProjectSortOrder,
   type SidebarThreadPreviewCount,
   type SidebarThreadSortOrder,
@@ -109,7 +111,7 @@ import {
 } from "../keybindings";
 import { isModelPickerOpen } from "../modelPickerVisibility";
 import { useShortcutModifierState } from "../shortcutModifierState";
-import { readLocalApi } from "../localApi";
+import { ensureLocalApi, readLocalApi } from "../localApi";
 import { useComposerDraftStore } from "../composerDraftStore";
 import { useNewThreadHandler } from "../hooks/useHandleNewThread";
 import { useDesktopUpdateState } from "../state/desktopUpdate";
@@ -187,12 +189,15 @@ import { useThreadSelectionStore } from "../threadSelectionStore";
 import { useOpenAddProjectCommandPalette } from "../commandPaletteContext";
 import {
   fetchSharedProjectDetail,
+  importSharedThreadLink,
   listSharedProjects,
   publishLocalProject,
   publishSharedThread,
+  resolveSharedThreadShare,
 } from "../sharedProjectsApi";
 import {
   getSidebarThreadIdsToPrewarm,
+  isWorkflowLaneThread,
   resolveAdjacentThreadId,
   isContextMenuPointerDown,
   isTrailingDoubleClick,
@@ -213,7 +218,11 @@ import { SidebarUpdatePill } from "./sidebar/SidebarUpdatePill";
 import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
 import { useIsMobile } from "~/hooks/useMediaQuery";
 import { CommandDialogTrigger } from "./ui/command";
-import { useClientSettings, useUpdateClientSettings } from "~/hooks/useSettings";
+import {
+  useClientSettings,
+  usePrimarySettings,
+  useUpdateClientSettings,
+} from "~/hooks/useSettings";
 import { primaryServerConfigAtom, primaryServerKeybindingsAtom } from "../state/server";
 import {
   derivePhysicalProjectKey,
@@ -328,6 +337,41 @@ function buildThreadJumpLabelMap(input: {
     }
   }
   return mapping.size > 0 ? mapping : EMPTY_THREAD_JUMP_LABELS;
+}
+
+function normalizeGitHubLoginsInput(value: string): string[] {
+  return Array.from(
+    new Set(
+      value
+        .split(/[,\s]+/u)
+        .map((entry) => entry.trim().replace(/^@/u, "").toLowerCase())
+        .filter((entry) => entry.length > 0),
+    ),
+  );
+}
+
+function parseSharedSessionCode(value: string): string | null {
+  const trimmed = value.trim();
+  if (trimmed.length === 0) {
+    return null;
+  }
+  try {
+    const url = new URL(trimmed);
+    const queryCode = url.searchParams.get("shareCode") ?? url.searchParams.get("code");
+    if (queryCode && queryCode.trim().length > 0) {
+      return queryCode.trim();
+    }
+  } catch {
+    // Fall back to raw code handling.
+  }
+  return trimmed;
+}
+
+function buildSharedSessionLink(shareCode: string): string {
+  if (typeof window === "undefined") {
+    return shareCode;
+  }
+  return `${window.location.origin}/settings/shared-projects?shareCode=${encodeURIComponent(shareCode)}`;
 }
 
 interface SidebarThreadRowProps {
@@ -457,7 +501,11 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
       event.stopPropagation();
       navigateToThread(threadRef);
       void (async () => {
-        const result = await openDiscoveredPort({ threadRef, port, openPreview });
+        const result = await openDiscoveredPort({
+          threadRef,
+          port,
+          openPreview,
+        });
         if (result._tag === "Success" || isAtomCommandInterrupted(result)) {
           return;
         }
@@ -1185,6 +1233,16 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
     reportFailure: false,
   });
   const updateSettings = useUpdateClientSettings();
+  const sharedCollaborationProfiles = usePrimarySettings(
+    (settings) => settings.sharedCollaborationProfiles,
+  );
+  const sharedCollaborationDefaultTarget = usePrimarySettings(
+    (settings) => settings.sharedCollaborationDefaultTarget,
+  );
+  const hostedCollaboration = usePrimarySettings((settings) => settings.hostedCollaboration);
+  const sharedCollaborationProjectTargets = useClientSettings(
+    (settings) => settings.sharedCollaborationProjectTargets,
+  );
   const sidebarThreadPreviewCount = useClientSettings<SidebarThreadPreviewCount>(
     (settings) => settings.sidebarThreadPreviewCount,
   );
@@ -1254,7 +1312,10 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
   // thread-list change).
   const sidebarThreadByKeyRef = useRef(sidebarThreadByKey);
   sidebarThreadByKeyRef.current = sidebarThreadByKey;
-  const projectThreads = sidebarThreads;
+  const projectThreads = useMemo(
+    () => sidebarThreads.filter((thread) => !isWorkflowLaneThread(thread)),
+    [sidebarThreads],
+  );
   const projectPreferenceKeys = useMemo(() => projectExpansionPreferenceKeys(project), [project]);
   const projectExpanded = useUiStateStore((state) =>
     resolveProjectExpanded(state.projectExpandedById, projectPreferenceKeys),
@@ -1282,6 +1343,27 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
   const [projectGroupingSelection, setProjectGroupingSelection] = useState<
     SidebarProjectGroupingMode | "inherit"
   >("inherit");
+  const [projectSharingTarget, setProjectSharingTarget] =
+    useState<SidebarProjectGroupMember | null>(null);
+  const [projectSharingMode, setProjectSharingMode] = useState<"default" | "kamicode" | "profile">(
+    "default",
+  );
+  const [projectSharingProfileId, setProjectSharingProfileId] = useState<
+    SharedCollaborationInstanceId | "__new__" | ""
+  >("");
+  const [projectSharingNewProfileLabel, setProjectSharingNewProfileLabel] = useState("");
+  const [projectSharingNewProfileUrl, setProjectSharingNewProfileUrl] = useState("");
+  const [projectSharingNewProfileToken, setProjectSharingNewProfileToken] = useState("");
+  const [projectImportTarget, setProjectImportTarget] = useState<SidebarProjectGroupMember | null>(
+    null,
+  );
+  const [projectImportLink, setProjectImportLink] = useState("");
+  const [threadShareDialogTarget, setThreadShareDialogTarget] = useState<{
+    threadRef: ScopedThreadRef;
+    title: string;
+  } | null>(null);
+  const [threadShareGitHubLogins, setThreadShareGitHubLogins] = useState("");
+  const [threadShareLink, setThreadShareLink] = useState("");
   const renamingCommittedRef = useRef(false);
   const renamingInputRef = useRef<HTMLInputElement | null>(null);
   const confirmArchiveButtonRefs = useRef(new Map<string, HTMLButtonElement>());
@@ -1295,52 +1377,85 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
       ),
     [project.memberProjects],
   );
-  const shareThread = useCallback(
-    async (threadRef: ScopedThreadRef) => {
-      const threadKey = scopedThreadKey(threadRef);
-      if (pendingShareThreadKey !== null) {
-        return;
+  const collaborationProfileById = useMemo(
+    () => new Map(sharedCollaborationProfiles.map((profile) => [profile.id, profile] as const)),
+    [sharedCollaborationProfiles],
+  );
+  const resolveProjectCollaborationProfileId = useCallback(
+    (member: SidebarProjectGroupMember): SharedCollaborationInstanceId | null => {
+      const target = sharedCollaborationProjectTargets[member.id] as
+        | SharedCollaborationProjectTarget
+        | undefined;
+      if (target?.mode === "profile" && target.profileId) {
+        return target.profileId;
       }
-      setPendingShareThreadKey(threadKey);
-
-      try {
-        const threadSummary = sidebarThreadByKeyRef.current.get(threadKey);
-        if (!threadSummary) {
-          throw new Error("Session was not found in the sidebar.");
-        }
-
-        const projectMember = memberProjectByScopedKey.get(
-          scopedProjectKey(scopeProjectRef(threadSummary.environmentId, threadSummary.projectId)),
-        );
-        if (!projectMember) {
-          throw new Error("Project for this session was not found.");
-        }
-
-        const threadDetail = await loadThreadDetailForSharing(threadRef);
-        const sharedProjects = await listSharedProjects();
-        const existingSharedProject =
-          sharedProjects.projects.find((entry) => entry.sourceProjectId === projectMember.id) ??
-          null;
-        const sharedProjectDetail = existingSharedProject
-          ? await fetchSharedProjectDetail(existingSharedProject.id)
-          : await publishLocalProject({
+      if (target?.mode === "kamicode") {
+        return null;
+      }
+      if (
+        sharedCollaborationDefaultTarget.mode === "profile" &&
+        sharedCollaborationDefaultTarget.profileId
+      ) {
+        return sharedCollaborationDefaultTarget.profileId;
+      }
+      return null;
+    },
+    [sharedCollaborationDefaultTarget, sharedCollaborationProjectTargets],
+  );
+  const hasKamiCodeInstanceConfigured =
+    hostedCollaboration.url.trim().length > 0 && hostedCollaboration.tokenRedacted;
+  const submitThreadShare = useCallback(async () => {
+    if (!threadShareDialogTarget) {
+      return;
+    }
+    const threadRef = threadShareDialogTarget.threadRef;
+    const threadKey = scopedThreadKey(threadRef);
+    if (pendingShareThreadKey !== null) {
+      return;
+    }
+    setPendingShareThreadKey(threadKey);
+    try {
+      const threadSummary = sidebarThreadByKeyRef.current.get(threadKey);
+      if (!threadSummary) {
+        throw new Error("Session was not found in the sidebar.");
+      }
+      const projectMember = memberProjectByScopedKey.get(
+        scopedProjectKey(scopeProjectRef(threadSummary.environmentId, threadSummary.projectId)),
+      );
+      if (!projectMember) {
+        throw new Error("Project for this session was not found.");
+      }
+      const profileId = resolveProjectCollaborationProfileId(projectMember);
+      const threadDetail = await loadThreadDetailForSharing(threadRef);
+      const sharedProjects = await listSharedProjects({ profileId });
+      const existingSharedProject =
+        sharedProjects.projects.find((entry) => entry.sourceProjectId === projectMember.id) ?? null;
+      const sharedProjectDetail = existingSharedProject
+        ? await fetchSharedProjectDetail(existingSharedProject.id, {
+            profileId,
+          })
+        : await publishLocalProject(
+            {
               sourceProjectId: projectMember.id,
               name: projectMember.title,
               cwd: projectMember.workspaceRoot,
-            });
-        const existingSharedThread =
-          sharedProjectDetail.threads.find((entry) => entry.localThreadId === threadDetail.id) ??
-          null;
-        const sessionSnapshot = toSharedSessionSnapshot(
-          threadDetail,
-          sharedProjectDetail.project.repository,
-        );
-
-        await publishSharedThread({
+            },
+            { profileId },
+          );
+      const existingSharedThread =
+        sharedProjectDetail.threads.find((entry) => entry.localThreadId === threadDetail.id) ??
+        null;
+      const sessionSnapshot = toSharedSessionSnapshot(
+        threadDetail,
+        sharedProjectDetail.project.repository,
+      );
+      const sharedThread = await publishSharedThread(
+        {
           projectId: sharedProjectDetail.project.id,
           localThreadId: threadDetail.id,
           title: threadDetail.title,
           visibility: "shared",
+          allowedGithubLogins: normalizeGitHubLoginsInput(threadShareGitHubLogins),
           codeState: {
             branch: threadDetail.branch ?? sharedProjectDetail.project.repository.currentBranch,
             headSha: sharedProjectDetail.project.repository.headSha,
@@ -1349,29 +1464,36 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
           },
           messages: toSharedThreadMessages(threadDetail),
           sessionSnapshot,
-        });
+        },
+        { profileId },
+      );
 
-        toastManager.add({
-          type: "success",
-          title: existingSharedThread ? "Session sharing updated" : "Session shared",
-          description: existingSharedProject
-            ? `${threadDetail.title} is shared in ${sharedProjectDetail.project.name}.`
-            : `Project sharing was enabled, then ${threadDetail.title} was shared.`,
-        });
-      } catch (error) {
-        toastManager.add(
-          stackedThreadToast({
-            type: "error",
-            title: "Failed to share session",
-            description: error instanceof Error ? error.message : "An error occurred.",
-          }),
-        );
-      } finally {
-        setPendingShareThreadKey((current) => (current === threadKey ? null : current));
-      }
-    },
-    [memberProjectByScopedKey, pendingShareThreadKey],
-  );
+      const shareCode = sharedThread.shareCode;
+      const nextLink = shareCode ? buildSharedSessionLink(shareCode) : "";
+      setThreadShareLink(nextLink);
+      toastManager.add({
+        type: "success",
+        title: existingSharedThread ? "Session sharing updated" : "Session shared",
+        description: nextLink || `${threadDetail.title} is ready to share.`,
+      });
+    } catch (error) {
+      toastManager.add(
+        stackedThreadToast({
+          type: "error",
+          title: "Failed to share session",
+          description: error instanceof Error ? error.message : "An error occurred.",
+        }),
+      );
+    } finally {
+      setPendingShareThreadKey((current) => (current === threadKey ? null : current));
+    }
+  }, [
+    memberProjectByScopedKey,
+    pendingShareThreadKey,
+    resolveProjectCollaborationProfileId,
+    threadShareDialogTarget,
+    threadShareGitHubLogins,
+  ]);
   const memberThreadCountByPhysicalKey = useMemo(() => {
     const counts = new Map<string, number>(
       project.memberProjects.map((member) => [member.physicalProjectKey, 0] as const),
@@ -1566,6 +1688,222 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
     setProjectRenameTitle(member.title);
   }, []);
 
+  const openProjectSharingDialog = useCallback(
+    (member: SidebarProjectGroupMember) => {
+      const target = sharedCollaborationProjectTargets[member.id] as
+        | SharedCollaborationProjectTarget
+        | undefined;
+      setProjectSharingTarget(member);
+      setProjectSharingMode(target?.mode ?? "default");
+      setProjectSharingProfileId(target?.profileId ?? "");
+      setProjectSharingNewProfileLabel("");
+      setProjectSharingNewProfileUrl("");
+      setProjectSharingNewProfileToken("");
+    },
+    [sharedCollaborationProjectTargets],
+  );
+
+  const closeProjectSharingDialog = useCallback(() => {
+    setProjectSharingTarget(null);
+    setProjectSharingMode("default");
+    setProjectSharingProfileId("");
+    setProjectSharingNewProfileLabel("");
+    setProjectSharingNewProfileUrl("");
+    setProjectSharingNewProfileToken("");
+  }, []);
+
+  const submitProjectSharing = useCallback(async () => {
+    if (!projectSharingTarget) {
+      return;
+    }
+    let profileId: SharedCollaborationInstanceId | null = null;
+    if (projectSharingMode === "profile") {
+      if (projectSharingProfileId === "__new__") {
+        const label = projectSharingNewProfileLabel.trim();
+        const url = projectSharingNewProfileUrl.trim();
+        const token = projectSharingNewProfileToken.trim();
+        if (!label || !url || !token) {
+          toastManager.add({
+            type: "warning",
+            title: "Profile details are required",
+          });
+          return;
+        }
+        profileId = `shared-collab-${Date.now()}` as SharedCollaborationInstanceId;
+        await ensureLocalApi().server.updateSettings({
+          sharedCollaborationProfiles: [
+            ...sharedCollaborationProfiles,
+            {
+              id: profileId,
+              label,
+              url,
+              token,
+              tokenRedacted: false,
+              deploymentTargetKey: "",
+            },
+          ],
+        });
+      } else if (projectSharingProfileId.trim().length > 0) {
+        profileId = projectSharingProfileId as SharedCollaborationInstanceId;
+      } else {
+        toastManager.add({
+          type: "warning",
+          title: "Choose a shared collaboration profile",
+        });
+        return;
+      }
+    }
+
+    const nextProjectTarget: SharedCollaborationProjectTarget = {
+      mode: projectSharingMode,
+      profileId,
+    };
+    updateSettings({
+      sharedCollaborationProjectTargets: {
+        ...sharedCollaborationProjectTargets,
+        [projectSharingTarget.id]: nextProjectTarget,
+      },
+    });
+    try {
+      await publishLocalProject(
+        {
+          sourceProjectId: projectSharingTarget.id,
+          name: projectSharingTarget.title,
+          cwd: projectSharingTarget.workspaceRoot,
+        },
+        { profileId },
+      );
+      toastManager.add({
+        type: "success",
+        title: "Project sharing enabled",
+        description:
+          projectSharingMode === "profile"
+            ? `Using ${profileId ? (collaborationProfileById.get(profileId)?.label ?? "the selected shared instance") : "the selected shared instance"}.`
+            : projectSharingMode === "kamicode"
+              ? "Using the KamiCode shared instance target."
+              : "Using the default shared collaboration target.",
+      });
+      closeProjectSharingDialog();
+    } catch (error) {
+      toastManager.add(
+        stackedThreadToast({
+          type: "error",
+          title: "Failed to enable project sharing",
+          description: error instanceof Error ? error.message : "An error occurred.",
+        }),
+      );
+    }
+  }, [
+    closeProjectSharingDialog,
+    collaborationProfileById,
+    projectSharingMode,
+    projectSharingNewProfileLabel,
+    projectSharingNewProfileToken,
+    projectSharingNewProfileUrl,
+    projectSharingProfileId,
+    projectSharingTarget,
+    sharedCollaborationProfiles,
+    sharedCollaborationProjectTargets,
+    updateSettings,
+  ]);
+
+  const openProjectImportDialog = useCallback((member: SidebarProjectGroupMember) => {
+    setProjectImportTarget(member);
+    setProjectImportLink("");
+  }, []);
+
+  const closeProjectImportDialog = useCallback(() => {
+    setProjectImportTarget(null);
+    setProjectImportLink("");
+  }, []);
+
+  const submitProjectImport = useCallback(async () => {
+    if (!projectImportTarget) {
+      return;
+    }
+    const shareCode = parseSharedSessionCode(projectImportLink);
+    if (!shareCode) {
+      toastManager.add({
+        type: "warning",
+        title: "Enter a valid shared session link or code",
+      });
+      return;
+    }
+    const profileId = resolveProjectCollaborationProfileId(projectImportTarget);
+    try {
+      const resolved = await resolveSharedThreadShare({ shareCode }, { profileId });
+      const result = await importSharedThreadLink(
+        {
+          shareCode,
+          targetProjectId: projectImportTarget.id,
+          targetProjectCwd: projectImportTarget.workspaceRoot,
+        },
+        { profileId },
+      );
+      toastManager.add({
+        type: "success",
+        title: "Session imported",
+        description: result.stashedChanges
+          ? `Imported ${resolved.thread.title} onto ${result.branch ?? "the shared branch"}. Your previous local changes were stashed as ${result.stashName}.`
+          : `Imported ${resolved.thread.title} onto ${result.branch ?? "the shared branch"}.`,
+      });
+      if (isMobile) {
+        setOpenMobile(false);
+      }
+      void router.navigate({
+        to: "/$environmentId/$threadId",
+        params: buildThreadRouteParams(
+          scopeThreadRef(projectImportTarget.environmentId, result.threadId),
+        ),
+      });
+      closeProjectImportDialog();
+    } catch (error) {
+      toastManager.add(
+        stackedThreadToast({
+          type: "error",
+          title: "Failed to import shared session",
+          description: error instanceof Error ? error.message : "An error occurred.",
+        }),
+      );
+    }
+  }, [
+    closeProjectImportDialog,
+    isMobile,
+    projectImportLink,
+    projectImportTarget,
+    resolveProjectCollaborationProfileId,
+    router,
+    setOpenMobile,
+  ]);
+
+  const openThreadShareDialog = useCallback((threadRef: ScopedThreadRef, title: string) => {
+    setThreadShareDialogTarget({ threadRef, title });
+    setThreadShareGitHubLogins("");
+    setThreadShareLink("");
+  }, []);
+
+  const shareThread = useCallback(
+    async (threadRef: ScopedThreadRef) => {
+      const threadKey = scopedThreadKey(threadRef);
+      const threadSummary = sidebarThreadByKeyRef.current.get(threadKey);
+      if (!threadSummary) {
+        toastManager.add({
+          type: "warning",
+          title: "Session not found",
+        });
+        return;
+      }
+      openThreadShareDialog(threadRef, threadSummary.title);
+    },
+    [openThreadShareDialog],
+  );
+
+  const closeThreadShareDialog = useCallback(() => {
+    setThreadShareDialogTarget(null);
+    setThreadShareGitHubLogins("");
+    setThreadShareLink("");
+  }, []);
+
   const openProjectGroupingDialog = useCallback(
     (member: SidebarProjectGroupMember) => {
       const overrideKey = deriveProjectGroupingOverrideKey(member);
@@ -1753,7 +2091,14 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
 
         const actionHandlers = new Map<string, () => Promise<void> | void>();
         const makeLeaf = (
-          action: "rename" | "grouping" | "copy-path" | "triggers" | "delete",
+          action:
+            | "rename"
+            | "grouping"
+            | "copy-path"
+            | "triggers"
+            | "sharing"
+            | "import-session"
+            | "delete",
           member: SidebarProjectGroupMember,
           options?: {
             destructive?: boolean;
@@ -1770,7 +2115,15 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
                 openProjectGroupingDialog(member);
                 return;
               case "copy-path":
-                copyPathToClipboard(member.workspaceRoot, { path: member.workspaceRoot });
+                copyPathToClipboard(member.workspaceRoot, {
+                  path: member.workspaceRoot,
+                });
+                return;
+              case "sharing":
+                openProjectSharingDialog(member);
+                return;
+              case "import-session":
+                openProjectImportDialog(member);
                 return;
               case "triggers":
                 openProjectTriggersSettings(member);
@@ -1789,7 +2142,14 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
         };
 
         const buildTargetedItem = (
-          action: "rename" | "grouping" | "copy-path" | "triggers" | "delete",
+          action:
+            | "rename"
+            | "grouping"
+            | "copy-path"
+            | "triggers"
+            | "sharing"
+            | "import-session"
+            | "delete",
           label: string,
           options?: {
             destructive?: boolean;
@@ -1827,6 +2187,8 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
             buildTargetedItem("grouping", "Group into..."),
             buildTargetedItem("copy-path", "Copy Path"),
             buildTargetedItem("triggers", "Manage triggers"),
+            buildTargetedItem("sharing", "Enable sharing"),
+            buildTargetedItem("import-session", "Import session"),
             buildTargetedItem("delete", "Remove", {
               destructive: true,
             }),
@@ -1848,8 +2210,11 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
       copyPathToClipboard,
       handleRemoveProject,
       openProjectTriggersSettings,
+      openProjectImportDialog,
       openProjectGroupingDialog,
       openProjectRenameDialog,
+      openProjectSharingDialog,
+      openProjectTriggersSettings,
       project.groupedProjectCount,
       project.memberProjects,
       suppressProjectClickForContextMenuRef,
@@ -2288,6 +2653,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
       const clicked = await api.contextMenu.show(
         [
           { id: "rename", label: "Rename thread" },
+          { id: "share-session", label: "Share session" },
           { id: "mark-unread", label: "Mark unread" },
           { id: "copy-path", label: "Copy Path" },
           { id: "copy-thread-id", label: "Copy Thread ID" },
@@ -2298,6 +2664,10 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
 
       if (clicked === "rename") {
         startThreadRename(threadKey, thread.title);
+        return;
+      }
+      if (clicked === "share-session") {
+        openThreadShareDialog(threadRef, thread.title);
         return;
       }
 
@@ -2354,6 +2724,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
       deleteThread,
       markThreadUnread,
       memberProjectByScopedKey,
+      openThreadShareDialog,
       project.workspaceRoot,
       startThreadRename,
     ],
@@ -2620,6 +2991,220 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
               Cancel
             </Button>
             <Button onClick={saveProjectGroupingPreference}>Save</Button>
+          </DialogFooter>
+        </DialogPopup>
+      </Dialog>
+
+      <Dialog
+        open={projectSharingTarget !== null}
+        onOpenChange={(open) => {
+          if (!open) {
+            closeProjectSharingDialog();
+          }
+        }}
+      >
+        <DialogPopup className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Enable sharing</DialogTitle>
+            <DialogDescription>
+              {projectSharingTarget
+                ? `Choose how ${projectSharingTarget.workspaceRoot} should connect to shared sessions.`
+                : "Choose a shared collaboration target."}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogPanel className="space-y-4">
+            <div className="grid gap-1.5">
+              <span className="text-xs font-medium text-foreground">Target</span>
+              <Select
+                value={projectSharingMode}
+                onValueChange={(value) => {
+                  if (value === "default" || value === "kamicode" || value === "profile") {
+                    setProjectSharingMode(value);
+                  }
+                }}
+              >
+                <SelectTrigger className="w-full" aria-label="Shared collaboration target">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectPopup align="end" alignItemWithTrigger={false}>
+                  <SelectItem hideIndicator value="default">
+                    Use global default
+                  </SelectItem>
+                  <SelectItem hideIndicator value="kamicode">
+                    Use KamiCode instance
+                  </SelectItem>
+                  <SelectItem hideIndicator value="profile">
+                    Use custom instance
+                  </SelectItem>
+                </SelectPopup>
+              </Select>
+            </div>
+            {projectSharingMode === "profile" ? (
+              <>
+                <div className="grid gap-1.5">
+                  <span className="text-xs font-medium text-foreground">Saved instance</span>
+                  <Select
+                    value={projectSharingProfileId as string}
+                    onValueChange={(value) => {
+                      setProjectSharingProfileId(
+                        value === null
+                          ? ""
+                          : value === "__new__"
+                            ? "__new__"
+                            : (value as SharedCollaborationInstanceId),
+                      );
+                    }}
+                  >
+                    <SelectTrigger className="w-full" aria-label="Shared collaboration profile">
+                      <SelectValue placeholder="Choose a saved instance" />
+                    </SelectTrigger>
+                    <SelectPopup align="end" alignItemWithTrigger={false}>
+                      {sharedCollaborationProfiles.map((profile) => (
+                        <SelectItem key={profile.id} hideIndicator value={profile.id}>
+                          {profile.label}
+                        </SelectItem>
+                      ))}
+                      <SelectItem hideIndicator value="__new__">
+                        Add new instance
+                      </SelectItem>
+                    </SelectPopup>
+                  </Select>
+                </div>
+                {projectSharingProfileId === "__new__" ? (
+                  <div className="grid gap-3 rounded-md border border-border/60 p-3">
+                    <Input
+                      aria-label="New instance label"
+                      placeholder="Instance label"
+                      value={projectSharingNewProfileLabel}
+                      onChange={(event) => setProjectSharingNewProfileLabel(event.target.value)}
+                    />
+                    <Input
+                      aria-label="New instance URL"
+                      placeholder="https://your-collab-server.example"
+                      value={projectSharingNewProfileUrl}
+                      onChange={(event) => setProjectSharingNewProfileUrl(event.target.value)}
+                    />
+                    <Input
+                      aria-label="New instance token"
+                      placeholder="Secret token"
+                      value={projectSharingNewProfileToken}
+                      onChange={(event) => setProjectSharingNewProfileToken(event.target.value)}
+                    />
+                  </div>
+                ) : null}
+              </>
+            ) : null}
+            <p className="text-xs text-muted-foreground">
+              {projectSharingMode === "kamicode"
+                ? hasKamiCodeInstanceConfigured
+                  ? "This project will use the configured KamiCode collaboration instance."
+                  : "No KamiCode collaboration server URL/token is configured yet. Configure it in Shared Projects settings or choose a custom instance."
+                : projectSharingMode === "profile"
+                  ? "Custom instances can be reused across projects, while each project can still pick its own target."
+                  : sharedCollaborationDefaultTarget.mode === "profile"
+                    ? "This project will follow the current global custom-instance default."
+                    : "This project will follow the current global KamiCode/default target."}
+            </p>
+            <p className="text-xs text-muted-foreground">
+              Need deployment help?{" "}
+              <a
+                className="text-foreground underline underline-offset-2"
+                href="https://github.com/camie-ace/KamiCode/tree/main/docs"
+                rel="noreferrer"
+                target="_blank"
+              >
+                Open the shared server deployment docs
+              </a>
+              .
+            </p>
+          </DialogPanel>
+          <DialogFooter>
+            <Button variant="outline" onClick={closeProjectSharingDialog}>
+              Cancel
+            </Button>
+            <Button onClick={() => void submitProjectSharing()}>Enable sharing</Button>
+          </DialogFooter>
+        </DialogPopup>
+      </Dialog>
+
+      <Dialog
+        open={projectImportTarget !== null}
+        onOpenChange={(open) => {
+          if (!open) {
+            closeProjectImportDialog();
+          }
+        }}
+      >
+        <DialogPopup className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Import session</DialogTitle>
+            <DialogDescription>
+              {projectImportTarget
+                ? `Import a shared session into ${projectImportTarget.title}. If the current checkout is dirty, KamiCode will stash those changes before switching to the shared branch.`
+                : "Import a shared session by link or code."}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogPanel className="space-y-4">
+            <div className="grid gap-1.5">
+              <span className="text-xs font-medium text-foreground">Session link or code</span>
+              <Input
+                aria-label="Shared session link or code"
+                placeholder="Paste a shared session link or code"
+                value={projectImportLink}
+                onChange={(event) => setProjectImportLink(event.target.value)}
+              />
+            </div>
+          </DialogPanel>
+          <DialogFooter>
+            <Button variant="outline" onClick={closeProjectImportDialog}>
+              Cancel
+            </Button>
+            <Button onClick={() => void submitProjectImport()}>Import session</Button>
+          </DialogFooter>
+        </DialogPopup>
+      </Dialog>
+
+      <Dialog
+        open={threadShareDialogTarget !== null}
+        onOpenChange={(open) => {
+          if (!open) {
+            closeThreadShareDialog();
+          }
+        }}
+      >
+        <DialogPopup className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Share session</DialogTitle>
+            <DialogDescription>
+              {threadShareDialogTarget
+                ? `Choose which GitHub usernames can import ${threadShareDialogTarget.title}. Leave it blank to allow anyone with the link who is otherwise authorized by that instance.`
+                : "Choose who can import this session."}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogPanel className="space-y-4">
+            <div className="grid gap-1.5">
+              <span className="text-xs font-medium text-foreground">GitHub usernames</span>
+              <Input
+                aria-label="GitHub usernames"
+                placeholder="@alice, @bob"
+                value={threadShareGitHubLogins}
+                onChange={(event) => setThreadShareGitHubLogins(event.target.value)}
+              />
+            </div>
+            {threadShareLink ? (
+              <div className="grid gap-1.5">
+                <span className="text-xs font-medium text-foreground">Share link</span>
+                <Input aria-label="Share link" readOnly value={threadShareLink} />
+              </div>
+            ) : null}
+          </DialogPanel>
+          <DialogFooter>
+            <Button variant="outline" onClick={closeThreadShareDialog}>
+              Close
+            </Button>
+            <Button onClick={() => void submitThreadShare()}>
+              {pendingShareThreadKey ? "Sharing..." : "Create share link"}
+            </Button>
           </DialogFooter>
         </DialogPopup>
       </Dialog>
@@ -3535,7 +4120,10 @@ export default function Sidebar() {
   }, []);
 
   const visibleThreads = useMemo(
-    () => sidebarThreads.filter((thread) => thread.archivedAt === null),
+    () =>
+      sidebarThreads.filter(
+        (thread) => thread.archivedAt === null && !isWorkflowLaneThread(thread),
+      ),
     [sidebarThreads],
   );
   const sortedProjects = useMemo(() => {
@@ -3575,7 +4163,7 @@ export default function Sidebar() {
       sortedProjects.flatMap((project) => {
         const projectThreads = sortThreads(
           (threadsByProjectKey.get(project.projectKey) ?? []).filter(
-            (thread) => thread.archivedAt === null,
+            (thread) => thread.archivedAt === null && !isWorkflowLaneThread(thread),
           ),
           sidebarThreadSortOrder,
         );

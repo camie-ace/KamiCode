@@ -13,6 +13,7 @@ import type {
   SharedThread,
   SharedThreadVisibility,
   PersistedSavedEnvironmentRecord,
+  UserAuthSessionState,
 } from "@t3tools/contracts";
 import {
   DEFAULT_MODEL,
@@ -28,9 +29,11 @@ import { useNavigate } from "@tanstack/react-router";
 import {
   CloudIcon,
   Code2Icon,
+  ExternalLinkIcon,
   GitBranchIcon,
   KeyRoundIcon,
   LinkIcon,
+  LogOutIcon,
   MessagesSquareIcon,
   RefreshCwIcon,
   ServerIcon,
@@ -44,10 +47,14 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
 import {
+  fetchUserAuthSessionState,
+  logoutGitHubUser,
+  startGitHubUserLogin,
+} from "../../environments/primary/userAuth";
+import {
   claimSharedProjectInvite,
   createSharedProjectInvite,
   deleteSharedProject,
-  fetchSharedProjectCurrentUser,
   fetchSharedProjectDetail,
   importSharedThread,
   listSharedProjects,
@@ -80,6 +87,7 @@ import { projectEnvironment } from "../../state/projects";
 import { threadEnvironment } from "../../state/threads";
 import { useAtomCommand } from "../../state/use-atom-command";
 import type { Project, ThreadShell } from "../../types";
+import { GitHubIcon } from "../Icons";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
@@ -95,7 +103,18 @@ type LoadState =
   | { readonly status: "loaded" }
   | { readonly status: "error"; readonly message: string };
 
-type CurrentSharedUser = Awaited<ReturnType<typeof fetchSharedProjectCurrentUser>>["user"];
+type GitHubSessionLoadState =
+  | { readonly status: "loading" }
+  | { readonly status: "loaded"; readonly session: UserAuthSessionState | null }
+  | { readonly status: "error"; readonly message: string };
+
+type CollabReachabilityState =
+  | { readonly status: "idle" }
+  | { readonly status: "pending" }
+  | { readonly status: "success"; readonly message: string }
+  | { readonly status: "error"; readonly message: string };
+
+type CurrentSharedUser = Extract<UserAuthSessionState, { readonly authenticated: true }>["user"];
 type CollabDeployFailure = {
   readonly rawMessage: string;
   readonly displayMessage: string;
@@ -187,7 +206,10 @@ function formatTimestamp(value: string | null | undefined): string {
   if (!value) return "Never";
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) return value;
-  return parsed.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
+  return parsed.toLocaleString(undefined, {
+    dateStyle: "medium",
+    timeStyle: "short",
+  });
 }
 
 function shortSha(value: string | null | undefined): string {
@@ -255,6 +277,14 @@ function defaultCollabPublicBaseUrl(record: SavedEnvironmentRecord | null): stri
   if (!target) return "";
   const host = target.hostname || target.alias;
   return host ? `http://${host}:8787` : "";
+}
+
+function collabHealthCheckUrl(url: string): string | null {
+  try {
+    return new URL("/healthz", url).toString();
+  } catch {
+    return null;
+  }
 }
 
 function buildCollabDeployAiRepairPrompt(input: {
@@ -350,13 +380,22 @@ export function SharedProjectsSettings() {
   const navigate = useNavigate();
   const hostedCollaboration = usePrimarySettings((settings) => settings.hostedCollaboration);
   const updatePrimarySettings = useUpdatePrimarySettings();
-  const createProject = useAtomCommand(projectEnvironment.create, { reportFailure: false });
-  const createThread = useAtomCommand(threadEnvironment.create, { reportFailure: false });
-  const startThreadTurn = useAtomCommand(threadEnvironment.startTurn, { reportFailure: false });
+  const createProject = useAtomCommand(projectEnvironment.create, {
+    reportFailure: false,
+  });
+  const createThread = useAtomCommand(threadEnvironment.create, {
+    reportFailure: false,
+  });
+  const startThreadTurn = useAtomCommand(threadEnvironment.startTurn, {
+    reportFailure: false,
+  });
   const localProjects = useProjects();
   const localThreads = useThreadShells();
   const savedEnvironmentById = useMemo<Record<string, SavedEnvironmentRecord>>(() => ({}), []);
   const [currentUser, setCurrentUser] = useState<CurrentSharedUser | null>(null);
+  const [githubSessionState, setGitHubSessionState] = useState<GitHubSessionLoadState>({
+    status: "loading",
+  });
   const [sharedProjects, setSharedProjects] = useState<
     ReadonlyArray<SharedProjectDetail["project"]>
   >([]);
@@ -421,6 +460,9 @@ export function SharedProjectsSettings() {
   const [lastCollabDeployFailure, setLastCollabDeployFailure] =
     useState<CollabDeployFailure | null>(null);
   const [collabDeployRepairPromptCopied, setCollabDeployRepairPromptCopied] = useState(false);
+  const [collabReachability, setCollabReachability] = useState<CollabReachabilityState>({
+    status: "idle",
+  });
 
   const selectedLocalProject = useMemo(
     () =>
@@ -487,6 +529,7 @@ export function SharedProjectsSettings() {
   const hasDesktopBridge = typeof window !== "undefined" && Boolean(window.desktopBridge);
   const hasHostedCollabConfig =
     hostedCollaboration.url.trim().length > 0 && hostedCollaboration.tokenRedacted;
+  const effectiveCollabUrl = collabServerForm.url.trim() || hostedCollaboration.url.trim();
   const isDeployingCollabServer = pendingAction === "deploy-collab-server";
   const isOpeningCollabDeployAiRepairThread =
     pendingAction === "open-collab-deploy-ai-repair-thread";
@@ -522,11 +565,18 @@ export function SharedProjectsSettings() {
     async (preferredProjectId?: SharedProjectId | null) => {
       setLoadState({ status: "loading" });
       try {
-        const [userResult, listResult] = await Promise.all([
-          fetchSharedProjectCurrentUser(),
-          listSharedProjects(),
-        ]);
-        setCurrentUser(userResult.user);
+        const session = await fetchUserAuthSessionState();
+        setGitHubSessionState({ status: "loaded", session });
+        if (!session.enabled || !session.authenticated) {
+          setCurrentUser(null);
+          setSharedProjects([]);
+          setSelectedProjectId(null);
+          setDetail(null);
+          setLoadState({ status: "loaded" });
+          return;
+        }
+        setCurrentUser(session.user);
+        const listResult = await listSharedProjects();
         setSharedProjects(listResult.projects);
         const projectIds = new Set(listResult.projects.map((project) => project.id));
         const requestedProjectId = preferredProjectId ?? selectedProjectId;
@@ -550,13 +600,22 @@ export function SharedProjectsSettings() {
         }
         setLoadState({ status: "loaded" });
       } catch (error) {
+        const message = error instanceof Error ? error.message : "Failed to load shared projects.";
+        if (currentUser === null) {
+          setGitHubSessionState({ status: "error", message });
+          setSharedProjects([]);
+          setSelectedProjectId(null);
+          setDetail(null);
+          setLoadState({ status: "loaded" });
+          return;
+        }
         setLoadState({
           status: "error",
-          message: error instanceof Error ? error.message : "Failed to load shared projects.",
+          message,
         });
       }
     },
-    [selectedProjectId],
+    [currentUser, selectedProjectId],
   );
 
   useEffect(() => {
@@ -639,14 +698,92 @@ export function SharedProjectsSettings() {
 
   const updateHostedCollaborationSettings = useCallback(
     async (hostedCollaborationPatch: NonNullable<ServerSettingsPatch["hostedCollaboration"]>) => {
+      const nextHostedCollaboration = {
+        ...hostedCollaboration,
+        ...hostedCollaborationPatch,
+      };
+      const localApi = readLocalApi();
+      if (localApi) {
+        await localApi.server.updateSettings({
+          hostedCollaboration: nextHostedCollaboration,
+        });
+        return;
+      }
       updatePrimarySettings({
         hostedCollaboration: {
-          ...hostedCollaboration,
-          ...hostedCollaborationPatch,
+          ...nextHostedCollaboration,
         },
       });
     },
     [hostedCollaboration, updatePrimarySettings],
+  );
+
+  const connectGitHub = useCallback(async () => {
+    setPendingAction("connect-github");
+    setGitHubSessionState({ status: "loading" });
+    try {
+      await startGitHubUserLogin();
+    } catch (error) {
+      setGitHubSessionState({
+        status: "error",
+        message: error instanceof Error ? error.message : "Failed to start GitHub sign-in.",
+      });
+      setPendingAction(null);
+    }
+  }, []);
+
+  const signOutGitHub = useCallback(
+    () =>
+      runAction("sign-out-github", async () => {
+        await logoutGitHubUser();
+        setCurrentUser(null);
+        setSharedProjects([]);
+        setSelectedProjectId(null);
+        setDetail(null);
+        setAcceptedBootstrap(null);
+        await load();
+      }),
+    [load, runAction],
+  );
+
+  const openGitHubProfile = useCallback(async (githubLogin: string) => {
+    const url = `https://github.com/${githubLogin}`;
+    if (window.desktopBridge) {
+      const opened = await window.desktopBridge.openExternal(url);
+      if (opened) {
+        return;
+      }
+    }
+    window.open(url, "_blank", "noopener,noreferrer");
+  }, []);
+
+  const testCollabServerReachability = useCallback(
+    () =>
+      runAction("test-collab-server", async () => {
+        const rawUrl = effectiveCollabUrl;
+        if (!rawUrl) {
+          throw new Error("Enter or save a collaboration server URL first.");
+        }
+        let healthUrl: string;
+        try {
+          healthUrl = new URL("/healthz", rawUrl).toString();
+        } catch {
+          throw new Error("The collaboration server URL is not valid.");
+        }
+        setCollabReachability({ status: "pending" });
+        const response = await fetch(healthUrl, {
+          credentials: "omit",
+          redirect: "follow",
+        });
+        if (!response.ok) {
+          throw new Error(`Health check failed with status ${response.status}.`);
+        }
+        setCollabReachability({
+          status: "success",
+          message: `Reachable at ${healthUrl}.`,
+        });
+      }),
+    [effectiveCollabUrl, runAction],
   );
 
   const publishProject = useCallback(
@@ -1082,7 +1219,9 @@ export function SharedProjectsSettings() {
             await upsertSharedSshCredential({
               projectId: detail.project.id,
               ...(editingSshCredentialId
-                ? { credentialId: SharedSshCredentialId.make(editingSshCredentialId) }
+                ? {
+                    credentialId: SharedSshCredentialId.make(editingSshCredentialId),
+                  }
                 : {}),
               label: sshCredentialForm.label.trim(),
               host: sshCredentialForm.host.trim(),
@@ -1187,7 +1326,12 @@ export function SharedProjectsSettings() {
                 deployedSha: deployForm.deployedSha.trim() || null,
               }),
             );
-            setDeployForm({ branch: "", environmentId: "", deployUrl: "", deployedSha: "" });
+            setDeployForm({
+              branch: "",
+              environmentId: "",
+              deployUrl: "",
+              deployedSha: "",
+            });
           })
         : undefined,
     [commitDetail, defaultEnvironment?.id, deployForm, detail, runAction],
@@ -1213,20 +1357,56 @@ export function SharedProjectsSettings() {
         <SettingsRow
           title="GitHub identity"
           description={
-            currentUser
-              ? `Invites and project access use @${currentUser.githubLogin}.`
-              : "GitHub identity is required for shared project access."
+            githubSessionState.status === "loaded" &&
+            githubSessionState.session &&
+            !githubSessionState.session.enabled
+              ? "GitHub login is not configured on this server."
+              : currentUser
+                ? `Invites and project access use @${currentUser.githubLogin}.`
+                : "GitHub identity is required for shared project access."
           }
           status={
-            loadState.status === "error" ? (
+            githubSessionState.status === "error" ? (
+              <span className="text-destructive">{githubSessionState.message}</span>
+            ) : loadState.status === "error" ? (
               <span className="text-destructive">{loadState.message}</span>
             ) : null
           }
           control={
             currentUser ? (
-              <Badge variant="success">@{currentUser.githubLogin}</Badge>
+              <>
+                <Badge variant="success">@{currentUser.githubLogin}</Badge>
+                <Button
+                  size="xs"
+                  variant="outline"
+                  disabled={isPending}
+                  onClick={() => void openGitHubProfile(currentUser.githubLogin)}
+                >
+                  <ExternalLinkIcon className="size-3.5" />
+                  Open
+                </Button>
+                <Button
+                  size="xs"
+                  variant="destructive-outline"
+                  disabled={isPending}
+                  onClick={() => void signOutGitHub()}
+                >
+                  <LogOutIcon className="size-3.5" />
+                  Sign out
+                </Button>
+              </>
+            ) : githubSessionState.status === "loaded" &&
+              githubSessionState.session &&
+              !githubSessionState.session.enabled ? (
+              <Badge variant="outline">Disabled</Badge>
             ) : (
-              <Badge variant="warning">Unavailable</Badge>
+              <>
+                <Badge variant="warning">Unavailable</Badge>
+                <Button size="xs" disabled={isPending} onClick={() => void connectGitHub()}>
+                  <GitHubIcon className="size-3.5" />
+                  Connect GitHub
+                </Button>
+              </>
             )
           }
         />
@@ -1283,24 +1463,66 @@ export function SharedProjectsSettings() {
           description={
             hasHostedCollabConfig
               ? hostedCollaboration.url
-              : "No hosted collaboration server is configured."
+              : "Shared projects are currently local-only. No hosted KamiCode collaboration server URL/token is configured on this app yet."
           }
           status={
-            hasHostedCollabConfig ? (
-              <Badge variant="success">Configured</Badge>
-            ) : (
-              <Badge variant="warning">Local only</Badge>
-            )
+            <div className="flex flex-wrap items-center gap-2">
+              {hasHostedCollabConfig ? (
+                <Badge variant="success">Configured</Badge>
+              ) : (
+                <Badge variant="warning">Local only</Badge>
+              )}
+              <span>
+                This screen only uses the saved URL/token. KamiCode shared projects are not
+                auto-discovered unless a hosted server is configured here or injected by backend
+                environment config.
+              </span>
+            </div>
           }
           control={
-            <Button
-              size="xs"
-              variant="destructive-outline"
-              disabled={isPending || !hostedCollaboration.url}
-              onClick={() => void clearCollabServerConfig()}
-            >
-              Clear
-            </Button>
+            <div className="flex w-full items-center justify-end gap-2 sm:w-auto">
+              <Button
+                size="xs"
+                variant="outline"
+                disabled={isPending || effectiveCollabUrl.length === 0}
+                onClick={() => void testCollabServerReachability()}
+              >
+                <RefreshCwIcon
+                  className={
+                    pendingAction === "test-collab-server" ||
+                    collabReachability.status === "pending"
+                      ? "size-3.5 animate-spin"
+                      : "size-3.5"
+                  }
+                />
+                Test
+              </Button>
+              <Button
+                size="xs"
+                variant="destructive-outline"
+                disabled={isPending || !hostedCollaboration.url}
+                onClick={() => void clearCollabServerConfig()}
+              >
+                Clear
+              </Button>
+            </div>
+          }
+        />
+        <SettingsRow
+          title="Server reachability"
+          description={
+            collabHealthCheckUrl(effectiveCollabUrl)
+              ? `Health check ${collabHealthCheckUrl(effectiveCollabUrl)} to verify the server is reachable from this app.`
+              : "Enter a hosted collaboration server URL above, then test reachability. This only checks the server health endpoint and does not require the bearer token."
+          }
+          status={
+            collabReachability.status === "success" ? (
+              <span className="text-emerald-400">{collabReachability.message}</span>
+            ) : collabReachability.status === "error" ? (
+              <span className="text-destructive">{collabReachability.message}</span>
+            ) : collabReachability.status === "pending" ? (
+              <span>Checking collaboration server health...</span>
+            ) : null
           }
         />
         <SettingsRow
@@ -1480,7 +1702,10 @@ export function SharedProjectsSettings() {
                   size="xs"
                   disabled={isPending || !hasDesktopBridge || !selectedDeployConnection?.desktopSsh}
                   onClick={() =>
-                    void deployCollabServer({ installDocker: true, confirmRepair: false })
+                    void deployCollabServer({
+                      installDocker: true,
+                      confirmRepair: false,
+                    })
                   }
                 >
                   <ServerIcon className="size-3.5" />
@@ -2424,7 +2649,9 @@ export function SharedProjectsSettings() {
                       onClick={() =>
                         void runAction("sync-remote-runtime", async () => {
                           commitDetail(
-                            await syncSharedRemoteRuntime({ projectId: detail.project.id }),
+                            await syncSharedRemoteRuntime({
+                              projectId: detail.project.id,
+                            }),
                           );
                         })
                       }
