@@ -1429,6 +1429,7 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
             provisioningProfile: macPasskeySigning.provisioningProfilePath,
           }
         : {}),
+      ...(!signed ? { identity: null } : {}),
     };
   }
 

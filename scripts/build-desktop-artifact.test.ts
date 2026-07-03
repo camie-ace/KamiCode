@@ -439,6 +439,26 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
       assert.deepStrictEqual(mac.protocols, [
         { name: "KamiCode", schemes: ["t3code", "t3code-dev"] },
       ]);
+      assert.notProperty(mac, "identity");
+    }).pipe(Effect.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env: {} })))),
+  );
+
+  it.effect("disables macOS signing for unsigned builds", () =>
+    Effect.gen(function* () {
+      const config = yield* createBuildConfig(
+        "mac",
+        "dmg",
+        "1.2.3",
+        false,
+        false,
+        undefined,
+        undefined,
+      );
+
+      const mac = config.mac as Record<string, unknown>;
+      assert.equal(mac.identity, null);
+      assert.notProperty(mac, "entitlements");
+      assert.notProperty(mac, "provisioningProfile");
     }).pipe(Effect.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env: {} })))),
   );
 
