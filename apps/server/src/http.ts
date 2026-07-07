@@ -68,6 +68,90 @@ import * as ServerEnvironment from "./environment/ServerEnvironment.ts";
 
 const PROJECT_FAVICON_CACHE_CONTROL = "public, max-age=3600";
 const OTLP_TRACES_PROXY_PATH = "/api/observability/v1/traces";
+const PRIVATE_ASSET_CACHE_CONTROL = "private, max-age=3600";
+
+class AssetRangeStatError extends Data.TaggedError("AssetRangeStatError")<{
+  readonly path: string;
+  readonly cause: unknown;
+}> {}
+
+export type HttpByteRangeResolution =
+  | {
+      readonly _tag: "range";
+      readonly start: number;
+      readonly end: number;
+      readonly bytesToRead: number;
+      readonly contentRange: string;
+    }
+  | {
+      readonly _tag: "unsatisfiable";
+      readonly contentRange: string;
+    };
+
+function parseByteRangeInteger(value: string): number | null {
+  if (!/^\d+$/u.test(value)) {
+    return null;
+  }
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : null;
+}
+
+export function resolveHttpByteRange(
+  rangeHeader: string | undefined,
+  sizeBytes: number,
+): HttpByteRangeResolution | null {
+  if (!rangeHeader || !Number.isSafeInteger(sizeBytes) || sizeBytes < 0) {
+    return null;
+  }
+  const trimmed = rangeHeader.trim();
+  if (!trimmed.toLowerCase().startsWith("bytes=") || trimmed.includes(",")) {
+    return null;
+  }
+  const spec = trimmed.slice("bytes=".length).trim();
+  const match = /^(?<start>\d*)-(?<end>\d*)$/u.exec(spec);
+  const rawStart = match?.groups?.start ?? "";
+  const rawEnd = match?.groups?.end ?? "";
+  if (!match || (rawStart.length === 0 && rawEnd.length === 0)) {
+    return null;
+  }
+  if (sizeBytes === 0) {
+    return { _tag: "unsatisfiable", contentRange: "bytes */0" };
+  }
+
+  let start: number;
+  let end: number;
+  if (rawStart.length === 0) {
+    const suffixLength = parseByteRangeInteger(rawEnd);
+    if (suffixLength === null || suffixLength === 0) {
+      return null;
+    }
+    start = Math.max(sizeBytes - suffixLength, 0);
+    end = sizeBytes - 1;
+  } else {
+    const parsedStart = parseByteRangeInteger(rawStart);
+    if (parsedStart === null) {
+      return null;
+    }
+    start = parsedStart;
+    const parsedEnd = rawEnd.length > 0 ? parseByteRangeInteger(rawEnd) : null;
+    if (rawEnd.length > 0 && parsedEnd === null) {
+      return null;
+    }
+    end = Math.min(parsedEnd ?? sizeBytes - 1, sizeBytes - 1);
+  }
+
+  if (start >= sizeBytes || end < start) {
+    return { _tag: "unsatisfiable", contentRange: `bytes */${sizeBytes}` };
+  }
+
+  return {
+    _tag: "range",
+    start,
+    end,
+    bytesToRead: end - start + 1,
+    contentRange: `bytes ${start}-${end}/${sizeBytes}`,
+  };
+}
 export const TEST_HARNESS_ARTIFACT_ROUTE_PATH = "/api/test-harness/artifact";
 export const TEST_HARNESS_RUNS_ROUTE_PATH = "/api/test-harness/runs";
 export const TEST_HARNESS_TRACE_VIEWER_ROUTE_PREFIX = "/api/test-harness/trace-viewer";
@@ -494,18 +578,55 @@ export const assetRouteLayer = HttpRouter.add(
         status: 200,
         contentType: "image/svg+xml",
         headers: {
-          "Cache-Control": "private, max-age=3600",
+          "Cache-Control": PRIVATE_ASSET_CACHE_CONTROL,
           "X-Content-Type-Options": "nosniff",
         },
       });
     }
 
+    const baseHeaders = {
+      "Accept-Ranges": "bytes",
+      "Cache-Control": PRIVATE_ASSET_CACHE_CONTROL,
+      "X-Content-Type-Options": "nosniff",
+    };
+    const rangeHeader = request.headers["range"];
+    if (typeof rangeHeader === "string") {
+      const stat = yield* Effect.tryPromise({
+        try: () => NodeFSP.stat(asset.path),
+        catch: (cause) => new AssetRangeStatError({ path: asset.path, cause }),
+      }).pipe(Effect.orElseSucceed(() => null));
+      if (stat) {
+        const range = resolveHttpByteRange(rangeHeader, stat.size);
+        if (range?._tag === "unsatisfiable") {
+          return HttpServerResponse.empty({
+            status: 416,
+            headers: {
+              ...baseHeaders,
+              "Content-Range": range.contentRange,
+            },
+          });
+        }
+        if (range?._tag === "range") {
+          return yield* HttpServerResponse.file(asset.path, {
+            status: 206,
+            offset: range.start,
+            bytesToRead: range.bytesToRead,
+            headers: {
+              ...baseHeaders,
+              "Content-Range": range.contentRange,
+            },
+          }).pipe(
+            Effect.orElseSucceed(() =>
+              HttpServerResponse.text("Internal Server Error", { status: 500 }),
+            ),
+          );
+        }
+      }
+    }
+
     return yield* HttpServerResponse.file(asset.path, {
       status: 200,
-      headers: {
-        "Cache-Control": "private, max-age=3600",
-        "X-Content-Type-Options": "nosniff",
-      },
+      headers: baseHeaders,
     }).pipe(
       Effect.orElseSucceed(() => HttpServerResponse.text("Internal Server Error", { status: 500 })),
     );
