@@ -226,9 +226,9 @@ describe("user auth bootstrap", () => {
         redirect: "manual",
       },
     );
-    expect(
-      fetchRequestAt(fetchMock, 0).headers.get("authorization"),
-    ).toBe("Bearer desktop-bearer-token");
+    expect(fetchRequestAt(fetchMock, 0).headers.get("authorization")).toBe(
+      "Bearer desktop-bearer-token",
+    );
     expect(openExternal).toHaveBeenCalledWith(
       "https://github.com/login/oauth/authorize?state=desktop",
     );
@@ -241,9 +241,9 @@ describe("user auth bootstrap", () => {
         redirect: "manual",
       },
     );
-    expect(
-      fetchRequestAt(fetchMock, 1).headers.get("authorization"),
-    ).toBe("Bearer desktop-bearer-token");
+    expect(fetchRequestAt(fetchMock, 1).headers.get("authorization")).toBe(
+      "Bearer desktop-bearer-token",
+    );
     expect(reload).toHaveBeenCalled();
     vi.useRealTimers();
   });
