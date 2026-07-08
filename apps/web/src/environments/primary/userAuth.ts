@@ -1,5 +1,6 @@
 import type { KamiUser, UserAuthSessionState } from "@t3tools/contracts";
 
+import { readDesktopPrimaryBearerToken } from "./desktopAuth";
 import { resolvePrimaryEnvironmentHttpUrl } from "./target";
 
 export type UserAuthGateState =
@@ -21,11 +22,35 @@ export interface GitHubUserLoginOptions {
 let userAuthBootstrapPromise: Promise<UserAuthGateState> | null = null;
 let resolvedAuthenticatedUserAuthGateState: UserAuthGateState | null = null;
 
-export async function fetchUserAuthSessionState(): Promise<UserAuthSessionState> {
-  const response = await fetch(resolvePrimaryEnvironmentHttpUrl("/api/user/session"), {
-    credentials: "include",
-    redirect: "manual",
+function isSameOriginBrowserPrimary(): boolean {
+  return (
+    typeof window !== "undefined" &&
+    window.location.origin.startsWith("http") &&
+    new URL(resolvePrimaryEnvironmentHttpUrl("/")).origin === window.location.origin
+  );
+}
+
+async function fetchPrimaryUserAuth(
+  pathname: string,
+  init?: RequestInit & { readonly searchParams?: Record<string, string> },
+): Promise<Response> {
+  const { searchParams, ...requestInit } = init ?? {};
+  const bearerToken = await readDesktopPrimaryBearerToken();
+  const headers = new Headers(requestInit.headers);
+  if (bearerToken) {
+    headers.set("authorization", `Bearer ${bearerToken}`);
+  }
+
+  return fetch(resolvePrimaryEnvironmentHttpUrl(pathname, searchParams), {
+    ...requestInit,
+    headers,
+    credentials: isSameOriginBrowserPrimary() ? "include" : "omit",
+    redirect: requestInit.redirect ?? "manual",
   });
+}
+
+export async function fetchUserAuthSessionState(): Promise<UserAuthSessionState> {
+  const response = await fetchPrimaryUserAuth("/api/user/session");
   if (!response.ok) {
     throw new Error(`Failed to load GitHub login state (${response.status}).`);
   }
@@ -114,13 +139,9 @@ async function startDesktopGitHubUserLogin(options?: GitHubUserLoginOptions): Pr
     return false;
   }
 
-  const startResponse = await fetch(
-    resolvePrimaryEnvironmentHttpUrl("/api/user/auth/github/desktop/start"),
-    {
-      credentials: "include",
-      method: "POST",
-    },
-  );
+  const startResponse = await fetchPrimaryUserAuth("/api/user/auth/github/desktop/start", {
+    method: "POST",
+  });
   if (!startResponse.ok) {
     throw new Error(
       await readJsonErrorMessage(
@@ -156,15 +177,11 @@ async function startDesktopGitHubUserLogin(options?: GitHubUserLoginOptions): Pr
   let pollIntervalMs = normalizeDesktopPollIntervalMs(start.pollIntervalMs);
   while (Date.now() - startedAt < DESKTOP_GITHUB_LOGIN_TIMEOUT_MS) {
     await waitForDesktopGitHubLoginPoll(pollIntervalMs);
-    const sessionResponse = await fetch(
-      resolvePrimaryEnvironmentHttpUrl("/api/user/auth/github/desktop/session", {
+    const sessionResponse = await fetchPrimaryUserAuth("/api/user/auth/github/desktop/session", {
+      searchParams: {
         handoffId: start.handoffId,
-      }),
-      {
-        credentials: "include",
-        redirect: "manual",
       },
-    );
+    });
 
     if (sessionResponse.status === 202) {
       try {
@@ -211,8 +228,7 @@ export async function startGitHubUserLogin(options?: GitHubUserLoginOptions): Pr
 }
 
 export async function logoutGitHubUser(): Promise<void> {
-  const response = await fetch(resolvePrimaryEnvironmentHttpUrl("/api/user/logout"), {
-    credentials: "include",
+  const response = await fetchPrimaryUserAuth("/api/user/logout", {
     method: "POST",
   });
   if (!response.ok) {

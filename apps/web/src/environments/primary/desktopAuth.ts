@@ -8,6 +8,9 @@ export function readDesktopPrimaryBearerToken(): Promise<string | null> {
   if (!bridge) {
     return Promise.resolve(null);
   }
+  if (typeof bridge.getLocalEnvironmentBearerToken !== "function") {
+    return Promise.resolve(null);
+  }
 
   desktopBearerTokenPromise ??= bridge.getLocalEnvironmentBearerToken().catch((error) => {
     desktopBearerTokenPromise = null;
