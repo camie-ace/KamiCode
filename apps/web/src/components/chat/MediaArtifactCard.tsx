@@ -4,6 +4,7 @@ import {
   CopyIcon,
   EyeIcon,
   ExternalLinkIcon,
+  FileIcon,
   FileImageIcon,
   FilmIcon,
   FolderOpenIcon,
@@ -23,6 +24,7 @@ import { readLocalApi } from "~/localApi";
 import type { MediaArtifact } from "~/mediaArtifacts";
 import {
   isImageMediaArtifactKind,
+  isOpenableDocumentMediaArtifact,
   isPreviewableMediaArtifactKind,
   mediaArtifactCanReveal,
   mediaArtifactExternalTarget,
@@ -105,6 +107,7 @@ export const MediaArtifactCard = memo(function MediaArtifactCard({
   const isPreviewableKind = isPreviewableMediaArtifactKind(artifact.kind);
   const isImageLike = isImageMediaArtifactKind(artifact.kind);
   const isVideo = artifact.kind === "video";
+  const isFile = isOpenableDocumentMediaArtifact(artifact);
   const { canOpenViewer, canRenderPreview, canUseInChat, canCopyImage } =
     deriveMediaArtifactCardAvailability({
       previewUrl,
@@ -122,6 +125,7 @@ export const MediaArtifactCard = memo(function MediaArtifactCard({
     desktopBridgeAvailable,
   });
   const canOpenExternal = Boolean(externalTarget);
+  const canOpenFile = isFile && canOpenExternal;
   const metadataRows = useMemo(
     () => buildMetadataRows(artifact, displayPath, undefined, 6),
     [artifact, displayPath],
@@ -129,9 +133,12 @@ export const MediaArtifactCard = memo(function MediaArtifactCard({
   const compactMetadata = useMemo(() => buildCompactMetadata(artifact), [artifact]);
   const previewUnavailableMessage = previewFailed
     ? "Preview failed to load."
-    : isPreviewableKind
-      ? "Preview unavailable."
-      : "Unsupported preview format.";
+    : isFile
+      ? "File unavailable."
+      : isPreviewableKind
+        ? "Preview unavailable."
+        : "Unsupported preview format.";
+  const showPreviewWarning = !canRenderPreview && !(isFile && (canOpenExternal || canReveal));
   const previewRecoveryMessage = buildPreviewRecoveryMessage({
     canOpenViewer,
     openViewerLabel: isVideo ? "Play" : "Preview",
@@ -375,6 +382,12 @@ export const MediaArtifactCard = memo(function MediaArtifactCard({
                 preload="metadata"
                 onError={() => setPreviewFailed(true)}
               />
+            ) : isFile ? (
+              <PreviewUnavailableState
+                icon="file"
+                compact
+                label={canOpenFile ? "Document" : "File unavailable"}
+              />
             ) : artifact.kind === "video" ? (
               <PreviewUnavailableState icon="video" compact label="Preview unavailable" />
             ) : artifact.kind === "gif" ? (
@@ -404,7 +417,7 @@ export const MediaArtifactCard = memo(function MediaArtifactCard({
                 {compactMetadata}
               </p>
             </div>
-            {!canRenderPreview ? (
+            {showPreviewWarning ? (
               <div className="flex items-start gap-1.5 rounded-lg border border-warning/25 bg-warning/8 px-2 py-1.5 text-[11px] text-muted-foreground/85">
                 <AlertTriangleIcon className="mt-0.5 size-3 shrink-0 text-warning" aria-hidden />
                 <p>
@@ -417,17 +430,31 @@ export const MediaArtifactCard = memo(function MediaArtifactCard({
               role="group"
               aria-label={`Actions for ${artifact.title}`}
             >
-              <Button
-                type="button"
-                size="xs"
-                variant="outline"
-                disabled={!canOpenViewer}
-                onClick={openViewer}
-                className="bg-background/76"
-              >
-                <EyeIcon />
-                {isVideo ? "Play" : "Preview"}
-              </Button>
+              {isFile ? (
+                <Button
+                  type="button"
+                  size="xs"
+                  variant="outline"
+                  disabled={!canOpenExternal}
+                  onClick={openExternally}
+                  className="bg-background/76"
+                >
+                  <ExternalLinkIcon />
+                  Open
+                </Button>
+              ) : (
+                <Button
+                  type="button"
+                  size="xs"
+                  variant="outline"
+                  disabled={!canOpenViewer}
+                  onClick={openViewer}
+                  className="bg-background/76"
+                >
+                  <EyeIcon />
+                  {isVideo ? "Play" : "Preview"}
+                </Button>
+              )}
               {isImageLike || isVideo ? (
                 <Tooltip>
                   <TooltipTrigger
@@ -476,7 +503,7 @@ export const MediaArtifactCard = memo(function MediaArtifactCard({
                   <CopyIcon />
                 </Button>
               ) : null}
-              {canOpenExternal ? (
+              {canOpenExternal && !isFile ? (
                 <Button
                   type="button"
                   size="icon-xs"
@@ -563,6 +590,12 @@ export const MediaArtifactCard = memo(function MediaArtifactCard({
               preload="metadata"
               onError={() => setPreviewFailed(true)}
             />
+          ) : isFile ? (
+            <PreviewUnavailableState
+              icon="file"
+              compact={compact}
+              label={canOpenFile ? "Document" : "File unavailable"}
+            />
           ) : artifact.kind === "video" ? (
             <PreviewUnavailableState icon="video" compact={compact} label="Preview unavailable" />
           ) : artifact.kind === "gif" ? (
@@ -602,7 +635,7 @@ export const MediaArtifactCard = memo(function MediaArtifactCard({
           >
             {displayPath}
           </p>
-          {!canRenderPreview ? (
+          {showPreviewWarning ? (
             <div
               className={cn(
                 "mt-2 flex items-start gap-1.5 rounded-lg border border-warning/25 bg-warning/8 px-2 py-1.5 text-xs text-muted-foreground/85",
@@ -647,16 +680,29 @@ export const MediaArtifactCard = memo(function MediaArtifactCard({
             role="group"
             aria-label={`Actions for ${artifact.title}`}
           >
-            <Button
-              type="button"
-              size="xs"
-              variant="outline"
-              disabled={!canOpenViewer}
-              onClick={openViewer}
-            >
-              <EyeIcon />
-              {isVideo ? "Play" : "Preview"}
-            </Button>
+            {isFile ? (
+              <Button
+                type="button"
+                size="xs"
+                variant="outline"
+                disabled={!canOpenExternal}
+                onClick={openExternally}
+              >
+                <ExternalLinkIcon />
+                Open
+              </Button>
+            ) : (
+              <Button
+                type="button"
+                size="xs"
+                variant="outline"
+                disabled={!canOpenViewer}
+                onClick={openViewer}
+              >
+                <EyeIcon />
+                {isVideo ? "Play" : "Preview"}
+              </Button>
+            )}
             {isImageLike || isVideo ? (
               <Tooltip>
                 <TooltipTrigger
@@ -693,7 +739,7 @@ export const MediaArtifactCard = memo(function MediaArtifactCard({
                 {imageCopied ? "Copied image" : "Copy image"}
               </Button>
             ) : null}
-            {canOpenExternal ? (
+            {canOpenExternal && !isFile ? (
               <Button type="button" size="xs" variant="ghost" onClick={openExternally}>
                 <ExternalLinkIcon />
                 Open
@@ -1013,11 +1059,18 @@ export function MediaArtifactViewer(props: {
 }
 
 function PreviewUnavailableState(props: {
-  icon: "gif" | "image" | "video";
+  icon: "file" | "gif" | "image" | "video";
   compact: boolean;
   label: string;
 }) {
-  const Icon = props.icon === "video" ? FilmIcon : props.icon === "gif" ? ImageIcon : FileImageIcon;
+  const Icon =
+    props.icon === "video"
+      ? FilmIcon
+      : props.icon === "gif"
+        ? ImageIcon
+        : props.icon === "file"
+          ? FileIcon
+          : FileImageIcon;
   return (
     <div className="flex flex-col items-center justify-center gap-1.5 px-2 text-center">
       <Icon className={cn("size-7", props.compact && "size-5")} aria-hidden />
@@ -1103,6 +1156,8 @@ function kindLabel(kind: MediaArtifact["kind"]): string {
       return "Image";
     case "video":
       return "Video";
+    case "file":
+      return "File";
     case "unknown":
       return "Media";
   }

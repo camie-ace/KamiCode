@@ -1,5 +1,20 @@
 export const WORKSPACE_BROWSER_PREVIEW_EXTENSIONS = [".htm", ".html", ".pdf"] as const;
 
+export const WORKSPACE_DOCUMENT_FILE_EXTENSIONS = [
+  ".csv",
+  ".doc",
+  ".docx",
+  ".json",
+  ".log",
+  ".md",
+  ".ppt",
+  ".pptx",
+  ".txt",
+  ".xls",
+  ".xlsx",
+  ".xml",
+] as const;
+
 export const WORKSPACE_IMAGE_PREVIEW_EXTENSIONS = [
   ".avif",
   ".gif",
@@ -23,6 +38,7 @@ export const WORKSPACE_VIDEO_PREVIEW_EXTENSIONS = [
 export const WORKSPACE_EXACT_FILE_PREVIEW_EXTENSIONS = [
   ...WORKSPACE_IMAGE_PREVIEW_EXTENSIONS,
   ...WORKSPACE_VIDEO_PREVIEW_EXTENSIONS,
+  ...WORKSPACE_DOCUMENT_FILE_EXTENSIONS,
 ] as const;
 
 function hasPreviewExtension(path: string, extensions: ReadonlyArray<string>): boolean {

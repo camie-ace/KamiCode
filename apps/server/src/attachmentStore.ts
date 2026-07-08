@@ -22,11 +22,17 @@ const SAFE_VIDEO_FILE_EXTENSIONS = new Set([".m4v", ".mov", ".mp4", ".ogv", ".we
 const SAFE_GENERIC_FILE_EXTENSIONS = new Set([
   ".bin",
   ".csv",
+  ".doc",
+  ".docx",
   ".json",
   ".log",
   ".md",
   ".pdf",
+  ".ppt",
+  ".pptx",
   ".txt",
+  ".xls",
+  ".xlsx",
   ".xml",
 ]);
 const ATTACHMENT_FILENAME_EXTENSIONS = [

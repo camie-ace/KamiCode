@@ -47,6 +47,7 @@ import {
   extractMediaArtifactsFromText,
   stripLocalMediaSearchResultSetsFromText,
 } from "~/mediaArtifacts";
+import { useDisplayableMediaArtifacts } from "~/mediaArtifactAssets";
 import { MediaArtifactCard } from "./MediaArtifactCard";
 import { LocalMediaSearchResults } from "./LocalMediaSearchResults";
 import {
@@ -1018,6 +1019,11 @@ function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "mess
     () => (row.message.streaming ? [] : extractMediaArtifactsFromText(visibleMessageText)),
     [row.message.streaming, visibleMessageText],
   );
+  const displayableMediaArtifacts = useDisplayableMediaArtifacts({
+    environmentId: ctx.activeThreadEnvironmentId,
+    threadRef: ctx.threadRef,
+    artifacts: mediaArtifacts,
+  });
 
   return (
     <>
@@ -1038,9 +1044,9 @@ function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "mess
             composerTarget={ctx.threadRef ?? undefined}
           />
         ))}
-        {mediaArtifacts.length > 0 ? (
+        {displayableMediaArtifacts.length > 0 ? (
           <div className="grid gap-2">
-            {mediaArtifacts.map((artifact) => (
+            {displayableMediaArtifacts.map((artifact) => (
               <MediaArtifactCard
                 key={artifact.id}
                 artifact={artifact}

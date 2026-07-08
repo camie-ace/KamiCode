@@ -191,9 +191,30 @@ export const issueAssetUrl = Effect.fn("AssetAccess.issueAssetUrl")(function* (i
             }),
         ),
       );
-      const relativePath = path.isAbsolute(input.resource.path)
-        ? path.relative(workspaceRoot, input.resource.path)
-        : input.resource.path;
+      const resourcePath = input.resource.path;
+      let relativePath: string;
+      if (!path.isAbsolute(resourcePath)) {
+        relativePath = resourcePath;
+      } else {
+        const relativeFromRoot = path.relative(workspaceRoot, resourcePath);
+        const isInsideRoot =
+          relativeFromRoot.length > 0 &&
+          !relativeFromRoot.startsWith("..") &&
+          !path.isAbsolute(relativeFromRoot);
+        const isRootRelativeWebPath =
+          /^[/\\](?![/\\])/.test(resourcePath) && !/^[A-Za-z]:/.test(resourcePath);
+        const existingAbsolutePath = isRootRelativeWebPath
+          ? yield* fileSystem.exists(resourcePath).pipe(Effect.orElseSucceed(() => true))
+          : false;
+        // A rooted path with no drive/UNC prefix may be a web-route reference
+        // like "/marketing/x.png". Reinterpret it as workspace-root-relative
+        // only when there is no real absolute filesystem target to reject.
+        relativePath = isInsideRoot
+          ? relativeFromRoot
+          : isRootRelativeWebPath && !existingAbsolutePath
+            ? resourcePath.replace(/^[/\\]+/, "")
+            : relativeFromRoot;
+      }
       const resolved = yield* workspacePaths
         .resolveRelativePathWithinRoot({ workspaceRoot, relativePath })
         .pipe(
