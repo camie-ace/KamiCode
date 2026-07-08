@@ -25,6 +25,14 @@ function installTestBrowser(url: string) {
   return testWindow;
 }
 
+function fetchRequestAt(fetchMock: ReturnType<typeof vi.fn<typeof fetch>>, index: number) {
+  const call = fetchMock.mock.calls[index];
+  if (!call) {
+    throw new Error(`Expected fetch call ${index + 1}.`);
+  }
+  return new Request(call[0], call[1]);
+}
+
 describe("user auth bootstrap", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
@@ -54,10 +62,11 @@ describe("user auth bootstrap", () => {
     await expect(resolveInitialUserAuthGateState()).resolves.toEqual({
       status: "disabled",
     });
-    expect(fetchMock).toHaveBeenCalledWith("http://localhost/api/user/session", {
-      credentials: "include",
-      redirect: "manual",
-    });
+    const request = fetchRequestAt(fetchMock, 0);
+    expect(request.url).toBe("http://localhost/api/user/session");
+    expect(request.credentials).toBe("include");
+    expect(request.redirect).toBe("manual");
+    expect(request.headers.get("authorization")).toBeNull();
   });
 
   it("fails closed when the GitHub login state endpoint is unavailable", async () => {
@@ -169,6 +178,7 @@ describe("user auth bootstrap", () => {
           bootstrapToken: "desktop-bootstrap-token",
         },
       ],
+      getLocalEnvironmentBearerToken: vi.fn().mockResolvedValue("desktop-bearer-token"),
       openExternal,
     } as unknown as DesktopBridge;
     const user = {
@@ -210,10 +220,15 @@ describe("user auth bootstrap", () => {
       1,
       "http://localhost:3773/api/user/auth/github/desktop/start",
       {
-        credentials: "include",
+        credentials: "omit",
+        headers: expect.any(Headers),
         method: "POST",
+        redirect: "manual",
       },
     );
+    expect(
+      fetchRequestAt(fetchMock, 0).headers.get("authorization"),
+    ).toBe("Bearer desktop-bearer-token");
     expect(openExternal).toHaveBeenCalledWith(
       "https://github.com/login/oauth/authorize?state=desktop",
     );
@@ -221,10 +236,14 @@ describe("user auth bootstrap", () => {
       2,
       "http://localhost:3773/api/user/auth/github/desktop/session?handoffId=handoff-1",
       {
-        credentials: "include",
+        credentials: "omit",
+        headers: expect.any(Headers),
         redirect: "manual",
       },
     );
+    expect(
+      fetchRequestAt(fetchMock, 1).headers.get("authorization"),
+    ).toBe("Bearer desktop-bearer-token");
     expect(reload).toHaveBeenCalled();
     vi.useRealTimers();
   });
