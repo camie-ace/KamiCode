@@ -1,10 +1,12 @@
 import { useAuth, useUser } from "@clerk/expo";
+import Constants from "expo-constants";
 import * as Notifications from "expo-notifications";
+import * as Updates from "expo-updates";
 import { useNavigation } from "@react-navigation/native";
 import { NativeStackScreenOptions } from "../../native/StackHeader";
 import { SymbolView } from "expo-symbols";
 import * as Effect from "effect/Effect";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { Alert, Linking, Platform, ScrollView, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -18,7 +20,11 @@ import {
 import { AppText as Text } from "../../components/AppText";
 import { setLiveActivityUpdatesEnabled } from "../agent-awareness/liveActivityPreferences";
 import { requestAgentNotificationPermission } from "../agent-awareness/notificationPermissions";
-import { refreshAgentAwarenessRegistration } from "../agent-awareness/remoteRegistration";
+import {
+  getAgentAwarenessRegistrationStatus,
+  refreshAgentAwarenessRegistration,
+  subscribeAgentAwarenessRegistrationStatus,
+} from "../agent-awareness/remoteRegistration";
 import { refreshManagedRelayEnvironments } from "../cloud/managedRelayState";
 import { useClerkSettingsSheetDetent } from "../cloud/ClerkSettingsSheetDetent";
 import { hasCloudPublicConfig, resolveRelayClerkTokenOptions } from "../cloud/publicConfig";
@@ -34,6 +40,19 @@ import { SettingsSwitchRow } from "./components/SettingsSwitchRow";
 
 type NotificationStatus = "checking" | "enabled" | "disabled" | "unsupported";
 type LiveActivityStatus = "checking" | "enabled" | "disabled" | "signed-out" | "linking";
+
+// Reflects whether the relay actually accepted this device's registration.
+// The notification and Live Activity switches are gated on this so they can
+// never read as enabled when the device cannot receive anything (e.g. the
+// registration request timed out).
+function useDeviceRegistered(): boolean {
+  const status = useSyncExternalStore(
+    subscribeAgentAwarenessRegistrationStatus,
+    getAgentAwarenessRegistrationStatus,
+    () => "unknown" as const,
+  );
+  return status === "registered";
+}
 
 export function SettingsRouteScreen() {
   const navigation = useNavigation();
@@ -111,6 +130,7 @@ function ConfiguredSettingsRouteScreen() {
   const { savedConnectionsById } = useSavedRemoteConnections();
   const [notificationStatus, setNotificationStatus] = useState<NotificationStatus>("checking");
   const [liveActivityStatus, setLiveActivityStatus] = useState<LiveActivityStatus>("checking");
+  const deviceRegistered = useDeviceRegistered();
 
   const connections = useMemo(() => Object.values(savedConnectionsById), [savedConnectionsById]);
   const environmentCount = connections.length;
@@ -180,10 +200,19 @@ function ConfiguredSettingsRouteScreen() {
     }
     if (result.value.type === "granted") {
       setNotificationStatus("enabled");
-      Alert.alert(
-        "Notifications enabled",
-        "Live Activity notifications are enabled for this device.",
-      );
+      // Permission alone is not enough: the switch stays off until the relay
+      // registration succeeds, so tell the user the truth about which happened.
+      if (getAgentAwarenessRegistrationStatus() === "registered") {
+        Alert.alert(
+          "Notifications enabled",
+          "Live Activity notifications are enabled for this device.",
+        );
+      } else {
+        Alert.alert(
+          "Couldn't finish enabling notifications",
+          "Notification access was granted, but this device could not be registered with T3 Connect. Notifications will start once registration succeeds.",
+        );
+      }
       return;
     }
     if (result.value.type === "unsupported") {
@@ -211,8 +240,8 @@ function ConfiguredSettingsRouteScreen() {
 
   const promptSignIn = useCallback(() => {
     Alert.alert(
-      "Request T3 Cloud access",
-      "Live Activity updates require approved T3 Cloud access so relay can deliver updates to this device.",
+      "Request T3 Connect access",
+      "Live Activity updates require approved T3 Connect access so relay can deliver updates to this device.",
       [
         { text: "Cancel", style: "cancel" },
         {
@@ -269,12 +298,22 @@ function ConfiguredSettingsRouteScreen() {
 
     refreshManagedRelayEnvironments();
     setLiveActivityStatus("enabled");
-    Alert.alert(
-      "Live Activities enabled",
-      environmentCount > 0
-        ? `${environmentCount} environment${environmentCount === 1 ? "" : "s"} linked for Live Activity updates.`
-        : "Live Activity updates are enabled. Add an environment to start receiving updates.",
-    );
+    // The environment link can succeed while this device's own registration
+    // (the push-to-start token the relay needs) has not — don't claim Live
+    // Activities are live until the device is actually registered.
+    if (getAgentAwarenessRegistrationStatus() === "registered") {
+      Alert.alert(
+        "Live Activities enabled",
+        environmentCount > 0
+          ? `${environmentCount} environment${environmentCount === 1 ? "" : "s"} linked for Live Activity updates.`
+          : "Live Activity updates are enabled. Add an environment to start receiving updates.",
+      );
+    } else {
+      Alert.alert(
+        "Couldn't finish enabling Live Activities",
+        "This device could not be registered with T3 Connect, so Live Activities won't appear yet. They'll start once registration succeeds.",
+      );
+    }
   }, [connections, environmentCount, getToken, isSignedIn, promptSignIn]);
 
   const handleDeviceNotificationsChange = useCallback(
@@ -393,7 +432,10 @@ function ConfiguredSettingsRouteScreen() {
             icon="bell.badge"
             label="Device Notifications"
             disabled={notificationStatus === "checking" || notificationStatus === "unsupported"}
-            value={notificationStatus === "enabled"}
+            // Only reads as on when this device is actually registered with the
+            // relay; otherwise notifications cannot be delivered regardless of
+            // the local iOS permission.
+            value={notificationStatus === "enabled" && deviceRegistered}
             onValueChange={handleDeviceNotificationsChange}
           />
           <SettingsSwitchRow
@@ -402,7 +444,12 @@ function ConfiguredSettingsRouteScreen() {
             }
             icon="bolt.circle"
             label="Live Activity Updates"
-            value={liveActivityStatus === "enabled" || liveActivityStatus === "linking"}
+            // Same gate: a saved preference is meaningless until the device
+            // registration the relay needs to push updates has succeeded.
+            value={
+              (liveActivityStatus === "enabled" || liveActivityStatus === "linking") &&
+              deviceRegistered
+            }
             onValueChange={handleLiveActivitiesChange}
           />
         </SettingsSection>
@@ -422,6 +469,23 @@ function ConfiguredSettingsRouteScreen() {
 function AppSettingsSection() {
   const icon = useThemeColor("--color-icon");
 
+  const version = Constants.expoConfig?.version ?? "0.0.0";
+  // Fall back to "production" to match resolveAppVariant in app.config.ts, so a
+  // missing variant never mislabels a production build as development.
+  const variant = (Constants.expoConfig?.extra?.appVariant as string | undefined) ?? "production";
+  const variantLabel = variant === "production" ? "" : capitalize(variant);
+  const versionLabel = variantLabel ? `${version} · ${variantLabel}` : version;
+  // Which JS is actually running: the bundle shipped in the binary, or an OTA
+  // update downloaded on top of it. Surfacing this makes "am I even on the
+  // right build?" answerable at a glance.
+  const bundleLabel = Updates.isEnabled
+    ? Updates.isEmbeddedLaunch
+      ? "Embedded"
+      : Updates.updateId
+        ? `OTA ${Updates.updateId.slice(0, 7)}`
+        : null
+    : null;
+
   return (
     <SettingsSection title="App">
       <View className="flex-row items-center gap-4 p-4">
@@ -433,10 +497,19 @@ function AppSettingsSection() {
           weight="regular"
         />
         <Text className="flex-1 text-lg text-foreground">Version</Text>
-        <Text className="text-lg text-foreground-muted">Alpha</Text>
+        <View className="items-end">
+          <Text className="text-lg text-foreground-muted">{versionLabel}</Text>
+          {bundleLabel ? (
+            <Text className="text-xs text-foreground-muted/70">{bundleLabel}</Text>
+          ) : null}
+        </View>
       </View>
     </SettingsSection>
   );
+}
+
+function capitalize(value: string): string {
+  return value.length > 0 ? value.charAt(0).toUpperCase() + value.slice(1) : value;
 }
 
 function ArchivedThreadsSettingsSection() {

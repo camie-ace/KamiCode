@@ -34,6 +34,8 @@ import {
 import { useScaledTextRole } from "../settings/appearance/useScaledTextRole";
 import { getComposerDraftSnapshot } from "../../state/use-composer-drafts";
 import { useProjects } from "../../state/entities";
+import { deriveThreadTitleFromPrompt } from "../../lib/projectThreadStartTurn";
+import { armAgentAwarenessLiveActivityForLocalWork } from "../agent-awareness/remoteRegistration";
 import { enqueueThreadOutboxMessage, removeThreadOutboxMessage } from "../../state/thread-outbox";
 import { useRemoteConnectionStatus } from "../../state/use-remote-environment-registry";
 import { branchBadgeLabel, useNewTaskFlow } from "./new-task-flow-provider";
@@ -111,7 +113,7 @@ export function NewTaskDraftScreen(props: {
   }, [props.pendingTaskId, cancelEditingPendingTask]);
 
   const borderColor = useThemeColor("--color-border");
-  const bodyText = useScaledTextRole("body");
+  const headlineText = useScaledTextRole("headline");
   const sheetFadeOpaque = colorScheme === "dark" ? "rgba(14,14,14,0.98)" : "rgba(242,242,247,0.98)";
   const sheetFadeTransparent = colorScheme === "dark" ? "rgba(14,14,14,0)" : "rgba(242,242,247,0)";
 
@@ -129,12 +131,13 @@ export function NewTaskDraftScreen(props: {
       lastInitialProjectRefRef.current = props.initialProjectRef;
       appliedInitialProjectKeyRef.current = null;
     }
-    if (props.initialProjectRef?.environmentId && props.initialProjectRef?.projectId) {
+    const initialEnvironmentId = props.initialProjectRef?.environmentId;
+    const initialProjectId = props.initialProjectRef?.projectId;
+    if (initialEnvironmentId && initialProjectId) {
       const directProject =
         projects.find(
           (project) =>
-            project.environmentId === props.initialProjectRef?.environmentId &&
-            project.id === props.initialProjectRef?.projectId,
+            project.environmentId === initialEnvironmentId && project.id === initialProjectId,
         ) ?? null;
 
       if (directProject) {
@@ -523,6 +526,14 @@ export function NewTaskDraftScreen(props: {
     }
 
     flow.setSubmitting(true);
+    // Arm the lock-screen card before the async thread creation: backgrounding
+    // the app right after tapping submit would otherwise reject the foreground
+    // -only Activity start. If creation fails, the token registration's replay
+    // finds no work and ends the card within seconds.
+    armAgentAwarenessLiveActivityForLocalWork({
+      threadTitle: deriveThreadTitleFromPrompt(initialMessageText),
+      projectTitle: selectedProject.title,
+    });
     const result = await createProjectThread({
       project: selectedProject,
       modelSelection,
@@ -602,7 +613,7 @@ export function NewTaskDraftScreen(props: {
             onPasteImages={(uris) => void handleNativePasteImages(uris)}
             placeholder={`Describe a coding task in ${selectedProject.title}`}
             style={{ flex: 1, minHeight: 0 }}
-            textStyle={bodyText}
+            textStyle={headlineText}
           />
         </View>
 
