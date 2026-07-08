@@ -46,11 +46,19 @@ describe("workspace file previews", () => {
     },
   );
 
-  it.each(["README.md", "src/index.ts", "image.png.ts", "png"])(
-    "rejects non-preview path %s",
+  it.each(["README.md", "data.csv", "notes.TXT", "spreadsheet.xlsx?download=1"])(
+    "recognizes document preview path %s",
     (path) => {
-      expect(isWorkspacePreviewEntryPath(path)).toBe(false);
-      expect(isWorkspaceExactFilePreviewPath(path)).toBe(false);
+      expect(isWorkspaceExactFilePreviewPath(path)).toBe(true);
+      expect(isWorkspacePreviewEntryPath(path)).toBe(true);
+      expect(isWorkspaceImagePreviewPath(path)).toBe(false);
+      expect(isWorkspaceVideoPreviewPath(path)).toBe(false);
+      expect(isWorkspaceBrowserPreviewPath(path)).toBe(false);
     },
   );
+
+  it.each(["src/index.ts", "image.png.ts", "png"])("rejects non-preview path %s", (path) => {
+    expect(isWorkspacePreviewEntryPath(path)).toBe(false);
+    expect(isWorkspaceExactFilePreviewPath(path)).toBe(false);
+  });
 });
