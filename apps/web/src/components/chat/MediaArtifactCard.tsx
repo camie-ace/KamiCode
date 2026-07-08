@@ -134,6 +134,7 @@ export const MediaArtifactCard = memo(function MediaArtifactCard({
       : "Unsupported preview format.";
   const previewRecoveryMessage = buildPreviewRecoveryMessage({
     canOpenViewer,
+    openViewerLabel: isVideo ? "Play" : "Preview",
     canUseInChat,
     canOpenExternal,
     canReveal,
@@ -1176,13 +1177,14 @@ function isPositiveFiniteNumber(value: number | undefined): value is number {
 
 function buildPreviewRecoveryMessage(input: {
   readonly canOpenViewer: boolean;
+  readonly openViewerLabel: string;
   readonly canUseInChat: boolean;
   readonly canOpenExternal: boolean;
   readonly canReveal: boolean;
   readonly revealLabel: string;
 }): string {
   const actions = [
-    ...(input.canOpenViewer ? ["Play"] : []),
+    ...(input.canOpenViewer ? [input.openViewerLabel] : []),
     ...(input.canUseInChat ? ["Use in chat"] : []),
     "Copy path",
     ...(input.canOpenExternal ? ["Open externally"] : []),
