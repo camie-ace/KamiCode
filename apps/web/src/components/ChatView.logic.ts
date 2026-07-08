@@ -24,7 +24,7 @@ import type { DraftThreadEnvMode } from "../composerDraftStore";
 
 export interface MediaFollowUpArtifact {
   readonly id: string;
-  readonly kind: "image" | "gif" | "video" | "unknown";
+  readonly kind: "image" | "gif" | "video" | "file" | "unknown";
   readonly source?: string | undefined;
   readonly origin?: string | undefined;
   readonly title: string;

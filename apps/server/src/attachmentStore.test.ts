@@ -92,6 +92,15 @@ describe("attachmentStore", () => {
         sizeBytes: 5,
       }),
     ).toBe("thread-1-notes.txt");
+    expect(
+      attachmentRelativePath({
+        type: "file",
+        id: "thread-1-budget",
+        name: "budget.xlsx",
+        mimeType: "application/octet-stream",
+        sizeBytes: 5,
+      }),
+    ).toBe("thread-1-budget.xlsx");
   });
 
   it("resolves attachment path by id for video extensions", () => {

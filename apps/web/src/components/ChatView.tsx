@@ -267,6 +267,7 @@ import {
 } from "../versionSkew";
 import { useAssetUrls } from "../assets/assetUrls";
 import { collectThreadMediaArtifacts } from "~/mediaArtifacts";
+import { useDisplayableMediaArtifacts } from "~/mediaArtifactAssets";
 
 const ATTACHMENT_ONLY_BOOTSTRAP_PROMPT =
   "[User attached one or more media files without additional text. Respond using the conversation context and the attached media.]";
@@ -3059,11 +3060,17 @@ function ChatViewContent(props: ChatViewProps) {
     () => collectThreadMediaArtifacts(timelineMessages),
     [timelineMessages],
   );
+  const displayableThreadMediaArtifacts = useDisplayableMediaArtifacts({
+    environmentId,
+    threadRef: activeThreadRef,
+    artifacts: threadMediaArtifacts,
+  });
   const selectedThreadMediaArtifact = useMemo(
     () =>
-      threadMediaArtifacts.find((artifact) => artifact.dedupeKey === selectedMediaArtifactKey) ??
-      null,
-    [selectedMediaArtifactKey, threadMediaArtifacts],
+      displayableThreadMediaArtifacts.find(
+        (artifact) => artifact.dedupeKey === selectedMediaArtifactKey,
+      ) ?? null,
+    [displayableThreadMediaArtifacts, selectedMediaArtifactKey],
   );
   const { turnDiffSummaries, inferredCheckpointTurnCountByTurnId } =
     useTurnDiffSummaries(activeThread);
@@ -5578,7 +5585,7 @@ function ChatViewContent(props: ChatViewProps) {
     const mediaFollowUpReferences = resolveMediaFollowUpReferences({
       prompt: promptForSend,
       selectedArtifact: selectedThreadMediaArtifact,
-      recentArtifacts: threadMediaArtifacts,
+      recentArtifacts: displayableThreadMediaArtifacts,
     });
     const promptWithMediaReferences = appendMediaFollowUpReferencesToPrompt({
       prompt: promptForSend,
@@ -6877,7 +6884,7 @@ function ChatViewContent(props: ChatViewProps) {
       />
     ) : activeRightPanelSurface?.kind === "media" ? (
       <MediaPanel
-        artifacts={threadMediaArtifacts}
+        artifacts={displayableThreadMediaArtifacts}
         environmentId={activeThread.environmentId}
         threadRef={activeThreadRef}
         composerTarget={composerDraftTarget}

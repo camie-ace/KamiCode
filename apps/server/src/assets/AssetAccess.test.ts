@@ -84,6 +84,37 @@ describe("AssetAccess", () => {
     }).pipe(Effect.provide(testLayer)),
   );
 
+  it.effect("resolves rooted web-route paths against the workspace root", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const root = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "t3-asset-rooted-web-path-",
+      });
+      const imagePath = path.join(root, "marketing", "camie-ai-ai-productivity", "hero.png");
+      yield* fileSystem.makeDirectory(path.dirname(imagePath), { recursive: true });
+      yield* fileSystem.writeFile(imagePath, new Uint8Array([137, 80, 78, 71]));
+      const canonicalImagePath = yield* fileSystem.realPath(imagePath);
+
+      const result = yield* issueAssetUrl({
+        resource: {
+          _tag: "workspace-file",
+          threadId: ThreadId.make("thread-1"),
+          path: "/marketing/camie-ai-ai-productivity/hero.png",
+        },
+        workspaceRoot: root,
+      });
+      const suffix = result.relativeUrl.slice(`${ASSET_ROUTE_PREFIX}/`.length);
+      const separatorIndex = suffix.indexOf("/");
+      const token = suffix.slice(0, separatorIndex);
+
+      expect(yield* resolveAsset(token, "hero.png")).toEqual({
+        kind: "file",
+        path: canonicalImagePath,
+      });
+    }).pipe(Effect.provide(testLayer)),
+  );
+
   it.effect("rejects workspace files outside the authorized root", () =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
@@ -229,6 +260,42 @@ describe("AssetAccess", () => {
       });
       expect(yield* resolveAsset(token, "other.mp4")).toBeNull();
       expect(yield* resolveAsset(token, "../demo.mp4")).toBeNull();
+    }).pipe(Effect.provide(testLayer)),
+  );
+
+  it.effect("issues exact workspace URLs for document files", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const root = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "t3-asset-document-workspace-",
+      });
+      const reportsDirectory = path.join(root, "reports");
+      const documentPath = path.join(reportsDirectory, "budget.xlsx");
+      const siblingPath = path.join(reportsDirectory, "other.xlsx");
+      yield* fileSystem.makeDirectory(reportsDirectory, { recursive: true });
+      yield* fileSystem.writeFile(documentPath, new Uint8Array([80, 75, 3, 4]));
+      yield* fileSystem.writeFile(siblingPath, new Uint8Array([80, 75, 3, 4]));
+      const canonicalDocumentPath = yield* fileSystem.realPath(documentPath);
+
+      const result = yield* issueAssetUrl({
+        resource: {
+          _tag: "workspace-file",
+          threadId: ThreadId.make("thread-1"),
+          path: documentPath,
+        },
+        workspaceRoot: root,
+      });
+      const suffix = result.relativeUrl.slice(`${ASSET_ROUTE_PREFIX}/`.length);
+      const separatorIndex = suffix.indexOf("/");
+      const token = suffix.slice(0, separatorIndex);
+
+      expect(yield* resolveAsset(token, "budget.xlsx")).toEqual({
+        kind: "file",
+        path: canonicalDocumentPath,
+      });
+      expect(yield* resolveAsset(token, "other.xlsx")).toBeNull();
+      expect(yield* resolveAsset(token, "../budget.xlsx")).toBeNull();
     }).pipe(Effect.provide(testLayer)),
   );
 

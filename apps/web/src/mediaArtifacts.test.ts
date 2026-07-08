@@ -42,6 +42,27 @@ describe("mediaArtifacts", () => {
     expect(mediaKindForExtension("gif")).toBe("gif");
     expect(mediaKindForExtension(".webp")).toBe("image");
     expect(mediaKindForExtension("mov")).toBe("video");
+    expect(mediaKindForExtension("pdf")).toBe("file");
+    expect(mediaKindForExtension(".xlsx")).toBe("file");
+  });
+
+  it("extracts document and spreadsheet links as file artifacts", () => {
+    const artifacts = extractMediaArtifactsFromText(
+      "Review docs/report.pdf and [budget](reports/budget.xlsx).",
+    );
+
+    expect(artifacts).toMatchObject([
+      {
+        kind: "file",
+        title: "budget.xlsx",
+        path: "reports/budget.xlsx",
+      },
+      {
+        kind: "file",
+        title: "report.pdf",
+        path: "docs/report.pdf",
+      },
+    ]);
   });
 
   it("normalizes file URI media links as local paths", () => {
@@ -147,7 +168,7 @@ describe("mediaArtifacts", () => {
     });
   });
 
-  it("collects gif, video, and unsupported file attachment metadata", () => {
+  it("collects gif, video, and file attachment metadata", () => {
     const artifacts = collectThreadMediaArtifacts([
       {
         id: "user-1",
@@ -203,7 +224,7 @@ describe("mediaArtifacts", () => {
     });
     const fileArtifact = artifacts.find((artifact) => artifact.title === "notes.pdf");
     expect(fileArtifact).toMatchObject({
-      kind: "unknown",
+      kind: "file",
       origin: "attached",
       source: "local",
       extension: "pdf",
