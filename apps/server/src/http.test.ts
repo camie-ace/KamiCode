@@ -8,6 +8,7 @@ import {
   isLoopbackHostname,
   listTestHarnessRuns,
   resolveDevRedirectUrl,
+  resolveHttpByteRange,
   resolveTestHarnessArtifactPath,
   resolveTestHarnessTraceViewerAssetPath,
 } from "./http.ts";
@@ -34,6 +35,51 @@ describe("http dev routing", () => {
     expect(resolveDevRedirectUrl(devUrl, requestUrl)).toBe(
       "http://127.0.0.1:5173/pair?token=test-token",
     );
+  });
+});
+
+describe("http byte range parsing", () => {
+  it("resolves open-ended byte ranges for media playback", () => {
+    expect(resolveHttpByteRange("bytes=100-", 1_000)).toEqual({
+      _tag: "range",
+      start: 100,
+      end: 999,
+      bytesToRead: 900,
+      contentRange: "bytes 100-999/1000",
+    });
+  });
+
+  it("resolves suffix byte ranges", () => {
+    expect(resolveHttpByteRange("bytes=-250", 1_000)).toEqual({
+      _tag: "range",
+      start: 750,
+      end: 999,
+      bytesToRead: 250,
+      contentRange: "bytes 750-999/1000",
+    });
+  });
+
+  it("clamps explicit range ends to the file size", () => {
+    expect(resolveHttpByteRange("bytes=900-2000", 1_000)).toEqual({
+      _tag: "range",
+      start: 900,
+      end: 999,
+      bytesToRead: 100,
+      contentRange: "bytes 900-999/1000",
+    });
+  });
+
+  it("marks unsatisfiable ranges for 416 responses", () => {
+    expect(resolveHttpByteRange("bytes=1000-", 1_000)).toEqual({
+      _tag: "unsatisfiable",
+      contentRange: "bytes */1000",
+    });
+  });
+
+  it("ignores malformed or multi-range headers", () => {
+    expect(resolveHttpByteRange("items=0-10", 1_000)).toBeNull();
+    expect(resolveHttpByteRange("bytes=0-10,20-30", 1_000)).toBeNull();
+    expect(resolveHttpByteRange("bytes=-0", 1_000)).toBeNull();
   });
 });
 

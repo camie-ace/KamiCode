@@ -44,6 +44,33 @@ interface MediaArtifactCardProps {
   onInteract?: (artifact: MediaArtifact) => void;
 }
 
+interface MediaArtifactCardAvailabilityInput {
+  readonly previewUrl: string | null | undefined;
+  readonly isPreviewableKind: boolean;
+  readonly isImageLike: boolean;
+  readonly isVideo: boolean;
+  readonly composerTargetAvailable: boolean;
+  readonly previewFailed: boolean;
+  readonly canWriteImage: boolean;
+}
+
+export function deriveMediaArtifactCardAvailability(input: MediaArtifactCardAvailabilityInput): {
+  readonly canOpenViewer: boolean;
+  readonly canRenderPreview: boolean;
+  readonly canUseInChat: boolean;
+  readonly canCopyImage: boolean;
+} {
+  const hasPreviewUrl = Boolean(input.previewUrl);
+  const canOpenViewer = hasPreviewUrl && input.isPreviewableKind;
+  return {
+    canOpenViewer,
+    canRenderPreview: canOpenViewer && !input.previewFailed,
+    canUseInChat:
+      hasPreviewUrl && input.composerTargetAvailable && (input.isImageLike || input.isVideo),
+    canCopyImage: hasPreviewUrl && input.isImageLike && input.canWriteImage,
+  };
+}
+
 export const MediaArtifactCard = memo(function MediaArtifactCard({
   artifact,
   environmentId,
@@ -76,12 +103,18 @@ export const MediaArtifactCard = memo(function MediaArtifactCard({
   const addAttachments = useComposerDraftStore((store) => store.addAttachments);
   const displayPath = mediaArtifactReference(artifact);
   const isPreviewableKind = isPreviewableMediaArtifactKind(artifact.kind);
-  const canPreview = Boolean(previewUrl) && isPreviewableKind && !previewFailed;
   const isImageLike = isImageMediaArtifactKind(artifact.kind);
   const isVideo = artifact.kind === "video";
-  const canUseInChat = Boolean(
-    composerTarget && previewUrl && (isImageLike || isVideo) && !previewFailed,
-  );
+  const { canOpenViewer, canRenderPreview, canUseInChat, canCopyImage } =
+    deriveMediaArtifactCardAvailability({
+      previewUrl,
+      isPreviewableKind,
+      isImageLike,
+      isVideo,
+      composerTargetAvailable: Boolean(composerTarget),
+      previewFailed,
+      canWriteImage: canWriteImageToClipboard(),
+    });
   const revealLabel = revealInFileExplorerLabel(getNavigatorPlatform());
   const desktopBridgeAvailable = hasDesktopBridge();
   const canReveal = mediaArtifactCanReveal(artifact, hasDesktopLocalMediaRevealBridge());
@@ -89,7 +122,6 @@ export const MediaArtifactCard = memo(function MediaArtifactCard({
     desktopBridgeAvailable,
   });
   const canOpenExternal = Boolean(externalTarget);
-  const canCopyImage = Boolean(canPreview && isImageLike && canWriteImageToClipboard());
   const metadataRows = useMemo(
     () => buildMetadataRows(artifact, displayPath, undefined, 6),
     [artifact, displayPath],
@@ -101,6 +133,9 @@ export const MediaArtifactCard = memo(function MediaArtifactCard({
       ? "Preview unavailable."
       : "Unsupported preview format.";
   const previewRecoveryMessage = buildPreviewRecoveryMessage({
+    canOpenViewer,
+    openViewerLabel: isVideo ? "Play" : "Preview",
+    canUseInChat,
     canOpenExternal,
     canReveal,
     revealLabel,
@@ -226,7 +261,7 @@ export const MediaArtifactCard = memo(function MediaArtifactCard({
   }, [artifact, canReveal, onInteract]);
 
   const useInChat = useCallback(() => {
-    if (!composerTarget || !previewUrl || (!isImageLike && !isVideo) || previewFailed) return;
+    if (!composerTarget || !previewUrl || (!isImageLike && !isVideo)) return;
     void fetch(previewUrl)
       .then(async (response) => {
         if (!response.ok) throw new Error(`Could not load ${artifact.title}.`);
@@ -269,15 +304,14 @@ export const MediaArtifactCard = memo(function MediaArtifactCard({
     isImageLike,
     isVideo,
     onInteract,
-    previewFailed,
     previewUrl,
   ]);
 
   const openViewer = useCallback(() => {
-    if (!canPreview) return;
+    if (!canOpenViewer) return;
     onInteract?.(artifact);
     setViewerOpen(true);
-  }, [artifact, canPreview, onInteract]);
+  }, [artifact, canOpenViewer, onInteract]);
 
   const viewer =
     viewerOpen && previewUrl ? (
@@ -318,14 +352,14 @@ export const MediaArtifactCard = memo(function MediaArtifactCard({
             className={cn(
               "relative flex aspect-[16/10] w-full items-center justify-center overflow-hidden bg-muted/35 text-muted-foreground transition-colors",
               "after:pointer-events-none after:absolute after:inset-0 after:bg-gradient-to-t after:from-black/28 after:via-transparent after:to-transparent",
-              canPreview && "cursor-zoom-in hover:bg-muted/50",
-              !canPreview && "cursor-default",
+              canOpenViewer && "cursor-zoom-in hover:bg-muted/50",
+              !canOpenViewer && "cursor-default",
             )}
             onClick={openViewer}
-            disabled={!canPreview}
+            disabled={!canOpenViewer}
             aria-label={`Preview ${artifact.title}`}
           >
-            {canPreview && isImageLike ? (
+            {canRenderPreview && isImageLike ? (
               <img
                 src={previewUrl ?? undefined}
                 alt={artifact.title}
@@ -333,7 +367,7 @@ export const MediaArtifactCard = memo(function MediaArtifactCard({
                 loading="lazy"
                 onError={() => setPreviewFailed(true)}
               />
-            ) : canPreview && isVideo ? (
+            ) : canRenderPreview && isVideo ? (
               <video
                 src={previewUrl ?? undefined}
                 className="h-full w-full bg-black object-cover"
@@ -352,7 +386,7 @@ export const MediaArtifactCard = memo(function MediaArtifactCard({
               {recent ? <MediaBadge tone="accent">Recent</MediaBadge> : null}
               {active ? <MediaBadge tone="accent">Active</MediaBadge> : null}
             </div>
-            {canPreview ? (
+            {canOpenViewer ? (
               <span className="pointer-events-none absolute bottom-2 right-2 z-10 rounded-full border border-white/14 bg-black/45 p-1 text-white opacity-0 shadow-sm backdrop-blur transition-opacity group-hover/media:opacity-100">
                 <Maximize2Icon className="size-3.5" aria-hidden />
               </span>
@@ -370,7 +404,7 @@ export const MediaArtifactCard = memo(function MediaArtifactCard({
                 {compactMetadata}
               </p>
             </div>
-            {!canPreview ? (
+            {!canRenderPreview ? (
               <div className="flex items-start gap-1.5 rounded-lg border border-warning/25 bg-warning/8 px-2 py-1.5 text-[11px] text-muted-foreground/85">
                 <AlertTriangleIcon className="mt-0.5 size-3 shrink-0 text-warning" aria-hidden />
                 <p>
@@ -387,7 +421,7 @@ export const MediaArtifactCard = memo(function MediaArtifactCard({
                 type="button"
                 size="xs"
                 variant="outline"
-                disabled={!canPreview}
+                disabled={!canOpenViewer}
                 onClick={openViewer}
                 className="bg-background/76"
               >
@@ -502,15 +536,15 @@ export const MediaArtifactCard = memo(function MediaArtifactCard({
           type="button"
           className={cn(
             "relative flex items-center justify-center overflow-hidden rounded-lg border border-border/70 bg-muted/45 text-muted-foreground transition-colors",
-            canPreview && "cursor-zoom-in hover:bg-muted/65",
-            !canPreview && "cursor-default bg-muted/30",
+            canOpenViewer && "cursor-zoom-in hover:bg-muted/65",
+            !canOpenViewer && "cursor-default bg-muted/30",
             compact ? "h-20 min-h-20 rounded-md" : "min-h-32",
           )}
           onClick={openViewer}
-          disabled={!canPreview}
+          disabled={!canOpenViewer}
           aria-label={`Preview ${artifact.title}`}
         >
-          {canPreview && isImageLike ? (
+          {canRenderPreview && isImageLike ? (
             <img
               src={previewUrl ?? undefined}
               alt={artifact.title}
@@ -518,7 +552,7 @@ export const MediaArtifactCard = memo(function MediaArtifactCard({
               loading="lazy"
               onError={() => setPreviewFailed(true)}
             />
-          ) : canPreview && isVideo ? (
+          ) : canRenderPreview && isVideo ? (
             <video
               src={previewUrl ?? undefined}
               className={cn(
@@ -538,7 +572,7 @@ export const MediaArtifactCard = memo(function MediaArtifactCard({
           ) : (
             <PreviewUnavailableState icon="image" compact={compact} label="Preview unavailable" />
           )}
-          {canPreview ? (
+          {canOpenViewer ? (
             <span className="pointer-events-none absolute bottom-2 right-2 rounded-full border border-black/10 bg-background/90 p-1 text-foreground opacity-0 shadow-sm transition-opacity group-hover/media:opacity-100">
               <Maximize2Icon className="size-3.5" aria-hidden />
             </span>
@@ -568,7 +602,7 @@ export const MediaArtifactCard = memo(function MediaArtifactCard({
           >
             {displayPath}
           </p>
-          {!canPreview ? (
+          {!canRenderPreview ? (
             <div
               className={cn(
                 "mt-2 flex items-start gap-1.5 rounded-lg border border-warning/25 bg-warning/8 px-2 py-1.5 text-xs text-muted-foreground/85",
@@ -617,7 +651,7 @@ export const MediaArtifactCard = memo(function MediaArtifactCard({
               type="button"
               size="xs"
               variant="outline"
-              disabled={!canPreview}
+              disabled={!canOpenViewer}
               onClick={openViewer}
             >
               <EyeIcon />
@@ -1142,16 +1176,22 @@ function isPositiveFiniteNumber(value: number | undefined): value is number {
 }
 
 function buildPreviewRecoveryMessage(input: {
+  readonly canOpenViewer: boolean;
+  readonly openViewerLabel: string;
+  readonly canUseInChat: boolean;
   readonly canOpenExternal: boolean;
   readonly canReveal: boolean;
   readonly revealLabel: string;
 }): string {
   const actions = [
+    ...(input.canOpenViewer ? [input.openViewerLabel] : []),
+    ...(input.canUseInChat ? ["Use in chat"] : []),
     "Copy path",
     ...(input.canOpenExternal ? ["Open externally"] : []),
     ...(input.canReveal ? [input.revealLabel] : []),
   ];
-  return `Use ${formatActionList(actions)}.`;
+  const verb = input.canOpenViewer || input.canUseInChat ? "Try" : "Use";
+  return `${verb} ${formatActionList(actions)}.`;
 }
 
 function formatActionList(actions: ReadonlyArray<string>): string {
