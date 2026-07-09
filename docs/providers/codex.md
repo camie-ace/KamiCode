@@ -27,6 +27,51 @@ Log in with Codex normally:
 codex login
 ```
 
+## GPT-5.6 Models
+
+KamiCode asks `codex app-server` for the model list for each configured account. Models appear in
+the picker when Codex reports them for that account, so rollout state and workspace admin policy can
+change what you see.
+
+As of July 9, 2026, OpenAI docs list these GPT-5.6 Codex model slugs:
+
+- `gpt-5.6`
+- `gpt-5.6-sol`
+- `gpt-5.6-terra`
+- `gpt-5.6-luna`
+
+KamiCode defaults new Codex sessions to `gpt-5.6` and defaults internal git/title/PR helper
+generation to `gpt-5.6-terra`.
+
+Short aliases are accepted in custom model fields and model-selection inputs:
+
+```text
+5.6        -> gpt-5.6
+sol        -> gpt-5.6-sol
+terra      -> gpt-5.6-terra
+luna       -> gpt-5.6-luna
+5.6-sol    -> gpt-5.6-sol
+5.6-terra  -> gpt-5.6-terra
+5.6-luna   -> gpt-5.6-luna
+```
+
+Local Codex config can also pin a model:
+
+```toml
+model = "gpt-5.6"
+model_reasoning_effort = "medium"
+```
+
+For a named variant:
+
+```toml
+model = "gpt-5.6-terra"
+model_reasoning_effort = "high"
+```
+
+If Codex reports service tiers for a model, KamiCode shows a Service Tier control and forwards the
+selected tier to Codex for the thread or turn.
+
 ## I Want Work And Personal Codex Accounts
 
 Use one real Codex home and one shadow home.

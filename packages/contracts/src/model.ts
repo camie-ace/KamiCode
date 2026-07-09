@@ -133,8 +133,8 @@ const CURSOR_DRIVER_KIND = ProviderDriverKind.make("cursor");
 const GROK_DRIVER_KIND = ProviderDriverKind.make("grok");
 const OPENCODE_DRIVER_KIND = ProviderDriverKind.make("opencode");
 
-export const DEFAULT_MODEL = "gpt-5.4";
-export const DEFAULT_GIT_TEXT_GENERATION_MODEL = "gpt-5.4-mini";
+export const DEFAULT_MODEL = "gpt-5.6";
+export const DEFAULT_GIT_TEXT_GENERATION_MODEL = "gpt-5.6-terra";
 
 export const DEFAULT_MODEL_BY_PROVIDER: Partial<Record<ProviderDriverKind, string>> = {
   [CODEX_DRIVER_KIND]: DEFAULT_MODEL,
@@ -158,6 +158,13 @@ export const MODEL_SLUG_ALIASES_BY_PROVIDER: Partial<
   Record<ProviderDriverKind, Record<string, string>>
 > = {
   [CODEX_DRIVER_KIND]: {
+    "5.6": "gpt-5.6",
+    sol: "gpt-5.6-sol",
+    "5.6-sol": "gpt-5.6-sol",
+    terra: "gpt-5.6-terra",
+    "5.6-terra": "gpt-5.6-terra",
+    luna: "gpt-5.6-luna",
+    "5.6-luna": "gpt-5.6-luna",
     "gpt-5-codex": "gpt-5.4",
     "5.4": "gpt-5.4",
     "5.3": "gpt-5.3-codex",

@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vite-plus/test";
-import { ProviderInstanceId, type ModelCapabilities } from "@t3tools/contracts";
+import {
+  DEFAULT_GIT_TEXT_GENERATION_MODEL,
+  DEFAULT_MODEL,
+  DEFAULT_MODEL_BY_PROVIDER,
+  ProviderDriverKind,
+  ProviderInstanceId,
+  type ModelCapabilities,
+} from "@t3tools/contracts";
 
 import {
   buildProviderOptionSelectionsFromDescriptors,
@@ -10,6 +17,7 @@ import {
   getProviderOptionDescriptors,
   getProviderOptionBooleanSelectionValue,
   getProviderOptionStringSelectionValue,
+  normalizeModelSlug,
 } from "./model.ts";
 
 const codexCaps: ModelCapabilities = createModelCapabilities({
@@ -60,6 +68,24 @@ const claudeCaps: ModelCapabilities = createModelCapabilities({
 });
 
 describe("descriptor helpers", () => {
+  it("uses GPT-5.6 Codex defaults", () => {
+    expect(DEFAULT_MODEL).toBe("gpt-5.6");
+    expect(DEFAULT_GIT_TEXT_GENERATION_MODEL).toBe("gpt-5.6-terra");
+    expect(DEFAULT_MODEL_BY_PROVIDER[ProviderDriverKind.make("codex")]).toBe("gpt-5.6");
+  });
+
+  it("normalizes GPT-5.6 Codex shorthand and named variants", () => {
+    const codex = ProviderDriverKind.make("codex");
+
+    expect(normalizeModelSlug("5.6", codex)).toBe("gpt-5.6");
+    expect(normalizeModelSlug("sol", codex)).toBe("gpt-5.6-sol");
+    expect(normalizeModelSlug("5.6-sol", codex)).toBe("gpt-5.6-sol");
+    expect(normalizeModelSlug("terra", codex)).toBe("gpt-5.6-terra");
+    expect(normalizeModelSlug("5.6-terra", codex)).toBe("gpt-5.6-terra");
+    expect(normalizeModelSlug("luna", codex)).toBe("gpt-5.6-luna");
+    expect(normalizeModelSlug("5.6-luna", codex)).toBe("gpt-5.6-luna");
+  });
+
   it("applies selection values to capability descriptors", () => {
     expect(
       getProviderOptionDescriptors({
