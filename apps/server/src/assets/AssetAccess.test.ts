@@ -149,6 +149,57 @@ describe("AssetAccess", () => {
     }).pipe(Effect.provide(testLayer)),
   );
 
+  it.effect(
+    "issues an exact URL for an authorized assistant-referenced file outside the root",
+    () =>
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const root = yield* fileSystem.makeTempDirectoryScoped({
+          prefix: "t3-asset-referenced-root-",
+        });
+        const outside = yield* fileSystem.makeTempDirectoryScoped({
+          prefix: "t3-asset-referenced-outside-",
+        });
+        const videoPath = path.join(outside, "edited video.mp4");
+        const siblingPath = path.join(outside, "other.mp4");
+        yield* fileSystem.writeFile(videoPath, new Uint8Array([0, 0, 0, 24]));
+        yield* fileSystem.writeFile(siblingPath, new Uint8Array([0, 0, 0, 24]));
+        const canonicalVideoPath = yield* fileSystem.realPath(videoPath);
+
+        const result = yield* issueAssetUrl({
+          resource: {
+            _tag: "workspace-file",
+            threadId: ThreadId.make("thread-1"),
+            path: videoPath,
+          },
+          workspaceRoot: root,
+          allowReferencedExternalFile: true,
+        });
+        const suffix = result.relativeUrl.slice(`${ASSET_ROUTE_PREFIX}/`.length);
+        const separatorIndex = suffix.indexOf("/");
+        const token = suffix.slice(0, separatorIndex);
+
+        expect(yield* resolveAsset(token, "edited%20video.mp4")).toEqual({
+          kind: "file",
+          path: canonicalVideoPath,
+        });
+        expect(yield* resolveAsset(token, "other.mp4")).toBeNull();
+        expect(yield* resolveAsset(token, "../edited%20video.mp4")).toBeNull();
+
+        const relativePathError = yield* issueAssetUrl({
+          resource: {
+            _tag: "workspace-file",
+            threadId: ThreadId.make("thread-1"),
+            path: "../edited video.mp4",
+          },
+          workspaceRoot: root,
+          allowReferencedExternalFile: true,
+        }).pipe(Effect.flip);
+        expect(relativePathError._tag).toBe("AssetWorkspacePathValidationError");
+      }).pipe(Effect.provide(testLayer)),
+  );
+
   it.effect("preserves non-missing canonical path failures when issuing asset URLs", () =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;

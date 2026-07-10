@@ -14,8 +14,10 @@ import {
   AssetWorkspaceRootNormalizationError,
 } from "@t3tools/contracts";
 import {
+  isWorkspaceImagePreviewPath,
   isWorkspaceExactFilePreviewPath,
   isWorkspacePreviewEntryPath,
+  isWorkspaceVideoPreviewPath,
   WORKSPACE_BROWSER_PREVIEW_EXTENSIONS,
   WORKSPACE_EXACT_FILE_PREVIEW_EXTENSIONS,
 } from "@t3tools/shared/filePreview";
@@ -149,6 +151,17 @@ const resolveCanonicalWorkspaceFile = Effect.fn("AssetAccess.resolveCanonicalWor
   },
 );
 
+const resolveCanonicalExactFile = Effect.fn("AssetAccess.resolveCanonicalExactFile")(function* (
+  filePath: string,
+) {
+  const fileSystem = yield* FileSystem.FileSystem;
+  const canonicalFile = yield* optionOnNotFound(fileSystem.realPath(filePath));
+  if (Option.isNone(canonicalFile)) return null;
+
+  const info = yield* optionOnNotFound(fileSystem.stat(canonicalFile.value));
+  return Option.isSome(info) && info.value.type === "File" ? canonicalFile.value : null;
+});
+
 const resolveCanonicalWorkspaceFileForRequest = (input: {
   readonly workspaceRoot: string;
   readonly relativePath: string;
@@ -167,6 +180,7 @@ const resolveCanonicalWorkspaceFileForRequest = (input: {
 export const issueAssetUrl = Effect.fn("AssetAccess.issueAssetUrl")(function* (input: {
   readonly resource: AssetResource;
   readonly workspaceRoot?: string;
+  readonly allowReferencedExternalFile?: boolean;
 }) {
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
@@ -192,6 +206,49 @@ export const issueAssetUrl = Effect.fn("AssetAccess.issueAssetUrl")(function* (i
         ),
       );
       const resourcePath = input.resource.path;
+      if (input.allowReferencedExternalFile) {
+        if (!path.isAbsolute(resourcePath)) {
+          return yield* new AssetWorkspacePathValidationError({
+            resource: input.resource,
+            cause: new WorkspacePaths.WorkspacePathOutsideRootError({
+              workspaceRoot,
+              relativePath: resourcePath,
+            }),
+          });
+        }
+        if (
+          !isWorkspaceImagePreviewPath(resourcePath) &&
+          !isWorkspaceVideoPreviewPath(resourcePath)
+        ) {
+          return yield* new AssetPreviewTypeValidationError({
+            resource: input.resource,
+          });
+        }
+        const canonicalFile = yield* resolveCanonicalExactFile(resourcePath).pipe(
+          Effect.mapError(
+            (cause) =>
+              new AssetWorkspaceAssetInspectionError({
+                resource: input.resource,
+                cause,
+              }),
+          ),
+        );
+        if (!canonicalFile) {
+          return yield* new AssetWorkspaceAssetNotFoundError({
+            resource: input.resource,
+          });
+        }
+        const relativePath = path.basename(canonicalFile);
+        claims = {
+          version: 1,
+          kind: "workspace-file-exact",
+          workspaceRoot: path.dirname(canonicalFile),
+          relativePath,
+          expiresAt,
+        };
+        fileName = relativePath;
+        break;
+      }
       let relativePath: string;
       if (!path.isAbsolute(resourcePath)) {
         relativePath = resourcePath;

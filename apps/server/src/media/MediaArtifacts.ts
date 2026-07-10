@@ -69,6 +69,65 @@ export function extensionFromMediaTarget(target: string): string | null {
   return match?.[1]?.toLowerCase() ?? null;
 }
 
+function safeDecodeMediaTarget(target: string): string {
+  try {
+    return decodeURIComponent(target);
+  } catch {
+    return target;
+  }
+}
+
+function normalizeAssetPathForReferenceMatch(target: string): string {
+  return safeDecodeMediaTarget(target.trim())
+    .replace(/file:\/\/\/(?=[A-Za-z]:[\\/])/giu, "")
+    .replace(/file:\/\//giu, "")
+    .replace(/\\/g, "/")
+    .replace(/^\/(?=[A-Za-z]:\/)/u, "");
+}
+
+function isAssetPathBoundary(character: string | undefined): boolean {
+  return character === undefined || !/[A-Za-z0-9._~%/\\-]/u.test(character);
+}
+
+/**
+ * Confirms that a completed assistant message actually exposed an exact local
+ * asset path before the server grants a capability for a file outside the
+ * workspace. This keeps the fallback narrow: a client cannot turn an
+ * arbitrary absolute path into a readable asset URL.
+ */
+export function assistantMessageReferencesAssetPath(text: string, targetPath: string): boolean {
+  const normalizedTarget = normalizeAssetPathForReferenceMatch(targetPath);
+  const extension = extensionFromMediaTarget(normalizedTarget);
+  const kind = extension ? mediaKindForExtension(extension) : "unknown";
+  if (kind !== "image" && kind !== "gif" && kind !== "video") {
+    return false;
+  }
+
+  const normalizedText = normalizeAssetPathForReferenceMatch(text);
+  const caseInsensitive =
+    /^[A-Za-z]:\//u.test(normalizedTarget) || normalizedTarget.startsWith("//");
+  const comparableTarget = caseInsensitive ? normalizedTarget.toLowerCase() : normalizedTarget;
+  const comparableText = caseInsensitive ? normalizedText.toLowerCase() : normalizedText;
+
+  let fromIndex = 0;
+  while (fromIndex <= comparableText.length - comparableTarget.length) {
+    const matchIndex = comparableText.indexOf(comparableTarget, fromIndex);
+    if (matchIndex < 0) {
+      return false;
+    }
+    const matchEnd = matchIndex + comparableTarget.length;
+    if (
+      isAssetPathBoundary(comparableText[matchIndex - 1]) &&
+      isAssetPathBoundary(comparableText[matchEnd])
+    ) {
+      return true;
+    }
+    fromIndex = matchIndex + 1;
+  }
+
+  return false;
+}
+
 export function createMediaArtifact(input: {
   readonly id: string;
   readonly target: string;

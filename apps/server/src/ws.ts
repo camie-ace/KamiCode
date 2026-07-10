@@ -91,6 +91,7 @@ import * as TerminalManager from "./terminal/Manager.ts";
 import * as PreviewAutomationBroker from "./mcp/PreviewAutomationBroker.ts";
 import * as PreviewManager from "./preview/Manager.ts";
 import { issueAssetUrl } from "./assets/AssetAccess.ts";
+import { assistantMessageReferencesAssetPath } from "./media/MediaArtifacts.ts";
 import * as PortScanner from "./preview/PortScanner.ts";
 import * as WorkspaceEntries from "./workspace/WorkspaceEntries.ts";
 import * as WorkspaceFileSystem from "./workspace/WorkspaceFileSystem.ts";
@@ -1750,23 +1751,24 @@ const makeWsRpcLayer = (
           observeRpcEffect(
             WS_METHODS.assetsCreateUrl,
             Effect.gen(function* () {
-              if (input.resource._tag !== "workspace-file") {
-                return yield* issueAssetUrl({ resource: input.resource });
+              const resource = input.resource;
+              if (resource._tag !== "workspace-file") {
+                return yield* issueAssetUrl({ resource });
               }
               const thread = yield* projectionSnapshotQuery
-                .getThreadShellById(input.resource.threadId)
+                .getThreadShellById(resource.threadId)
                 .pipe(
                   Effect.mapError(
                     (cause) =>
                       new AssetWorkspaceContextResolutionError({
-                        resource: input.resource,
+                        resource,
                         cause,
                       }),
                   ),
                 );
               if (Option.isNone(thread)) {
                 return yield* new AssetWorkspaceContextNotFoundError({
-                  resource: input.resource,
+                  resource,
                 });
               }
               const project = yield* projectionSnapshotQuery
@@ -1775,20 +1777,56 @@ const makeWsRpcLayer = (
                   Effect.mapError(
                     (cause) =>
                       new AssetWorkspaceContextResolutionError({
-                        resource: input.resource,
+                        resource,
                         cause,
                       }),
                   ),
                 );
               if (Option.isNone(project)) {
                 return yield* new AssetWorkspaceContextNotFoundError({
-                  resource: input.resource,
+                  resource,
                 });
               }
+              const workspaceRoot = thread.value.worktreePath ?? project.value.workspaceRoot;
               return yield* issueAssetUrl({
-                resource: input.resource,
-                workspaceRoot: thread.value.worktreePath ?? project.value.workspaceRoot,
-              });
+                resource,
+                workspaceRoot,
+              }).pipe(
+                Effect.catchTag("AssetWorkspacePathValidationError", (outsideWorkspaceError) =>
+                  Effect.gen(function* () {
+                    const threadDetail = yield* projectionSnapshotQuery
+                      .getThreadDetailById(resource.threadId)
+                      .pipe(
+                        Effect.mapError(
+                          (cause) =>
+                            new AssetWorkspaceContextResolutionError({
+                              resource,
+                              cause,
+                            }),
+                        ),
+                      );
+                    if (Option.isNone(threadDetail)) {
+                      return yield* new AssetWorkspaceContextNotFoundError({
+                        resource,
+                      });
+                    }
+                    const isReferencedByAssistant = threadDetail.value.messages.some(
+                      (message) =>
+                        message.role === "assistant" &&
+                        !message.streaming &&
+                        assistantMessageReferencesAssetPath(message.text, resource.path),
+                    );
+                    if (!isReferencedByAssistant) {
+                      return yield* outsideWorkspaceError;
+                    }
+                    return yield* issueAssetUrl({
+                      resource,
+                      workspaceRoot,
+                      allowReferencedExternalFile: true,
+                    });
+                  }),
+                ),
+              );
             }),
             { "rpc.aggregate": "workspace" },
           ),
