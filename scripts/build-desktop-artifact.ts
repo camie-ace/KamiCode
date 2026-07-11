@@ -73,7 +73,7 @@ const RepoRoot = Effect.service(Path.Path).pipe(
 );
 const encodeJsonString = Schema.encodeEffect(Schema.UnknownFromJsonString);
 const decodeWorkspaceConfig = Schema.decodeEffect(fromYaml(WorkspaceConfig));
-const decodeNodePtyManifest = Schema.decodeUnknownEffect(
+const decodePackageVersionManifest = Schema.decodeUnknownEffect(
   Schema.fromJsonString(Schema.Struct({ version: Schema.String })),
 );
 const encodeStageWorkspaceConfig = Schema.encodeEffect(fromYaml(StageWorkspaceConfig));
@@ -287,11 +287,13 @@ const dependencyResolutionDescriptions = {
   "server-production": "production dependencies",
   "workspace-overrides": "overrides",
   "desktop-runtime": "desktop runtime dependencies",
+  "ffi-runtime": "ffi-rs runtime dependency",
 } as const;
 const DependencyResolutionKind = Schema.Literals([
   "server-production",
   "workspace-overrides",
   "desktop-runtime",
+  "ffi-runtime",
 ]);
 
 export class DesktopBuildDependencyResolutionError extends Schema.TaggedErrorClass<DesktopBuildDependencyResolutionError>()(
@@ -379,6 +381,20 @@ export class DesktopBuildNoArtifactsProducedError extends Schema.TaggedErrorClas
 ) {
   override get message(): string {
     return `Build completed but no files were produced in ${this.distPath}`;
+  }
+}
+
+export class PackagedDesktopNativeDependencyMissingError extends Schema.TaggedErrorClass<PackagedDesktopNativeDependencyMissingError>()(
+  "PackagedDesktopNativeDependencyMissingError",
+  {
+    packageName: Schema.String,
+    packagePath: Schema.String,
+    platform: BuildPlatform,
+    arch: BuildArch,
+  },
+) {
+  override get message(): string {
+    return `Packaged desktop native dependency is missing: ${this.packageName}`;
   }
 }
 
@@ -825,6 +841,30 @@ export function resolveFffNativeDependencies(
     architectures.flatMap((architecture) =>
       ["gnu", "musl"].map((libc) => [`@ff-labs/fff-bin-linux-${architecture}-${libc}`, version]),
     ),
+  );
+}
+
+export function resolveFfiNativeDependencies(
+  platform: typeof BuildPlatform.Type,
+  arch: typeof BuildArch.Type,
+  version: string,
+): Record<string, string> {
+  const architectures = arch === "universal" ? (["arm64", "x64"] as const) : [arch];
+
+  if (platform === "mac") {
+    return Object.fromEntries(
+      architectures.map((architecture) => [`@yuuang/ffi-rs-darwin-${architecture}`, version]),
+    );
+  }
+
+  if (platform === "win") {
+    return Object.fromEntries(
+      architectures.map((architecture) => [`@yuuang/ffi-rs-win32-${architecture}-msvc`, version]),
+    );
+  }
+
+  return Object.fromEntries(
+    architectures.map((architecture) => [`@yuuang/ffi-rs-linux-${architecture}-gnu`, version]),
   );
 }
 
@@ -1556,7 +1596,7 @@ const stageWslNodePtyPrebuild = Effect.fn("stageWslNodePtyPrebuild")(function* (
 
   const manifestPath = path.join(nodePtyDir, "package.json");
   const pkgRaw = yield* fs.readFileString(manifestPath);
-  const manifest = yield* decodeNodePtyManifest(pkgRaw).pipe(
+  const manifest = yield* decodePackageVersionManifest(pkgRaw).pipe(
     Effect.mapError(
       (cause) =>
         new WslNodePtyManifestReadError({
@@ -1576,6 +1616,64 @@ const stageWslNodePtyPrebuild = Effect.fn("stageWslNodePtyPrebuild")(function* (
   yield* Effect.log(
     `[desktop-artifact] Staged WSL node-pty prebuild (linux-${linuxArch}, node-pty ${nodePtyVersion}).`,
   );
+});
+
+const resolveFfiRsVersion = Effect.fn("resolveFfiRsVersion")(function* (repoRoot: string) {
+  const fs = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const manifestPath = "apps/server/node_modules/@ff-labs/fff-node -> ffi-rs/package.json";
+  const dependencyResolutionError = (cause: unknown) =>
+    new DesktopBuildDependencyResolutionError({
+      kind: "ffi-runtime",
+      manifestPath,
+      cause,
+    });
+
+  const fffManifestPath = yield* fs
+    .realPath(path.join(repoRoot, "apps/server/node_modules/@ff-labs/fff-node/package.json"))
+    .pipe(Effect.mapError(dependencyResolutionError));
+  const packageRequire = NodeModule.createRequire(fffManifestPath);
+  const ffiManifestPath = yield* Effect.try({
+    try: () => packageRequire.resolve("ffi-rs/package.json"),
+    catch: dependencyResolutionError,
+  });
+  const raw = yield* fs
+    .readFileString(ffiManifestPath)
+    .pipe(Effect.mapError(dependencyResolutionError));
+  const manifest = yield* decodePackageVersionManifest(raw).pipe(
+    Effect.mapError(dependencyResolutionError),
+  );
+  return manifest.version;
+});
+
+const assertPackagedWindowsFfiNativeDependencies = Effect.fn(
+  "assertPackagedWindowsFfiNativeDependencies",
+)(function* (input: {
+  readonly stageDistDir: string;
+  readonly arch: typeof BuildArch.Type;
+  readonly packageNames: ReadonlyArray<string>;
+}) {
+  const fs = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const unpackedNodeModulesDir = path.join(
+    input.stageDistDir,
+    "win-unpacked",
+    "resources",
+    "app.asar.unpacked",
+    "node_modules",
+  );
+
+  for (const packageName of input.packageNames) {
+    const packagePath = path.join(unpackedNodeModulesDir, ...packageName.split("/"));
+    if (!(yield* fs.exists(packagePath))) {
+      return yield* new PackagedDesktopNativeDependencyMissingError({
+        packageName,
+        packagePath,
+        platform: "win",
+        arch: input.arch,
+      });
+    }
+  }
 });
 
 const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
@@ -1635,6 +1733,7 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
         cause,
       }),
   });
+  const ffiRsVersion = yield* resolveFfiRsVersion(repoRoot);
 
   const appVersion = options.version ?? serverPackageJson.version;
   const iconAssets = resolveDesktopBuildIconAssets(appVersion);
@@ -1739,9 +1838,16 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
     yield* fs.writeFileString(macEntitlementsPath, renderMacPasskeyEntitlements(macPasskeySigning));
   }
 
+  const ffiNativeDependencies = {
+    ...resolveFfiNativeDependencies(options.platform, options.arch, ffiRsVersion),
+    ...(options.platform === "win"
+      ? resolveFfiNativeDependencies("linux", options.arch, ffiRsVersion)
+      : {}),
+  };
   const stageDependencies = {
     ...resolvedServerDependencies,
     ...resolvedDesktopRuntimeDependencies,
+    ...ffiNativeDependencies,
     ...resolveFffNativeDependencies(
       options.platform,
       options.arch,
@@ -1904,6 +2010,14 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
       distPath: stageDistDir,
       platform: options.platform,
       arch: options.arch,
+    });
+  }
+
+  if (options.platform === "win") {
+    yield* assertPackagedWindowsFfiNativeDependencies({
+      stageDistDir,
+      arch: options.arch,
+      packageNames: Object.keys(ffiNativeDependencies),
     });
   }
 

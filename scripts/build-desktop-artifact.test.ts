@@ -31,6 +31,7 @@ import {
   resolveMacPasskeySigningConfiguration,
   resolveDesktopRuntimeDependencies,
   resolveFffNativeDependencies,
+  resolveFfiNativeDependencies,
   resolveBuildOptions,
   resolveDesktopArtifactName,
   resolveDesktopBuildIconAssets,
@@ -633,6 +634,22 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
     assert.deepStrictEqual(resolveFffNativeDependencies("linux", "arm64", "0.9.4"), {
       "@ff-labs/fff-bin-linux-arm64-gnu": "0.9.4",
       "@ff-labs/fff-bin-linux-arm64-musl": "0.9.4",
+    });
+  });
+
+  it("promotes target ffi-rs binaries to direct staged dependencies", () => {
+    assert.deepStrictEqual(resolveFfiNativeDependencies("mac", "universal", "1.3.2"), {
+      "@yuuang/ffi-rs-darwin-arm64": "1.3.2",
+      "@yuuang/ffi-rs-darwin-x64": "1.3.2",
+    });
+    assert.deepStrictEqual(resolveFfiNativeDependencies("win", "x64", "1.3.2"), {
+      "@yuuang/ffi-rs-win32-x64-msvc": "1.3.2",
+    });
+    assert.deepStrictEqual(resolveFfiNativeDependencies("linux", "x64", "1.3.2"), {
+      "@yuuang/ffi-rs-linux-x64-gnu": "1.3.2",
+    });
+    assert.deepStrictEqual(resolveFfiNativeDependencies("linux", "arm64", "1.3.2"), {
+      "@yuuang/ffi-rs-linux-arm64-gnu": "1.3.2",
     });
   });
 
