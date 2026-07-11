@@ -32,6 +32,14 @@ import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 const LINUX_ICON_SIZES = [16, 22, 24, 32, 48, 64, 128, 256, 512] as const;
 const DESKTOP_APP_ID = "tech.camie.kamicode";
 const DESKTOP_PUBLISHER_NAME = "Camie Tech";
+// electron-builder derives the Windows install directory and updater cache from
+// the staged package name. Keep it distinct from upstream T3 Code so the two
+// desktop apps cannot overwrite each other when installed side by side.
+export const DESKTOP_PACKAGE_NAME = "kamicode";
+// Preserve the original KamiCode NSIS identity across the app ID rebrand. A
+// changing installer GUID creates a second uninstall entry instead of upgrading
+// the existing app, and the legacy uninstaller can later remove the new files.
+export const DESKTOP_WINDOWS_INSTALLER_GUID = "3e155f2a-a3e3-5a89-aef5-f846781094d1";
 const APPLE_TEAM_ID_PATTERN = /^[A-Z0-9]{10}$/u;
 
 const BuildPlatform = Schema.Literals(["mac", "linux", "win"]);
@@ -1445,12 +1453,12 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
   if (platform === "linux") {
     buildConfig.linux = {
       target: [target],
-      executableName: "t3code",
+      executableName: DESKTOP_PACKAGE_NAME,
       icon: "icons",
       category: "Development",
       desktop: {
         entry: {
-          StartupWMClass: "t3code",
+          StartupWMClass: DESKTOP_PACKAGE_NAME,
         },
       },
     };
@@ -1458,6 +1466,10 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
 
   if (platform === "win") {
     buildConfig.npmRebuild = false;
+    buildConfig.nsis = {
+      guid: DESKTOP_WINDOWS_INSTALLER_GUID,
+      include: "installer.nsh",
+    };
     const winConfig: Record<string, unknown> = {
       target: [target],
       icon: "icon.ico",
@@ -1752,7 +1764,7 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
     stageDependencies,
   );
   const stagePackageJson: StagePackageJson = {
-    name: "t3code",
+    name: DESKTOP_PACKAGE_NAME,
     version: appVersion,
     buildVersion: appVersion,
     t3codeCommitHash: commitHash,

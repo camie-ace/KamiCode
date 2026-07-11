@@ -1,7 +1,10 @@
+import * as NodeURL from "node:url";
+
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import * as ConfigProvider from "effect/ConfigProvider";
 import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Sink from "effect/Sink";
@@ -14,6 +17,8 @@ import {
   createStagePatchedDependencies,
   createBuildConfig,
   DESKTOP_ASAR_UNPACK,
+  DESKTOP_PACKAGE_NAME,
+  DESKTOP_WINDOWS_INSTALLER_GUID,
   InvalidMacPasskeyRpDomainError,
   InvalidMacPasskeyPublishableKeyError,
   InvalidMockUpdateServerPortError,
@@ -89,6 +94,27 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
     assert.equal(resolveDesktopProductName("0.0.17-dev.20260413.42"), "KamiCode (Dev)");
     assert.equal(resolveDesktopProductName("0.0.17-nightly.20260413.42"), "KamiCode (Nightly)");
   });
+
+  it("uses a package identity that cannot collide with upstream T3 Code", () => {
+    assert.equal(DESKTOP_PACKAGE_NAME, "kamicode");
+    assert.equal(DESKTOP_WINDOWS_INSTALLER_GUID, "3e155f2a-a3e3-5a89-aef5-f846781094d1");
+  });
+
+  it.effect("repairs the colliding nightly registration and its preserved shortcut", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const source = yield* fs.readFileString(
+        NodeURL.fileURLToPath(new URL("../apps/desktop/resources/installer.nsh", import.meta.url)),
+      );
+
+      assert.include(source, 'StrCmp $R0 "$LocalAppData\\Programs\\t3code"');
+      assert.include(
+        source,
+        `DeleteRegValue HKCU "Software\\${DESKTOP_WINDOWS_INSTALLER_GUID}" "KeepShortcuts"`,
+      );
+      assert.include(source, "d2bc2073-f4a4-53c2-aab6-e8fbd5d6a5d9");
+    }),
+  );
 
   it("uses KamiCode desktop artifact names", () => {
     assert.equal(resolveDesktopArtifactName(), "KamiCode-${version}-${arch}.${ext}");
@@ -516,6 +542,25 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
     }).pipe(Effect.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env: {} })))),
   );
 
+  it.effect("uses the KamiCode executable identity for Linux builds", () =>
+    Effect.gen(function* () {
+      const config = yield* createBuildConfig(
+        "linux",
+        "AppImage",
+        "1.2.3",
+        false,
+        false,
+        undefined,
+        undefined,
+      );
+      const linux = config.linux as Record<string, unknown>;
+      const desktop = linux.desktop as { readonly entry: Record<string, unknown> };
+
+      assert.equal(linux.executableName, "kamicode");
+      assert.equal(desktop.entry.StartupWMClass, "kamicode");
+    }).pipe(Effect.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env: {} })))),
+  );
+
   it.effect("keeps executable resource editing enabled for unsigned Windows builds", () =>
     Effect.gen(function* () {
       const config = yield* createBuildConfig(
@@ -528,9 +573,12 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
         undefined,
       );
       const win = config.win as Record<string, unknown>;
+      const nsis = config.nsis as Record<string, unknown>;
 
       assert.equal(config.appId, "tech.camie.kamicode");
       assert.equal(config.artifactName, "KamiCode-${version}-${arch}.${ext}");
+      assert.equal(nsis.guid, DESKTOP_WINDOWS_INSTALLER_GUID);
+      assert.equal(nsis.include, "installer.nsh");
       assert.equal(win.icon, "icon.ico");
       assert.equal(win.signAndEditExecutable, true);
       assert.notProperty(win, "azureSignOptions");

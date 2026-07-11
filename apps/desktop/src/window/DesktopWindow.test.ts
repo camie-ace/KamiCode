@@ -68,7 +68,7 @@ function makeFakeBrowserWindow() {
     isDestroyed: vi.fn(() => false),
     isMinimized: vi.fn(() => false),
     isVisible: vi.fn(() => true),
-    loadURL: vi.fn(() => Promise.resolve()),
+    loadURL: vi.fn((_url: string) => Promise.resolve()),
     on: vi.fn(),
     once: vi.fn(),
     restore: vi.fn(),
@@ -572,8 +572,8 @@ describe("DesktopWindow", () => {
         yield* Effect.gen(function* () {
           const desktopWindow = yield* DesktopWindow.DesktopWindow;
 
-          // 1. WSL-only boot shows the connecting splash.
-          yield* desktopWindow.showConnectingSplash;
+          // 1. Cold boot shows the startup splash.
+          yield* desktopWindow.showStartupSplash;
           assert.equal(yield* Ref.get(scenario.createCalls), 1);
 
           // 2. Backend reports ready, but opening the real main fails. The pool
@@ -588,7 +588,7 @@ describe("DesktopWindow", () => {
 
           // 3. Activating must not mistake the splash for the main window: it
           //    retries the open and brings up the real main instead of leaving
-          //    the user stranded on "Connecting to WSL".
+          //    the user stranded on the startup window.
           yield* desktopWindow.activate;
           assert.equal(yield* Ref.get(scenario.createCalls), 3);
           const registeredMain = yield* Ref.get(scenario.mainWindow);
@@ -599,7 +599,7 @@ describe("DesktopWindow", () => {
   );
 
   it.effect(
-    "re-reveals the connecting splash on activate while the backend is still cold-booting",
+    "re-reveals the startup splash on activate while the backend is still cold-booting",
     () =>
       Effect.gen(function* () {
         const splash = makeFakeBrowserWindow();
@@ -609,8 +609,12 @@ describe("DesktopWindow", () => {
         yield* Effect.gen(function* () {
           const desktopWindow = yield* DesktopWindow.DesktopWindow;
 
-          yield* desktopWindow.showConnectingSplash;
+          yield* desktopWindow.showStartupSplash;
           assert.equal(yield* Ref.get(scenario.createCalls), 1);
+          assert.include(
+            decodeURIComponent(String(splash.loadURL.mock.calls[0]?.[0] ?? "")),
+            "Starting KamiCode...",
+          );
 
           // Taskbar/dock activation during cold boot must bring the splash back
           // rather than no-op and leave it hidden until the backend finishes.
@@ -630,7 +634,7 @@ describe("DesktopWindow", () => {
       yield* Effect.gen(function* () {
         const desktopWindow = yield* DesktopWindow.DesktopWindow;
 
-        yield* desktopWindow.showConnectingSplash;
+        yield* desktopWindow.showStartupSplash;
         yield* desktopWindow.dispatchMenuAction("open-settings");
 
         assert.equal(yield* Ref.get(scenario.createCalls), 1);
@@ -649,7 +653,7 @@ describe("DesktopWindow", () => {
       yield* Effect.gen(function* () {
         const desktopWindow = yield* DesktopWindow.DesktopWindow;
 
-        yield* desktopWindow.showConnectingSplash;
+        yield* desktopWindow.showStartupSplash;
         const readyExit = yield* Effect.exit(
           desktopWindow.handleBackendReady(new URL("http://127.0.0.1:3773")),
         );

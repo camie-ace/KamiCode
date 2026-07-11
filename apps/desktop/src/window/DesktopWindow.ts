@@ -61,10 +61,9 @@ export class DesktopWindow extends Context.Service<
     readonly revealOrCreateMain: Effect.Effect<Electron.BrowserWindow, DesktopWindowError>;
     readonly activate: Effect.Effect<void, DesktopWindowError>;
     readonly createMainIfBackendReady: Effect.Effect<void, DesktopWindowError>;
-    // Show a lightweight "Connecting to WSL" splash window immediately (wsl-only
-    // mode), before the WSL backend that serves the renderer is ready. It is
-    // dismissed automatically once the real main window reveals.
-    readonly showConnectingSplash: Effect.Effect<void>;
+    // Show a lightweight startup window before the backend that serves the
+    // renderer is ready. It is dismissed once the real main window reveals.
+    readonly showStartupSplash: Effect.Effect<void>;
     // Marks the primary backend as ready so `createMainIfBackendReady` and the
     // macOS "activate without windows" path may open the real main window. The
     // renderer now always loads the local client URL (getDesktopUrl) and connects
@@ -119,15 +118,13 @@ function getInitialWindowBackgroundColor(shouldUseDarkColors: boolean): string {
   return shouldUseDarkColors ? "#0a0a0a" : "#ffffff";
 }
 
-// A self-contained "Connecting to WSL" splash, shown immediately in wsl-only
-// mode while the WSL backend (which serves the renderer) cold-boots. Inlined as
-// a data URL so it needs no bundled asset and no backend — pure CSS, no JS.
-function buildConnectingSplashDataUrl(shouldUseDarkColors: boolean): string {
+// Inlined as a data URL so startup feedback needs no bundled asset or backend.
+function buildStartupSplashDataUrl(shouldUseDarkColors: boolean): string {
   const background = getInitialWindowBackgroundColor(shouldUseDarkColors);
   const label = shouldUseDarkColors ? "#9ca3af" : "#6b7280";
   const accent = shouldUseDarkColors ? "#f8fafc" : "#1f2937";
   const track = shouldUseDarkColors ? "rgba(248,250,252,0.18)" : "rgba(31,41,55,0.18)";
-  const html = `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'"><style>html,body{margin:0;height:100%}body{background:${background};color:${label};font-family:system-ui,-apple-system,'Segoe UI',sans-serif;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;-webkit-user-select:none;user-select:none;-webkit-app-region:drag}.spinner{width:26px;height:26px;border:3px solid ${track};border-top-color:${accent};border-radius:50%;animation:spin .8s linear infinite}.label{font-size:13px}@keyframes spin{to{transform:rotate(360deg)}}</style></head><body><div class="spinner"></div><div class="label">Connecting to WSL…</div></body></html>`;
+  const html = `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'"><style>html,body{margin:0;height:100%}body{background:${background};color:${label};font-family:system-ui,-apple-system,'Segoe UI',sans-serif;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;-webkit-user-select:none;user-select:none;-webkit-app-region:drag}.spinner{width:26px;height:26px;border:3px solid ${track};border-top-color:${accent};border-radius:50%;animation:spin .8s linear infinite}.label{font-size:13px}@keyframes spin{to{transform:rotate(360deg)}}</style></head><body><div class="spinner"></div><div class="label">Starting KamiCode...</div></body></html>`;
   return `data:text/html;charset=utf-8,${encodeURIComponent(html)}`;
 }
 
@@ -255,14 +252,14 @@ export const make = Effect.gen(function* () {
   // createMainIfBackendReady, which gates the post-readiness window
   // open in development and the macOS "activate without windows" path.
   const backendReadyRef = yield* Ref.make(false);
-  // The transient "Connecting to WSL" splash window, tracked separately so it
-  // is never mistaken for the real main window.
+  // The transient startup window is tracked separately so it is never mistaken
+  // for the real main window.
   const splashWindowRef = yield* Ref.make<Option.Option<Electron.BrowserWindow>>(Option.none());
   const context = yield* Effect.context<DesktopWindowRuntimeServices>();
   const runFork = Effect.runForkWith(context);
   const runPromise = Effect.runPromiseWith(context);
 
-  const dismissConnectingSplash = Effect.gen(function* () {
+  const dismissStartupSplash = Effect.gen(function* () {
     const splash = yield* Ref.getAndSet(splashWindowRef, Option.none());
     if (Option.isSome(splash) && !splash.value.isDestroyed()) {
       splash.value.close();
@@ -270,7 +267,7 @@ export const make = Effect.gen(function* () {
   });
 
   // currentMainOrFirst / focusedMainOrFirst fall back to "any first window",
-  // which during WSL-only boot is the connecting splash. The splash is never
+  // which during cold boot is the startup splash. The splash is never
   // registered via setMain, so it must be treated as "no real main window" --
   // otherwise ensureMain/activate/dispatchMenuAction latch onto it and never
   // open (or retry) the real main. That is the failure the pool's swallowed
@@ -545,9 +542,9 @@ export const make = Effect.gen(function* () {
       revealSubscribers.push((fire) => window.webContents.once("did-finish-load", fire));
     }
     bindFirstRevealTrigger(revealSubscribers, () => {
-      // Reveal the real window, then close the connecting splash (if any) so the
+      // Reveal the real window, then close the startup splash (if any) so the
       // two don't overlap and there's no blank gap between them.
-      void runPromise(Effect.andThen(electronWindow.reveal(window), dismissConnectingSplash));
+      void runPromise(Effect.andThen(electronWindow.reveal(window), dismissStartupSplash));
     });
 
     loadApplication();
@@ -592,7 +589,7 @@ export const make = Effect.gen(function* () {
     yield* createMain;
   }).pipe(Effect.withSpan("desktop.window.createMainIfBackendReady"));
 
-  const showConnectingSplash = Effect.gen(function* () {
+  const showStartupSplash = Effect.gen(function* () {
     // Only when nothing is shown yet: no real window, no existing splash.
     const existingSplash = yield* Ref.get(splashWindowRef);
     if (Option.isSome(existingSplash)) return;
@@ -628,14 +625,14 @@ export const make = Effect.gen(function* () {
         splash.show();
       }
     });
-    void splash.loadURL(buildConnectingSplashDataUrl(shouldUseDarkColors));
-    yield* logWindowInfo("connecting splash shown");
+    void splash.loadURL(buildStartupSplashDataUrl(shouldUseDarkColors));
+    yield* logWindowInfo("startup splash shown");
   }).pipe(
     // The splash is best-effort UX — never let it fail startup.
     Effect.catch((error) =>
-      logWindowWarning("failed to show connecting splash", { message: error.message }),
+      logWindowWarning("failed to show startup splash", { message: error.message }),
     ),
-    Effect.withSpan("desktop.window.showConnectingSplash"),
+    Effect.withSpan("desktop.window.showStartupSplash"),
   );
 
   return DesktopWindow.of({
@@ -649,7 +646,7 @@ export const make = Effect.gen(function* () {
         return;
       }
       // No real main window yet. While the backend is still cold-booting,
-      // re-reveal the connecting splash so taskbar/dock activation brings it
+      // re-reveal the startup splash so taskbar/dock activation brings it
       // back instead of doing nothing. Once the backend is ready we fall
       // through to (re)create the real main -- including retrying a previously
       // failed open the pool swallowed -- rather than latching onto the splash.
@@ -664,7 +661,7 @@ export const make = Effect.gen(function* () {
       yield* createMainIfBackendReady;
     }).pipe(Effect.withSpan("desktop.window.activate")),
     createMainIfBackendReady,
-    showConnectingSplash,
+    showStartupSplash,
     handleBackendReady: Effect.fn("desktop.window.handleBackendReady")(function* (httpBaseUrl) {
       yield* Ref.set(backendReadyRef, true);
       yield* logWindowInfo("backend ready", { source: "http", url: httpBaseUrl.href });
