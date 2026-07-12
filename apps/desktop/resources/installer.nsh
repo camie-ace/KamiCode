@@ -1,4 +1,12 @@
 !macro customInit
+  # Remove shortcuts created by pre-rebrand builds. Never touch the shared
+  # t3code program directory or updater cache: an official T3 Code install may
+  # own them. The current installer recreates the correct KamiCode shortcut.
+  Delete "$DESKTOP\KamiCode (Alpha).lnk"
+  Delete "$SMPROGRAMS\KamiCode (Alpha).lnk"
+  Delete "$DESKTOP\KamiCode (Dev).lnk"
+  Delete "$SMPROGRAMS\KamiCode (Dev).lnk"
+
   # The 2026-07-10 nightly accidentally installed KamiCode into T3 Code's
   # package directory. Forget only that broken KamiCode registration so this
   # installer never launches an uninstaller from, or reuses, T3 Code's folder.

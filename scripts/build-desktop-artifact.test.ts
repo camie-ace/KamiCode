@@ -27,6 +27,7 @@ import {
   MacPasskeySigningConfigurationResolutionError,
   MissingMacPasskeyProvisioningProfileError,
   renderMacPasskeyEntitlements,
+  resolveClaudeAgentSdkNativePackages,
   resolveClerkPasskeyNativeArtifacts,
   resolveMacPasskeySigningConfiguration,
   resolveDesktopRuntimeDependencies,
@@ -40,6 +41,7 @@ import {
   resolveGitHubPublishConfig,
   resolveMockUpdateServerPort,
   resolveMockUpdateServerUrl,
+  resolvePackageManagerUserAgent,
   stageLinuxIconSize,
   STAGE_INSTALL_ARGS,
 } from "./build-desktop-artifact.ts";
@@ -116,6 +118,10 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
         `DeleteRegValue HKCU "Software\\${DESKTOP_WINDOWS_INSTALLER_GUID}" "KeepShortcuts"`,
       );
       assert.include(source, "d2bc2073-f4a4-53c2-aab6-e8fbd5d6a5d9");
+      assert.include(source, 'Delete "$DESKTOP\\KamiCode (Alpha).lnk"');
+      assert.include(source, 'Delete "$SMPROGRAMS\\KamiCode (Alpha).lnk"');
+      assert.include(source, 'Delete "$DESKTOP\\KamiCode (Dev).lnk"');
+      assert.include(source, 'Delete "$SMPROGRAMS\\KamiCode (Dev).lnk"');
     }),
   );
 
@@ -243,6 +249,13 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
         cpu: ["x64"],
       },
     });
+    assert.deepStrictEqual(createStageWorkspaceConfig({ platform: "linux", arch: "x64" }), {
+      supportedArchitectures: {
+        os: ["linux"],
+        cpu: ["x64"],
+        libc: ["glibc"],
+      },
+    });
     // Windows artifacts also bundle the same-architecture WSL (Linux, glibc) backend, so the
     // staged install must fetch its native optional deps (e.g. ffi-rs) too.
     assert.deepStrictEqual(createStageWorkspaceConfig({ platform: "win", arch: "x64" }), {
@@ -288,6 +301,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
         supportedArchitectures: {
           os: ["linux"],
           cpu: ["x64"],
+          libc: ["glibc"],
         },
         allowBuilds: {
           electron: true,
@@ -630,6 +644,20 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
     });
   });
 
+  it("uses Claude Agent SDK platform packages as packaged dependency sentinels", () => {
+    assert.deepStrictEqual(resolveClaudeAgentSdkNativePackages("mac", "universal"), [
+      "@anthropic-ai/claude-agent-sdk-darwin-arm64",
+      "@anthropic-ai/claude-agent-sdk-darwin-x64",
+    ]);
+    assert.deepStrictEqual(resolveClaudeAgentSdkNativePackages("win", "x64"), [
+      "@anthropic-ai/claude-agent-sdk-win32-x64",
+      "@anthropic-ai/claude-agent-sdk-linux-x64",
+    ]);
+    assert.deepStrictEqual(resolveClaudeAgentSdkNativePackages("linux", "arm64"), [
+      "@anthropic-ai/claude-agent-sdk-linux-arm64",
+    ]);
+  });
+
   it("resolves target Clerk passkey native artifacts", () => {
     assert.deepStrictEqual(resolveClerkPasskeyNativeArtifacts("mac", "universal"), [
       {
@@ -653,6 +681,12 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
   it("falls back to the default mock update port when the configured port is blank", () => {
     assert.equal(resolveMockUpdateServerUrl(undefined), "http://localhost:3000");
     assert.equal(resolveMockUpdateServerUrl(4123), "http://localhost:4123");
+  });
+
+  it("derives the Electron Builder package manager user agent from packageManager", () => {
+    assert.equal(resolvePackageManagerUserAgent("pnpm@11.10.0"), "pnpm/11.10.0");
+    assert.equal(resolvePackageManagerUserAgent(" yarn@4.9.2 "), "yarn/4.9.2");
+    assert.equal(resolvePackageManagerUserAgent("pnpm"), "pnpm");
   });
 
   it.effect("normalizes mock update server ports from env-style strings", () =>
