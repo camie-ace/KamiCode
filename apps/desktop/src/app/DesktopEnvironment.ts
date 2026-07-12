@@ -41,6 +41,7 @@ export class DesktopEnvironment extends Context.Service<
     readonly resourcesPath: string;
     readonly homeDirectory: string;
     readonly appDataDirectory: string;
+    readonly localAppDataDirectory: string;
     readonly baseDir: string;
     readonly stateDir: string;
     readonly desktopSettingsPath: string;
@@ -148,7 +149,25 @@ const make = Effect.fn("desktop.environment.make")(function* (
       : input.platform === "darwin"
         ? path.join(homeDirectory, "Library", "Application Support")
         : Option.getOrElse(config.xdgConfigHome, () => path.join(homeDirectory, ".config"));
-  const baseDir = Option.getOrElse(config.t3Home, () => path.join(homeDirectory, ".kamicode"));
+  const localAppDataDirectory =
+    input.platform === "win32"
+      ? Option.getOrElse(config.localAppDataDirectory, () =>
+          path.join(homeDirectory, "AppData", "Local"),
+        )
+      : appDataDirectory;
+  // Packaged KamiCode must never inherit T3 Code's identity-sensitive
+  // overrides. Development keeps the legacy names because dev-runner and
+  // existing local scripts still provide them explicitly.
+  const configuredHome = config.kamiHome.pipe(
+    Option.orElse(() => (input.isPackaged ? Option.none() : config.legacyT3Home)),
+  );
+  const configuredBackendPort = config.kamiConfiguredBackendPort.pipe(
+    Option.orElse(() => (input.isPackaged ? Option.none() : config.legacyT3ConfiguredBackendPort)),
+  );
+  const appUserModelIdOverride = config.kamiAppUserModelIdOverride.pipe(
+    Option.orElse(() => (input.isPackaged ? Option.none() : config.legacyT3AppUserModelIdOverride)),
+  );
+  const baseDir = Option.getOrElse(configuredHome, () => path.join(homeDirectory, ".kamicode"));
   const rootDir = path.resolve(input.dirname, "../../..");
   const appRoot = input.isPackaged ? input.appPath : rootDir;
   const branding = resolveDesktopAppBranding({
@@ -173,6 +192,7 @@ const make = Effect.fn("desktop.environment.make")(function* (
     resourcesPath,
     homeDirectory,
     appDataDirectory,
+    localAppDataDirectory,
     baseDir,
     stateDir,
     desktopSettingsPath: path.join(stateDir, "desktop-settings.json"),
@@ -191,13 +211,13 @@ const make = Effect.fn("desktop.environment.make")(function* (
       : path.join(input.appPath, "dev-app-update.yml"),
     devServerUrl,
     devRemoteT3ServerEntryPath: config.devRemoteT3ServerEntryPath,
-    configuredBackendPort: config.configuredBackendPort,
+    configuredBackendPort,
     commitHashOverride: config.commitHashOverride,
     otlpTracesUrl: config.otlpTracesUrl,
     otlpExportIntervalMs: config.otlpExportIntervalMs,
     branding,
     displayName,
-    appUserModelId: Option.getOrElse(config.appUserModelIdOverride, () =>
+    appUserModelId: Option.getOrElse(appUserModelIdOverride, () =>
       isDevelopment ? `${APP_ID}.dev` : APP_ID,
     ),
     linuxDesktopEntryName: isDevelopment ? "kamicode-dev.desktop" : "kamicode.desktop",

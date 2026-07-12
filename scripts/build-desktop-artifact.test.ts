@@ -105,19 +105,41 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
     assert.equal(DESKTOP_WINDOWS_INSTALLER_GUID, "3e155f2a-a3e3-5a89-aef5-f846781094d1");
   });
 
-  it.effect("repairs the colliding nightly registration and its preserved shortcut", () =>
+  it.effect("repairs legacy stable and nightly collisions without deleting T3 Code data", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const source = yield* fs.readFileString(
         NodeURL.fileURLToPath(new URL("../apps/desktop/resources/installer.nsh", import.meta.url)),
       );
 
-      assert.include(source, 'StrCmp $R0 "$LocalAppData\\Programs\\t3code"');
+      assert.include(source, '$R0 == "$LocalAppData\\Programs\\t3code"');
+      assert.include(source, "!ifndef BUILD_UNINSTALLER");
+      assert.include(source, "!macro preInit");
+      assert.isBelow(source.indexOf("!macro preInit"), source.indexOf("!macro customInit"));
       assert.include(
         source,
-        `DeleteRegValue HKCU "Software\\${DESKTOP_WINDOWS_INSTALLER_GUID}" "KeepShortcuts"`,
+        '!insertmacro forgetCollidingKamiCodeRegistration "${KAMICODE_INSTALLER_GUID}"',
       );
+      assert.include(
+        source,
+        'DeleteRegValue HKCU "Software\\${KAMICODE_INSTALLER_GUID}" "KeepShortcuts"',
+      );
+      assert.include(source, `!define KAMICODE_INSTALLER_GUID "${DESKTOP_WINDOWS_INSTALLER_GUID}"`);
       assert.include(source, "d2bc2073-f4a4-53c2-aab6-e8fbd5d6a5d9");
+      assert.include(source, 'StrCmp $R3 "owner: camie-ace"');
+      assert.include(source, 'StrCmp $R3 "repo: KamiCode"');
+      assert.include(source, 'StrCmp $R3 "owner: pingdotgg"');
+      assert.include(source, 'StrCmp $R3 "repo: t3code"');
+      assert.include(
+        source,
+        'Rename "$LocalAppData\\t3code-updater" "$LocalAppData\\kamicode-recovery\\legacy-t3code-updater"',
+      );
+      assert.include(
+        source,
+        'FileOpen $R0 "$LocalAppData\\kamicode-recovery\\legacy-t3code-collision" w',
+      );
+      assert.notInclude(source, 'RMDir /r "$LocalAppData\\Programs\\t3code"');
+      assert.notInclude(source, 'RMDir /r "$APPDATA\\t3code"');
       assert.include(source, 'Delete "$DESKTOP\\KamiCode (Alpha).lnk"');
       assert.include(source, 'Delete "$SMPROGRAMS\\KamiCode (Alpha).lnk"');
       assert.include(source, 'Delete "$DESKTOP\\KamiCode (Dev).lnk"');

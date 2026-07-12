@@ -140,6 +140,45 @@ describe("DesktopEnvironment", () => {
     }),
   );
 
+  it.effect("keeps packaged identity overrides isolated from upstream T3 Code", () =>
+    Effect.gen(function* () {
+      const legacyOnly = yield* makeEnvironment(
+        {
+          isPackaged: true,
+          appPath: "/Applications/KamiCode.app/Contents/Resources/app.asar",
+        },
+        {
+          T3CODE_HOME: "/tmp/upstream-t3",
+          T3CODE_PORT: "3773",
+          T3CODE_DESKTOP_APP_USER_MODEL_ID: "com.t3tools.t3code",
+        },
+      );
+
+      assert.equal(toPortablePath(legacyOnly.baseDir), "/Users/alice/.kamicode");
+      assert.deepEqual(legacyOnly.configuredBackendPort, Option.none());
+      assert.equal(legacyOnly.appUserModelId, "tech.camie.kamicode");
+
+      const kamiOverrides = yield* makeEnvironment(
+        {
+          isPackaged: true,
+          appPath: "/Applications/KamiCode.app/Contents/Resources/app.asar",
+        },
+        {
+          KAMICODE_HOME: "/tmp/kamicode",
+          KAMICODE_PORT: "4873",
+          KAMICODE_DESKTOP_APP_USER_MODEL_ID: "tech.camie.kamicode.custom",
+          T3CODE_HOME: "/tmp/upstream-t3",
+          T3CODE_PORT: "3773",
+          T3CODE_DESKTOP_APP_USER_MODEL_ID: "com.t3tools.t3code",
+        },
+      );
+
+      assert.equal(toPortablePath(kamiOverrides.baseDir), "/tmp/kamicode");
+      assert.deepEqual(kamiOverrides.configuredBackendPort, Option.some(4873));
+      assert.equal(kamiOverrides.appUserModelId, "tech.camie.kamicode.custom");
+    }),
+  );
+
   it.effect("does not revive the retired Dev track for legacy prerelease versions", () =>
     Effect.gen(function* () {
       const environment = yield* makeEnvironment({
@@ -156,7 +195,7 @@ describe("DesktopEnvironment", () => {
     }),
   );
 
-  it.effect("uses a configured app user model id override", () =>
+  it.effect("keeps the legacy app user model id override for development", () =>
     Effect.gen(function* () {
       const environment = yield* makeEnvironment(
         {},

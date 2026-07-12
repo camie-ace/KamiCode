@@ -73,8 +73,8 @@ function makeEnvironmentLayer(
       Layer.mergeAll(
         NodeServices.layer,
         DesktopConfig.layerTest({
-          T3CODE_HOME: baseDir,
-          T3CODE_PORT: "9999",
+          KAMICODE_HOME: baseDir,
+          KAMICODE_PORT: "9999",
           T3CODE_MODE: "desktop",
           T3CODE_DESKTOP_LAN_HOST: "192.168.1.50",
           VITE_DEV_SERVER_URL: options?.devServerUrl,
