@@ -156,8 +156,9 @@ describe("user auth bootstrap", () => {
   });
 
   it("opens desktop GitHub login in the system browser and reloads after handoff completes", async () => {
-    const testWindow = installTestBrowser("http://localhost/");
+    const testWindow = installTestBrowser("t3code://app/");
     const openExternal = vi.fn<DesktopBridge["openExternal"]>().mockResolvedValue(true);
+    const onDesktopDeviceCode = vi.fn();
     const reload = vi.fn();
     Object.defineProperty(testWindow.location, "reload", {
       configurable: true,
@@ -192,8 +193,9 @@ describe("user auth bootstrap", () => {
       .fn<typeof fetch>()
       .mockResolvedValueOnce(
         jsonResponse({
-          authorizationUrl: "https://github.com/login/oauth/authorize?state=desktop",
+          authorizationUrl: "https://github.com/login/device",
           handoffId: "handoff-1",
+          userCode: "ABCD-1234",
         }),
       )
       .mockResolvedValueOnce(
@@ -207,20 +209,33 @@ describe("user auth bootstrap", () => {
             expiresAt: "2026-04-05T00:00:00.000Z",
           },
         }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({
+          enabled: true,
+          authenticated: true,
+          provider: "github",
+          user,
+          expiresAt: "2026-04-05T00:00:00.000Z",
+        }),
       );
     vi.stubGlobal("fetch", fetchMock);
     vi.useFakeTimers();
 
-    const { startGitHubUserLogin } = await import("./environments/primary/userAuth");
-    const loginPromise = startGitHubUserLogin();
+    const {
+      __resetUserAuthBootstrapForTests,
+      resolveInitialUserAuthGateState,
+      startGitHubUserLogin,
+    } = await import("./environments/primary/userAuth");
+    const loginPromise = startGitHubUserLogin({ onDesktopDeviceCode });
     await vi.advanceTimersByTimeAsync(1_000);
     await loginPromise;
 
     expect(fetchMock).toHaveBeenNthCalledWith(
       1,
-      "http://localhost:3773/api/user/auth/github/desktop/start",
+      "t3code://app/api/user/auth/github/desktop/start",
       {
-        credentials: "omit",
+        credentials: "include",
         headers: expect.any(Headers),
         method: "POST",
         redirect: "manual",
@@ -229,14 +244,16 @@ describe("user auth bootstrap", () => {
     expect(fetchRequestAt(fetchMock, 0).headers.get("authorization")).toBe(
       "Bearer desktop-bearer-token",
     );
-    expect(openExternal).toHaveBeenCalledWith(
-      "https://github.com/login/oauth/authorize?state=desktop",
-    );
+    expect(onDesktopDeviceCode).toHaveBeenCalledWith({
+      userCode: "ABCD-1234",
+      verificationUri: "https://github.com/login/device",
+    });
+    expect(openExternal).toHaveBeenCalledWith("https://github.com/login/device");
     expect(fetchMock).toHaveBeenNthCalledWith(
       2,
-      "http://localhost:3773/api/user/auth/github/desktop/session?handoffId=handoff-1",
+      "t3code://app/api/user/auth/github/desktop/session?handoffId=handoff-1",
       {
-        credentials: "omit",
+        credentials: "include",
         headers: expect.any(Headers),
         redirect: "manual",
       },
@@ -245,6 +262,20 @@ describe("user auth bootstrap", () => {
       "Bearer desktop-bearer-token",
     );
     expect(reload).toHaveBeenCalled();
+
+    // Model the post-login renderer reload: session bootstrap stays on the
+    // same-origin desktop proxy so Electron can replay the HTTP-only cookie.
+    __resetUserAuthBootstrapForTests();
+    await expect(resolveInitialUserAuthGateState()).resolves.toEqual({
+      status: "authenticated",
+      provider: "github",
+      user,
+    });
+    expect(fetchRequestAt(fetchMock, 2).url).toBe("t3code://app/api/user/session");
+    expect(fetchRequestAt(fetchMock, 2).credentials).toBe("include");
+    expect(fetchRequestAt(fetchMock, 2).headers.get("authorization")).toBe(
+      "Bearer desktop-bearer-token",
+    );
     vi.useRealTimers();
   });
 });

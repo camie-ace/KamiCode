@@ -84,15 +84,17 @@ function iconResizeSpawnerLayer(
 }
 
 it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
-  it("resolves dedicated updater channels from prerelease versions", () => {
-    assert.equal(resolveDesktopUpdateChannel("0.0.17-dev.20260413.42"), "dev");
+  it("only resolves Stable and Nightly updater channels", () => {
     assert.equal(resolveDesktopUpdateChannel("0.0.17-nightly.20260413.42"), "nightly");
     assert.equal(resolveDesktopUpdateChannel("0.0.17"), "latest");
+    assert.throws(
+      () => resolveDesktopUpdateChannel("0.0.17-dev.20260413.42"),
+      /Dev desktop releases are no longer supported/,
+    );
   });
 
   it("switches desktop packaging product names for prerelease builds", () => {
     assert.equal(resolveDesktopProductName("0.0.17"), "KamiCode (Alpha)");
-    assert.equal(resolveDesktopProductName("0.0.17-dev.20260413.42"), "KamiCode (Dev)");
     assert.equal(resolveDesktopProductName("0.0.17-nightly.20260413.42"), "KamiCode (Nightly)");
   });
 
@@ -128,12 +130,6 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
       windowsIconIco: BRAND_ASSET_PATHS.productionWindowsIconIco,
     });
 
-    assert.deepStrictEqual(resolveDesktopBuildIconAssets("0.0.17-dev.20260413.42"), {
-      macIconPng: BRAND_ASSET_PATHS.developmentDesktopIconPng,
-      linuxIconPng: BRAND_ASSET_PATHS.developmentDesktopIconPng,
-      windowsIconIco: BRAND_ASSET_PATHS.developmentWindowsIconIco,
-    });
-
     assert.deepStrictEqual(resolveDesktopBuildIconAssets("0.0.17-nightly.20260413.42"), {
       macIconPng: BRAND_ASSET_PATHS.nightlyMacIconPng,
       linuxIconPng: BRAND_ASSET_PATHS.nightlyLinuxIconPng,
@@ -165,18 +161,6 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
           ),
         ),
       );
-      const devConfig = yield* resolveGitHubPublishConfig("dev").pipe(
-        Effect.provide(
-          ConfigProvider.layer(
-            ConfigProvider.fromEnv({
-              env: {
-                GITHUB_REPOSITORY: "pingdotgg/t3code",
-              },
-            }),
-          ),
-        ),
-      );
-
       assert.deepStrictEqual(latestConfig, {
         provider: "github",
         owner: "pingdotgg",
@@ -189,13 +173,6 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
         repo: "t3code",
         releaseType: "prerelease",
         channel: "nightly",
-      });
-      assert.deepStrictEqual(devConfig, {
-        provider: "github",
-        owner: "pingdotgg",
-        repo: "t3code",
-        releaseType: "prerelease",
-        channel: "dev",
       });
     }),
   );

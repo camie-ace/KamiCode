@@ -50,15 +50,13 @@ describe("branding", () => {
     expect(branding.APP_DISPLAY_NAME).toBe("KamiCode (Nightly)");
   });
 
-  it("normalizes hosted dev app channel metadata", async () => {
+  it("ignores the retired hosted Dev channel metadata", async () => {
     vi.stubEnv("VITE_HOSTED_APP_CHANNEL", "dev");
 
     const branding = await import("./branding");
 
-    expect(branding.HOSTED_APP_CHANNEL).toBe("dev");
-    expect(branding.HOSTED_APP_CHANNEL_LABEL).toBe("Dev");
-    expect(branding.APP_STAGE_LABEL).toBe("Dev");
-    expect(branding.APP_DISPLAY_NAME).toBe("KamiCode (Dev)");
+    expect(branding.HOSTED_APP_CHANNEL).toBeNull();
+    expect(branding.HOSTED_APP_CHANNEL_LABEL).toBeNull();
   });
 
   it("ignores unknown hosted app channels", async () => {
@@ -72,13 +70,13 @@ describe("branding", () => {
 });
 
 describe("branding logic", () => {
-  it("returns Dev for dev primary server versions", () => {
+  it("uses the fallback for retired Dev primary server versions", () => {
     expect(
       resolveServerBackedAppStageLabel({
         primaryServerVersion: "0.0.28-dev.20260616.12",
         fallbackStageLabel: "Alpha",
       }),
-    ).toBe("Dev");
+    ).toBe("Alpha");
   });
 
   it("returns Nightly for nightly primary server versions", () => {
@@ -101,7 +99,7 @@ describe("branding logic", () => {
     ).toBe("T3 Code (Nightly)");
   });
 
-  it("updates the display name for dev primary server versions", () => {
+  it("keeps the fallback display name for retired Dev primary server versions", () => {
     expect(
       resolveServerBackedAppDisplayName({
         baseName: "KamiCode",
@@ -109,7 +107,7 @@ describe("branding logic", () => {
         fallbackStageLabel: "Alpha",
         primaryServerVersion: "0.0.28-dev.20260616.12",
       }),
-    ).toBe("KamiCode (Dev)");
+    ).toBe("KamiCode (Alpha)");
   });
 
   it("keeps the fallback display name for stable primary server versions", () => {

@@ -53,7 +53,6 @@ describe("brand-assets", () => {
 
   it("maps hosted release channels to web asset brands", () => {
     expect(resolveWebAssetBrandForChannel("latest")).toBe("production");
-    expect(resolveWebAssetBrandForChannel("dev")).toBe("development");
     expect(resolveWebAssetBrandForChannel("nightly")).toBe("nightly");
   });
 });

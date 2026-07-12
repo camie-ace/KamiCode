@@ -103,12 +103,12 @@ describe("DesktopSettings", () => {
     );
   });
 
-  it("defaults packaged dev builds to the dev update channel", () => {
+  it("routes legacy Dev prerelease versions to the stable update channel", () => {
     assert.deepEqual(DesktopAppSettings.resolveDefaultDesktopSettings("0.0.17-dev.20260415.1"), {
       serverExposureMode: "local-only",
       tailscaleServeEnabled: false,
       tailscaleServePort: 443,
-      updateChannel: "dev",
+      updateChannel: "latest",
       updateChannelConfiguredByUser: false,
       wslBackendEnabled: false,
       wslOnly: false,
@@ -150,9 +150,9 @@ describe("DesktopSettings", () => {
         assert.isTrue(tailscale.changed);
         assert.equal(tailscale.settings.tailscaleServePort, 9443);
 
-        const updateChannel = yield* settings.setUpdateChannel("dev");
+        const updateChannel = yield* settings.setUpdateChannel("nightly");
         assert.isTrue(updateChannel.changed);
-        assert.equal(updateChannel.settings.updateChannel, "dev");
+        assert.equal(updateChannel.settings.updateChannel, "nightly");
         assert.equal(updateChannel.settings.updateChannelConfiguredByUser, true);
       }),
     ),
@@ -308,6 +308,23 @@ describe("DesktopSettings", () => {
           wslOnly: false,
           wslDistro: null,
         } satisfies DesktopAppSettings.DesktopSettings);
+      }),
+      { appVersion: "0.0.17-nightly.20260415.1" },
+    ),
+  );
+
+  it.effect("migrates the retired Dev update channel to stable", () =>
+    withSettings(
+      Effect.gen(function* () {
+        const settings = yield* DesktopAppSettings.DesktopAppSettings;
+        yield* writeSettingsPatch({
+          updateChannel: "dev",
+          updateChannelConfiguredByUser: true,
+        });
+
+        const loaded = yield* settings.load;
+        assert.equal(loaded.updateChannel, "latest");
+        assert.isTrue(loaded.updateChannelConfiguredByUser);
       }),
       { appVersion: "0.0.17-nightly.20260415.1" },
     ),

@@ -22,12 +22,35 @@ export interface GitHubUserLoginOptions {
 let userAuthBootstrapPromise: Promise<UserAuthGateState> | null = null;
 let resolvedAuthenticatedUserAuthGateState: UserAuthGateState | null = null;
 
+function isDesktopRenderer(): boolean {
+  return typeof window !== "undefined" && window.desktopBridge !== undefined;
+}
+
 function isSameOriginBrowserPrimary(): boolean {
   return (
     typeof window !== "undefined" &&
     window.location.origin.startsWith("http") &&
     new URL(resolvePrimaryEnvironmentHttpUrl("/")).origin === window.location.origin
   );
+}
+
+function resolvePrimaryUserAuthUrl(
+  pathname: string,
+  searchParams?: Record<string, string>,
+): string {
+  if (!isDesktopRenderer()) {
+    return resolvePrimaryEnvironmentHttpUrl(pathname, searchParams);
+  }
+
+  // Desktop production and development both expose the renderer through a
+  // same-origin custom protocol. Its main-process proxy owns the local HTTP
+  // cookie jar, so user-auth requests must travel through that proxy instead
+  // of bypassing it with a cross-origin loopback fetch.
+  const url = new URL(pathname, window.location.href);
+  if (searchParams) {
+    url.search = new URLSearchParams(searchParams).toString();
+  }
+  return url.toString();
 }
 
 async function fetchPrimaryUserAuth(
@@ -41,10 +64,10 @@ async function fetchPrimaryUserAuth(
     headers.set("authorization", `Bearer ${bearerToken}`);
   }
 
-  return fetch(resolvePrimaryEnvironmentHttpUrl(pathname, searchParams), {
+  return fetch(resolvePrimaryUserAuthUrl(pathname, searchParams), {
     ...requestInit,
     headers,
-    credentials: isSameOriginBrowserPrimary() ? "include" : "omit",
+    credentials: isDesktopRenderer() || isSameOriginBrowserPrimary() ? "include" : "omit",
     redirect: requestInit.redirect ?? "manual",
   });
 }

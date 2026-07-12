@@ -1,5 +1,6 @@
 import type { AuthSessionState } from "@t3tools/contracts";
 import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
+import { CheckIcon, CopyIcon } from "lucide-react";
 import React, { startTransition, useEffect, useRef, useState, useCallback } from "react";
 
 import { APP_DISPLAY_NAME } from "../../branding";
@@ -11,6 +12,7 @@ import {
   submitServerAuthCredential,
 } from "../../environments/primary";
 import { readHostedPairingRequest } from "../../hostedPairing";
+import { useCopyToClipboard } from "../../hooks/useCopyToClipboard";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { useAtomCommand } from "../../state/use-atom-command";
@@ -331,15 +333,10 @@ export function GitHubLoginSurface({ errorMessage }: { errorMessage?: string }) 
         </p>
 
         {desktopDeviceCode ? (
-          <div className="mt-5 rounded-lg border border-border/70 bg-background/55 px-3 py-3 text-sm leading-relaxed">
-            <p className="text-muted-foreground">Enter this code in the GitHub browser window.</p>
-            <p className="mt-2 font-mono text-lg font-semibold tracking-[0.14em]">
-              {desktopDeviceCode.userCode}
-            </p>
-            <p className="mt-1 text-xs text-muted-foreground">
-              {desktopDeviceCode.verificationUri}
-            </p>
-          </div>
+          <GitHubDeviceCode
+            {...desktopDeviceCode}
+            onCopyError={(error) => setLoginError(error.message)}
+          />
         ) : null}
 
         {loginError ? (
@@ -362,6 +359,44 @@ export function GitHubLoginSurface({ errorMessage }: { errorMessage?: string }) 
           </Button>
         </div>
       </section>
+    </div>
+  );
+}
+
+export function GitHubDeviceCode({
+  userCode,
+  verificationUri,
+  onCopyError,
+}: {
+  readonly userCode: string;
+  readonly verificationUri: string;
+  readonly onCopyError?: (error: Error) => void;
+}) {
+  const { copyToClipboard: copyDeviceCode, isCopied } = useCopyToClipboard({
+    target: "GitHub device code",
+    onError: (error) => onCopyError?.(error),
+  });
+
+  return (
+    <div className="mt-5 rounded-lg border border-border/70 bg-background/55 px-3 py-3 text-sm leading-relaxed">
+      <p className="text-muted-foreground">Enter this code in the GitHub browser window.</p>
+      <div className="mt-2 flex items-center justify-between gap-3">
+        <p className="font-mono text-lg font-semibold tracking-[0.14em]">{userCode}</p>
+        <Button
+          aria-label={isCopied ? "GitHub device code copied" : "Copy GitHub device code"}
+          onClick={() => copyDeviceCode(userCode)}
+          size="icon-sm"
+          title={isCopied ? "Copied" : "Copy code"}
+          variant="ghost"
+        >
+          {isCopied ? (
+            <CheckIcon className="size-4 text-primary" />
+          ) : (
+            <CopyIcon className="size-4" />
+          )}
+        </Button>
+      </div>
+      <p className="mt-1 text-xs text-muted-foreground">{verificationUri}</p>
     </div>
   );
 }

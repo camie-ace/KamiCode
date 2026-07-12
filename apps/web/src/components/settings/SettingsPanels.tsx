@@ -156,7 +156,6 @@ function ProviderLastChecked({ lastCheckedAt }: { lastCheckedAt: string | null }
 
 const DESKTOP_UPDATE_CHANNEL_LABELS = {
   latest: "Stable",
-  dev: "Dev",
   nightly: "Nightly",
 } as const satisfies Record<DesktopUpdateChannel, string>;
 
@@ -317,7 +316,7 @@ function AboutVersionSection() {
       {hasDesktopBridge ? (
         <SettingsRow
           title="Update track"
-          description="Stable follows full releases. Dev follows dev prereleases. Nightly follows the nightly desktop channel."
+          description="Stable follows full releases. Nightly follows the nightly desktop channel."
           control={
             <Select
               value={selectedUpdateChannel}
@@ -335,9 +334,6 @@ function AboutVersionSection() {
               <SelectPopup align="end" alignItemWithTrigger={false}>
                 <SelectItem hideIndicator value="latest">
                   Stable
-                </SelectItem>
-                <SelectItem hideIndicator value="dev">
-                  Dev
                 </SelectItem>
                 <SelectItem hideIndicator value="nightly">
                   Nightly
@@ -365,10 +361,7 @@ function AboutVersionSection() {
               </SelectTrigger>
               <SelectPopup align="end" alignItemWithTrigger={false}>
                 <SelectItem hideIndicator value="latest">
-                  Latest
-                </SelectItem>
-                <SelectItem hideIndicator value="dev">
-                  Dev
+                  Stable
                 </SelectItem>
                 <SelectItem hideIndicator value="nightly">
                   Nightly

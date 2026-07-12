@@ -470,7 +470,7 @@ describe("DesktopUpdates", () => {
     ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
   });
 
-  it.effect("persists channel changes through the settings service", () => {
+  it.effect("persists Nightly channel changes through the settings service", () => {
     const harness = makeHarness();
 
     return Effect.scoped(
@@ -479,20 +479,20 @@ describe("DesktopUpdates", () => {
         const updates = yield* DesktopUpdates.DesktopUpdates;
         yield* updates.configure;
 
-        const state = yield* updates.setChannel("dev");
+        const state = yield* updates.setChannel("nightly");
         const persistedSettings = yield* settings.get;
 
-        assert.equal(state.channel, "dev");
-        assert.equal(harness.channel(), "dev");
+        assert.equal(state.channel, "nightly");
+        assert.equal(harness.channel(), "nightly");
         assert.isTrue(harness.allowPrerelease());
-        assert.isTrue(harness.allowDowngrade());
-        assert.equal(persistedSettings.updateChannel, "dev");
+        assert.isFalse(harness.allowDowngrade());
+        assert.equal(persistedSettings.updateChannel, "nightly");
         assert.equal(persistedSettings.updateChannelConfiguredByUser, true);
       }),
     ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
   });
 
-  it.effect("enables nightly prereleases without leaving downgrade checks enabled", () => {
+  it.effect("disables prereleases after returning from Nightly to Stable", () => {
     const harness = makeHarness();
 
     return Effect.scoped(
@@ -500,11 +500,12 @@ describe("DesktopUpdates", () => {
         const updates = yield* DesktopUpdates.DesktopUpdates;
         yield* updates.configure;
 
-        const state = yield* updates.setChannel("nightly");
+        yield* updates.setChannel("nightly");
+        const state = yield* updates.setChannel("latest");
 
-        assert.equal(state.channel, "nightly");
-        assert.equal(harness.channel(), "nightly");
-        assert.isTrue(harness.allowPrerelease());
+        assert.equal(state.channel, "latest");
+        assert.equal(harness.channel(), "latest");
+        assert.isFalse(harness.allowPrerelease());
         assert.isFalse(harness.allowDowngrade());
       }),
     ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));

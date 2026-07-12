@@ -327,7 +327,7 @@ export const make = Effect.gen(function* () {
   ) {
     yield* Effect.annotateCurrentSpan({ channel });
     const allowsPrerelease = channel !== "latest";
-    const allowDowngrade = channel === "dev";
+    const allowDowngrade = false;
     yield* electronUpdater.setChannel(channel);
     yield* electronUpdater.setAllowPrerelease(allowsPrerelease);
     yield* electronUpdater.setAllowDowngrade(allowDowngrade);

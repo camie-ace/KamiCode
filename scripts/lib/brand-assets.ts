@@ -15,8 +15,6 @@ export const BRAND_ASSET_PATHS = {
   nightlyWebFavicon32Png: "assets/nightly/blueprint-web-favicon-32x32.png",
   nightlyWebAppleTouchIconPng: "assets/nightly/blueprint-web-apple-touch-180.png",
 
-  developmentDesktopIconPng: "assets/dev/blueprint-macos-1024.png",
-  developmentWindowsIconIco: "assets/dev/blueprint-windows.ico",
   developmentWebFaviconIco: "assets/dev/blueprint-web-favicon.ico",
   developmentWebFavicon16Png: "assets/dev/blueprint-web-favicon-16x16.png",
   developmentWebFavicon32Png: "assets/dev/blueprint-web-favicon-32x32.png",
@@ -25,14 +23,11 @@ export const BRAND_ASSET_PATHS = {
 
 export type WebAssetBrand = "development" | "nightly" | "production";
 
-export const WEB_ASSET_CHANNELS = ["latest", "dev", "nightly"] as const;
+export const WEB_ASSET_CHANNELS = ["latest", "nightly"] as const;
 
 export type WebAssetChannel = (typeof WEB_ASSET_CHANNELS)[number];
 
 export function resolveWebAssetBrandForChannel(channel: WebAssetChannel): WebAssetBrand {
-  if (channel === "dev") {
-    return "development";
-  }
   return channel === "nightly" ? "nightly" : "production";
 }
 

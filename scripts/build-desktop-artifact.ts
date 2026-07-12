@@ -1340,7 +1340,7 @@ export function resolveDesktopRuntimeDependencies(
   return resolveCatalogDependencies(runtimeDependencies, catalog, "apps/desktop");
 }
 
-export type DesktopBuildUpdateChannel = "latest" | "dev" | "nightly";
+export type DesktopBuildUpdateChannel = "latest" | "nightly";
 
 export const resolveGitHubPublishConfig = Effect.fn("resolveGitHubPublishConfig")(function* (
   updateChannel: DesktopBuildUpdateChannel,
@@ -1370,21 +1370,13 @@ export const resolveGitHubPublishConfig = Effect.fn("resolveGitHubPublishConfig"
 
 export function resolveDesktopUpdateChannel(version: string): DesktopBuildUpdateChannel {
   if (/-dev\.\d{8}\.\d+$/.test(version)) {
-    return "dev";
+    throw new Error("Dev desktop releases are no longer supported.");
   }
   return /-nightly\.\d{8}\.\d+$/.test(version) ? "nightly" : "latest";
 }
 
 export function resolveDesktopBuildIconAssets(version: string): DesktopBuildIconAssets {
   const updateChannel = resolveDesktopUpdateChannel(version);
-  if (updateChannel === "dev") {
-    return {
-      macIconPng: BRAND_ASSET_PATHS.developmentDesktopIconPng,
-      linuxIconPng: BRAND_ASSET_PATHS.developmentDesktopIconPng,
-      windowsIconIco: BRAND_ASSET_PATHS.developmentWindowsIconIco,
-    };
-  }
-
   if (updateChannel === "nightly") {
     return {
       macIconPng: BRAND_ASSET_PATHS.nightlyMacIconPng,
@@ -1407,9 +1399,6 @@ export function resolveMockUpdateServerUrl(mockUpdateServerPort: number | undefi
 export function resolveDesktopProductName(version: string): string {
   const baseProductName = desktopPackageJson.productName ?? "KamiCode (Alpha)";
   const updateChannel = resolveDesktopUpdateChannel(version);
-  if (updateChannel === "dev") {
-    return baseProductName.replace(/\([^)]*\)$/, "(Dev)");
-  }
   if (updateChannel === "nightly") {
     return baseProductName.replace(/\([^)]*\)$/, "(Nightly)");
   }

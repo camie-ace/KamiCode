@@ -85,6 +85,7 @@ describe("ElectronProtocol", () => {
       assert.isNull(forwardedHeaders.get("origin"));
       assert.isNull(forwardedHeaders.get("referer"));
       assert.isNull(forwardedHeaders.get("sec-fetch-site"));
+      assert.equal(netFetchMock.mock.calls[0]?.[1]?.credentials, "include");
       assert.deepEqual(unhandleMock.mock.calls, [["t3code-dev"]]);
     }).pipe(Effect.provide(ElectronProtocol.layer)),
   );

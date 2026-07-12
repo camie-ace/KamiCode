@@ -149,6 +149,10 @@ async function proxyRequest(
   const init: RequestInit = {
     method: request.method,
     headers: makeProxiedRequestHeaders(request.headers),
+    // The custom renderer protocol is the same-origin gateway for the local
+    // backend. Keep its HTTP-only user session in Electron's default session
+    // so authentication survives renderer reloads and desktop restarts.
+    credentials: "include",
   };
   if (request.method !== "GET" && request.method !== "HEAD") {
     init.body = request.body;

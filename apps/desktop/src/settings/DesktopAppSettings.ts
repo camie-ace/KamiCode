@@ -1,6 +1,5 @@
 import {
   DesktopServerExposureModeSchema,
-  DesktopUpdateChannelSchema,
   type DesktopServerExposureMode,
   type DesktopUpdateChannel,
 } from "@t3tools/contracts";
@@ -49,6 +48,10 @@ export interface DesktopSettingsChange {
 
 export const DEFAULT_TAILSCALE_SERVE_PORT = 443;
 
+// Read the retired Dev value long enough to migrate existing installations,
+// but never expose or persist it as a supported update channel again.
+const PersistedDesktopUpdateChannelSchema = Schema.Literals(["latest", "dev", "nightly"]);
+
 export const DEFAULT_DESKTOP_SETTINGS: DesktopSettings = {
   serverExposureMode: "local-only",
   tailscaleServeEnabled: false,
@@ -64,7 +67,7 @@ const DesktopSettingsDocument = Schema.Struct({
   serverExposureMode: Schema.optionalKey(DesktopServerExposureModeSchema),
   tailscaleServeEnabled: Schema.optionalKey(Schema.Boolean),
   tailscaleServePort: Schema.optionalKey(Schema.Number),
-  updateChannel: Schema.optionalKey(DesktopUpdateChannelSchema),
+  updateChannel: Schema.optionalKey(PersistedDesktopUpdateChannelSchema),
   updateChannelConfiguredByUser: Schema.optionalKey(Schema.Boolean),
   // Newer form of the WSL toggle. `wslMode` is still accepted on load so
   // existing on-disk settings keep working; on the next persist we write the
@@ -163,9 +166,13 @@ function normalizeDesktopSettingsDocument(
   appVersion: string,
 ): DesktopSettings {
   const defaultSettings = resolveDefaultDesktopSettings(appVersion);
-  const parsedUpdateChannel = Option.fromNullishOr(parsed.updateChannel);
+  const retiredDevChannel = parsed.updateChannel === "dev";
+  const parsedUpdateChannel = Option.fromNullishOr(
+    retiredDevChannel ? "latest" : parsed.updateChannel,
+  );
   const isLegacySettings = parsed.updateChannelConfiguredByUser === undefined;
   const updateChannelConfiguredByUser =
+    retiredDevChannel ||
     parsed.updateChannelConfiguredByUser === true ||
     (isLegacySettings && Option.contains(parsedUpdateChannel, "nightly"));
 

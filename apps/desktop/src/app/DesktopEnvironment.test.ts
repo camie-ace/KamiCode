@@ -140,7 +140,7 @@ describe("DesktopEnvironment", () => {
     }),
   );
 
-  it.effect("labels packaged dev releases and defaults them to the dev update channel", () =>
+  it.effect("does not revive the retired Dev track for legacy prerelease versions", () =>
     Effect.gen(function* () {
       const environment = yield* makeEnvironment({
         isPackaged: true,
@@ -149,10 +149,10 @@ describe("DesktopEnvironment", () => {
 
       assert.deepEqual(environment.branding, {
         baseName: "KamiCode",
-        stageLabel: "Dev",
-        displayName: "KamiCode (Dev)",
+        stageLabel: "Alpha",
+        displayName: "KamiCode (Alpha)",
       });
-      assert.equal(environment.defaultDesktopSettings.updateChannel, "dev");
+      assert.equal(environment.defaultDesktopSettings.updateChannel, "latest");
     }),
   );
 
