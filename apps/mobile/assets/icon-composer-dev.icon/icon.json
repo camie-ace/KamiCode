@@ -18,7 +18,7 @@
           "image-name": "T3.svg",
           "name": "T3",
           "position": {
-            "scale": 10,
+            "scale": 1,
             "translation-in-points": [0, 0]
           }
         },

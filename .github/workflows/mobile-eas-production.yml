@@ -1,15 +1,15 @@
 name: Mobile EAS Production
 
-# Production builds and OTA updates run from CI (Linux) — never from a laptop.
+# Production builds and OTA updates run from CI (Linux), not from a laptop.
 # Under the fingerprint runtime-version policy the fingerprint must be computed
 # in the same OS/pnpm as the EAS build; a macOS `eas build` computes a different
 # fingerprint (platform-specific deps + pnpm version) and errors. On this Linux
-# runner, with corepack pinning pnpm 10.24 in eas.json, local == build.
+# runner, with the package manager pinned in eas.json, local == build.
 on:
   workflow_dispatch:
     inputs:
       mode:
-        description: "build (+ auto-submit to TestFlight) or update (OTA)"
+        description: "Build a store artifact or publish an OTA update"
         required: true
         type: choice
         default: build
@@ -29,15 +29,22 @@ on:
         description: "OTA update message (mode=update only)"
         required: false
         type: string
+      submit:
+        description: "Submit a completed store build (requires configured store credentials)"
+        required: true
+        type: boolean
+        default: false
 
 jobs:
   production:
     name: EAS Production ${{ inputs.mode }}
-    runs-on: blacksmith-8vcpu-ubuntu-2404
+    runs-on: ubuntu-latest
     permissions:
       contents: read
     env:
       APP_VARIANT: production
+      KAMICODE_MOBILE_EXPO_OWNER: ${{ vars.KAMICODE_MOBILE_EXPO_OWNER }}
+      KAMICODE_MOBILE_EXPO_PROJECT_ID: ${{ vars.KAMICODE_MOBILE_EXPO_PROJECT_ID }}
       NODE_OPTIONS: --max-old-space-size=8192
     steps:
       - id: expo-token
@@ -45,11 +52,11 @@ jobs:
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
         run: |
-          if [ -n "$EXPO_TOKEN" ]; then
+          if [ -n "$EXPO_TOKEN" ] && [ -n "$KAMICODE_MOBILE_EXPO_PROJECT_ID" ]; then
             echo "present=true" >> "$GITHUB_OUTPUT"
           else
             echo "present=false" >> "$GITHUB_OUTPUT"
-            echo "EXPO_TOKEN is not available; skipping EAS production job."
+            echo "EXPO_TOKEN or KAMICODE_MOBILE_EXPO_PROJECT_ID is unavailable; skipping EAS production job."
           fi
 
       - name: Checkout
@@ -90,14 +97,24 @@ jobs:
         working-directory: apps/mobile
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
-        run: eas env:pull production --non-interactive
+        run: eas env:pull production --path ../../.env.local --non-interactive
 
       - name: Build and submit
         if: steps.expo-token.outputs.present == 'true' && inputs.mode == 'build'
         working-directory: apps/mobile
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
-        run: eas build --platform ${{ inputs.platform }} --profile production --auto-submit --non-interactive --no-wait
+        run: |
+          submit_args=()
+          if [ "${{ inputs.submit }}" = "true" ]; then
+            submit_args+=(--auto-submit)
+          fi
+          eas build \
+            --platform ${{ inputs.platform }} \
+            --profile production \
+            --non-interactive \
+            --no-wait \
+            "${submit_args[@]}"
 
       - name: Publish OTA update
         if: steps.expo-token.outputs.present == 'true' && inputs.mode == 'update'

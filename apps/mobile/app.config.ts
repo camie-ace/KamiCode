@@ -8,9 +8,12 @@ const repoEnv = loadRepoEnv();
 Object.assign(process.env, repoEnv);
 
 const APP_VARIANT = resolveAppVariant(repoEnv.APP_VARIANT);
-const isIosPersonalTeamBuild = repoEnv.T3CODE_IOS_PERSONAL_TEAM === "1";
+const isIosPersonalTeamBuild =
+  (repoEnv.KAMICODE_IOS_PERSONAL_TEAM ?? repoEnv.T3CODE_IOS_PERSONAL_TEAM) === "1";
 
-const personalTeamBundleIdentifier = repoEnv.T3CODE_IOS_PERSONAL_TEAM_BUNDLE_ID?.trim();
+const personalTeamBundleIdentifier = (
+  repoEnv.KAMICODE_IOS_PERSONAL_TEAM_BUNDLE_ID ?? repoEnv.T3CODE_IOS_PERSONAL_TEAM_BUNDLE_ID
+)?.trim();
 const IOS_BUNDLE_IDENTIFIER_PATTERN = /^[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+$/;
 
 if (
@@ -19,9 +22,16 @@ if (
     !IOS_BUNDLE_IDENTIFIER_PATTERN.test(personalTeamBundleIdentifier))
 ) {
   throw new Error(
-    "T3CODE_IOS_PERSONAL_TEAM_BUNDLE_ID must be a reverse-DNS identifier such as com.example.t3code when T3CODE_IOS_PERSONAL_TEAM=1.",
+    "KAMICODE_IOS_PERSONAL_TEAM_BUNDLE_ID must be a reverse-DNS identifier such as com.example.kamicode when KAMICODE_IOS_PERSONAL_TEAM=1.",
   );
 }
+
+const appleTeamId = (repoEnv.KAMICODE_APPLE_TEAM_ID ?? repoEnv.T3CODE_APPLE_TEAM_ID)
+  ?.trim()
+  .toUpperCase();
+const relyingParty = repoEnv.KAMICODE_MOBILE_RELYING_PARTY?.trim();
+const expoOwner = repoEnv.KAMICODE_MOBILE_EXPO_OWNER?.trim();
+const expoProjectId = repoEnv.KAMICODE_MOBILE_EXPO_PROJECT_ID?.trim();
 
 const VARIANT_CONFIG: Record<
   AppVariant,
@@ -36,31 +46,31 @@ const VARIANT_CONFIG: Record<
   }
 > = {
   development: {
-    appName: "T3 Code Dev",
-    scheme: "t3code-dev",
+    appName: "KamiCode Dev",
+    scheme: "kamicode-dev",
     iosIcon: "./assets/icon-composer-dev.icon",
     splashIcon: "./assets/splash-icon-dev.png",
-    iosBundleIdentifier: "com.t3tools.t3code.dev",
-    androidPackage: "com.t3tools.t3code.dev",
-    relyingParty: "clerk.t3.codes",
+    iosBundleIdentifier: "tech.camie.kamicode.dev",
+    androidPackage: "tech.camie.kamicode.dev",
+    relyingParty,
   },
   preview: {
-    appName: "T3 Code Preview",
-    scheme: "t3code-preview",
+    appName: "KamiCode Preview",
+    scheme: "kamicode-preview",
     iosIcon: "./assets/icon-composer-prod.icon",
     splashIcon: "./assets/splash-icon-prod.png",
-    iosBundleIdentifier: "com.t3tools.t3code.preview",
-    androidPackage: "com.t3tools.t3code.preview",
-    relyingParty: "clerk.t3.codes",
+    iosBundleIdentifier: "tech.camie.kamicode.preview",
+    androidPackage: "tech.camie.kamicode.preview",
+    relyingParty,
   },
   production: {
-    appName: "T3 Code",
-    scheme: "t3code",
+    appName: "KamiCode",
+    scheme: "kamicode",
     iosIcon: "./assets/icon-composer-prod.icon",
     splashIcon: "./assets/splash-icon-prod.png",
-    iosBundleIdentifier: "com.t3tools.t3code",
-    androidPackage: "com.t3tools.t3code",
-    relyingParty: "clerk.t3.codes",
+    iosBundleIdentifier: "tech.camie.kamicode",
+    androidPackage: "tech.camie.kamicode",
+    relyingParty,
   },
 };
 
@@ -96,7 +106,7 @@ const widgetsPlugin: NonNullable<ExpoConfig["plugins"]>[number] = [
       {
         name: "AgentActivity",
         displayName: "Agent Activity",
-        description: "Shows the current state of active T3 Code agents.",
+        description: "Shows the current state of active KamiCode agents.",
         supportedFamilies: ["systemSmall", "systemMedium", "accessoryRectangular"],
       },
     ],
@@ -109,7 +119,7 @@ const widgetsPlugin: NonNullable<ExpoConfig["plugins"]>[number] = [
 
 const config: ExpoConfig = {
   name: variant.appName,
-  slug: "t3-code",
+  slug: "kamicode",
   platforms: ["ios", "android"],
   scheme: variant.scheme,
   version: "0.1.0",
@@ -123,30 +133,30 @@ const config: ExpoConfig = {
   orientation: "portrait",
   icon: "./assets/icon.png",
   userInterfaceStyle: "automatic",
-  updates: {
-    enabled: true,
-    url: "https://u.expo.dev/d763fcb8-d37c-41ea-a773-b54a0ab4a454",
-    checkAutomatically: "ON_LOAD",
-    fallbackToCacheTimeout: 0,
-  },
+  updates: expoProjectId
+    ? {
+        enabled: true,
+        url: `https://u.expo.dev/${expoProjectId}`,
+        checkAutomatically: "ON_LOAD",
+        fallbackToCacheTimeout: 0,
+      }
+    : { enabled: false },
   ios: {
     icon: variant.iosIcon,
     supportsTablet: true,
     bundleIdentifier: variant.iosBundleIdentifier,
-    // Pin code signing to the T3 Tools team so non-interactive `expo run:ios`
-    // does not fall back to a personal team (which cannot sign app groups,
-    // Sign in with Apple, or push notification entitlements).
-    appleTeamId: "ARK85ZXQ4Z",
-    associatedDomains: [
-      `applinks:${variant.relyingParty}`,
-      `webcredentials:${variant.relyingParty}`,
-    ],
+    // Production signing is owned by KamiCode. A fresh clone intentionally has
+    // no baked-in Apple team or associated domain from the upstream project.
+    appleTeamId: appleTeamId || undefined,
+    associatedDomains: variant.relyingParty
+      ? [`applinks:${variant.relyingParty}`, `webcredentials:${variant.relyingParty}`]
+      : undefined,
     infoPlist: {
       NSAppTransportSecurity: {
         NSAllowsArbitraryLoads: true,
       },
       NSLocalNetworkUsageDescription:
-        "Allow T3 Code to connect to T3 Code servers on your local network or tailnet.",
+        "Allow KamiCode to connect to KamiCode environments on your local network or tailnet.",
       ITSAppUsesNonExemptEncryption: false,
     },
   },
@@ -154,9 +164,8 @@ const config: ExpoConfig = {
     icon: "./assets/icon.png",
     package: variant.androidPackage,
     adaptiveIcon: {
-      backgroundColor: "#E6F4FE",
+      backgroundColor: "#000000",
       foregroundImage: "./assets/android-icon-foreground.png",
-      backgroundImage: "./assets/android-icon-background.png",
       monochromeImage: "./assets/android-icon-monochrome.png",
     },
     // Opts into OnBackInvokedCallback-based back dispatch (Android 13+).
@@ -207,7 +216,7 @@ const config: ExpoConfig = {
         androidIcons: {
           shortcut_icon: {
             foregroundImage: "./assets/android-icon-foreground.png",
-            backgroundColor: "#E6F4FE",
+            backgroundColor: "#000000",
           },
         },
       },
@@ -215,7 +224,7 @@ const config: ExpoConfig = {
     [
       "expo-camera",
       {
-        cameraPermission: "Allow T3 Code to access your camera so you can scan pairing QR codes.",
+        cameraPermission: "Allow KamiCode to access your camera so you can scan pairing QR codes.",
         barcodeScannerEnabled: true,
       },
     ],
@@ -224,7 +233,7 @@ const config: ExpoConfig = {
       {
         image: variant.splashIcon,
         resizeMode: "contain",
-        backgroundColor: "#ffffff",
+        backgroundColor: "#000000",
         imageWidth: 220,
         dark: {
           image: variant.splashIcon,
@@ -264,11 +273,13 @@ const config: ExpoConfig = {
     appVariant: APP_VARIANT,
     iosPersonalTeamBuild: isIosPersonalTeamBuild,
     relay: {
-      url: repoEnv.T3CODE_RELAY_URL ?? null,
+      url: repoEnv.KAMICODE_RELAY_URL ?? repoEnv.T3CODE_RELAY_URL ?? null,
     },
     clerk: {
-      publishableKey: repoEnv.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY ?? null,
-      jwtTemplate: repoEnv.EXPO_PUBLIC_CLERK_JWT_TEMPLATE ?? null,
+      publishableKey:
+        repoEnv.KAMICODE_CLERK_PUBLISHABLE_KEY ?? repoEnv.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY ?? null,
+      jwtTemplate:
+        repoEnv.KAMICODE_CLERK_JWT_TEMPLATE ?? repoEnv.EXPO_PUBLIC_CLERK_JWT_TEMPLATE ?? null,
     },
     // Native Google sign-in credentials. @clerk/expo reads these from `extra`
     // under their exact env-var names (not nested), and its config plugin reads
@@ -280,15 +291,20 @@ const config: ExpoConfig = {
     EXPO_PUBLIC_CLERK_GOOGLE_ANDROID_CLIENT_ID: repoEnv.EXPO_PUBLIC_CLERK_GOOGLE_ANDROID_CLIENT_ID,
     EXPO_PUBLIC_CLERK_GOOGLE_IOS_URL_SCHEME: repoEnv.EXPO_PUBLIC_CLERK_GOOGLE_IOS_URL_SCHEME,
     observability: {
-      tracesUrl: repoEnv.EXPO_PUBLIC_OTLP_TRACES_URL ?? "https://api.axiom.co/v1/traces",
-      tracesDataset: repoEnv.EXPO_PUBLIC_OTLP_TRACES_DATASET ?? null,
-      tracesToken: repoEnv.EXPO_PUBLIC_OTLP_TRACES_TOKEN ?? null,
+      tracesUrl:
+        repoEnv.KAMICODE_MOBILE_OTLP_TRACES_URL ??
+        repoEnv.EXPO_PUBLIC_OTLP_TRACES_URL ??
+        "https://api.axiom.co/v1/traces",
+      tracesDataset:
+        repoEnv.KAMICODE_MOBILE_OTLP_TRACES_DATASET ??
+        repoEnv.EXPO_PUBLIC_OTLP_TRACES_DATASET ??
+        null,
+      tracesToken:
+        repoEnv.KAMICODE_MOBILE_OTLP_TRACES_TOKEN ?? repoEnv.EXPO_PUBLIC_OTLP_TRACES_TOKEN ?? null,
     },
-    eas: {
-      projectId: "d763fcb8-d37c-41ea-a773-b54a0ab4a454",
-    },
+    ...(expoProjectId ? { eas: { projectId: expoProjectId } } : {}),
   },
-  owner: "pingdotgg",
+  ...(expoOwner ? { owner: expoOwner } : {}),
 };
 
 export default config;

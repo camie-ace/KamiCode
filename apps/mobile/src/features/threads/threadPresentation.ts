@@ -13,7 +13,8 @@ export type ThreadStatusKind =
   | "working"
   | "connecting"
   | "error"
-  | "plan-ready";
+  | "plan-ready"
+  | "triggered";
 
 export interface ThreadStatusPresentation extends StatusTone {
   readonly kind: ThreadStatusKind;
@@ -121,6 +122,18 @@ export function resolveThreadStatus(
       textClassName: "text-violet-700 dark:text-violet-300",
       iconColor: "#bf5af2",
       iconBackground: "rgba(191,90,242,0.22)",
+      pulse: false,
+    };
+  }
+
+  if (thread.startedBy?.kind === "trigger") {
+    return {
+      kind: "triggered",
+      label: "Triggered",
+      pillClassName: "bg-cyan-500/12 dark:bg-cyan-500/16",
+      textClassName: "text-cyan-700 dark:text-cyan-300",
+      iconColor: "#32ade6",
+      iconBackground: "rgba(50,173,230,0.22)",
       pulse: false,
     };
   }

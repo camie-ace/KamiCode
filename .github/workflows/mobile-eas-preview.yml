@@ -6,13 +6,15 @@ on:
 jobs:
   preview:
     name: EAS Preview
-    if: github.repository == 'pingdotgg/t3code'
-    runs-on: blacksmith-8vcpu-ubuntu-2404
+    if: github.repository == 'camie-ace/KamiCode'
+    runs-on: ubuntu-latest
     permissions:
       contents: read
       pull-requests: write
     env:
       APP_VARIANT: preview
+      KAMICODE_MOBILE_EXPO_OWNER: ${{ vars.KAMICODE_MOBILE_EXPO_OWNER }}
+      KAMICODE_MOBILE_EXPO_PROJECT_ID: ${{ vars.KAMICODE_MOBILE_EXPO_PROJECT_ID }}
       NODE_OPTIONS: --max-old-space-size=8192
       MOBILE_VERSION_POLICY: fingerprint
     steps:
@@ -21,11 +23,11 @@ jobs:
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
         run: |
-          if [ -n "$EXPO_TOKEN" ]; then
+          if [ -n "$EXPO_TOKEN" ] && [ -n "$KAMICODE_MOBILE_EXPO_PROJECT_ID" ]; then
             echo "present=true" >> "$GITHUB_OUTPUT"
           else
             echo "present=false" >> "$GITHUB_OUTPUT"
-            echo "EXPO_TOKEN is not available; skipping EAS preview."
+            echo "EXPO_TOKEN or KAMICODE_MOBILE_EXPO_PROJECT_ID is unavailable; skipping EAS preview."
           fi
 
       - name: Checkout
@@ -66,7 +68,7 @@ jobs:
         working-directory: apps/mobile
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
-        run: eas env:pull preview --non-interactive
+        run: eas env:pull preview --path ../../.env.local --non-interactive
 
       - name: Deploy with fingerprint check
         if: steps.expo-token.outputs.present == 'true'

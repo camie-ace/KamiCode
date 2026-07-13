@@ -47,6 +47,11 @@ import {
 import { ControlPill, ControlPillMenu } from "../../components/ControlPill";
 import { ProviderIcon } from "../../components/ProviderIcon";
 import type { DraftComposerImageAttachment } from "../../lib/composerImages";
+import {
+  isMobileInteractionMode,
+  MOBILE_INTERACTION_MODE_OPTIONS,
+  mobileInteractionModeLabel,
+} from "../../lib/interactionModeOptions";
 import { buildModelOptions, groupByProvider } from "../../lib/modelOptions";
 import { useScaledTextRole } from "../settings/appearance/useScaledTextRole";
 import type { RemoteClientConnectionState } from "../../lib/connection";
@@ -360,7 +365,7 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
 
     if (composerTrigger.kind === "slash-command") {
       const q = composerTrigger.query.toLowerCase();
-      const allBuiltIn = [
+      const allBuiltIn: Array<Extract<ComposerCommandItem, { readonly type: "slash-command" }>> = [
         {
           id: "cmd:model",
           type: "slash-command" as const,
@@ -368,20 +373,13 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
           label: "/model",
           description: "Switch model",
         },
-        {
-          id: "cmd:plan",
+        ...MOBILE_INTERACTION_MODE_OPTIONS.map((option) => ({
+          id: `cmd:${option.id}`,
           type: "slash-command" as const,
-          command: "plan",
-          label: "/plan",
-          description: "Switch to plan mode",
-        },
-        {
-          id: "cmd:default",
-          type: "slash-command" as const,
-          command: "default",
-          label: "/default",
-          description: "Switch to default mode",
-        },
+          command: option.id,
+          label: `/${option.id}`,
+          description: `Switch to ${option.title.toLowerCase()} mode`,
+        })),
       ];
       const builtIn = allBuiltIn.filter((item) => item.command.includes(q));
 
@@ -511,7 +509,7 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
     // the app is foregrounded and the activity token can be registered.
     armAgentAwarenessLiveActivityForLocalWork({
       threadTitle: props.selectedThread.title,
-      projectTitle: props.environmentLabel ?? "T3 Code",
+      projectTitle: props.environmentLabel ?? "KamiCode",
     });
     try {
       await onSendMessage();
@@ -529,10 +527,7 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
     (item: ComposerCommandItem) => {
       if (!composerTrigger) return;
 
-      if (
-        item.type === "slash-command" &&
-        (item.command === "plan" || item.command === "default")
-      ) {
+      if (item.type === "slash-command" && isMobileInteractionMode(item.command)) {
         const result = replaceTextRange(
           draftMessage,
           composerTrigger.rangeStart,
@@ -644,14 +639,11 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
       {
         id: "options-interaction",
         title: "Interaction",
-        subtitle: currentInteractionMode === "plan" ? "Plan" : "Default",
-        subactions: [
-          { id: "options:interaction:default", title: "Default" },
-          { id: "options:interaction:plan", title: "Plan" },
-        ].map((option) => {
-          const value = option.id.replace("options:interaction:", "");
+        subtitle: mobileInteractionModeLabel(currentInteractionMode),
+        subactions: MOBILE_INTERACTION_MODE_OPTIONS.map((option) => {
+          const value = option.id;
           return {
-            id: option.id,
+            id: `options:interaction:${option.id}`,
             title: option.title,
             state: currentInteractionMode === value ? ("on" as const) : undefined,
           };

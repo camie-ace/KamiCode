@@ -263,7 +263,7 @@ function RootStackLayout(props: {
 }) {
   useAgentNotificationNavigation();
   useThreadOutboxDrain();
-  // Presents the T3 Connect onboarding sheet after an in-session sign-in.
+  // Presents the Kami Connect onboarding sheet after an in-session sign-in.
   useConnectOnboardingNavigation();
   // Launcher app shortcuts: routes shortcut taps and tracks opened threads.
   useAppShortcuts(props.state);
@@ -443,7 +443,7 @@ export const RootStack = createNativeStackNavigator({
         // Root screenOptions hide headers; formSheets that want the native
         // title bar opt back in with the sheet header preset.
         ...SHEET_SOLID_HEADER_OPTIONS,
-        title: "Set up T3 Connect",
+        title: "Set up Kami Connect",
         gestureEnabled: true,
         presentation: "formSheet",
         sheetAllowedDetents: [0.6, 0.95],

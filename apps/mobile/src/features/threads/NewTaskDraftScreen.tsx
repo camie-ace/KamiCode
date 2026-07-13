@@ -29,6 +29,10 @@ import { ComposerSurface } from "./ThreadComposer";
 import { makeTurnCommandMetadata } from "../../lib/commandMetadata";
 import { convertPastedImagesToAttachments, pickComposerImages } from "../../lib/composerImages";
 import {
+  MOBILE_INTERACTION_MODE_OPTIONS,
+  mobileInteractionModeLabel,
+} from "../../lib/interactionModeOptions";
+import {
   applyProviderOptionMenuEvent,
   buildProviderOptionMenuActions,
   providerOptionsConfigurationLabel,
@@ -290,14 +294,11 @@ export function NewTaskDraftScreen(props: {
       {
         id: "options-interaction",
         title: "Interaction",
-        subtitle: flow.interactionMode === "plan" ? "Plan" : "Default",
-        subactions: [
-          { id: "options:interaction:default", title: "Default" },
-          { id: "options:interaction:plan", title: "Plan" },
-        ].map((option) => {
-          const value = option.id.replace("options:interaction:", "");
+        subtitle: mobileInteractionModeLabel(flow.interactionMode),
+        subactions: MOBILE_INTERACTION_MODE_OPTIONS.map((option) => {
+          const value = option.id;
           return {
-            id: option.id,
+            id: `options:interaction:${option.id}`,
             title: option.title,
             state: flow.interactionMode === value ? ("on" as const) : undefined,
           };

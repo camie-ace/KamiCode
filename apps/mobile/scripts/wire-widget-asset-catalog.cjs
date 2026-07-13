@@ -16,7 +16,18 @@ const xcodePath = require.resolve("xcode", {
 const xcode = require(xcodePath);
 const { addWidgetAssetCatalog } = require("../plugins/lib/addWidgetAssetCatalog.cjs");
 
-const pbxprojPath = path.join(__dirname, "..", "ios", "T3CodeDev.xcodeproj", "project.pbxproj");
+const iosDirectory = path.join(__dirname, "..", "ios");
+const xcodeProjects = fs
+  .readdirSync(iosDirectory, { withFileTypes: true })
+  .filter((entry) => entry.isDirectory() && entry.name.endsWith(".xcodeproj"));
+
+if (xcodeProjects.length !== 1) {
+  throw new Error(
+    `Expected one generated Xcode project in ${iosDirectory}, found ${xcodeProjects.length}.`,
+  );
+}
+
+const pbxprojPath = path.join(iosDirectory, xcodeProjects[0].name, "project.pbxproj");
 const proj = xcode.project(pbxprojPath);
 proj.parseSync();
 
