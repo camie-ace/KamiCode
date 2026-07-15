@@ -1002,6 +1002,7 @@ packages:
 
   '@astrojs/check@0.9.9':
     resolution: {integrity: sha512-A5UW8uIuErLWEoRQvzgXpO1gTjUFtK8r7nU2Z7GewAMxUb7bPvpk11qaKKgxqXlHJWlAvaaxy+Xg28A6bmQ1Tg==}
+    hasBin: true
     peerDependencies:
       typescript: ^5.0.0 || ^6.0.0
 
@@ -1077,6 +1078,7 @@ packages:
 
   '@astrojs/language-server@2.16.10':
     resolution: {integrity: sha512-87VQ/5GSdHlRnUA+hGuerYyIGAj+9RbZmATyuKLEUePinUXhQ5YkRnRrHhOD9sSi5JOErLjrLkHnfZFEvGrV8w==}
+    hasBin: true
     peerDependencies:
       prettier: ^3.0.0
       prettier-plugin-astro: '>=0.11.0'
@@ -2452,6 +2454,7 @@ packages:
 
   '@expo/cli@56.1.16':
     resolution: {integrity: sha512-VBQn0mqAwc67b9Cn0RVXyeodghomAx5xGRhA/bXaQzuxDjMQk0zIOb6pXMZX7yiIwJW66UZt/zQiJNSv6aWJYw==}
+    hasBin: true
     peerDependencies:
       expo: '*'
       expo-router: '*'
@@ -5436,6 +5439,7 @@ packages:
   alchemy@https://pkg.ing/alchemy/078ff00:
     resolution: {integrity: sha512-+yX8sLZZSS5EfHHiO5vKHK782VMo1MkcvMGaHeOLoLSGTFWMT+wRqU5CX+LOOPXyymuMWW9cydg8Hg3c9/u1bw==, tarball: https://pkg.ing/alchemy/078ff00}
     version: 2.0.0-beta.51
+    hasBin: true
     peerDependencies:
       '@effect/platform-bun': 4.0.0-beta.78
       '@effect/platform-node': 4.0.0-beta.78
@@ -5573,6 +5577,7 @@ packages:
   astro@7.0.3:
     resolution: {integrity: sha512-CK+G+Tl2DMV1EXCwVG45vyurxf2IfRTklMxDhRKn+tst9Yl8rWXpudL62Fa6zin5Bt968FBvuyASj1aJShROZg==}
     engines: {node: '>=22.12.0', npm: '>=9.6.5', pnpm: '>=7.1.0'}
+    hasBin: true
     peerDependencies:
       '@astrojs/markdown-remark': 7.2.0
     peerDependenciesMeta:
@@ -6898,6 +6903,7 @@ packages:
 
   expo-updates@56.0.19:
     resolution: {integrity: sha512-tTSPYO5h8wDA6a+wQ2v/SRdnOdz29x0npGHCv+4Ev31Fz5r05Ii1Wgfh3BlTXNz8mikMReDsZCf6YN71YeQKpw==}
+    hasBin: true
     peerDependencies:
       expo: '*'
       expo-dev-client: '*'
@@ -6922,6 +6928,7 @@ packages:
 
   expo@56.0.12:
     resolution: {integrity: sha512-FxgdI/Yqva6iJOThZIHfvxlKPxs4EC4uScUnEswwSArR/Fj9k430O13R590LcOQTsdNsjIs+GBHwjfoAY6vmAQ==}
+    hasBin: true
     peerDependencies:
       '@expo/dom-webview': '*'
       '@expo/metro-runtime': '*'
@@ -8436,6 +8443,7 @@ packages:
   msw@2.12.11:
     resolution: {integrity: sha512-dVg20zi2I2EvnwH/+WupzsOC2mCa7qsIhyMAWtfRikn6RKtwL9+7SaF1IQ5LyZry4tlUtf6KyTVhnlQiZXozTQ==}
     engines: {node: '>=18'}
+    hasBin: true
     peerDependencies:
       typescript: '>= 4.8.x'
     peerDependenciesMeta:
@@ -9112,6 +9120,7 @@ packages:
 
   react-grab@0.1.44:
     resolution: {integrity: sha512-bDEwBdI90ljq2lhUtPqmWis/HwYB/CvfT0m5i+P9F83Pt0Ot8o9XL8v00s9jcWzdQUlsFDzmq2FO2CHUe8JY8A==}
+    hasBin: true
     peerDependencies:
       react: '>=17.0.0'
     peerDependenciesMeta:
@@ -9242,6 +9251,7 @@ packages:
   react-native@0.85.3:
     resolution: {integrity: sha512-HN/fGC+3nZVcDNcw7gfbM/DuqZAvI9Mz+/SxuhODaua4JY0BPzhfTzWXRyTR4mRgMHmShTPpH2PYMTxvZrsdZA==}
     engines: {node: ^20.19.4 || ^22.13.0 || ^24.3.0 || >= 25.0.0}
+    hasBin: true
     peerDependencies:
       '@react-native/jest-preset': 0.85.3
       '@types/react': ^19.1.1
@@ -10024,6 +10034,7 @@ packages:
   tsdown@0.20.3:
     resolution: {integrity: sha512-qWOUXSbe4jN8JZEgrkc/uhJpC8VN2QpNu3eZkBWwNuTEjc/Ik1kcc54ycfcQ5QPRHeu9OQXaLfCI3o7pEJgB2w==}
     engines: {node: '>=20.19.0'}
+    hasBin: true
     peerDependencies:
       '@arethetypeswrong/core': ^0.18.1
       '@vitejs/devtools': '*'
@@ -10197,6 +10208,7 @@ packages:
   unrun@0.2.39:
     resolution: {integrity: sha512-h9FxYVpztY/wwq+bauLOh6Y3CWu2IVeRLq5lxzneBiIU9Tn86OGp9xiQrGhnYspAmg5dzdY0Cc8+Y70kuTARCg==}
     engines: {node: '>=20.19.0'}
+    hasBin: true
     peerDependencies:
       synckit: ^0.11.11
     peerDependenciesMeta:
@@ -10273,6 +10285,7 @@ packages:
 
   update-browserslist-db@1.2.3:
     resolution: {integrity: sha512-Js0m9cx+qOgDxo0eMiFGEueWztz+d4+M3rGlmKPT+T4IS/jP4ylw3Nwpu6cpTTP8R1MAC1kF4VbdLt3ARf209w==}
+    hasBin: true
     peerDependencies:
       browserslist: '>= 4.21.0'
 
