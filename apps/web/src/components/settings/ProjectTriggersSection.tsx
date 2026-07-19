@@ -608,9 +608,10 @@ export default function ProjectTriggersSection({
                   autoFocus
                   placeholder="Morning project check"
                   value={form.name}
-                  onChange={(event) =>
-                    setForm((current) => ({ ...current, name: event.currentTarget.value }))
-                  }
+                  onChange={(event) => {
+                    const value = event.currentTarget.value;
+                    setForm((current) => ({ ...current, name: value }));
+                  }}
                 />
               </div>
               <div className="space-y-1.5">
@@ -619,12 +620,13 @@ export default function ProjectTriggersSection({
                   id="project-trigger-description"
                   placeholder="Why this trigger exists"
                   value={form.description}
-                  onChange={(event) =>
+                  onChange={(event) => {
+                    const value = event.currentTarget.value;
                     setForm((current) => ({
                       ...current,
-                      description: event.currentTarget.value,
-                    }))
-                  }
+                      description: value,
+                    }));
+                  }}
                 />
               </div>
               <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_11rem]">
@@ -634,9 +636,10 @@ export default function ProjectTriggersSection({
                     id="project-trigger-schedule"
                     placeholder="0 9 * * 1-5"
                     value={form.schedule}
-                    onChange={(event) =>
-                      setForm((current) => ({ ...current, schedule: event.currentTarget.value }))
-                    }
+                    onChange={(event) => {
+                      const value = event.currentTarget.value;
+                      setForm((current) => ({ ...current, schedule: value }));
+                    }}
                   />
                 </div>
                 <div className="space-y-1.5">
@@ -644,9 +647,10 @@ export default function ProjectTriggersSection({
                   <Input
                     id="project-trigger-timezone"
                     value={form.timezone}
-                    onChange={(event) =>
-                      setForm((current) => ({ ...current, timezone: event.currentTarget.value }))
-                    }
+                    onChange={(event) => {
+                      const value = event.currentTarget.value;
+                      setForm((current) => ({ ...current, timezone: value }));
+                    }}
                   />
                 </div>
               </div>
@@ -673,9 +677,10 @@ export default function ProjectTriggersSection({
                   id="project-trigger-prompt"
                   placeholder="Check the project status and summarize anything that needs attention."
                   value={form.prompt}
-                  onChange={(event) =>
-                    setForm((current) => ({ ...current, prompt: event.currentTarget.value }))
-                  }
+                  onChange={(event) => {
+                    const value = event.currentTarget.value;
+                    setForm((current) => ({ ...current, prompt: value }));
+                  }}
                 />
               </div>
               <label className="flex items-center justify-between gap-3 rounded-md border border-border/70 px-3 py-2 text-sm">

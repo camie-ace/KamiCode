@@ -208,7 +208,7 @@ confidentiality.
 
 ## 5. Preserve native connector ownership
 
-A trigger must be created on the `24HR Development Cycle` KamiCode project with
+A trigger must be created on the `24HR Control Plane` KamiCode project with
 the same Codex provider instance that owns the installed GitHub and Jira
 connected apps. Dispatch preserves the trigger's `projectId`, complete
 `modelSelection` (including `instanceId`), runtime mode, interaction mode, and
