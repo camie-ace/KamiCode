@@ -16,6 +16,7 @@ import {
   AuthRelayWriteScope,
   AuthTerminalOperateScope,
   AuthAccessReadScope,
+  AuthAccessWriteScope,
   AuthAccessStreamError,
   type AuthAccessStreamEvent,
   type AuthEnvironmentScope,
@@ -45,8 +46,9 @@ import {
   ProjectWriteFileError,
   ProjectTriggerFireError,
   ProjectTriggerNotFoundError,
+  ProjectTriggerRunNotFoundError,
+  ProjectTriggerValidationError,
   type ProjectTriggerRecord,
-  type ProjectTriggerRunRecord,
   ProjectTriggerStoreError,
   type ProjectTriggerStreamEvent,
   ProviderInstanceId,
@@ -119,19 +121,32 @@ import * as VcsProjectConfig from "./vcs/VcsProjectConfig.ts";
 import * as VcsProcess from "./vcs/VcsProcess.ts";
 import * as PairingGrantStore from "./auth/PairingGrantStore.ts";
 import * as SessionStore from "./auth/SessionStore.ts";
+import { ServerSecretStore } from "./auth/ServerSecretStore.ts";
 import { failEnvironmentAuthInvalid, failEnvironmentInternal } from "./auth/http.ts";
 import { makeProjectTriggerRunRow } from "./projectTriggers/commands.ts";
+import {
+  projectTriggerWebhookDescriptor,
+  projectTriggerWebhookEndpointPath,
+  toProjectTriggerRunRecord,
+} from "./projectTriggers/records.ts";
 import {
   ProjectTriggerId,
   ProjectTriggerRepository,
 } from "./projectTriggers/Services/ProjectTriggerRepository.ts";
 import type {
+  ProjectTriggerRepositoryChange,
   ProjectTriggerRow,
   ProjectTriggerRunRow,
 } from "./projectTriggers/Services/ProjectTriggerRepository.ts";
 import { ProjectTriggerScheduler } from "./projectTriggers/Services/ProjectTriggerScheduler.ts";
 import { ProjectTriggerService } from "./projectTriggers/Services/ProjectTriggerService.ts";
 import { computeProjectTriggerNextFireAt } from "./projectTriggers/schedule.ts";
+import {
+  deriveProjectTriggerWebhookSecret,
+  encodeProjectTriggerWebhookSecret,
+  PROJECT_TRIGGER_WEBHOOK_MASTER_SECRET_NAME,
+  projectTriggerWebhookRunKey,
+} from "./projectTriggers/webhookSecurity.ts";
 import * as RelayClient from "@t3tools/shared/relayClient";
 const isOrchestrationDispatchCommandError = Schema.is(OrchestrationDispatchCommandError);
 const isProjectTriggerStoreError = Schema.is(ProjectTriggerStoreError);
@@ -349,6 +364,10 @@ const RPC_REQUIRED_SCOPE = new Map<string, AuthEnvironmentScope>([
   [WS_METHODS.projectTriggersUpdate, AuthOrchestrationOperateScope],
   [WS_METHODS.projectTriggersDelete, AuthOrchestrationOperateScope],
   [WS_METHODS.projectTriggersFire, AuthOrchestrationOperateScope],
+  [WS_METHODS.projectTriggersGetRun, AuthOrchestrationReadScope],
+  [WS_METHODS.projectTriggersCancelRun, AuthOrchestrationOperateScope],
+  [WS_METHODS.projectTriggersRetryRun, AuthOrchestrationOperateScope],
+  [WS_METHODS.projectTriggersRotateWebhookSecret, AuthAccessWriteScope],
 ]);
 
 function toAuthAccessStreamEvent(
@@ -442,6 +461,7 @@ const makeWsRpcLayer = (
       const projectTriggerRepository = yield* ProjectTriggerRepository;
       const projectTriggerService = yield* ProjectTriggerService;
       const projectTriggerScheduler = yield* ProjectTriggerScheduler;
+      const serverSecretStore = yield* ServerSecretStore;
       const authorizationError = (requiredScope: AuthEnvironmentScope) =>
         new EnvironmentAuthorizationError({
           message: `The authenticated token is missing required scope: ${requiredScope}.`,
@@ -522,6 +542,10 @@ const makeWsRpcLayer = (
         | "update"
         | "delete"
         | "fire"
+        | "getRun"
+        | "cancelRun"
+        | "retryRun"
+        | "rotateWebhookSecret"
         | "listRuns"
         | "subscribe";
 
@@ -631,55 +655,15 @@ const makeWsRpcLayer = (
               branch: row.bootstrap?.createThread?.branch ?? null,
               worktreePath: row.bootstrap?.createThread?.worktreePath ?? null,
             },
+            webhook: projectTriggerWebhookDescriptor(row),
             lastRunId: latestRun?.runId ?? projectTriggerLastRunId(row),
             lastRunAt: latestRun?.fireAt ?? row.lastFireAt,
-            lastRunStatus: latestRun ? projectTriggerRunStatus(latestRun.status) : null,
+            lastRunStatus: latestRun?.status ?? null,
             nextRunAt: row.nextFireAt,
             createdAt: row.createdAt,
             updatedAt: row.updatedAt,
           } satisfies ProjectTriggerRecord;
         });
-
-      const projectTriggerRunStatus = (
-        status: ProjectTriggerRunRow["status"],
-      ): ProjectTriggerRunRecord["status"] => {
-        switch (status) {
-          case "queued":
-            return "queued";
-          case "claimed":
-            return "starting";
-          case "dispatched":
-            return "succeeded";
-          case "failed":
-            return "failed";
-          case "skipped":
-            return "cancelled";
-        }
-      };
-
-      const toProjectTriggerRunRecord = (
-        run: ProjectTriggerRunRow,
-        trigger: ProjectTriggerRow,
-        initiator: ProjectTriggerRunRecord["initiator"],
-      ): ProjectTriggerRunRecord => ({
-        id: run.runId,
-        triggerId: run.triggerId,
-        projectId: trigger.projectId,
-        initiator,
-        status: projectTriggerRunStatus(run.status),
-        threadId: run.threadId,
-        scheduledFor: run.fireAt,
-        startedAt: run.claimedAt ?? run.dispatchedAt,
-        completedAt: run.completedAt,
-        error:
-          run.failureDetail !== null
-            ? { message: run.failureDetail }
-            : run.skipReason !== null
-              ? { message: run.skipReason, code: "skipped" }
-              : null,
-        createdAt: run.queuedAt,
-        updatedAt: run.completedAt ?? run.dispatchedAt ?? run.claimedAt ?? run.queuedAt,
-      });
 
       const getActiveProjectTriggerRow = (
         triggerId: ProjectTriggerRow["triggerId"],
@@ -696,6 +680,45 @@ const makeWsRpcLayer = (
             return Effect.succeed(row.value);
           }),
         );
+
+      const getProjectTriggerRun = (
+        runId: ProjectTriggerRunRow["runId"],
+        operation: ProjectTriggerStoreOperation,
+      ): Effect.Effect<
+        { readonly run: ProjectTriggerRunRow; readonly trigger: ProjectTriggerRow },
+        ProjectTriggerRunNotFoundError | ProjectTriggerNotFoundError | ProjectTriggerStoreError
+      > =>
+        Effect.gen(function* () {
+          const run = yield* projectTriggerRepository
+            .getRunById({ runId })
+            .pipe(
+              Effect.mapError((cause) =>
+                makeProjectTriggerStoreError(
+                  operation,
+                  "Failed to load project trigger run.",
+                  cause,
+                ),
+              ),
+            );
+          if (Option.isNone(run)) {
+            return yield* new ProjectTriggerRunNotFoundError({ runId });
+          }
+          const trigger = yield* projectTriggerRepository
+            .getTriggerById({ triggerId: run.value.triggerId })
+            .pipe(
+              Effect.mapError((cause) =>
+                makeProjectTriggerStoreError(
+                  operation,
+                  "Failed to load project trigger for run.",
+                  cause,
+                ),
+              ),
+            );
+          if (Option.isNone(trigger)) {
+            return yield* new ProjectTriggerNotFoundError({ triggerId: run.value.triggerId });
+          }
+          return { run: run.value, trigger: trigger.value };
+        });
 
       const saveProjectTriggerFromCreateInput = (
         input: Parameters<typeof projectTriggerService.saveTrigger>[0],
@@ -729,8 +752,13 @@ const makeWsRpcLayer = (
                     .pipe(
                       Effect.map((runs) =>
                         runs
-                          .filter((run) => run.status === "queued" || run.status === "claimed")
-                          .map((run) => toProjectTriggerRunRecord(run, row, "cron")),
+                          .filter(
+                            (run) =>
+                              run.status === "queued" ||
+                              run.status === "starting" ||
+                              run.status === "running",
+                          )
+                          .map((run) => toProjectTriggerRunRecord(run, row)),
                       ),
                       Effect.mapError((cause) =>
                         makeProjectTriggerStoreError(
@@ -757,6 +785,100 @@ const makeWsRpcLayer = (
             emittedAt,
           })),
         );
+
+      const projectTriggerChangeEvent = (
+        change: ProjectTriggerRepositoryChange,
+        sequence: number,
+        emittedAt: string,
+      ): Effect.Effect<Option.Option<ProjectTriggerStreamEvent>, ProjectTriggerStoreError> => {
+        if (change.type === "triggerDeleted") {
+          return Effect.succeed(
+            Option.some({
+              type: "triggerDeleted",
+              projectId: change.projectId,
+              triggerId: change.triggerId,
+              deletedAt: change.deletedAt,
+              sequence,
+              emittedAt,
+            } satisfies ProjectTriggerStreamEvent),
+          );
+        }
+        if (change.type === "triggerUpserted") {
+          return projectTriggerRepository.getTriggerById({ triggerId: change.triggerId }).pipe(
+            Effect.mapError((cause) =>
+              makeProjectTriggerStoreError(
+                "subscribe",
+                "Failed to load changed project trigger.",
+                cause,
+              ),
+            ),
+            Effect.flatMap(
+              Option.match({
+                onNone: () => Effect.succeed(Option.none()),
+                onSome: (row) =>
+                  row.deletedAt !== null
+                    ? Effect.succeed(Option.none())
+                    : toProjectTriggerRecord(row, "subscribe").pipe(
+                        Effect.map((trigger) =>
+                          Option.some({
+                            type: "triggerUpserted",
+                            projectId: change.projectId,
+                            trigger,
+                            sequence,
+                            emittedAt,
+                          } satisfies ProjectTriggerStreamEvent),
+                        ),
+                      ),
+              }),
+            ),
+          );
+        }
+        return Effect.all({
+          run: projectTriggerRepository.getRunById({ runId: change.runId }),
+          trigger: projectTriggerRepository.getTriggerById({ triggerId: change.triggerId }),
+        }).pipe(
+          Effect.mapError((cause) =>
+            makeProjectTriggerStoreError(
+              "subscribe",
+              "Failed to load changed project trigger run.",
+              cause,
+            ),
+          ),
+          Effect.map(({ run, trigger }) =>
+            Option.isSome(run) && Option.isSome(trigger)
+              ? Option.some({
+                  type: "runUpserted",
+                  projectId: change.projectId,
+                  run: toProjectTriggerRunRecord(run.value, trigger.value),
+                  sequence,
+                  emittedAt,
+                } satisfies ProjectTriggerStreamEvent)
+              : Option.none(),
+          ),
+        );
+      };
+
+      const loadProjectTriggerStream = (projectId: ProjectTriggerRow["projectId"]) =>
+        Effect.gen(function* () {
+          // Subscribe before loading the snapshot so mutations during snapshot
+          // hydration are buffered instead of disappearing between phases.
+          const changes = yield* projectTriggerRepository.subscribeChanges;
+          const snapshot = yield* loadProjectTriggerSnapshot(projectId);
+          const sequence = yield* Ref.make(0);
+          const live = Stream.fromSubscription(changes).pipe(
+            Stream.filter((change) => change.projectId === projectId),
+            Stream.mapEffect((change) =>
+              Effect.gen(function* () {
+                const nextSequence = yield* Ref.updateAndGet(sequence, (value) => value + 1);
+                const emittedAt = yield* nowIso;
+                return yield* projectTriggerChangeEvent(change, nextSequence, emittedAt);
+              }),
+            ),
+            Stream.filter(Option.isSome),
+            Stream.map((event) => event.value),
+          );
+          return Stream.concat(Stream.make(snapshot satisfies ProjectTriggerStreamEvent), live);
+        });
 
       const loadAuthAccessSnapshot = () =>
         Effect.all({
@@ -1442,10 +1564,42 @@ const makeWsRpcLayer = (
             Effect.gen(function* () {
               const trigger = yield* getActiveProjectTriggerRow(input.triggerId, "fire");
               const fireAt = yield* nowIso;
+              const idempotencyKey =
+                input.idempotencyKey ??
+                (yield* crypto.randomUUIDv4.pipe(
+                  Effect.mapError((cause) =>
+                    makeProjectTriggerStoreError(
+                      "fire",
+                      "Failed to generate a trigger run idempotency key.",
+                      cause,
+                    ),
+                  ),
+                ));
+              const existing = yield* projectTriggerRepository
+                .getRunByIdempotencyKey({ triggerId: trigger.triggerId, idempotencyKey })
+                .pipe(
+                  Effect.mapError((cause) =>
+                    makeProjectTriggerStoreError(
+                      "fire",
+                      "Failed to check project trigger run idempotency.",
+                      cause,
+                    ),
+                  ),
+                );
+              if (Option.isSome(existing)) {
+                return {
+                  run: toProjectTriggerRunRecord(existing.value, trigger),
+                  threadId: existing.value.threadId,
+                };
+              }
               const run = makeProjectTriggerRunRow({
                 trigger,
                 fireAt,
                 queuedAt: fireAt,
+                initiator: "manual",
+                eventKind: "manual",
+                idempotencyKey,
+                runKey: projectTriggerWebhookRunKey(trigger.triggerId, `manual:${idempotencyKey}`),
               });
 
               const inserted = yield* projectTriggerRepository.insertRun(run).pipe(
@@ -1461,7 +1615,7 @@ const makeWsRpcLayer = (
               if (!inserted) {
                 return yield* new ProjectTriggerFireError({
                   triggerId: input.triggerId,
-                  message: "A project trigger run already exists for this fire time.",
+                  message: "A project trigger run already exists for this idempotency key.",
                 });
               }
 
@@ -1471,8 +1625,242 @@ const makeWsRpcLayer = (
               );
 
               return {
-                run: toProjectTriggerRunRecord(run, trigger, "manual"),
+                run: toProjectTriggerRunRecord(run, trigger),
                 threadId: run.threadId,
+              };
+            }),
+            { "rpc.aggregate": "projectTriggers" },
+          ),
+        [WS_METHODS.projectTriggersGetRun]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.projectTriggersGetRun,
+            getProjectTriggerRun(input.runId, "getRun").pipe(
+              Effect.map(({ run, trigger }) => ({
+                run: toProjectTriggerRunRecord(run, trigger),
+              })),
+            ),
+            { "rpc.aggregate": "projectTriggers" },
+          ),
+        [WS_METHODS.projectTriggersCancelRun]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.projectTriggersCancelRun,
+            Effect.gen(function* () {
+              const loaded = yield* getProjectTriggerRun(input.runId, "cancelRun");
+              if (
+                loaded.run.status === "succeeded" ||
+                loaded.run.status === "failed" ||
+                loaded.run.status === "cancelled"
+              ) {
+                return { run: toProjectTriggerRunRecord(loaded.run, loaded.trigger) };
+              }
+              const cancelledAt = yield* nowIso;
+              const reason = input.reason ?? "Cancelled by an authenticated user.";
+
+              if (loaded.run.status === "running") {
+                const interruptId = yield* crypto.randomUUIDv4.pipe(
+                  Effect.mapError((cause) =>
+                    makeProjectTriggerStoreError(
+                      "cancelRun",
+                      "Failed to generate trigger cancellation command id.",
+                      cause,
+                    ),
+                  ),
+                );
+                yield* orchestrationDispatcher
+                  .dispatch({
+                    type: "thread.turn.interrupt",
+                    commandId: CommandId.make(
+                      `project-trigger:${loaded.run.runId}:cancel:${interruptId}`,
+                    ),
+                    threadId: loaded.run.threadId,
+                    createdAt: cancelledAt,
+                  })
+                  .pipe(
+                    Effect.mapError(
+                      (cause) =>
+                        new ProjectTriggerFireError({
+                          triggerId: loaded.trigger.triggerId,
+                          message: "Failed to interrupt the running trigger turn.",
+                          cause,
+                        }),
+                    ),
+                  );
+              }
+
+              yield* projectTriggerRepository
+                .markRunCancelled({
+                  runId: loaded.run.runId,
+                  cancelledAt,
+                  cancellationReason: reason,
+                })
+                .pipe(
+                  Effect.mapError((cause) =>
+                    makeProjectTriggerStoreError(
+                      "cancelRun",
+                      "Failed to cancel project trigger run.",
+                      cause,
+                    ),
+                  ),
+                );
+              const cancelled = yield* getProjectTriggerRun(input.runId, "cancelRun");
+              return { run: toProjectTriggerRunRecord(cancelled.run, cancelled.trigger) };
+            }),
+            { "rpc.aggregate": "projectTriggers" },
+          ),
+        [WS_METHODS.projectTriggersRetryRun]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.projectTriggersRetryRun,
+            Effect.gen(function* () {
+              const original = yield* getProjectTriggerRun(input.runId, "retryRun");
+              if (
+                original.run.status === "queued" ||
+                original.run.status === "starting" ||
+                original.run.status === "running"
+              ) {
+                return yield* new ProjectTriggerValidationError({
+                  field: "runId",
+                  message: "Only a completed, failed, or cancelled trigger run can be retried.",
+                });
+              }
+              if (original.trigger.deletedAt !== null) {
+                return yield* new ProjectTriggerNotFoundError({
+                  triggerId: original.trigger.triggerId,
+                });
+              }
+              const retryAt = yield* nowIso;
+              const requestedKey =
+                input.idempotencyKey ??
+                (yield* crypto.randomUUIDv4.pipe(
+                  Effect.mapError((cause) =>
+                    makeProjectTriggerStoreError(
+                      "retryRun",
+                      "Failed to generate retry idempotency key.",
+                      cause,
+                    ),
+                  ),
+                ));
+              const idempotencyKey = `retry:${original.run.runId}:${requestedKey}`;
+              const existing = yield* projectTriggerRepository
+                .getRunByIdempotencyKey({
+                  triggerId: original.trigger.triggerId,
+                  idempotencyKey,
+                })
+                .pipe(
+                  Effect.mapError((cause) =>
+                    makeProjectTriggerStoreError(
+                      "retryRun",
+                      "Failed to check trigger retry idempotency.",
+                      cause,
+                    ),
+                  ),
+                );
+              if (Option.isSome(existing)) {
+                return {
+                  run: toProjectTriggerRunRecord(existing.value, original.trigger),
+                  threadId: existing.value.threadId,
+                };
+              }
+              const event =
+                original.run.eventPayload === null
+                  ? null
+                  : {
+                      eventKind: original.run.eventKind ?? "webhook",
+                      occurredAt: original.run.fireAt,
+                      payload: original.run.eventPayload,
+                    };
+              const retry = makeProjectTriggerRunRow({
+                trigger: original.trigger,
+                fireAt: retryAt,
+                queuedAt: retryAt,
+                initiator: "retry",
+                eventKind: original.run.eventKind ?? "webhook",
+                event,
+                idempotencyKey,
+                retryOfRunId: original.run.runId,
+                runKey: projectTriggerWebhookRunKey(original.trigger.triggerId, idempotencyKey),
+              });
+              const inserted = yield* projectTriggerRepository
+                .insertRun(retry)
+                .pipe(
+                  Effect.mapError((cause) =>
+                    makeProjectTriggerStoreError(
+                      "retryRun",
+                      "Failed to queue project trigger retry.",
+                      cause,
+                    ),
+                  ),
+                );
+              if (!inserted) {
+                return yield* new ProjectTriggerFireError({
+                  triggerId: original.trigger.triggerId,
+                  message: "A retry already exists for this idempotency key.",
+                });
+              }
+              yield* projectTriggerScheduler.tick.pipe(
+                Effect.ignoreCause({ log: true }),
+                Effect.forkDetach,
+              );
+              return {
+                run: toProjectTriggerRunRecord(retry, original.trigger),
+                threadId: retry.threadId,
+              };
+            }),
+            { "rpc.aggregate": "projectTriggers" },
+          ),
+        [WS_METHODS.projectTriggersRotateWebhookSecret]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.projectTriggersRotateWebhookSecret,
+            Effect.gen(function* () {
+              const trigger = yield* getActiveProjectTriggerRow(
+                input.triggerId,
+                "rotateWebhookSecret",
+              );
+              const master = yield* serverSecretStore
+                .getOrCreateRandom(PROJECT_TRIGGER_WEBHOOK_MASTER_SECRET_NAME, 32)
+                .pipe(
+                  Effect.mapError((cause) =>
+                    makeProjectTriggerStoreError(
+                      "rotateWebhookSecret",
+                      "Failed to load the project trigger webhook master secret.",
+                      cause,
+                    ),
+                  ),
+                );
+              const updatedAt = yield* nowIso;
+              const rotated = yield* projectTriggerRepository
+                .rotateWebhookSecretVersion({
+                  triggerId: trigger.triggerId,
+                  updatedAt,
+                })
+                .pipe(
+                  Effect.mapError((cause) =>
+                    makeProjectTriggerStoreError(
+                      "rotateWebhookSecret",
+                      "Failed to rotate the project trigger webhook secret.",
+                      cause,
+                    ),
+                  ),
+                );
+              if (Option.isNone(rotated)) {
+                return yield* new ProjectTriggerNotFoundError({ triggerId: trigger.triggerId });
+              }
+              const secretVersion = rotated.value;
+              const secret = encodeProjectTriggerWebhookSecret(
+                deriveProjectTriggerWebhookSecret(master, trigger.webhookPublicId, secretVersion),
+              );
+              return {
+                credentials: {
+                  triggerId: trigger.triggerId,
+                  publicId: trigger.webhookPublicId,
+                  endpointPath: projectTriggerWebhookEndpointPath(trigger.webhookPublicId),
+                  secret,
+                  secretVersion,
+                  algorithm: "hmac-sha256" as const,
+                  signatureHeader: "x-kamicode-signature" as const,
+                  timestampHeader: "x-kamicode-timestamp" as const,
+                  nonceHeader: "x-kamicode-nonce" as const,
+                  idempotencyHeader: "idempotency-key" as const,
+                },
               };
             }),
             { "rpc.aggregate": "projectTriggers" },
@@ -1497,13 +1885,7 @@ const makeWsRpcLayer = (
                   ),
                 );
               return {
-                runs: runs.map((run) =>
-                  toProjectTriggerRunRecord(
-                    run,
-                    trigger,
-                    run.fireAt === run.queuedAt ? "manual" : "cron",
-                  ),
-                ),
+                runs: runs.map((run) => toProjectTriggerRunRecord(run, trigger)),
               };
             }),
             { "rpc.aggregate": "projectTriggers" },
@@ -1511,9 +1893,7 @@ const makeWsRpcLayer = (
         [WS_METHODS.projectTriggersSubscribe]: (input) =>
           observeRpcStreamEffect(
             WS_METHODS.projectTriggersSubscribe,
-            Effect.map(loadProjectTriggerSnapshot(input.projectId), (snapshot) =>
-              Stream.make(snapshot satisfies ProjectTriggerStreamEvent),
-            ),
+            loadProjectTriggerStream(input.projectId),
             { "rpc.aggregate": "projectTriggers" },
           ),
         [WS_METHODS.serverRefreshProviders]: (input) =>

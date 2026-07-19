@@ -368,6 +368,7 @@ it.layer(NodeServices.layer)("bin cli parsing", (it) => {
         "terminal:operate",
         "review:write",
         "relay:read",
+        "project-trigger:run",
         "access:read",
         "access:write",
         "relay:write",
@@ -380,11 +381,31 @@ it.layer(NodeServices.layer)("bin cli parsing", (it) => {
         "terminal:operate",
         "review:write",
         "relay:read",
+        "project-trigger:run",
         "access:read",
         "access:write",
         "relay:write",
       ]);
       assert.equal("token" in (listed[0] ?? {}), false);
+
+      const controllerOutput = yield* captureStdout(
+        runCli([
+          "auth",
+          "session",
+          "issue",
+          "--base-dir",
+          baseDir,
+          "--project-trigger-only",
+          "--json",
+        ]),
+      );
+      // @effect-diagnostics-next-line preferSchemaOverJson:off
+      const controller = JSON.parse(controllerOutput.output) as {
+        readonly token: string;
+        readonly scopes: ReadonlyArray<string>;
+      };
+      assert.equal(controller.token.length > 0, true);
+      assert.deepEqual(controller.scopes, ["project-trigger:run"]);
     }),
   );
 

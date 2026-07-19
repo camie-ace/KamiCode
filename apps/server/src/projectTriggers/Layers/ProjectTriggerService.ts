@@ -25,6 +25,8 @@ const makeProjectTriggerService = Effect.gen(function* () {
         scheduleOnceAt: input.scheduleOnceAt,
         timezone: input.timezone ?? "UTC",
         runtimeTarget: input.runtimeTarget ?? "local",
+        webhookPublicId: input.webhookPublicId ?? input.triggerId,
+        webhookSecretVersion: input.webhookSecretVersion ?? 0,
         nextFireAt: null,
         lastFireAt: null,
         prompt: input.prompt,

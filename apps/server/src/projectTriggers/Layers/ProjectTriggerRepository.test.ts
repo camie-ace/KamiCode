@@ -1,4 +1,4 @@
-import { MessageId, ProjectId, ProviderInstanceId } from "@t3tools/contracts";
+import { ProjectId, ProviderInstanceId } from "@t3tools/contracts";
 import { assert, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -18,7 +18,7 @@ const layer = it.layer(
 
 layer("ProjectTriggerRepository", (it) => {
   it.effect(
-    "claims due triggers, schedules a run, recovers an expired run claim, and marks dispatch",
+    "claims a run and advances it only from dispatch through observed thread completion",
     () =>
       Effect.gen(function* () {
         const repository = yield* ProjectTriggerRepository;
@@ -35,6 +35,8 @@ layer("ProjectTriggerRepository", (it) => {
           scheduleOnceAt: "2026-03-24T00:00:00.000Z",
           timezone: "UTC",
           runtimeTarget: "local",
+          webhookPublicId: "webhook-nightly-checks",
+          webhookSecretVersion: 0,
           nextFireAt: "2026-03-24T00:00:00.000Z",
           lastFireAt: null,
           prompt: "Run the nightly checks.",
@@ -73,10 +75,14 @@ layer("ProjectTriggerRepository", (it) => {
           fireAt: "2026-03-24T00:00:00.000Z",
           queuedAt: "2026-03-24T00:00:01.000Z",
         });
-        assert.strictEqual(
-          run.messageId,
-          MessageId.make("project-trigger:trigger-nightly-checks:2026-03-24T00:00:00.000Z:message"),
-        );
+        const repeatedRun = makeProjectTriggerRunRow({
+          trigger: claimedTrigger,
+          fireAt: "2026-03-24T00:00:00.000Z",
+          queuedAt: "2026-03-24T00:00:01.000Z",
+        });
+        assert.strictEqual(repeatedRun.runId, run.runId);
+        assert.strictEqual(repeatedRun.messageId, run.messageId);
+        assert.isAtMost(run.runId.length, 100);
 
         const scheduled = yield* repository.scheduleRunForClaimedTrigger({
           triggerId,
@@ -97,7 +103,7 @@ layer("ProjectTriggerRepository", (it) => {
           limit: 10,
         });
         assert.strictEqual(claimedRuns.length, 1);
-        assert.strictEqual(claimedRuns[0]?.status, "claimed");
+        assert.strictEqual(claimedRuns[0]?.status, "starting");
 
         const recovered = yield* repository.recoverExpiredRunClaims({
           now: "2026-03-24T00:00:04.000Z",
@@ -111,7 +117,7 @@ layer("ProjectTriggerRepository", (it) => {
         });
         assert.strictEqual(reclaimedRuns.length, 1);
 
-        const dispatched = yield* repository.markRunDispatched({
+        const dispatched = yield* repository.markRunStarting({
           runId: run.runId,
           dispatchedAt: "2026-03-24T00:00:06.000Z",
           resultSequence: 42,
@@ -119,9 +125,184 @@ layer("ProjectTriggerRepository", (it) => {
         assert.strictEqual(dispatched, true);
 
         const dispatchedRun = yield* repository.getRunById({ runId: run.runId });
-        assert.strictEqual(Option.getOrThrow(dispatchedRun).status, "dispatched");
+        assert.strictEqual(Option.getOrThrow(dispatchedRun).status, "starting");
         assert.strictEqual(Option.getOrThrow(dispatchedRun).resultSequence, 42);
+
+        const running = yield* repository.markRunRunning({
+          threadId: run.threadId,
+          startedAt: "2026-03-24T00:00:07.000Z",
+        });
+        assert.strictEqual(running, true);
+        assert.strictEqual(
+          Option.getOrThrow(yield* repository.getRunById({ runId: run.runId })).status,
+          "running",
+        );
+
+        const succeeded = yield* repository.markRunSucceeded({
+          threadId: run.threadId,
+          completedAt: "2026-03-24T00:00:08.000Z",
+        });
+        assert.strictEqual(succeeded, true);
+        assert.strictEqual(
+          Option.getOrThrow(yield* repository.getRunById({ runId: run.runId })).status,
+          "succeeded",
+        );
       }),
+  );
+
+  it.effect("atomically enforces webhook idempotency, nonce replay, and secret rotation", () =>
+    Effect.gen(function* () {
+      const repository = yield* ProjectTriggerRepository;
+      const triggerId = ProjectTriggerId.make("trigger-webhook-security");
+      const trigger = {
+        triggerId,
+        projectId: ProjectId.make("project-webhook-security"),
+        name: "Webhook security",
+        description: null,
+        enabled: true,
+        scheduleKind: "manual" as const,
+        scheduleCron: null,
+        scheduleOnceAt: null,
+        timezone: "UTC",
+        runtimeTarget: "local" as const,
+        webhookPublicId: "public-webhook-security",
+        webhookSecretVersion: 0,
+        nextFireAt: null,
+        lastFireAt: null,
+        prompt: "Review the event.",
+        attachments: [],
+        modelSelection: {
+          instanceId: ProviderInstanceId.make("codex"),
+          model: "gpt-5.4",
+        },
+        runtimeMode: "full-access" as const,
+        interactionMode: "default" as const,
+        dispatchPolicy: null,
+        titleSeed: null,
+        bootstrap: null,
+        createdAt: "2026-07-19T19:00:00.000Z",
+        updatedAt: "2026-07-19T19:00:00.000Z",
+        deletedAt: null,
+        scheduleClaimedAt: null,
+        scheduleClaimExpiresAt: null,
+        failureDetail: null,
+      };
+      yield* repository.upsertTrigger(trigger);
+
+      const firstVersion = yield* repository.rotateWebhookSecretVersion({
+        triggerId,
+        updatedAt: "2026-07-19T19:00:01.000Z",
+      });
+      const secondVersion = yield* repository.rotateWebhookSecretVersion({
+        triggerId,
+        updatedAt: "2026-07-19T19:00:02.000Z",
+      });
+      assert.strictEqual(Option.getOrThrow(firstVersion), 1);
+      assert.strictEqual(Option.getOrThrow(secondVersion), 2);
+
+      const idempotencyKey = "delivery-42";
+      const run = {
+        ...makeProjectTriggerRunRow({
+          trigger,
+          fireAt: "2026-07-19T19:01:00.000Z",
+          queuedAt: "2026-07-19T19:01:00.000Z",
+          initiator: "webhook",
+          eventKind: "webhook",
+          event: { payload: { ref: "refs/heads/main" } },
+          idempotencyKey,
+          requestDigest: "digest-a",
+          runKey: "delivery-42",
+        }),
+        idempotencyKey,
+      };
+      const intake = {
+        run,
+        nonce: "nonce-0123456789abcdef",
+        requestDigest: "digest-a",
+        receivedAt: "2026-07-19T19:01:00.000Z",
+        expiresAt: "2026-07-20T19:01:00.000Z",
+      };
+
+      const inserted = yield* repository.acceptWebhookRun(intake);
+      assert.strictEqual(inserted.outcome, "inserted");
+      const existing = yield* repository.acceptWebhookRun({
+        ...intake,
+        nonce: "nonce-fedcba9876543210",
+      });
+      assert.strictEqual(existing.outcome, "existing");
+      if (existing.outcome === "existing") {
+        assert.strictEqual(existing.run.runId, run.runId);
+      }
+      const conflict = yield* repository.acceptWebhookRun({
+        ...intake,
+        requestDigest: "digest-b",
+      });
+      assert.strictEqual(conflict.outcome, "idempotency-conflict");
+
+      const replayKey = "delivery-43";
+      const replayRun = {
+        ...makeProjectTriggerRunRow({
+          trigger,
+          fireAt: "2026-07-19T19:02:00.000Z",
+          queuedAt: "2026-07-19T19:02:00.000Z",
+          initiator: "webhook",
+          eventKind: "webhook",
+          idempotencyKey: replayKey,
+          requestDigest: "digest-c",
+          runKey: "delivery-43",
+        }),
+        idempotencyKey: replayKey,
+      };
+      const replay = yield* repository.acceptWebhookRun({
+        ...intake,
+        run: replayRun,
+        requestDigest: "digest-c",
+      });
+      assert.strictEqual(replay.outcome, "replay");
+
+      const expiredReceiptReplay = yield* repository.acceptWebhookRun({
+        ...intake,
+        nonce: "nonce-after-expiry-012345",
+        receivedAt: "2026-07-20T19:01:01.000Z",
+        expiresAt: "2026-07-21T19:01:01.000Z",
+      });
+      assert.strictEqual(expiredReceiptReplay.outcome, "existing");
+      if (expiredReceiptReplay.outcome === "existing") {
+        assert.strictEqual(expiredReceiptReplay.run.runId, run.runId);
+      }
+
+      const operation = {
+        triggerId,
+        runId: run.runId,
+        idempotencyKey: `cancel:${run.runId}:request-1`,
+        nonce: "cancel-nonce-0123456789",
+        requestDigest: "cancel-digest-a",
+        receivedAt: "2026-07-19T19:03:00.000Z",
+        expiresAt: "2026-07-20T19:03:00.000Z",
+      };
+      assert.strictEqual((yield* repository.recordWebhookOperation(operation)).outcome, "inserted");
+      assert.strictEqual(
+        (yield* repository.recordWebhookOperation({
+          ...operation,
+          nonce: "cancel-nonce-9876543210",
+        })).outcome,
+        "existing",
+      );
+      assert.strictEqual(
+        (yield* repository.recordWebhookOperation({
+          ...operation,
+          requestDigest: "cancel-digest-b",
+        })).outcome,
+        "idempotency-conflict",
+      );
+      assert.strictEqual(
+        (yield* repository.recordWebhookOperation({
+          ...operation,
+          idempotencyKey: `cancel:${run.runId}:request-2`,
+        })).outcome,
+        "replay",
+      );
+    }),
   );
 
   it.effect("claims one hundred due runs once and recovers expired claims", () =>
@@ -145,6 +326,8 @@ layer("ProjectTriggerRepository", (it) => {
           scheduleOnceAt: dueAt,
           timezone: "UTC",
           runtimeTarget: "local",
+          webhookPublicId: `webhook-benchmark-${suffix}`,
+          webhookSecretVersion: 0,
           nextFireAt: dueAt,
           lastFireAt: null,
           prompt: "Run the benchmark trigger.",

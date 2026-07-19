@@ -32,6 +32,8 @@ export interface SaveProjectTriggerInput {
   readonly scheduleOnceAt: IsoDateTime | null;
   readonly timezone?: ProjectTriggerRow["timezone"];
   readonly runtimeTarget?: ProjectTriggerRow["runtimeTarget"];
+  readonly webhookPublicId?: ProjectTriggerRow["webhookPublicId"];
+  readonly webhookSecretVersion?: ProjectTriggerRow["webhookSecretVersion"];
   readonly prompt: ProjectTriggerRow["prompt"];
   readonly attachments?: ReadonlyArray<ChatAttachment>;
   readonly modelSelection: ModelSelection;
