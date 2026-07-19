@@ -133,6 +133,8 @@ export type ProviderInteractionMode = typeof ProviderInteractionMode.Type;
 export const DEFAULT_PROVIDER_INTERACTION_MODE: ProviderInteractionMode = "default";
 export const TriggerEventKind = Schema.Literals([
   "cron",
+  "manual",
+  "webhook",
   "github.issue",
   "github.pull_request",
   "github.comment",

@@ -25,6 +25,7 @@ import {
   ORCHESTRATION_WS_METHODS,
   type PreviewEvent,
   ProjectId,
+  ProjectTriggerId,
   ProviderDriverKind,
   ProviderInstanceId,
   ResolvedKeybindingRule,
@@ -142,8 +143,14 @@ import * as ProcessDiagnostics from "./diagnostics/ProcessDiagnostics.ts";
 import * as ProcessResourceMonitor from "./diagnostics/ProcessResourceMonitor.ts";
 import * as TraceDiagnostics from "./diagnostics/TraceDiagnostics.ts";
 import { ProjectTriggerRepository } from "./projectTriggers/Services/ProjectTriggerRepository.ts";
+import type {
+  ProjectTriggerRepositoryChange,
+  ProjectTriggerRow,
+  ProjectTriggerRunRow,
+} from "./projectTriggers/Services/ProjectTriggerRepository.ts";
 import { ProjectTriggerScheduler } from "./projectTriggers/Services/ProjectTriggerScheduler.ts";
 import { ProjectTriggerService } from "./projectTriggers/Services/ProjectTriggerService.ts";
+import { signProjectTriggerWebhookRequest } from "./projectTriggers/webhookSecurity.ts";
 import * as Data from "effect/Data";
 import * as ProcessRunner from "./processRunner.ts";
 
@@ -638,6 +645,8 @@ const buildAppUnderTest = (options?: {
     >;
     relayClient?: Partial<RelayClient.RelayClient["Service"]>;
     cloudCliTokenManager?: Partial<CloudCliTokenManager.CloudCliTokenManager["Service"]>;
+    projectTriggerRepository?: Partial<ProjectTriggerRepository["Service"]>;
+    projectTriggerScheduler?: Partial<ProjectTriggerScheduler["Service"]>;
   };
 }) =>
   Effect.gen(function* () {
@@ -1068,6 +1077,7 @@ const buildAppUnderTest = (options?: {
         Layer.mock(ProjectTriggerRepository)({
           upsertTrigger: () => Effect.void,
           getTriggerById: () => Effect.succeed(Option.none()),
+          getTriggerByPublicId: () => Effect.succeed(Option.none()),
           listTriggersByProjectId: () => Effect.succeed([]),
           deleteTrigger: () => Effect.succeed(false),
           recoverExpiredTriggerClaims: () => Effect.succeed(0),
@@ -1076,12 +1086,28 @@ const buildAppUnderTest = (options?: {
           insertRun: () => Effect.succeed(false),
           markTriggerScheduleFailed: () => Effect.succeed(false),
           getRunById: () => Effect.succeed(Option.none()),
+          getRunByThreadId: () => Effect.succeed(Option.none()),
+          getRunByIdempotencyKey: () => Effect.succeed(Option.none()),
           listRunsByTriggerId: () => Effect.succeed([]),
+          listActiveRuns: () => Effect.succeed([]),
           recoverExpiredRunClaims: () => Effect.succeed(0),
           claimDueRuns: () => Effect.succeed([]),
-          markRunDispatched: () => Effect.succeed(false),
+          markRunStarting: () => Effect.succeed(false),
+          markRunRunning: () => Effect.succeed(false),
+          markRunSucceeded: () => Effect.succeed(false),
           markRunFailed: () => Effect.succeed(false),
-          markRunSkipped: () => Effect.succeed(false),
+          markRunCancelled: () => Effect.succeed(false),
+          settleRunByThread: () => Effect.succeed(false),
+          rotateWebhookSecretVersion: () => Effect.succeed(Option.none()),
+          acceptWebhookRun: () =>
+            Effect.die("ProjectTriggerRepository.acceptWebhookRun not stubbed."),
+          recordWebhookOperation: () =>
+            Effect.die("ProjectTriggerRepository.recordWebhookOperation not stubbed."),
+          subscribeChanges: Effect.flatMap(
+            PubSub.unbounded<ProjectTriggerRepositoryChange>(),
+            (pubsub) => PubSub.subscribe(pubsub),
+          ),
+          ...options?.layers?.projectTriggerRepository,
         }),
       ),
       Layer.provide(
@@ -1105,6 +1131,7 @@ const buildAppUnderTest = (options?: {
             skippedRuns: 0,
           }),
           start: () => Effect.void,
+          ...options?.layers?.projectTriggerScheduler,
         }),
       ),
       Layer.provide(
@@ -1700,6 +1727,274 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
 
       assert.equal(response.status, 200);
       assert.deepEqual(body, testEnvironmentDescriptor);
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("runs the signed project-trigger controller API with a narrow bearer identity", () =>
+    Effect.gen(function* () {
+      let secretVersion = 0;
+      const runs = new Map<ProjectTriggerRunRow["runId"], ProjectTriggerRunRow>();
+      const idempotentRuns = new Map<string, ProjectTriggerRunRow["runId"]>();
+      const trigger: ProjectTriggerRow = {
+        triggerId: ProjectTriggerId.make("trigger-controller-route"),
+        projectId: ProjectId.make("project-controller-route"),
+        name: "Controller route",
+        description: null,
+        enabled: true,
+        scheduleKind: "manual",
+        scheduleCron: null,
+        scheduleOnceAt: null,
+        timezone: "UTC",
+        runtimeTarget: "local",
+        webhookPublicId: "public-controller-route",
+        webhookSecretVersion: secretVersion,
+        nextFireAt: null,
+        lastFireAt: null,
+        prompt: "Handle the controller event.",
+        attachments: [],
+        modelSelection: {
+          instanceId: ProviderInstanceId.make("codex"),
+          model: "gpt-5.4",
+        },
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        dispatchPolicy: null,
+        titleSeed: null,
+        bootstrap: null,
+        createdAt: "1970-01-01T00:00:00.000Z",
+        updatedAt: "1970-01-01T00:00:00.000Z",
+        deletedAt: null,
+        scheduleClaimedAt: null,
+        scheduleClaimExpiresAt: null,
+        failureDetail: null,
+      };
+
+      yield* buildAppUnderTest({
+        layers: {
+          projectTriggerRepository: {
+            getTriggerById: () =>
+              Effect.succeed(Option.some({ ...trigger, webhookSecretVersion: secretVersion })),
+            getTriggerByPublicId: () =>
+              Effect.succeed(Option.some({ ...trigger, webhookSecretVersion: secretVersion })),
+            rotateWebhookSecretVersion: () =>
+              Effect.sync(() => {
+                secretVersion += 1;
+                return Option.some(secretVersion);
+              }),
+            acceptWebhookRun: (input) =>
+              Effect.sync(() => {
+                const existingId = idempotentRuns.get(input.run.idempotencyKey);
+                const existing = existingId === undefined ? undefined : runs.get(existingId);
+                if (existing !== undefined) return { outcome: "existing" as const, run: existing };
+                runs.set(input.run.runId, input.run);
+                idempotentRuns.set(input.run.idempotencyKey, input.run.runId);
+                return { outcome: "inserted" as const, run: input.run };
+              }),
+            getRunById: ({ runId }) => {
+              const run = runs.get(runId);
+              return Effect.succeed(run === undefined ? Option.none() : Option.some(run));
+            },
+            recordWebhookOperation: () => Effect.succeed({ outcome: "inserted" }),
+            markRunCancelled: ({ runId, cancelledAt, cancellationReason }) =>
+              Effect.sync(() => {
+                const run = runs.get(runId);
+                if (run === undefined) return false;
+                runs.set(runId, {
+                  ...run,
+                  status: "cancelled",
+                  completedAt: cancelledAt,
+                  cancellationReason,
+                });
+                return true;
+              }),
+          },
+        },
+      });
+
+      const endpointPath = `/api/project-triggers/webhook/${trigger.webhookPublicId}`;
+      const endpointUrl = yield* getHttpServerUrl(endpointPath);
+      const browserOnlyResponse = yield* fetchEffect(endpointUrl, {
+        method: "POST",
+        headers: { cookie: yield* getAuthenticatedSessionCookieHeader() },
+        body: "{}",
+      });
+      assert.equal(browserOnlyResponse.status, 403);
+
+      const admin = yield* exchangeAccessToken(defaultDesktopBootstrapToken, {
+        scope: "access:write",
+      });
+      assert.equal(admin.response.status, 200);
+      const rotateUrl = yield* getHttpServerUrl(
+        `/api/project-triggers/${trigger.triggerId}/webhook/secret/rotate`,
+      );
+      const rotateResponse = yield* fetchEffect(rotateUrl, {
+        method: "POST",
+        headers: { authorization: `Bearer ${admin.body.access_token ?? ""}` },
+      });
+      const rotated = yield* responseJsonEffect<{
+        readonly credentials: {
+          readonly secret: string;
+          readonly secretVersion: number;
+          readonly endpointPath: string;
+        };
+      }>(rotateResponse);
+      assert.equal(rotateResponse.status, 200);
+      assert.equal(rotated.credentials.secretVersion, 1);
+      assert.equal(rotated.credentials.endpointPath, endpointPath);
+
+      const controller = yield* exchangeAccessToken(defaultDesktopBootstrapToken, {
+        scope: "project-trigger:run",
+      });
+      assert.equal(controller.response.status, 200);
+      assert.equal(controller.body.scope, "project-trigger:run");
+      const controllerToken = controller.body.access_token ?? "";
+      const secret = Uint8Array.from(Buffer.from(rotated.credentials.secret, "base64url"));
+
+      const sendSigned = (input: {
+        readonly method: "GET" | "POST";
+        readonly path: string;
+        readonly body: string;
+        readonly idempotencyKey: string;
+        readonly nonce: string;
+        readonly tamperBody?: string;
+      }) =>
+        Effect.gen(function* () {
+          const timestamp = String(Math.floor((yield* Clock.currentTimeMillis) / 1_000)).padStart(
+            10,
+            "0",
+          );
+          const signature = signProjectTriggerWebhookRequest(secret, {
+            method: input.method,
+            path: input.path,
+            timestamp,
+            nonce: input.nonce,
+            idempotencyKey: input.idempotencyKey,
+            rawBody: input.body,
+          });
+          return yield* fetchEffect(yield* getHttpServerUrl(input.path), {
+            method: input.method,
+            headers: {
+              authorization: `Bearer ${controllerToken}`,
+              "content-type": "application/json",
+              "x-kamicode-signature": signature,
+              "x-kamicode-timestamp": timestamp,
+              "x-kamicode-nonce": input.nonce,
+              "idempotency-key": input.idempotencyKey,
+            },
+            body: input.method === "GET" ? undefined : (input.tamperBody ?? input.body),
+          });
+        });
+
+      const eventBody = '{"eventKind":"webhook","payload":{"ref":"refs/heads/main"}}';
+      const acceptedResponse = yield* sendSigned({
+        method: "POST",
+        path: endpointPath,
+        body: eventBody,
+        idempotencyKey: "delivery-42",
+        nonce: "nonce-start-0123456789",
+      });
+      const accepted = yield* responseJsonEffect<{
+        readonly run: {
+          readonly id: string;
+          readonly status: string;
+          readonly startedAt: string | null;
+        };
+        readonly correlation: {
+          readonly runId: string;
+          readonly threadId: string;
+          readonly threadPath: string;
+          readonly statusPath: string;
+        };
+        readonly idempotentReplay: boolean;
+      }>(acceptedResponse);
+      assert.equal(acceptedResponse.status, 202);
+      assert.equal(accepted.run.status, "queued");
+      assert.equal(accepted.run.startedAt, null);
+      assert.isAtMost(accepted.run.id.length, 100);
+      assert.equal(accepted.correlation.runId, accepted.run.id);
+      assert.match(accepted.correlation.threadPath, /^\/threads\//u);
+      assert.include(accepted.correlation.threadPath, testEnvironmentDescriptor.environmentId);
+      assert.equal(accepted.idempotentReplay, false);
+
+      const duplicateResponse = yield* sendSigned({
+        method: "POST",
+        path: endpointPath,
+        body: eventBody,
+        idempotencyKey: "delivery-42",
+        nonce: "nonce-start-9876543210",
+      });
+      const duplicate = yield* responseJsonEffect<{ readonly idempotentReplay: boolean }>(
+        duplicateResponse,
+      );
+      assert.equal(duplicateResponse.status, 200);
+      assert.equal(duplicate.idempotentReplay, true);
+
+      const statusResponse = yield* sendSigned({
+        method: "GET",
+        path: accepted.correlation.statusPath,
+        body: "",
+        idempotencyKey: "status-42",
+        nonce: "nonce-status-01234567",
+      });
+      const current = yield* responseJsonEffect<{
+        readonly run: { readonly id: string; readonly status: string };
+        readonly correlation: { readonly runId: string };
+        readonly error?: { readonly code?: string };
+      } | null>(statusResponse);
+      assert.equal(
+        statusResponse.status,
+        200,
+        current?.error?.code ?? accepted.correlation.statusPath,
+      );
+      if (current === null) assert.fail("Expected a trigger status response body.");
+      assert.equal(current.run.id, accepted.run.id);
+      assert.equal(current.correlation.runId, accepted.run.id);
+
+      const tamperedResponse = yield* sendSigned({
+        method: "POST",
+        path: endpointPath,
+        body: eventBody,
+        tamperBody: `${eventBody} `,
+        idempotencyKey: "delivery-tampered",
+        nonce: "nonce-tamper-01234567",
+      });
+      assert.equal(tamperedResponse.status, 401);
+
+      const cancelBody = '{"reason":"maintenance"}';
+      const cancelResponse = yield* sendSigned({
+        method: "POST",
+        path: `${accepted.correlation.statusPath}/cancel`,
+        body: cancelBody,
+        idempotencyKey: "cancel-42",
+        nonce: "nonce-cancel-01234567",
+      });
+      const cancelled = yield* responseJsonEffect<{
+        readonly run: { readonly status: string; readonly cancellationReason: string | null };
+      }>(cancelResponse);
+      assert.equal(cancelResponse.status, 200);
+      assert.equal(cancelled.run.status, "cancelled");
+      assert.equal(cancelled.run.cancellationReason, "maintenance");
+
+      const retryResponse = yield* sendSigned({
+        method: "POST",
+        path: `${accepted.correlation.statusPath}/retry`,
+        body: "{}",
+        idempotencyKey: "retry-42",
+        nonce: "nonce-retry-012345678",
+      });
+      const retried = yield* responseJsonEffect<{
+        readonly run: {
+          readonly status: string;
+          readonly initiator: string;
+          readonly retryOfRunId: string | null;
+        };
+        readonly correlation: { readonly statusPath: string };
+      }>(retryResponse);
+      assert.equal(retryResponse.status, 202);
+      assert.equal(retried.run.status, "queued");
+      assert.equal(retried.run.initiator, "retry");
+      assert.equal(retried.run.retryOfRunId, accepted.run.id);
+      assert.notEqual(retried.correlation.statusPath, accepted.correlation.statusPath);
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 

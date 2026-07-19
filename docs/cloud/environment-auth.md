@@ -9,22 +9,26 @@ checks and token exchange behavior can be audited against established concepts.
 Environment authorization is capability-based. A session carries zero or more
 OAuth-style scope strings:
 
-| Scope                   | Permission                                                               |
-| ----------------------- | ------------------------------------------------------------------------ |
-| `orchestration:read`    | Read snapshots, status, events, configuration, and filesystem/VCS state. |
-| `orchestration:operate` | Dispatch user operations and mutate environment-side workspace state.    |
-| `terminal:operate`      | Create, attach, input, resize, clear, restart, and terminate terminals.  |
-| `review:write`          | Read review diff previews used to compose review feedback.               |
-| `access:read`           | Inspect pairing links and client sessions.                               |
-| `access:write`          | Create or revoke pairing links and client sessions.                      |
-| `relay:read`            | Inspect managed relay connectivity.                                      |
-| `relay:write`           | Link, configure, or unlink managed relay connectivity.                   |
+| Scope                   | Permission                                                                |
+| ----------------------- | ------------------------------------------------------------------------- |
+| `orchestration:read`    | Read snapshots, status, events, configuration, and filesystem/VCS state.  |
+| `orchestration:operate` | Dispatch user operations and mutate environment-side workspace state.     |
+| `project-trigger:run`   | Start, inspect, cancel, and retry signed project-trigger controller runs. |
+| `terminal:operate`      | Create, attach, input, resize, clear, restart, and terminate terminals.   |
+| `review:write`          | Read review diff previews used to compose review feedback.                |
+| `access:read`           | Inspect pairing links and client sessions.                                |
+| `access:write`          | Create or revoke pairing links and client sessions.                       |
+| `relay:read`            | Inspect managed relay connectivity.                                       |
+| `relay:write`           | Link, configure, or unlink managed relay connectivity.                    |
 
 Ordinary pairing links grant the four client-operation scopes and read access to
 managed relay connectivity:
 `orchestration:read orchestration:operate terminal:operate review:write relay:read`.
 The desktop bootstrap credential and command-line administrative bootstrap
 credentials additionally grant `access:read access:write relay:write`.
+The headless project-trigger controller should instead use a bearer session
+issued with only `project-trigger:run`; see
+[Project Trigger Controller API](../operations/project-trigger-controller.md).
 
 ## Authentication Flows
 

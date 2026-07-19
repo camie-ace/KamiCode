@@ -151,6 +151,7 @@ it.layer(NodeServices.layer)("PairingGrantStore.layer", (it) => {
         "terminal:operate",
         "review:write",
         "relay:read",
+        "project-trigger:run",
         "access:read",
         "access:write",
         "relay:write",
