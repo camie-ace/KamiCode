@@ -207,6 +207,7 @@ it.layer(NodeServices.layer)("decider deletion flows", (it) => {
       expect(event.payload).toMatchObject({
         threadId,
         messageId,
+        queueId: "queue:evt-queued-update-start-requested",
         text: "edited queued text",
         updatedAt: "2026-01-01T00:00:01.000Z",
       });
@@ -218,6 +219,105 @@ it.layer(NodeServices.layer)("decider deletion flows", (it) => {
       );
       expect(thread?.queuedTurns?.[0]?.messageId).toBe(messageId);
       expect(thread?.queuedTurns?.[0]?.status).toBe("queued");
+    }),
+  );
+
+  it.effect("rejects queued message edits and deletes after dispatch claim", () =>
+    Effect.gen(function* () {
+      const now = "2026-01-01T00:00:00.000Z";
+      const threadId = asThreadId("thread-delete-1");
+      const messageId = asMessageId("message-dispatching");
+      const withMessage = yield* projectEvent(yield* seedReadModel, {
+        sequence: 4,
+        eventId: asEventId("evt-dispatching-message-sent"),
+        aggregateKind: "thread",
+        aggregateId: threadId,
+        type: "thread.message-sent",
+        occurredAt: now,
+        commandId: asCommandId("cmd-dispatching-message-sent"),
+        causationEventId: null,
+        correlationId: asCommandId("cmd-dispatching-message-sent"),
+        metadata: {},
+        payload: {
+          threadId,
+          messageId,
+          role: "user",
+          text: "queued text",
+          turnId: null,
+          streaming: false,
+          createdAt: now,
+          updatedAt: now,
+        },
+      });
+      const queued = yield* projectEvent(withMessage, {
+        sequence: 5,
+        eventId: asEventId("evt-dispatching-start-requested"),
+        aggregateKind: "thread",
+        aggregateId: threadId,
+        type: "thread.turn-start-requested",
+        occurredAt: now,
+        commandId: asCommandId("cmd-dispatching-start-requested"),
+        causationEventId: null,
+        correlationId: asCommandId("cmd-dispatching-start-requested"),
+        metadata: {},
+        payload: {
+          threadId,
+          messageId,
+          runtimeMode: "approval-required",
+          interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+          dispatchPolicy: "queue",
+          createdAt: now,
+        },
+      });
+      const queueId = "queue:evt-dispatching-start-requested";
+      const claim = yield* decideOrchestrationCommand({
+        command: {
+          type: "thread.queued-turn.status.set",
+          commandId: asCommandId("server:claim-dispatching"),
+          threadId,
+          queueId,
+          messageId,
+          status: "dispatching",
+          turnId: null,
+          failureDetail: null,
+          createdAt: "2026-01-01T00:00:01.000Z",
+        },
+        readModel: queued,
+      });
+      const claimEvent = Array.isArray(claim) ? claim[0] : claim;
+      expect(claimEvent?.type).toBe("thread.queued-turn-status-set");
+      if (!claimEvent) return;
+      const dispatching = yield* projectEvent(queued, { ...claimEvent, sequence: 6 });
+
+      const updateExit = yield* Effect.exit(
+        decideOrchestrationCommand({
+          command: {
+            type: "thread.queued-turn.update",
+            commandId: asCommandId("cmd-update-dispatching"),
+            threadId,
+            queueId,
+            messageId,
+            text: "too late",
+            createdAt: "2026-01-01T00:00:02.000Z",
+          },
+          readModel: dispatching,
+        }),
+      );
+      const deleteExit = yield* Effect.exit(
+        decideOrchestrationCommand({
+          command: {
+            type: "thread.queued-turn.delete",
+            commandId: asCommandId("cmd-delete-dispatching"),
+            threadId,
+            queueId,
+            messageId,
+            createdAt: "2026-01-01T00:00:02.000Z",
+          },
+          readModel: dispatching,
+        }),
+      );
+      expect(updateExit._tag).toBe("Failure");
+      expect(deleteExit._tag).toBe("Failure");
     }),
   );
 

@@ -658,9 +658,12 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           completed_at AS "completedAt",
           turn_id AS "turnId",
           failure_detail AS "failureDetail"
-        FROM projection_turn_queue
+        FROM projection_turn_queue queue
         WHERE status IN ('queued', 'dispatching')
-        ORDER BY thread_id ASC, requested_at ASC, queue_id ASC
+        ORDER BY thread_id ASC, COALESCE(
+          (SELECT sequence FROM orchestration_events WHERE event_id = queue.event_id),
+          9223372036854775807
+        ) ASC, queue_id ASC
       `,
   });
 
@@ -981,10 +984,13 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           completed_at AS "completedAt",
           turn_id AS "turnId",
           failure_detail AS "failureDetail"
-        FROM projection_turn_queue
+        FROM projection_turn_queue queue
         WHERE thread_id = ${threadId}
           AND status IN ('queued', 'dispatching')
-        ORDER BY requested_at ASC, queue_id ASC
+        ORDER BY COALESCE(
+          (SELECT sequence FROM orchestration_events WHERE event_id = queue.event_id),
+          9223372036854775807
+        ) ASC, queue_id ASC
       `,
   });
 

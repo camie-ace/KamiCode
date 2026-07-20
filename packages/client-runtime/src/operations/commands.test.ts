@@ -9,9 +9,12 @@ import {
 import { describe, expect, it } from "@effect/vitest";
 import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as SubscriptionRef from "effect/SubscriptionRef";
+import * as TestClock from "effect/testing/TestClock";
+import { RpcClientError } from "effect/unstable/rpc";
 
 import {
   AVAILABLE_CONNECTION_STATE,
@@ -132,6 +135,62 @@ describe("environment commands", () => {
           threadId: "thread-1",
         },
       ]);
+    }).pipe(Effect.provide(TEST_CRYPTO_LAYER)),
+  );
+
+  it.effect("retries an ambiguous transport failure with the same command id", () =>
+    Effect.gen(function* () {
+      const dispatched: ClientOrchestrationCommand[] = [];
+      let attempts = 0;
+      const client = {
+        [ORCHESTRATION_WS_METHODS.dispatchCommand]: (command: ClientOrchestrationCommand) =>
+          Effect.suspend(() => {
+            dispatched.push(command);
+            attempts += 1;
+            return attempts === 1
+              ? Effect.fail(
+                  new RpcClientError.RpcClientError({
+                    reason: new RpcClientError.RpcClientDefect({
+                      message: "socket closed after commit",
+                      cause: new Error("socket closed after commit"),
+                    }),
+                  }),
+                )
+              : Effect.succeed({ sequence: 42 });
+          }),
+      } as unknown as WsRpcProtocolClient;
+      const session: RpcSession.RpcSession = {
+        client,
+        initialConfig: Effect.never,
+        ready: Effect.void,
+        probe: Effect.void,
+        closed: Effect.never,
+      };
+      const supervisor = EnvironmentSupervisor.EnvironmentSupervisor.of({
+        target: TARGET,
+        state: yield* SubscriptionRef.make(AVAILABLE_CONNECTION_STATE),
+        session: yield* SubscriptionRef.make(Option.some(session)),
+        prepared: yield* SubscriptionRef.make(Option.none<PreparedConnection>()),
+        connect: Effect.void,
+        disconnect: Effect.void,
+        retryNow: Effect.void,
+      } satisfies EnvironmentSupervisor.EnvironmentSupervisor["Service"]);
+
+      const resultFiber = yield* stopThreadSession({
+        commandId: CommandId.make("retry-safe-command"),
+        threadId: ThreadId.make("thread-1"),
+        createdAt: "2026-06-06T00:01:00.000Z",
+      }).pipe(
+        Effect.provideService(EnvironmentSupervisor.EnvironmentSupervisor, supervisor),
+        Effect.forkChild,
+      );
+      yield* Effect.yieldNow;
+      yield* TestClock.adjust("250 millis");
+
+      expect(yield* Fiber.join(resultFiber)).toEqual({ sequence: 42 });
+      expect(dispatched).toHaveLength(2);
+      expect(dispatched[0]?.commandId).toBe("retry-safe-command");
+      expect(dispatched[1]?.commandId).toBe("retry-safe-command");
     }).pipe(Effect.provide(TEST_CRYPTO_LAYER)),
   );
 });

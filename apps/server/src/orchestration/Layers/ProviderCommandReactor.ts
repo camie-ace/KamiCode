@@ -429,6 +429,8 @@ const make = Effect.gen(function* () {
     createdAt: string,
     options?: {
       readonly modelSelection?: ModelSelection;
+      readonly runtimeMode?: RuntimeMode;
+      readonly interactionMode?: ProviderInteractionMode;
     },
   ) {
     const thread = yield* resolveThread(threadId);
@@ -436,7 +438,9 @@ const make = Effect.gen(function* () {
       return yield* Effect.die(new Error(`Thread '${threadId}' was not found in read model.`));
     }
 
-    const desiredRuntimeMode = thread.runtimeMode;
+    const desiredRuntimeMode = options?.runtimeMode ?? thread.runtimeMode;
+    const desiredInteractionMode =
+      options?.interactionMode ?? thread.interactionMode ?? DEFAULT_PROVIDER_INTERACTION_MODE;
     const requestedModelSelection = options?.modelSelection;
     const resolveActiveSession = (threadId: ThreadId) =>
       providerService
@@ -551,7 +555,7 @@ const make = Effect.gen(function* () {
         modelSelection: desiredModelSelection,
         ...(input?.resumeCursor !== undefined ? { resumeCursor: input.resumeCursor } : {}),
         runtimeMode: desiredRuntimeMode,
-        interactionMode: thread.interactionMode,
+        interactionMode: desiredInteractionMode,
       });
 
     const bindSessionToThread = (session: ProviderSession) =>
@@ -583,10 +587,9 @@ const make = Effect.gen(function* () {
     const existingSessionThreadId =
       thread.session && thread.session.status !== "stopped" && activeSession ? thread.id : null;
     if (existingSessionThreadId) {
-      const runtimeModeChanged = thread.runtimeMode !== thread.session?.runtimeMode;
+      const runtimeModeChanged = desiredRuntimeMode !== thread.session?.runtimeMode;
       const currentInteractionMode =
         activeSession?.interactionMode ?? DEFAULT_PROVIDER_INTERACTION_MODE;
-      const desiredInteractionMode = thread.interactionMode ?? DEFAULT_PROVIDER_INTERACTION_MODE;
       const interactionModeChanged = currentInteractionMode !== desiredInteractionMode;
       const cwdChanged = effectiveCwd !== activeSession?.cwd;
       const sessionModelSwitch = (yield* providerService.getCapabilities(desiredInstanceId))
@@ -627,7 +630,7 @@ const make = Effect.gen(function* () {
         desiredInstanceId,
         desiredProvider: desiredModelSelection.instanceId,
         currentRuntimeMode: thread.session?.runtimeMode,
-        desiredRuntimeMode: thread.runtimeMode,
+        desiredRuntimeMode,
         runtimeModeChanged,
         currentInteractionMode,
         desiredInteractionMode,
@@ -667,6 +670,7 @@ const make = Effect.gen(function* () {
     readonly messageText: string;
     readonly attachments?: ReadonlyArray<ChatAttachment>;
     readonly modelSelection?: ModelSelection;
+    readonly runtimeMode?: RuntimeMode;
     readonly interactionMode?: ProviderInteractionMode;
     readonly createdAt: string;
   }) {
@@ -676,11 +680,11 @@ const make = Effect.gen(function* () {
         new Error(`Thread '${input.threadId}' was not found in read model.`),
       );
     }
-    yield* ensureSessionForThread(
-      input.threadId,
-      input.createdAt,
-      input.modelSelection !== undefined ? { modelSelection: input.modelSelection } : {},
-    );
+    yield* ensureSessionForThread(input.threadId, input.createdAt, {
+      ...(input.modelSelection !== undefined ? { modelSelection: input.modelSelection } : {}),
+      ...(input.runtimeMode !== undefined ? { runtimeMode: input.runtimeMode } : {}),
+      ...(input.interactionMode !== undefined ? { interactionMode: input.interactionMode } : {}),
+    });
     if (input.modelSelection !== undefined) {
       threadModelSelections.set(input.threadId, input.modelSelection);
     }
@@ -837,29 +841,51 @@ const make = Effect.gen(function* () {
     },
   );
 
+  const setQueuedTurnStatus = Effect.fn("setQueuedTurnStatus")(function* (input: {
+    readonly row: Pick<ProjectionTurnQueueRow, "threadId" | "queueId" | "messageId">;
+    readonly status: "dispatching" | "started" | "failed";
+    readonly turnId?: TurnId;
+    readonly failureDetail?: string;
+    readonly createdAt: string;
+  }) {
+    yield* orchestrationEngine.dispatch({
+      type: "thread.queued-turn.status.set",
+      commandId: yield* serverCommandId(`queued-turn-${input.status}`),
+      threadId: input.row.threadId,
+      queueId: input.row.queueId,
+      messageId: input.row.messageId,
+      status: input.status,
+      turnId: input.turnId ?? null,
+      failureDetail:
+        input.failureDetail === undefined
+          ? null
+          : (input.failureDetail as typeof TrimmedNonEmptyString.Type),
+      createdAt: input.createdAt,
+    });
+  });
+
   const failQueuedTurnStart = (input: {
     readonly row: ProjectionTurnQueueRow;
     readonly detail: string;
     readonly createdAt: string;
   }) =>
-    projectionTurnQueueRepository
-      .markFailed({
-        queueId: input.row.queueId,
-        failedAt: input.createdAt,
-        failureDetail: input.detail as typeof TrimmedNonEmptyString.Type,
-      })
-      .pipe(
-        Effect.flatMap(() =>
-          appendProviderFailureActivity({
-            threadId: input.row.threadId,
-            kind: "provider.turn.start.failed",
-            summary: "Queued turn start failed",
-            detail: input.detail,
-            turnId: null,
-            createdAt: input.createdAt,
-          }),
-        ),
-      );
+    setQueuedTurnStatus({
+      row: input.row,
+      status: "failed",
+      failureDetail: input.detail,
+      createdAt: input.createdAt,
+    }).pipe(
+      Effect.flatMap(() =>
+        appendProviderFailureActivity({
+          threadId: input.row.threadId,
+          kind: "provider.turn.start.failed",
+          summary: "Queued turn start failed",
+          detail: input.detail,
+          turnId: null,
+          createdAt: input.createdAt,
+        }),
+      ),
+    );
 
   const drainThreadQueue = Effect.fn("drainThreadQueue")(function* (threadId: ThreadId) {
     if (drainingThreadIds.has(threadId)) {
@@ -885,14 +911,24 @@ const make = Effect.gen(function* () {
         }
 
         const claimedAt = yield* DateTime.now.pipe(Effect.map(DateTime.formatIso));
-        const claimed = yield* projectionTurnQueueRepository.claimNextQueuedByThreadId(
-          { threadId },
-          claimedAt,
-        );
-        if (Option.isNone(claimed)) {
+        const nextQueuedTurn = (thread.queuedTurns ?? []).find((turn) => turn.status === "queued");
+        if (!nextQueuedTurn) {
           return;
         }
+        yield* setQueuedTurnStatus({
+          row: nextQueuedTurn,
+          status: "dispatching",
+          createdAt: claimedAt,
+        });
 
+        const claimed = yield* projectionTurnQueueRepository.getByQueueId({
+          queueId: nextQueuedTurn.queueId,
+        });
+        if (Option.isNone(claimed)) {
+          return yield* Effect.die(
+            new Error(`Claimed queued turn '${nextQueuedTurn.queueId}' was not persisted.`),
+          );
+        }
         const queuedTurn = claimed.value;
         const latestThread = yield* resolveThread(threadId);
         const message = latestThread?.messages.find((entry) => entry.id === queuedTurn.messageId);
@@ -920,6 +956,7 @@ const make = Effect.gen(function* () {
           ...(queuedTurn.modelSelection !== null
             ? { modelSelection: queuedTurn.modelSelection }
             : {}),
+          runtimeMode: queuedTurn.runtimeMode,
           interactionMode: queuedTurn.interactionMode,
           createdAt: queuedTurn.requestedAt,
         }).pipe(
@@ -935,6 +972,19 @@ const make = Effect.gen(function* () {
 
         if (Option.isNone(sendTurnRequest)) {
           continue;
+        }
+
+        const beforeSendThread = yield* resolveThread(threadId);
+        const stillDispatching = (beforeSendThread?.queuedTurns ?? []).some(
+          (turn) => turn.queueId === queuedTurn.queueId && turn.status === "dispatching",
+        );
+        if (
+          !beforeSendThread ||
+          beforeSendThread.deletedAt !== null ||
+          beforeSendThread.archivedAt !== null ||
+          !stillDispatching
+        ) {
+          return;
         }
 
         const turnStart = yield* providerService.sendTurn(sendTurnRequest.value).pipe(
@@ -957,14 +1007,29 @@ const make = Effect.gen(function* () {
           continue;
         }
 
-        const markedStarted = yield* projectionTurnQueueRepository.markStarted({
-          queueId: queuedTurn.queueId,
+        const startedAt = yield* DateTime.now.pipe(Effect.map(DateTime.formatIso));
+        yield* setQueuedTurnStatus({
+          row: queuedTurn,
+          status: "started",
           turnId: turnStart.value.turnId,
-          startedAt: claimedAt,
-        });
-        if (!markedStarted) {
-          return;
-        }
+          createdAt: startedAt,
+        }).pipe(
+          Effect.catchCause((cause) =>
+            providerService.interruptTurn({ threadId }).pipe(
+              Effect.catchCause((interruptCause) =>
+                Effect.logWarning(
+                  "provider command reactor could not interrupt an uncommitted queued turn",
+                  {
+                    threadId,
+                    queueId: queuedTurn.queueId,
+                    cause: Cause.pretty(interruptCause),
+                  },
+                ),
+              ),
+              Effect.andThen(Effect.failCause(cause)),
+            ),
+          ),
+        );
         return;
       }
     } finally {
@@ -1077,6 +1142,7 @@ const make = Effect.gen(function* () {
       ...(event.payload.modelSelection !== undefined
         ? { modelSelection: event.payload.modelSelection }
         : {}),
+      runtimeMode: event.payload.runtimeMode,
       interactionMode: event.payload.interactionMode,
       createdAt: event.payload.createdAt,
     }).pipe(
@@ -1325,6 +1391,27 @@ const make = Effect.gen(function* () {
     yield* Effect.forkScoped(
       Stream.runForEach(orchestrationEngine.streamDomainEvents, processEvent),
     );
+
+    const queuedThreadIds = yield* projectionTurnQueueRepository.listQueuedThreadIds.pipe(
+      Effect.catchCause((cause) =>
+        Effect.logWarning("provider command reactor failed to load persisted queued threads", {
+          cause: Cause.pretty(cause),
+        }).pipe(Effect.as<ReadonlyArray<ThreadId>>([])),
+      ),
+    );
+    yield* Effect.forEach(
+      queuedThreadIds,
+      (threadId) =>
+        drainThreadQueue(threadId).pipe(
+          Effect.catchCause((cause) =>
+            Effect.logWarning("provider command reactor could not resume a persisted queue", {
+              threadId,
+              cause: Cause.pretty(cause),
+            }),
+          ),
+        ),
+      { concurrency: 8, discard: true },
+    ).pipe(Effect.forkScoped);
   });
 
   return {

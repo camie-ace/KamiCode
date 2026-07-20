@@ -22,6 +22,7 @@ import {
   ThreadMessageUpdatedPayload,
   ThreadMetaUpdatedPayload,
   ThreadProposedPlanUpsertedPayload,
+  ThreadQueuedTurnStatusSetPayload,
   ThreadQueuedTurnDeletedPayload,
   ThreadRuntimeModeSetPayload,
   ThreadUnarchivedPayload,
@@ -322,6 +323,7 @@ export function projectEvent(
           ...nextBase,
           threads: updateThread(nextBase.threads, payload.threadId, {
             deletedAt: payload.deletedAt,
+            queuedTurns: [],
             updatedAt: payload.deletedAt,
           }),
         })),
@@ -333,6 +335,7 @@ export function projectEvent(
           ...nextBase,
           threads: updateThread(nextBase.threads, payload.threadId, {
             archivedAt: payload.archivedAt,
+            queuedTurns: [],
             updatedAt: payload.updatedAt,
           }),
         })),
@@ -506,13 +509,17 @@ export function projectEvent(
         if (!thread) {
           return nextBase;
         }
+        const queueId = `queue:${event.eventId}`;
+        if ((thread.queuedTurns ?? []).some((turn) => turn.queueId === queueId)) {
+          return nextBase;
+        }
         return {
           ...nextBase,
           threads: updateThread(nextBase.threads, payload.threadId, {
             queuedTurns: [
               ...(thread.queuedTurns ?? []),
               {
-                queueId: `queue:${event.eventId}`,
+                queueId,
                 threadId: payload.threadId,
                 messageId: payload.messageId,
                 status: "queued",
@@ -524,6 +531,42 @@ export function projectEvent(
               },
             ],
             updatedAt: event.occurredAt,
+          }),
+        };
+      });
+
+    case "thread.queued-turn-status-set":
+      return Effect.gen(function* () {
+        const payload = yield* decodeForEvent(
+          ThreadQueuedTurnStatusSetPayload,
+          event.payload,
+          event.type,
+          "payload",
+        );
+        const thread = nextBase.threads.find((entry) => entry.id === payload.threadId);
+        if (!thread) {
+          return nextBase;
+        }
+        const queuedTurns =
+          payload.status === "queued" || payload.status === "dispatching"
+            ? (thread.queuedTurns ?? []).map((turn) =>
+                turn.queueId === payload.queueId
+                  ? {
+                      ...turn,
+                      status: payload.status,
+                      startedAt: payload.startedAt,
+                      completedAt: payload.completedAt,
+                      turnId: payload.turnId,
+                      failureDetail: payload.failureDetail,
+                    }
+                  : turn,
+              )
+            : (thread.queuedTurns ?? []).filter((turn) => turn.queueId !== payload.queueId);
+        return {
+          ...nextBase,
+          threads: updateThread(nextBase.threads, payload.threadId, {
+            queuedTurns,
+            updatedAt: payload.updatedAt,
           }),
         };
       });

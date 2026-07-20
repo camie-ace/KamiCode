@@ -6,12 +6,14 @@ import {
 import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
+import * as Schedule from "effect/Schedule";
 
 import type { EnvironmentSupervisor } from "../connection/supervisor.ts";
 import {
   type EnvironmentRpcFailure,
   type EnvironmentRpcSuccess,
   type EnvironmentRpcUnavailableError,
+  isEnvironmentRpcTransportFailure,
   request,
 } from "../rpc/client.ts";
 
@@ -80,7 +82,13 @@ function timestampedCommandMetadata(input: {
 }
 
 function dispatch(command: ClientOrchestrationCommand) {
-  return request(ORCHESTRATION_WS_METHODS.dispatchCommand, command);
+  return request(ORCHESTRATION_WS_METHODS.dispatchCommand, command).pipe(
+    Effect.retry({
+      schedule: Schedule.spaced("250 millis"),
+      times: 120,
+      while: isEnvironmentRpcTransportFailure,
+    }),
+  );
 }
 
 export const createProject: (input: CreateProjectInput) => CommandEffect = Effect.fn(

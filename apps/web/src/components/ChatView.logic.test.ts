@@ -279,12 +279,12 @@ describe("isPendingQueuedTurn", () => {
     failureDetail: null,
   });
 
-  it("keeps only not-yet-dispatched turns in the pending queue UI set", () => {
+  it("keeps queued and dispatching turns visible in the pending queue UI set", () => {
     expect(
       [makeQueuedTurn("queued"), makeQueuedTurn("dispatching")]
         .filter(isPendingQueuedTurn)
         .map((turn) => turn.status),
-    ).toEqual(["queued"]);
+    ).toEqual(["queued", "dispatching"]);
   });
 });
 

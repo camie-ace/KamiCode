@@ -63,6 +63,11 @@ export type EnvironmentStreamRpcTag =
 
 export type EnvironmentUnaryRpcTag = Exclude<EnvironmentRpcTag, EnvironmentStreamRpcTag>;
 const isRpcClientError = Schema.is(RpcClientError.RpcClientError);
+const isEnvironmentRpcUnavailableError = Schema.is(EnvironmentRpcUnavailableError);
+
+export function isEnvironmentRpcTransportFailure(error: unknown): boolean {
+  return isEnvironmentRpcUnavailableError(error) || isRpcClientError(error);
+}
 
 export type EnvironmentRpcInput<TTag extends EnvironmentRpcTag> = Parameters<RpcMethod<TTag>>[0];
 

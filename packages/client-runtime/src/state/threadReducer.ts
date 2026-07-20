@@ -93,6 +93,7 @@ export function applyThreadDetailEvent(
         thread: {
           ...thread,
           archivedAt: event.payload.archivedAt,
+          queuedTurns: [],
           updatedAt: event.payload.updatedAt,
         },
       };
@@ -142,7 +143,26 @@ export function applyThreadDetailEvent(
       };
 
     // ── Turn lifecycle ──────────────────────────────────────────────
-    case "thread.turn-start-requested":
+    case "thread.turn-start-requested": {
+      const queueId = `queue:${event.eventId}`;
+      const queuedTurns =
+        event.payload.dispatchPolicy === "queue" &&
+        !(thread.queuedTurns ?? []).some((turn) => turn.queueId === queueId)
+          ? [
+              ...(thread.queuedTurns ?? []),
+              {
+                queueId,
+                threadId: event.payload.threadId,
+                messageId: event.payload.messageId,
+                status: "queued" as const,
+                requestedAt: event.payload.createdAt,
+                startedAt: null,
+                completedAt: null,
+                turnId: null,
+                failureDetail: null,
+              },
+            ]
+          : (thread.queuedTurns ?? []);
       return {
         kind: "updated",
         thread: {
@@ -152,7 +172,48 @@ export function applyThreadDetailEvent(
             : {}),
           runtimeMode: event.payload.runtimeMode,
           interactionMode: event.payload.interactionMode,
+          queuedTurns,
           updatedAt: event.occurredAt,
+        },
+      };
+    }
+
+    case "thread.queued-turn-status-set": {
+      const queuedTurns =
+        event.payload.status === "queued" || event.payload.status === "dispatching"
+          ? (thread.queuedTurns ?? []).map((turn) =>
+              turn.queueId === event.payload.queueId
+                ? {
+                    ...turn,
+                    status: event.payload.status,
+                    startedAt: event.payload.startedAt,
+                    completedAt: event.payload.completedAt,
+                    turnId: event.payload.turnId,
+                    failureDetail: event.payload.failureDetail,
+                  }
+                : turn,
+            )
+          : (thread.queuedTurns ?? []).filter((turn) => turn.queueId !== event.payload.queueId);
+      return {
+        kind: "updated",
+        thread: {
+          ...thread,
+          queuedTurns,
+          updatedAt: event.payload.updatedAt,
+        },
+      };
+    }
+
+    case "thread.queued-turn-deleted":
+      return {
+        kind: "updated",
+        thread: {
+          ...thread,
+          messages: thread.messages.filter((message) => message.id !== event.payload.messageId),
+          queuedTurns: (thread.queuedTurns ?? []).filter(
+            (turn) => turn.queueId !== event.payload.queueId,
+          ),
+          updatedAt: event.payload.deletedAt,
         },
       };
 

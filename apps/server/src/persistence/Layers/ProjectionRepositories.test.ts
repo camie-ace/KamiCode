@@ -140,7 +140,7 @@ projectionRepositoriesLayer("Projection repositories", (it) => {
     }),
   );
 
-  it.effect("does not let a started mark overwrite a cancelled dispatching queued turn", () =>
+  it.effect("does not allow cancellation after a queued turn starts dispatching", () =>
     Effect.gen(function* () {
       const queue = yield* ProjectionTurnQueueRepository;
       const sql = yield* SqlClient.SqlClient;
@@ -167,32 +167,162 @@ projectionRepositoriesLayer("Projection repositories", (it) => {
         failureDetail: null,
       });
 
-      const claimed = yield* queue.claimNextQueuedByThreadId(
-        { threadId },
-        "2026-03-24T00:00:01.000Z",
-      );
-      assert.strictEqual(Option.isSome(claimed), true);
-      assert.strictEqual(Option.getOrThrow(claimed).status, "dispatching");
+      const dispatching = yield* queue.markDispatching({
+        queueId,
+        startedAt: "2026-03-24T00:00:01.000Z",
+      });
+      assert.strictEqual(dispatching, true);
 
       const cancelled = yield* queue.markCancelled({
         queueId,
         cancelledAt: "2026-03-24T00:00:02.000Z",
       });
-      assert.strictEqual(cancelled, true);
+      assert.strictEqual(cancelled, false);
 
       const started = yield* queue.markStarted({
         queueId,
         turnId: TurnId.make("turn-cancel-dispatching"),
         startedAt: "2026-03-24T00:00:03.000Z",
       });
-      assert.strictEqual(started, false);
+      assert.strictEqual(started, true);
 
       const rows = yield* sql<{ readonly status: string }>`
         SELECT status
         FROM projection_turn_queue
         WHERE queue_id = ${queueId}
       `;
-      assert.strictEqual(rows[0]?.status, "cancelled");
+      assert.strictEqual(rows[0]?.status, "started");
+    }),
+  );
+
+  it.effect("recovers abandoned queue rows and terminalizes archived work", () =>
+    Effect.gen(function* () {
+      const threads = yield* ProjectionThreadRepository;
+      const queue = yield* ProjectionTurnQueueRepository;
+      const sql = yield* SqlClient.SqlClient;
+      const now = "2026-03-24T01:00:00.000Z";
+      const makeThread = (threadId: ThreadId, archivedAt: string | null = null) =>
+        threads.upsert({
+          threadId,
+          projectId: ProjectId.make("project-queue-recovery"),
+          title: String(threadId),
+          modelSelection: {
+            instanceId: ProviderInstanceId.make("codex"),
+            model: "gpt-5.4",
+          },
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          branch: null,
+          worktreePath: null,
+          latestTurnId: null,
+          createdAt: now,
+          updatedAt: now,
+          archivedAt,
+          latestUserMessageAt: null,
+          pendingApprovalCount: 0,
+          pendingUserInputCount: 0,
+          hasActionableProposedPlan: 0,
+          deletedAt: null,
+        });
+      const activeThreadId = ThreadId.make("thread-queue-recovery-active");
+      const runningThreadId = ThreadId.make("thread-queue-recovery-running");
+      const archivedThreadId = ThreadId.make("thread-queue-recovery-archived");
+      yield* makeThread(activeThreadId);
+      yield* makeThread(runningThreadId);
+      yield* makeThread(archivedThreadId, now);
+
+      const upsertQueue = (
+        queueId: string,
+        threadId: ThreadId,
+        status: "queued" | "dispatching" | "started",
+        turnId: TurnId | null = null,
+        requestedAt = now,
+      ) =>
+        queue.upsert({
+          queueId,
+          threadId,
+          eventId: EventId.make(`event:${queueId}`),
+          commandId: null,
+          messageId: MessageId.make(`message:${queueId}`),
+          status,
+          requestedAt,
+          startedAt: status === "queued" ? null : now,
+          completedAt: null,
+          turnId,
+          modelSelection: null,
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          titleSeed: null,
+          sourceProposedPlanThreadId: null,
+          sourceProposedPlanId: null,
+          failureDetail: null,
+        });
+      yield* upsertQueue("queue:recover-dispatching", activeThreadId, "dispatching");
+      yield* upsertQueue(
+        "queue:recover-started",
+        activeThreadId,
+        "started",
+        TurnId.make("turn-recover-started"),
+      );
+      yield* upsertQueue("queue:recover-running", runningThreadId, "dispatching");
+      yield* upsertQueue("queue:recover-archived", archivedThreadId, "queued");
+      yield* upsertQueue(
+        "queue:recover-stale",
+        activeThreadId,
+        "queued",
+        null,
+        "2026-03-01T00:00:00.000Z",
+      );
+
+      yield* sql`
+        INSERT INTO projection_thread_sessions (
+          thread_id,
+          status,
+          runtime_mode,
+          active_turn_id,
+          updated_at
+        ) VALUES (
+          ${runningThreadId},
+          'running',
+          'full-access',
+          ${TurnId.make("turn-recovered-running")},
+          ${now}
+        )
+      `;
+
+      yield* queue.recoverAbandoned({
+        recoveredAt: "2026-03-24T01:05:00.000Z",
+        staleBefore: "2026-03-17T01:05:00.000Z",
+      });
+
+      const rows = yield* sql<{
+        readonly queueId: string;
+        readonly status: string;
+        readonly turnId: string | null;
+      }>`
+        SELECT
+          queue_id AS "queueId",
+          status,
+          turn_id AS "turnId"
+        FROM projection_turn_queue
+        WHERE queue_id LIKE 'queue:recover-%'
+        ORDER BY queue_id ASC
+      `;
+      assert.deepStrictEqual(rows, [
+        { queueId: "queue:recover-archived", status: "cancelled", turnId: null },
+        { queueId: "queue:recover-dispatching", status: "queued", turnId: null },
+        {
+          queueId: "queue:recover-running",
+          status: "started",
+          turnId: "turn-recovered-running",
+        },
+        { queueId: "queue:recover-stale", status: "cancelled", turnId: null },
+        {
+          queueId: "queue:recover-started",
+          status: "completed",
+          turnId: "turn-recover-started",
+        },
+      ]);
     }),
   );
 });

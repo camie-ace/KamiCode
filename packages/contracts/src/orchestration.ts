@@ -808,6 +808,7 @@ export const OrchestrationQueuedTurnStatus = Schema.Literals([
   "queued",
   "dispatching",
   "started",
+  "completed",
   "failed",
   "cancelled",
 ]);
@@ -1406,6 +1407,18 @@ const ThreadSessionSetCommand = Schema.Struct({
   createdAt: IsoDateTime,
 });
 
+const ThreadQueuedTurnStatusSetCommand = Schema.Struct({
+  type: Schema.Literal("thread.queued-turn.status.set"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  queueId: TrimmedNonEmptyString,
+  messageId: MessageId,
+  status: Schema.Literals(["dispatching", "started", "failed"]),
+  turnId: Schema.NullOr(TurnId),
+  failureDetail: Schema.NullOr(TrimmedNonEmptyString),
+  createdAt: IsoDateTime,
+});
+
 const ThreadMessageAssistantDeltaCommand = Schema.Struct({
   type: Schema.Literal("thread.message.assistant.delta"),
   commandId: CommandId,
@@ -1470,6 +1483,7 @@ const ThreadRevertCompleteCommand = Schema.Struct({
 
 const InternalOrchestrationCommand = Schema.Union([
   ThreadSessionSetCommand,
+  ThreadQueuedTurnStatusSetCommand,
   ThreadMessageAssistantDeltaCommand,
   ThreadMessageAssistantCompleteCommand,
   ThreadMessageImportCommand,
@@ -1500,6 +1514,7 @@ export const OrchestrationEventType = Schema.Literals([
   "thread.message-sent",
   "thread.message-updated",
   "thread.turn-start-requested",
+  "thread.queued-turn-status-set",
   "thread.queued-turn-deleted",
   "thread.turn-interrupt-requested",
   "thread.approval-response-requested",
@@ -1619,6 +1634,7 @@ export const ThreadMessageSentPayload = Schema.Struct({
 export const ThreadMessageUpdatedPayload = Schema.Struct({
   threadId: ThreadId,
   messageId: MessageId,
+  queueId: Schema.optional(TrimmedNonEmptyString),
   text: Schema.String,
   updatedAt: IsoDateTime,
 });
@@ -1644,6 +1660,18 @@ export const ThreadQueuedTurnDeletedPayload = Schema.Struct({
   queueId: TrimmedNonEmptyString,
   messageId: MessageId,
   deletedAt: IsoDateTime,
+});
+
+export const ThreadQueuedTurnStatusSetPayload = Schema.Struct({
+  threadId: ThreadId,
+  queueId: TrimmedNonEmptyString,
+  messageId: MessageId,
+  status: OrchestrationQueuedTurnStatus,
+  startedAt: Schema.NullOr(IsoDateTime),
+  completedAt: Schema.NullOr(IsoDateTime),
+  turnId: Schema.NullOr(TurnId),
+  failureDetail: Schema.NullOr(TrimmedNonEmptyString),
+  updatedAt: IsoDateTime,
 });
 
 export const ThreadTurnInterruptRequestedPayload = Schema.Struct({
@@ -1794,6 +1822,11 @@ export const OrchestrationEvent = Schema.Union([
     ...EventBaseFields,
     type: Schema.Literal("thread.turn-start-requested"),
     payload: ThreadTurnStartRequestedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.queued-turn-status-set"),
+    payload: ThreadQueuedTurnStatusSetPayload,
   }),
   Schema.Struct({
     ...EventBaseFields,

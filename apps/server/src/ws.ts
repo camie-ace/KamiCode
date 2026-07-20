@@ -252,6 +252,9 @@ function isThreadDetailEvent(event: OrchestrationEvent): event is Extract<
     type:
       | "thread.message-sent"
       | "thread.message-updated"
+      | "thread.turn-start-requested"
+      | "thread.queued-turn-status-set"
+      | "thread.queued-turn-deleted"
       | "thread.proposed-plan-upserted"
       | "thread.activity-appended"
       | "thread.turn-diff-completed"
@@ -262,6 +265,9 @@ function isThreadDetailEvent(event: OrchestrationEvent): event is Extract<
   return (
     event.type === "thread.message-sent" ||
     event.type === "thread.message-updated" ||
+    event.type === "thread.turn-start-requested" ||
+    event.type === "thread.queued-turn-status-set" ||
+    event.type === "thread.queued-turn-deleted" ||
     event.type === "thread.proposed-plan-upserted" ||
     event.type === "thread.activity-appended" ||
     event.type === "thread.turn-diff-completed" ||

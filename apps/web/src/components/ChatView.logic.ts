@@ -291,8 +291,8 @@ export function threadHasStarted(thread: Thread | null | undefined): boolean {
 
 export function isPendingQueuedTurn(
   turn: OrchestrationQueuedTurn,
-): turn is OrchestrationQueuedTurn & { readonly status: "queued" } {
-  return turn.status === "queued";
+): turn is OrchestrationQueuedTurn & { readonly status: "queued" | "dispatching" } {
+  return turn.status === "queued" || turn.status === "dispatching";
 }
 
 // `threadProvider` is the open branded driver kind carried by the session.

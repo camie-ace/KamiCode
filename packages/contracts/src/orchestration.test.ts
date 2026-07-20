@@ -1302,6 +1302,48 @@ it.effect("decodes thread.turn-start-requested title seed when present", () =>
   }),
 );
 
+it.effect("decodes internal queued-turn lifecycle commands and events", () =>
+  Effect.gen(function* () {
+    const command = yield* decodeOrchestrationCommand({
+      type: "thread.queued-turn.status.set",
+      commandId: "server:queue-status:1",
+      threadId: "thread-1",
+      queueId: "queue:event-1",
+      messageId: "msg-1",
+      status: "dispatching",
+      turnId: null,
+      failureDetail: null,
+      createdAt: "2026-01-01T00:00:01.000Z",
+    });
+    assert.strictEqual(command.type, "thread.queued-turn.status.set");
+
+    const event = yield* decodeOrchestrationEvent({
+      eventId: "event-status-1",
+      sequence: 10,
+      aggregateKind: "thread",
+      aggregateId: "thread-1",
+      type: "thread.queued-turn-status-set",
+      occurredAt: "2026-01-01T00:00:01.000Z",
+      commandId: "server:queue-status:1",
+      causationEventId: null,
+      correlationId: "server:queue-status:1",
+      metadata: {},
+      payload: {
+        threadId: "thread-1",
+        queueId: "queue:event-1",
+        messageId: "msg-1",
+        status: "dispatching",
+        startedAt: "2026-01-01T00:00:01.000Z",
+        completedAt: null,
+        turnId: null,
+        failureDetail: null,
+        updatedAt: "2026-01-01T00:00:01.000Z",
+      },
+    });
+    assert.strictEqual(event.type, "thread.queued-turn-status-set");
+  }),
+);
+
 it.effect("decodes latest turn source proposed plan metadata when present", () =>
   Effect.gen(function* () {
     const parsed = yield* decodeOrchestrationLatestTurn({

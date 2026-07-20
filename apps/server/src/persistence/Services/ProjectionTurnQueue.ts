@@ -22,6 +22,7 @@ export const ProjectionTurnQueueStatus = Schema.Literals([
   "queued",
   "dispatching",
   "started",
+  "completed",
   "failed",
   "cancelled",
 ]);
@@ -56,6 +57,24 @@ export const ThreadQueueInput = Schema.Struct({
 });
 export type ThreadQueueInput = typeof ThreadQueueInput.Type;
 
+export const ProjectionTurnQueueIdentityInput = Schema.Struct({
+  queueId: TrimmedNonEmptyString,
+  messageId: MessageId,
+});
+export type ProjectionTurnQueueIdentityInput = typeof ProjectionTurnQueueIdentityInput.Type;
+
+export const ProjectionTurnQueueIdInput = Schema.Struct({
+  queueId: TrimmedNonEmptyString,
+});
+export type ProjectionTurnQueueIdInput = typeof ProjectionTurnQueueIdInput.Type;
+
+export const MarkProjectionTurnQueueDispatchingInput = Schema.Struct({
+  queueId: TrimmedNonEmptyString,
+  startedAt: IsoDateTime,
+});
+export type MarkProjectionTurnQueueDispatchingInput =
+  typeof MarkProjectionTurnQueueDispatchingInput.Type;
+
 export const MarkProjectionTurnQueueStartedInput = Schema.Struct({
   queueId: TrimmedNonEmptyString,
   turnId: TurnId,
@@ -77,20 +96,45 @@ export const MarkProjectionTurnQueueCancelledInput = Schema.Struct({
 export type MarkProjectionTurnQueueCancelledInput =
   typeof MarkProjectionTurnQueueCancelledInput.Type;
 
+export const CompleteProjectionTurnQueueForThreadInput = Schema.Struct({
+  threadId: ThreadId,
+  completedAt: IsoDateTime,
+});
+export type CompleteProjectionTurnQueueForThreadInput =
+  typeof CompleteProjectionTurnQueueForThreadInput.Type;
+
+export const CancelProjectionTurnQueueForThreadInput = Schema.Struct({
+  threadId: ThreadId,
+  cancelledAt: IsoDateTime,
+});
+export type CancelProjectionTurnQueueForThreadInput =
+  typeof CancelProjectionTurnQueueForThreadInput.Type;
+
+export const RecoverProjectionTurnQueueInput = Schema.Struct({
+  recoveredAt: IsoDateTime,
+  staleBefore: IsoDateTime,
+});
+export type RecoverProjectionTurnQueueInput = typeof RecoverProjectionTurnQueueInput.Type;
+
 export interface ProjectionTurnQueueRepositoryShape {
   readonly upsert: (
     row: UpsertProjectionTurnQueueInput,
   ) => Effect.Effect<void, ProjectionRepositoryError>;
-  readonly claimNextQueuedByThreadId: (
-    input: ThreadQueueInput,
-    claimedAt: IsoDateTime,
+  readonly getByQueueId: (
+    input: ProjectionTurnQueueIdInput,
   ) => Effect.Effect<Option.Option<ProjectionTurnQueueRow>, ProjectionRepositoryError>;
+  readonly isQueued: (
+    input: ProjectionTurnQueueIdentityInput,
+  ) => Effect.Effect<boolean, ProjectionRepositoryError>;
+  readonly markDispatching: (
+    input: MarkProjectionTurnQueueDispatchingInput,
+  ) => Effect.Effect<boolean, ProjectionRepositoryError>;
   readonly markStarted: (
     input: MarkProjectionTurnQueueStartedInput,
   ) => Effect.Effect<boolean, ProjectionRepositoryError>;
   readonly markFailed: (
     input: MarkProjectionTurnQueueFailedInput,
-  ) => Effect.Effect<void, ProjectionRepositoryError>;
+  ) => Effect.Effect<boolean, ProjectionRepositoryError>;
   readonly markCancelled: (
     input: MarkProjectionTurnQueueCancelledInput,
   ) => Effect.Effect<boolean, ProjectionRepositoryError>;
@@ -100,6 +144,16 @@ export interface ProjectionTurnQueueRepositoryShape {
   readonly countQueuedByThreadId: (
     input: ThreadQueueInput,
   ) => Effect.Effect<number, ProjectionRepositoryError>;
+  readonly listQueuedThreadIds: Effect.Effect<ReadonlyArray<ThreadId>, ProjectionRepositoryError>;
+  readonly completeStartedByThreadId: (
+    input: CompleteProjectionTurnQueueForThreadInput,
+  ) => Effect.Effect<void, ProjectionRepositoryError>;
+  readonly cancelActiveByThreadId: (
+    input: CancelProjectionTurnQueueForThreadInput,
+  ) => Effect.Effect<void, ProjectionRepositoryError>;
+  readonly recoverAbandoned: (
+    input: RecoverProjectionTurnQueueInput,
+  ) => Effect.Effect<void, ProjectionRepositoryError>;
 }
 
 export class ProjectionTurnQueueRepository extends Context.Service<

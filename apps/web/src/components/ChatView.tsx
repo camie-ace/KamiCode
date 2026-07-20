@@ -3041,9 +3041,7 @@ function ChatViewContent(props: ChatViewProps) {
           createdAt: message.createdAt,
         }),
       );
-    return [...serverItems, ...optimisticItems].toSorted((left, right) =>
-      left.createdAt.localeCompare(right.createdAt),
-    );
+    return [...serverItems, ...optimisticItems];
   }, [
     activeThread,
     environmentId,
@@ -5087,8 +5085,11 @@ function ChatViewContent(props: ChatViewProps) {
   }, [activeThread?.id, activeThread?.messages, handoffAttachmentPreviews, optimisticUserMessages]);
 
   useEffect(() => {
-    if (!activeThread?.id || activeQueuedTurns.length === 0) return;
-    const queuedServerIds = new Set(activeQueuedTurns.map((turn) => turn.messageId));
+    if (!activeThread?.id) return;
+    const queuedServerIds = new Set(activeThread.messages.map((message) => message.id));
+    for (const turn of activeQueuedTurns) {
+      queuedServerIds.add(turn.messageId);
+    }
     const removedMessages = optimisticQueuedMessages.filter((message) =>
       queuedServerIds.has(message.id),
     );
@@ -5111,7 +5112,13 @@ function ChatViewContent(props: ChatViewProps) {
     return () => {
       window.clearTimeout(timer);
     };
-  }, [activeQueuedTurns, activeThread?.id, handoffAttachmentPreviews, optimisticQueuedMessages]);
+  }, [
+    activeQueuedTurns,
+    activeThread?.id,
+    activeThread?.messages,
+    handoffAttachmentPreviews,
+    optimisticQueuedMessages,
+  ]);
 
   useEffect(() => {
     setOptimisticUserMessages((existing) => {

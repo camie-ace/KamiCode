@@ -6,6 +6,7 @@ import {
   ThreadId,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
+import * as DateTime from "effect/DateTime";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
@@ -13,7 +14,11 @@ import * as Path from "effect/Path";
 import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
-import { toPersistenceSqlError, type ProjectionRepositoryError } from "../../persistence/Errors.ts";
+import {
+  PersistenceSqlError,
+  toPersistenceSqlError,
+  type ProjectionRepositoryError,
+} from "../../persistence/Errors.ts";
 import { OrchestrationEventStore } from "../../persistence/Services/OrchestrationEventStore.ts";
 import { ProjectionPendingApprovalRepository } from "../../persistence/Services/ProjectionPendingApprovals.ts";
 import { ProjectionProjectRepository } from "../../persistence/Services/ProjectionProjects.ts";
@@ -111,6 +116,8 @@ interface AttachmentSideEffects {
   readonly deletedThreadIds: Set<string>;
   readonly prunedThreadRelativePaths: Map<string, Set<string>>;
 }
+
+const QUEUE_RECOVERY_MAX_AGE_DAYS = 7;
 
 const materializeAttachmentsForProjection = Effect.fn("materializeAttachmentsForProjection")(
   (input: { readonly attachments: ReadonlyArray<ChatAttachment> }) =>
@@ -492,6 +499,9 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
     const path = yield* Path.Path;
     const serverConfig = yield* ServerConfig;
 
+    const queueTransitionConflict = (operation: string, detail: string) =>
+      new PersistenceSqlError({ operation, detail });
+
     const applyProjectsProjection: ProjectorDefinition["apply"] = Effect.fn(
       "applyProjectsProjection",
     )(function* (event, _attachmentSideEffects) {
@@ -864,6 +874,18 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
         }
 
         case "thread.message-updated": {
+          if (event.payload.queueId !== undefined) {
+            const isQueued = yield* projectionTurnQueueRepository.isQueued({
+              queueId: event.payload.queueId,
+              messageId: event.payload.messageId,
+            });
+            if (!isQueued) {
+              return yield* queueTransitionConflict(
+                "ProjectionPipeline.thread.message-updated",
+                `Queued turn '${event.payload.queueId}' is no longer editable.`,
+              );
+            }
+          }
           const existingMessage = yield* projectionThreadMessageRepository.getByMessageId({
             messageId: event.payload.messageId,
           });
@@ -1396,6 +1418,43 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
           return;
         }
 
+        case "thread.queued-turn-status-set": {
+          const transitioned = yield* (() => {
+            switch (event.payload.status) {
+              case "dispatching":
+                return projectionTurnQueueRepository.markDispatching({
+                  queueId: event.payload.queueId,
+                  startedAt: event.payload.startedAt ?? event.payload.updatedAt,
+                });
+              case "started":
+                return event.payload.turnId === null
+                  ? Effect.succeed(false)
+                  : projectionTurnQueueRepository.markStarted({
+                      queueId: event.payload.queueId,
+                      turnId: event.payload.turnId,
+                      startedAt: event.payload.startedAt ?? event.payload.updatedAt,
+                    });
+              case "failed":
+                return event.payload.failureDetail === null
+                  ? Effect.succeed(false)
+                  : projectionTurnQueueRepository.markFailed({
+                      queueId: event.payload.queueId,
+                      failedAt: event.payload.completedAt ?? event.payload.updatedAt,
+                      failureDetail: event.payload.failureDetail,
+                    });
+              default:
+                return Effect.succeed(false);
+            }
+          })();
+          if (!transitioned) {
+            return yield* queueTransitionConflict(
+              "ProjectionPipeline.thread.queued-turn-status-set",
+              `Queued turn '${event.payload.queueId}' could not transition to '${event.payload.status}'.`,
+            );
+          }
+          return;
+        }
+
         case "thread.queued-turn-deleted": {
           const cancelled = yield* projectionTurnQueueRepository.markCancelled({
             queueId: event.payload.queueId,
@@ -1405,7 +1464,40 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             yield* projectionThreadMessageRepository.deleteByMessageId({
               messageId: event.payload.messageId,
             });
+            return;
           }
+          return yield* queueTransitionConflict(
+            "ProjectionPipeline.thread.queued-turn-deleted",
+            `Queued turn '${event.payload.queueId}' is already being dispatched and cannot be deleted.`,
+          );
+        }
+
+        case "thread.session-set": {
+          if (
+            event.payload.session.activeTurnId === null &&
+            event.payload.session.status !== "starting" &&
+            event.payload.session.status !== "running"
+          ) {
+            yield* projectionTurnQueueRepository.completeStartedByThreadId({
+              threadId: event.payload.threadId,
+              completedAt: event.payload.session.updatedAt,
+            });
+          }
+          return;
+        }
+
+        case "thread.archived":
+          yield* projectionTurnQueueRepository.cancelActiveByThreadId({
+            threadId: event.payload.threadId,
+            cancelledAt: event.payload.archivedAt,
+          });
+          return;
+
+        case "thread.deleted": {
+          yield* projectionTurnQueueRepository.cancelActiveByThreadId({
+            threadId: event.payload.threadId,
+            cancelledAt: event.payload.deletedAt,
+          });
           return;
         }
 
@@ -1653,6 +1745,18 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
       Effect.provideService(FileSystem.FileSystem, fileSystem),
       Effect.provideService(Path.Path, path),
       Effect.provideService(ServerConfig, serverConfig),
+      Effect.flatMap(() =>
+        DateTime.now.pipe(
+          Effect.flatMap((now) =>
+            projectionTurnQueueRepository.recoverAbandoned({
+              recoveredAt: DateTime.formatIso(now),
+              staleBefore: DateTime.formatIso(
+                DateTime.subtract(now, { days: QUEUE_RECOVERY_MAX_AGE_DAYS }),
+              ),
+            }),
+          ),
+        ),
+      ),
       Effect.asVoid,
       Effect.tap(() =>
         Effect.logDebug("orchestration projection pipeline bootstrapped").pipe(

@@ -222,6 +222,7 @@ describe("ProviderCommandReactor", () => {
     readonly testEnvironments?: ReadonlyArray<ProjectTestEnvironment>;
     readonly continuationKeyByInstance?: Readonly<Record<string, string>>;
     readonly requiresNewThreadForModelChange?: boolean;
+    readonly seedQueuedTurnBeforeStart?: boolean;
   }) {
     const now = "2026-01-01T00:00:00.000Z";
     const baseDir =
@@ -463,8 +464,6 @@ describe("ProviderCommandReactor", () => {
     const engine = await runtime.runPromise(Effect.service(OrchestrationEngineService));
     const snapshotQuery = await runtime.runPromise(Effect.service(ProjectionSnapshotQuery));
     const reactor = await runtime.runPromise(Effect.service(ProviderCommandReactor));
-    scope = await Effect.runPromise(Scope.make("sequential"));
-    await Effect.runPromise(reactor.start().pipe(Scope.provide(scope)));
     const drain = () => Effect.runPromise(reactor.drain);
 
     await Effect.runPromise(
@@ -496,6 +495,27 @@ describe("ProviderCommandReactor", () => {
         createdAt: now,
       }),
     );
+    if (input?.seedQueuedTurnBeforeStart === true) {
+      await Effect.runPromise(
+        engine.dispatch({
+          type: "thread.turn.start",
+          commandId: CommandId.make("cmd-seeded-queued-turn"),
+          threadId: ThreadId.make("thread-1"),
+          message: {
+            messageId: asMessageId("user-message-seeded-queued-turn"),
+            role: "user",
+            text: "resume this persisted queued turn",
+            attachments: [],
+          },
+          interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+          runtimeMode: "approval-required",
+          dispatchPolicy: "queue",
+          createdAt: "2026-01-01T00:00:01.000Z",
+        }),
+      );
+    }
+    scope = await Effect.runPromise(Scope.make("sequential"));
+    await Effect.runPromise(reactor.start().pipe(Scope.provide(scope)));
 
     return {
       engine,
@@ -586,8 +606,8 @@ describe("ProviderCommandReactor", () => {
         text: "second",
         attachments: [],
       },
-      interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
-      runtimeMode: "approval-required",
+      interactionMode: "test",
+      runtimeMode: "full-access",
       dispatchPolicy: "queue",
       createdAt: "2026-01-01T00:00:01.000Z",
     });
@@ -615,10 +635,33 @@ describe("ProviderCommandReactor", () => {
     );
 
     await waitFor(() => harness.sendTurn.mock.calls.length === 1);
+    expect(harness.startSession.mock.calls[0]?.[1]).toMatchObject({
+      runtimeMode: "full-access",
+      interactionMode: "test",
+    });
     expect(harness.sendTurn.mock.calls[0]?.[0]).toMatchObject({
-      input: "second",
+      input: expect.stringContaining("second"),
+      threadId: ThreadId.make("thread-1"),
+      interactionMode: "test",
+    });
+  });
+
+  it("resumes a persisted queued turn when the reactor starts", async () => {
+    const harness = await createHarness({ seedQueuedTurnBeforeStart: true });
+
+    await waitFor(() => harness.sendTurn.mock.calls.length === 1);
+    expect(harness.sendTurn.mock.calls[0]?.[0]).toMatchObject({
+      input: "resume this persisted queued turn",
       threadId: ThreadId.make("thread-1"),
     });
+    await waitFor(async () => {
+      const current = await harness.readModel();
+      const currentThread = current.threads.find((entry) => entry.id === ThreadId.make("thread-1"));
+      return currentThread?.queuedTurns?.length === 0;
+    });
+    const readModel = await harness.readModel();
+    const thread = readModel.threads.find((entry) => entry.id === ThreadId.make("thread-1"));
+    expect(thread?.queuedTurns).toEqual([]);
   });
 
   it("generates a thread title on the first turn", async () => {
@@ -1609,7 +1652,7 @@ describe("ProviderCommandReactor", () => {
           attachments: [],
         },
         interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
-        runtimeMode: "full-access",
+        runtimeMode: "approval-required",
         createdAt: now,
       }),
     );

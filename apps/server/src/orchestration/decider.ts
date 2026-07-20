@@ -76,6 +76,7 @@ type InferredWorkflowAgentDraft = {
 const DEFAULT_WORKFLOW_AGENT_MODEL = "Use lead default";
 const DEFAULT_WORKFLOW_AGENT_REASONING_EFFORT = "Use lead default";
 const DEFAULT_WORKFLOW_AGENT_FAST_MODE = false;
+const MAX_QUEUED_TURNS_PER_THREAD = 100;
 
 function workflowAgentId(role: string, index: number): string {
   return `workflow-agent-${index + 1}-${role.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
@@ -711,6 +712,77 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       };
     }
 
+    case "thread.queued-turn.status.set": {
+      const thread = yield* requireThread({
+        readModel,
+        command,
+        threadId: command.threadId,
+      });
+      const queuedTurn = (thread.queuedTurns ?? []).find(
+        (turn) => turn.queueId === command.queueId && turn.messageId === command.messageId,
+      );
+      if (!queuedTurn) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Queued turn '${command.queueId}' was not found.`,
+        });
+      }
+      const expectedStatus = command.status === "dispatching" ? "queued" : "dispatching";
+      if (queuedTurn.status !== expectedStatus) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Queued turn '${command.queueId}' is '${queuedTurn.status}' and cannot transition to '${command.status}'.`,
+        });
+      }
+      if (command.status === "started" && command.turnId === null) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "A started queued turn requires a provider turn id.",
+        });
+      }
+      if (command.status === "failed" && command.failureDetail === null) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "A failed queued turn requires failure detail.",
+        });
+      }
+      if (command.status !== "started" && command.turnId !== null) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `A queued turn transitioning to '${command.status}' cannot include a provider turn id.`,
+        });
+      }
+      if (command.status !== "failed" && command.failureDetail !== null) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `A queued turn transitioning to '${command.status}' cannot include failure detail.`,
+        });
+      }
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "thread.queued-turn-status-set",
+        payload: {
+          threadId: command.threadId,
+          queueId: command.queueId,
+          messageId: command.messageId,
+          status: command.status,
+          startedAt:
+            command.status === "dispatching"
+              ? command.createdAt
+              : (queuedTurn.startedAt ?? command.createdAt),
+          completedAt: command.status === "failed" ? command.createdAt : null,
+          turnId: command.status === "started" ? command.turnId : null,
+          failureDetail: command.status === "failed" ? command.failureDetail : null,
+          updatedAt: command.createdAt,
+        },
+      };
+    }
+
     case "thread.queued-turn.update": {
       const thread = yield* requireThread({
         readModel,
@@ -752,6 +824,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         payload: {
           threadId: command.threadId,
           messageId: command.messageId,
+          queueId: queuedTurn.queueId,
           text: command.text,
           updatedAt: command.createdAt,
         },
@@ -764,6 +837,18 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         command,
         threadId: command.threadId,
       });
+      const dispatchPolicy = command.dispatchPolicy ?? DEFAULT_TURN_DISPATCH_POLICY;
+      if (
+        dispatchPolicy === "queue" &&
+        (targetThread.queuedTurns ?? []).filter(
+          (turn) => turn.status === "queued" || turn.status === "dispatching",
+        ).length >= MAX_QUEUED_TURNS_PER_THREAD
+      ) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Thread '${command.threadId}' already has ${MAX_QUEUED_TURNS_PER_THREAD} pending queued turns.`,
+        });
+      }
       const sourceProposedPlan = command.sourceProposedPlan;
       const sourceThread = sourceProposedPlan
         ? yield* requireThread({
@@ -826,7 +911,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           ...(command.titleSeed !== undefined ? { titleSeed: command.titleSeed } : {}),
           runtimeMode: command.runtimeMode,
           interactionMode: command.interactionMode,
-          dispatchPolicy: command.dispatchPolicy ?? DEFAULT_TURN_DISPATCH_POLICY,
+          dispatchPolicy,
           ...(sourceProposedPlan !== undefined ? { sourceProposedPlan } : {}),
           createdAt: command.createdAt,
         },

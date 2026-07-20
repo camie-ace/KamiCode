@@ -338,6 +338,138 @@ describe("applyThreadDetailEvent", () => {
     });
   });
 
+  describe("queued turn lifecycle", () => {
+    it("adds, marks dispatching, and removes a queued turn from live events", () => {
+      const queued = applyThreadDetailEvent(baseThread, {
+        ...baseEventFields,
+        sequence: 8,
+        occurredAt: "2026-04-01T06:00:00.000Z",
+        aggregateKind: "thread",
+        aggregateId: ThreadId.make("thread-1"),
+        type: "thread.turn-start-requested",
+        payload: {
+          threadId: ThreadId.make("thread-1"),
+          messageId: MessageId.make("msg-queued-live"),
+          runtimeMode: "approval-required",
+          interactionMode: "default",
+          dispatchPolicy: "queue",
+          createdAt: "2026-04-01T06:00:00.000Z",
+        },
+      });
+
+      expect(queued.kind).toBe("updated");
+      if (queued.kind !== "updated") return;
+      expect(queued.thread.queuedTurns).toEqual([
+        expect.objectContaining({
+          queueId: "queue:event-1",
+          messageId: MessageId.make("msg-queued-live"),
+          status: "queued",
+        }),
+      ]);
+
+      const dispatching = applyThreadDetailEvent(queued.thread, {
+        ...baseEventFields,
+        eventId: EventId.make("event-status-dispatching"),
+        sequence: 9,
+        occurredAt: "2026-04-01T06:00:01.000Z",
+        aggregateKind: "thread",
+        aggregateId: ThreadId.make("thread-1"),
+        type: "thread.queued-turn-status-set",
+        payload: {
+          threadId: ThreadId.make("thread-1"),
+          queueId: "queue:event-1",
+          messageId: MessageId.make("msg-queued-live"),
+          status: "dispatching",
+          startedAt: "2026-04-01T06:00:01.000Z",
+          completedAt: null,
+          turnId: null,
+          failureDetail: null,
+          updatedAt: "2026-04-01T06:00:01.000Z",
+        },
+      });
+
+      expect(dispatching.kind).toBe("updated");
+      if (dispatching.kind !== "updated") return;
+      expect(dispatching.thread.queuedTurns?.[0]?.status).toBe("dispatching");
+
+      const started = applyThreadDetailEvent(dispatching.thread, {
+        ...baseEventFields,
+        eventId: EventId.make("event-status-started"),
+        sequence: 10,
+        occurredAt: "2026-04-01T06:00:02.000Z",
+        aggregateKind: "thread",
+        aggregateId: ThreadId.make("thread-1"),
+        type: "thread.queued-turn-status-set",
+        payload: {
+          threadId: ThreadId.make("thread-1"),
+          queueId: "queue:event-1",
+          messageId: MessageId.make("msg-queued-live"),
+          status: "started",
+          startedAt: "2026-04-01T06:00:01.000Z",
+          completedAt: null,
+          turnId: TurnId.make("turn-queued-live"),
+          failureDetail: null,
+          updatedAt: "2026-04-01T06:00:02.000Z",
+        },
+      });
+
+      expect(started.kind).toBe("updated");
+      if (started.kind === "updated") {
+        expect(started.thread.queuedTurns).toEqual([]);
+      }
+    });
+
+    it("removes the queued message when deletion is confirmed", () => {
+      const threadWithQueuedMessage: OrchestrationThread = {
+        ...baseThread,
+        queuedTurns: [
+          {
+            queueId: "queue:event-delete",
+            threadId: ThreadId.make("thread-1"),
+            messageId: MessageId.make("msg-delete"),
+            status: "queued",
+            requestedAt: "2026-04-01T06:00:00.000Z",
+            startedAt: null,
+            completedAt: null,
+            turnId: null,
+            failureDetail: null,
+          },
+        ],
+        messages: [
+          {
+            id: MessageId.make("msg-delete"),
+            role: "user",
+            text: "Delete me",
+            turnId: null,
+            streaming: false,
+            createdAt: "2026-04-01T06:00:00.000Z",
+            updatedAt: "2026-04-01T06:00:00.000Z",
+          },
+        ],
+      };
+      const result = applyThreadDetailEvent(threadWithQueuedMessage, {
+        ...baseEventFields,
+        sequence: 9,
+        occurredAt: "2026-04-01T06:01:00.000Z",
+        aggregateKind: "thread",
+        aggregateId: ThreadId.make("thread-1"),
+        type: "thread.queued-turn-deleted",
+        payload: {
+          threadId: ThreadId.make("thread-1"),
+          queueId: "queue:event-delete",
+          messageId: MessageId.make("msg-delete"),
+          deletedAt: "2026-04-01T06:01:00.000Z",
+        },
+      });
+
+      expect(result.kind).toBe("updated");
+      if (result.kind === "updated") {
+        expect(result.thread.queuedTurns).toEqual([]);
+        expect(result.thread.messages).toEqual([]);
+      }
+    });
+  });
+
   describe("thread.message-updated", () => {
     it("updates an existing message text without changing queue state", () => {
       const threadWithQueuedMessage: OrchestrationThread = {
