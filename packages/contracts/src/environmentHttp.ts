@@ -1,10 +1,12 @@
 import * as Context from "effect/Context";
 import type * as DateTime from "effect/DateTime";
 import * as Schema from "effect/Schema";
+import * as Multipart from "effect/unstable/http/Multipart";
 import * as HttpApi from "effect/unstable/httpapi/HttpApi";
 import * as HttpApiEndpoint from "effect/unstable/httpapi/HttpApiEndpoint";
 import * as HttpApiGroup from "effect/unstable/httpapi/HttpApiGroup";
 import * as HttpApiMiddleware from "effect/unstable/httpapi/HttpApiMiddleware";
+import * as HttpApiSchema from "effect/unstable/httpapi/HttpApiSchema";
 import * as HttpServerRespondable from "effect/unstable/http/HttpServerRespondable";
 import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse";
 
@@ -24,7 +26,7 @@ import {
   AuthWebSocketTicketResult,
   ServerAuthSessionMethod,
 } from "./auth.ts";
-import { AuthSessionId, ThreadId, TrimmedNonEmptyString } from "./baseSchemas.ts";
+import { AuthSessionId, NonNegativeInt, ThreadId, TrimmedNonEmptyString } from "./baseSchemas.ts";
 import { ExecutionEnvironmentDescriptor } from "./environment.ts";
 import {
   ClientOrchestrationCommand,
@@ -301,6 +303,12 @@ const EnvironmentOrchestrationDispatchErrors = [
   EnvironmentInternalError,
 ] as const;
 
+const EnvironmentWorkspaceUploadErrors = [
+  EnvironmentHttpBadRequestError,
+  EnvironmentScopeRequiredError,
+  EnvironmentInternalError,
+] as const;
+
 export interface EnvironmentSessionPrincipalShape {
   readonly sessionId: AuthSessionId;
   readonly subject: string;
@@ -489,6 +497,52 @@ export class EnvironmentOrchestrationHttpApi extends HttpApiGroup.make("orchestr
     }).middleware(EnvironmentAuthenticatedAuth),
   ) {}
 
+export const WORKSPACE_UPLOAD_MAX_FILES = 8;
+export const WORKSPACE_UPLOAD_MAX_FILE_BYTES = 100 * 1024 * 1024;
+
+export const WorkspaceUploadConflict = Schema.Literals(["keep-both", "replace", "skip"]);
+export type WorkspaceUploadConflict = typeof WorkspaceUploadConflict.Type;
+
+export const WorkspaceUploadFileStatus = Schema.Literals(["uploaded", "renamed", "skipped"]);
+export type WorkspaceUploadFileStatus = typeof WorkspaceUploadFileStatus.Type;
+
+export const WorkspaceUploadFileResult = Schema.Struct({
+  originalName: TrimmedNonEmptyString,
+  relativePath: TrimmedNonEmptyString,
+  sizeBytes: NonNegativeInt,
+  status: WorkspaceUploadFileStatus,
+});
+export type WorkspaceUploadFileResult = typeof WorkspaceUploadFileResult.Type;
+
+export const WorkspaceUploadResult = Schema.Struct({
+  files: Schema.Array(WorkspaceUploadFileResult),
+});
+export type WorkspaceUploadResult = typeof WorkspaceUploadResult.Type;
+
+export const EnvironmentWorkspaceUploadPayload = Schema.Struct({
+  cwd: TrimmedNonEmptyString,
+  directory: Schema.String.check(Schema.isMaxLength(4096)),
+  conflict: WorkspaceUploadConflict,
+  files: Multipart.FilesSchema.check(
+    Schema.isMinLength(1),
+    Schema.isMaxLength(WORKSPACE_UPLOAD_MAX_FILES),
+  ),
+}).pipe(
+  HttpApiSchema.asMultipart({
+    maxFileSize: WORKSPACE_UPLOAD_MAX_FILE_BYTES,
+    maxParts: WORKSPACE_UPLOAD_MAX_FILES + 3,
+  }),
+);
+
+export class EnvironmentWorkspaceHttpApi extends HttpApiGroup.make("workspace").add(
+  HttpApiEndpoint.post("upload", "/api/workspace/upload", {
+    headers: OptionalBearerHeaders,
+    payload: EnvironmentWorkspaceUploadPayload,
+    success: WorkspaceUploadResult,
+    error: EnvironmentWorkspaceUploadErrors,
+  }).middleware(EnvironmentAuthenticatedAuth),
+) {}
+
 export class EnvironmentConnectHttpApi extends HttpApiGroup.make("connect")
   .add(
     HttpApiEndpoint.post("linkProof", "/api/connect/link-proof", {
@@ -554,4 +608,5 @@ export class EnvironmentHttpApi extends HttpApi.make("environment")
   .add(EnvironmentMetadataHttpApi)
   .add(EnvironmentAuthHttpApi)
   .add(EnvironmentOrchestrationHttpApi)
+  .add(EnvironmentWorkspaceHttpApi)
   .add(EnvironmentConnectHttpApi) {}

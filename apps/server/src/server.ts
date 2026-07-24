@@ -65,6 +65,7 @@ import * as RepositoryIdentityResolver from "./project/RepositoryIdentityResolve
 import * as WorkspaceEntries from "./workspace/WorkspaceEntries.ts";
 import * as WorkspaceFileSystem from "./workspace/WorkspaceFileSystem.ts";
 import * as WorkspacePaths from "./workspace/WorkspacePaths.ts";
+import { workspaceHttpApiLayer } from "./workspace/http.ts";
 import * as GitVcsDriver from "./vcs/GitVcsDriver.ts";
 import * as VcsDriverRegistry from "./vcs/VcsDriverRegistry.ts";
 import * as VcsProjectConfig from "./vcs/VcsProjectConfig.ts";
@@ -444,6 +445,7 @@ export const makeRoutesLayer = Layer.mergeAll(
     Layer.provide(authHttpApiLayer),
     Layer.provide(connectHttpApiLayer),
     Layer.provide(orchestrationHttpApiLayer),
+    Layer.provide(workspaceHttpApiLayer),
     Layer.provide(serverEnvironmentHttpApiLayer),
     Layer.provide(environmentAuthenticatedAuthLayer),
   ),

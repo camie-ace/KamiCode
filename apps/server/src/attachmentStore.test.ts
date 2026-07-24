@@ -101,6 +101,24 @@ describe("attachmentStore", () => {
         sizeBytes: 5,
       }),
     ).toBe("thread-1-budget.xlsx");
+    expect(
+      attachmentRelativePath({
+        type: "file",
+        id: "thread-1-document",
+        name: "document.pdf",
+        mimeType: "application/pdf",
+        sizeBytes: 5,
+      }),
+    ).toBe("thread-1-document.pdf");
+    expect(
+      attachmentRelativePath({
+        type: "file",
+        id: "thread-1-paper",
+        name: "paper.tex",
+        mimeType: "application/x-tex",
+        sizeBytes: 5,
+      }),
+    ).toBe("thread-1-paper.tex");
   });
 
   it("resolves attachment path by id for video extensions", () => {

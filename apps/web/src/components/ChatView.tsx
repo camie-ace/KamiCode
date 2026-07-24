@@ -270,7 +270,7 @@ import { collectThreadMediaArtifacts } from "~/mediaArtifacts";
 import { useDisplayableMediaArtifacts } from "~/mediaArtifactAssets";
 
 const ATTACHMENT_ONLY_BOOTSTRAP_PROMPT =
-  "[User attached one or more media files without additional text. Respond using the conversation context and the attached media.]";
+  "[User attached one or more files without additional text. Respond using the conversation context and the attached files.]";
 const EMPTY_ACTIVITIES: OrchestrationThreadActivity[] = [];
 const EMPTY_PROVIDERS: ServerProvider[] = [];
 const EMPTY_PROVIDER_SKILLS: ServerProvider["skills"] = [];
@@ -324,7 +324,7 @@ function toOptimisticChatAttachment(attachment: SendableComposerAttachment): Cha
     name: attachment.name,
     mimeType: attachment.mimeType,
     sizeBytes: attachment.sizeBytes,
-    previewUrl: attachment.previewUrl,
+    ...(attachment.previewUrl ? { previewUrl: attachment.previewUrl } : {}),
   };
   switch (type) {
     case "image":
@@ -344,6 +344,7 @@ function cloneComposerAttachmentForRetry(
   if (
     typeof URL === "undefined" ||
     typeof URL.createObjectURL !== "function" ||
+    !attachment.previewUrl ||
     !attachment.previewUrl.startsWith("blob:")
   ) {
     return attachment;
@@ -5669,7 +5670,13 @@ function ChatViewContent(props: ChatViewProps) {
     let titleSeed = trimmed;
     if (!titleSeed) {
       if (firstComposerAttachment) {
-        titleSeed = `${firstComposerAttachment.type === "video" ? "Video" : "Image"}: ${firstComposerAttachment.name}`;
+        const attachmentKind =
+          firstComposerAttachment.type === "video"
+            ? "Video"
+            : firstComposerAttachment.type === "file"
+              ? "File"
+              : "Image";
+        titleSeed = `${attachmentKind}: ${firstComposerAttachment.name}`;
       } else if (composerTerminalContextsSnapshot.length > 0) {
         titleSeed = formatTerminalContextLabel(composerTerminalContextsSnapshot[0]!);
       } else if (composerElementContextsSnapshot.length > 0) {

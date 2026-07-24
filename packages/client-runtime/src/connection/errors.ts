@@ -127,10 +127,14 @@ export function mapRemoteEnvironmentError(
         traceId: error.traceId,
       });
     case "EnvironmentRequestInvalidError":
+    case "EnvironmentHttpBadRequestError":
       return new ConnectionBlockedError({
         reason: "configuration",
-        detail: "The environment rejected the authentication request.",
-        traceId: error.traceId,
+        detail:
+          error._tag === "EnvironmentHttpBadRequestError"
+            ? error.message
+            : "The environment rejected the authentication request.",
+        ...("traceId" in error ? { traceId: error.traceId } : {}),
       });
     case "EnvironmentResourceNotFoundError":
       // Not expected during connection authorization, but the shared request

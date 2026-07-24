@@ -212,7 +212,7 @@ function filesystemBrowseFailureContext(error: WorkspaceEntries.WorkspaceEntries
 
 function projectFileFailureContext(
   error:
-    | WorkspaceFileSystem.WorkspaceFileSystemError
+    | WorkspaceFileSystem.WorkspaceProjectFileError
     | WorkspacePaths.WorkspacePathOutsideRootError,
 ): {
   readonly failure: ProjectFileFailure;

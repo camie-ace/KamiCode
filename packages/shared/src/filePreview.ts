@@ -9,6 +9,7 @@ export const WORKSPACE_DOCUMENT_FILE_EXTENSIONS = [
   ".md",
   ".ppt",
   ".pptx",
+  ".tex",
   ".txt",
   ".xls",
   ".xlsx",

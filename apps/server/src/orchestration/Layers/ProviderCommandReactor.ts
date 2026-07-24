@@ -35,6 +35,7 @@ import { resolveThreadWorkspaceCwd } from "../../checkpointing/Utils.ts";
 import { increment, orchestrationEventsProcessedTotal } from "../../observability/Metrics.ts";
 import { ProviderAdapterRequestError } from "../../provider/Errors.ts";
 import type { ProviderServiceError } from "../../provider/Errors.ts";
+import { appendProviderAttachmentContext } from "../../providerAttachmentContext.ts";
 import { TextGeneration } from "../../textGeneration/TextGeneration.ts";
 import { ProviderService } from "../../provider/Services/ProviderService.ts";
 import { ProviderRegistry } from "../../provider/Services/ProviderRegistry.ts";
@@ -54,6 +55,7 @@ import {
 } from "../../persistence/Services/ProjectionTurnQueue.ts";
 import { ProjectionTurnRepositoryLive } from "../../persistence/Layers/ProjectionTurns.ts";
 import { ProjectionTurnQueueRepositoryLive } from "../../persistence/Layers/ProjectionTurnQueue.ts";
+import { ServerConfig } from "../../config.ts";
 const isProviderAdapterRequestError = Schema.is(ProviderAdapterRequestError);
 const isProviderDriverKind = Schema.is(ProviderDriverKind);
 
@@ -267,6 +269,7 @@ const make = Effect.gen(function* () {
   const serverSettingsService = yield* ServerSettingsService;
   const projectionTurnRepository = yield* ProjectionTurnRepository;
   const projectionTurnQueueRepository = yield* ProjectionTurnQueueRepository;
+  const serverConfig = yield* ServerConfig;
   const serverCommandId = (tag: string) =>
     crypto.randomUUIDv4.pipe(Effect.map((uuid) => CommandId.make(`server:${tag}:${uuid}`)));
   const serverEventId = () => crypto.randomUUIDv4.pipe(Effect.map(EventId.make));
@@ -683,14 +686,20 @@ const make = Effect.gen(function* () {
     }
     const project =
       input.interactionMode === "test" ? yield* resolveProject(thread.projectId) : null;
+    const normalizedAttachments = input.attachments ?? [];
     const normalizedInput = toNonEmptyProviderInput(
-      buildTestModeTurnInput({
-        messageText: input.messageText,
-        project: project ?? null,
-        ...(input.interactionMode !== undefined ? { interactionMode: input.interactionMode } : {}),
+      appendProviderAttachmentContext({
+        messageText: buildTestModeTurnInput({
+          messageText: input.messageText,
+          project: project ?? null,
+          ...(input.interactionMode !== undefined
+            ? { interactionMode: input.interactionMode }
+            : {}),
+        }),
+        attachments: normalizedAttachments,
+        attachmentsDir: serverConfig.attachmentsDir,
       }),
     );
-    const normalizedAttachments = input.attachments ?? [];
     const activeSession = yield* providerService
       .listSessions()
       .pipe(

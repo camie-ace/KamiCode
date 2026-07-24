@@ -265,4 +265,166 @@ it.layer(TestLayer, { excludeTestServices: true })("WorkspaceFileSystemLive", (i
       }),
     );
   });
+
+  describe("uploadFiles", () => {
+    it.effect("streams binary files into nested workspace directories without changing bytes", () =>
+      Effect.gen(function* () {
+        const workspaceFileSystem = yield* WorkspaceFileSystem.WorkspaceFileSystem;
+        const fileSystem = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const cwd = yield* makeTempDir;
+        const uploadDir = yield* makeTempDir;
+        const sourcePath = path.join(uploadDir, "diagram.png");
+        const sourceBytes = Uint8Array.from([0, 1, 2, 127, 128, 254, 255]);
+        yield* fileSystem.writeFile(sourcePath, sourceBytes);
+
+        const result = yield* workspaceFileSystem.uploadFiles({
+          cwd,
+          directory: "assets/generated",
+          conflict: "keep-both",
+          files: [{ name: "diagram.png", path: sourcePath }],
+        });
+        const saved = yield* fileSystem.readFile(path.join(cwd, "assets/generated/diagram.png"));
+
+        expect(result).toEqual({
+          files: [
+            {
+              originalName: "diagram.png",
+              relativePath: "assets/generated/diagram.png",
+              sizeBytes: sourceBytes.byteLength,
+              status: "uploaded",
+            },
+          ],
+        });
+        expect(Array.from(saved)).toEqual(Array.from(sourceBytes));
+      }),
+    );
+
+    it.effect("refreshes an existing workspace entry index after upload", () =>
+      Effect.gen(function* () {
+        const workspaceFileSystem = yield* WorkspaceFileSystem.WorkspaceFileSystem;
+        const workspaceEntries = yield* WorkspaceEntries.WorkspaceEntries;
+        const fileSystem = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const cwd = yield* makeTempDir;
+        const uploadDir = yield* makeTempDir;
+        const sourcePath = path.join(uploadDir, "notes.md");
+        yield* fileSystem.writeFileString(sourcePath, "# Notes\n");
+
+        const beforeUpload = yield* workspaceEntries.list({ cwd });
+        expect(beforeUpload.entries).toEqual([]);
+
+        yield* workspaceFileSystem.uploadFiles({
+          cwd,
+          directory: "docs",
+          conflict: "keep-both",
+          files: [{ name: "notes.md", path: sourcePath }],
+        });
+
+        const afterUpload = yield* workspaceEntries.list({ cwd });
+        expect(afterUpload.entries).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({ path: "docs/notes.md", kind: "file" }),
+          ]),
+        );
+      }),
+    );
+
+    it.effect("keeps existing files and chooses a non-conflicting upload name", () =>
+      Effect.gen(function* () {
+        const workspaceFileSystem = yield* WorkspaceFileSystem.WorkspaceFileSystem;
+        const fileSystem = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const cwd = yield* makeTempDir;
+        const uploadDir = yield* makeTempDir;
+        const sourcePath = path.join(uploadDir, "spec.pdf");
+        yield* writeTextFile(cwd, "docs/spec.pdf", "existing");
+        yield* writeTextFile(cwd, "docs/spec (2).pdf", "existing copy");
+        yield* fileSystem.writeFileString(sourcePath, "new");
+
+        const result = yield* workspaceFileSystem.uploadFiles({
+          cwd,
+          directory: "docs",
+          conflict: "keep-both",
+          files: [{ name: "spec.pdf", path: sourcePath }],
+        });
+
+        expect(result).toEqual({
+          files: [
+            {
+              originalName: "spec.pdf",
+              relativePath: "docs/spec (3).pdf",
+              sizeBytes: 3,
+              status: "renamed",
+            },
+          ],
+        });
+        expect(yield* fileSystem.readFileString(path.join(cwd, "docs/spec.pdf"))).toBe("existing");
+        expect(yield* fileSystem.readFileString(path.join(cwd, "docs/spec (3).pdf"))).toBe("new");
+      }),
+    );
+
+    it.effect("supports skip and replace conflict policies", () =>
+      Effect.gen(function* () {
+        const workspaceFileSystem = yield* WorkspaceFileSystem.WorkspaceFileSystem;
+        const fileSystem = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const cwd = yield* makeTempDir;
+        const uploadDir = yield* makeTempDir;
+        const sourcePath = path.join(uploadDir, "notes.txt");
+        yield* writeTextFile(cwd, "notes.txt", "old");
+        yield* fileSystem.writeFileString(sourcePath, "new");
+
+        const skipped = yield* workspaceFileSystem.uploadFiles({
+          cwd,
+          directory: "",
+          conflict: "skip",
+          files: [{ name: "notes.txt", path: sourcePath }],
+        });
+        expect(skipped.files[0]?.status).toBe("skipped");
+        expect(yield* fileSystem.readFileString(path.join(cwd, "notes.txt"))).toBe("old");
+
+        const replaced = yield* workspaceFileSystem.uploadFiles({
+          cwd,
+          directory: "",
+          conflict: "replace",
+          files: [{ name: "notes.txt", path: sourcePath }],
+        });
+        expect(replaced.files[0]?.status).toBe("uploaded");
+        expect(yield* fileSystem.readFileString(path.join(cwd, "notes.txt"))).toBe("new");
+      }),
+    );
+
+    it.effect("rejects upload destinations and names that escape the workspace", () =>
+      Effect.gen(function* () {
+        const workspaceFileSystem = yield* WorkspaceFileSystem.WorkspaceFileSystem;
+        const fileSystem = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const cwd = yield* makeTempDir;
+        const uploadDir = yield* makeTempDir;
+        const sourcePath = path.join(uploadDir, "payload.txt");
+        yield* fileSystem.writeFileString(sourcePath, "nope");
+
+        const destinationError = yield* workspaceFileSystem
+          .uploadFiles({
+            cwd,
+            directory: "../outside",
+            conflict: "keep-both",
+            files: [{ name: "payload.txt", path: sourcePath }],
+          })
+          .pipe(Effect.flip);
+        const nameError = yield* workspaceFileSystem
+          .uploadFiles({
+            cwd,
+            directory: "",
+            conflict: "keep-both",
+            files: [{ name: "../payload.txt", path: sourcePath }],
+          })
+          .pipe(Effect.flip);
+
+        expect(destinationError).toBeInstanceOf(WorkspacePaths.WorkspacePathOutsideRootError);
+        expect(nameError).toBeInstanceOf(WorkspaceFileSystem.WorkspaceUploadTargetError);
+      }),
+    );
+  });
 });

@@ -338,6 +338,35 @@ describe("MessagesTimeline", () => {
     expect(onAnchorSizeChanged).toHaveBeenCalledWith(secondEntry.message.id, 240);
   });
 
+  it("renders a sent TeX attachment as a file link instead of a broken image", async () => {
+    const { MessagesTimeline } = await import("./MessagesTimeline");
+    const entry = {
+      ...buildUserTimelineEntry("Review this source."),
+      message: {
+        ...buildUserTimelineEntry("Review this source.").message,
+        attachments: [
+          {
+            type: "file" as const,
+            id: "attachment-tex",
+            name: "paper.tex",
+            mimeType: "application/x-tex",
+            sizeBytes: 42,
+            previewUrl: "/api/assets/signed-tex-attachment",
+          },
+        ],
+      },
+    };
+
+    const markup = renderToStaticMarkup(
+      <MessagesTimeline {...buildProps()} timelineEntries={[entry]} />,
+    );
+
+    expect(markup).toContain('data-attachment-kind="file"');
+    expect(markup).toContain('aria-label="Open paper.tex"');
+    expect(markup).toContain('href="/api/assets/signed-tex-attachment"');
+    expect(markup).not.toContain('<img src="/api/assets/signed-tex-attachment"');
+  });
+
   it("renders collapse controls for long user messages", async () => {
     const { MessagesTimeline } = await import("./MessagesTimeline");
     const markup = renderToStaticMarkup(

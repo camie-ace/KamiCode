@@ -1,5 +1,6 @@
 // @effect-diagnostics nodeBuiltinImport:off
 import Mime from "@effect/platform-node/Mime";
+import { WORKSPACE_DOCUMENT_FILE_EXTENSIONS } from "@t3tools/shared/filePreview";
 import * as NodeCrypto from "node:crypto";
 import * as NodeFS from "node:fs";
 
@@ -21,19 +22,8 @@ const VIDEO_EXTENSION_BY_MIME_TYPE: Record<string, string> = {
 const SAFE_VIDEO_FILE_EXTENSIONS = new Set([".m4v", ".mov", ".mp4", ".ogv", ".webm"]);
 const SAFE_GENERIC_FILE_EXTENSIONS = new Set([
   ".bin",
-  ".csv",
-  ".doc",
-  ".docx",
-  ".json",
-  ".log",
-  ".md",
   ".pdf",
-  ".ppt",
-  ".pptx",
-  ".txt",
-  ".xls",
-  ".xlsx",
-  ".xml",
+  ...WORKSPACE_DOCUMENT_FILE_EXTENSIONS,
 ]);
 const ATTACHMENT_FILENAME_EXTENSIONS = [
   ...SAFE_IMAGE_FILE_EXTENSIONS,

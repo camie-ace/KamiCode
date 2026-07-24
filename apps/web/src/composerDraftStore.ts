@@ -109,6 +109,12 @@ export interface ComposerVideoAttachment extends Omit<ChatVideoAttachment, "prev
 export interface ComposerFileAttachment extends Omit<ChatFileAttachment, "previewUrl"> {
   previewUrl?: string;
   file: File;
+  status?: "ready";
+}
+
+export interface ComposerUnsupportedAttachment extends Omit<ChatFileAttachment, "previewUrl"> {
+  previewUrl?: string;
+  file: File;
   status: "unsupported";
   unsupportedReason: string;
 }
@@ -116,7 +122,8 @@ export interface ComposerFileAttachment extends Omit<ChatFileAttachment, "previe
 export type ComposerAttachment =
   | ComposerImageAttachment
   | ComposerVideoAttachment
-  | ComposerFileAttachment;
+  | ComposerFileAttachment
+  | ComposerUnsupportedAttachment;
 
 const PersistedTerminalContextDraft = Schema.Struct({
   id: Schema.String,

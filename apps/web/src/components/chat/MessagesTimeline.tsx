@@ -818,8 +818,13 @@ function TimelineMinimap({
 
 type TimelineEntry = ReturnType<typeof deriveTimelineEntries>[number];
 type TimelineMessage = Extract<TimelineEntry, { kind: "message" }>["message"];
+type TimelineAttachment = NonNullable<TimelineMessage["attachments"]>[number];
 type TimelineWorkEntry = Extract<MessagesTimelineRow, { kind: "work" }>["groupedEntries"][number];
 type TimelineRow = MessagesTimelineRow;
+
+function isTimelineImageAttachment(attachment: TimelineAttachment): boolean {
+  return attachment.type === "image" || attachment.type === "gif";
+}
 
 const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: TimelineRow }) {
   return (
@@ -854,7 +859,7 @@ const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: Time
 
 function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" }> }) {
   const ctx = use(TimelineRowCtx);
-  const userImages = row.message.attachments ?? [];
+  const userAttachments = row.message.attachments ?? [];
   const displayedUserMessage = deriveDisplayedUserMessageState(row.message.text);
   const terminalContexts = displayedUserMessage.contexts;
   const previewAnnotations: ParsedPreviewAnnotation[] = [];
@@ -870,44 +875,88 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
     ...displayedUserMessage.elementContexts,
     ...elementContextState.contexts,
   ];
-  const previewImages = userImages.filter((image) => image.name.startsWith("preview-annotation-"));
-  const regularImages = userImages.filter((image) => !image.name.startsWith("preview-annotation-"));
+  const previewImages = userAttachments.filter(
+    (attachment) =>
+      isTimelineImageAttachment(attachment) && attachment.name.startsWith("preview-annotation-"),
+  );
+  const previewImageIds = new Set(previewImages.map((attachment) => attachment.id));
+  const regularAttachments = userAttachments.filter(
+    (attachment) => !previewImageIds.has(attachment.id),
+  );
+  const regularImages = regularAttachments.filter(isTimelineImageAttachment);
   const canRevertAgentWork = typeof row.revertTurnCount === "number";
 
   return (
     <div className="group flex flex-col items-end gap-1">
       <div className="relative max-w-[80%] rounded-2xl border border-border bg-secondary p-3">
-        {regularImages.length > 0 && (
+        {regularAttachments.length > 0 && (
           <div className="mb-2 grid max-w-[420px] grid-cols-2 gap-2">
-            {regularImages.map((image: NonNullable<TimelineMessage["attachments"]>[number]) => (
-              <div
-                key={image.id}
-                className="overflow-hidden rounded-lg border border-border/80 bg-background/70"
-              >
-                {image.previewUrl ? (
-                  <button
-                    type="button"
-                    className="h-full w-full cursor-zoom-in"
-                    aria-label={`Preview ${image.name}`}
-                    onClick={() => {
-                      const preview = buildExpandedImagePreview(regularImages, image.id);
-                      if (!preview) return;
-                      ctx.onImageExpand(preview);
-                    }}
-                  >
-                    <img
-                      src={image.previewUrl}
-                      alt={image.name}
-                      className="block h-auto max-h-[220px] w-full object-cover"
+            {regularAttachments.map((attachment) => {
+              const isImage = isTimelineImageAttachment(attachment);
+              return (
+                <div
+                  key={attachment.id}
+                  data-attachment-kind={attachment.type}
+                  className="overflow-hidden rounded-lg border border-border/80 bg-background/70"
+                >
+                  {isImage && attachment.previewUrl ? (
+                    <button
+                      type="button"
+                      className="h-full w-full cursor-zoom-in"
+                      aria-label={`Preview ${attachment.name}`}
+                      onClick={() => {
+                        const preview = buildExpandedImagePreview(regularImages, attachment.id);
+                        if (!preview) return;
+                        ctx.onImageExpand(preview);
+                      }}
+                    >
+                      <img
+                        src={attachment.previewUrl}
+                        alt={attachment.name}
+                        className="block h-auto max-h-[220px] w-full object-cover"
+                      />
+                    </button>
+                  ) : attachment.type === "video" && attachment.previewUrl ? (
+                    <video
+                      src={attachment.previewUrl}
+                      className="block h-auto max-h-[220px] w-full bg-black object-contain"
+                      controls
+                      playsInline
+                      preload="metadata"
+                      aria-label={`Play ${attachment.name}`}
                     />
-                  </button>
-                ) : (
-                  <div className="flex min-h-[72px] items-center justify-center px-2 py-3 text-center text-[11px] text-muted-foreground/70">
-                    {image.name}
-                  </div>
-                )}
-              </div>
-            ))}
+                  ) : attachment.type === "file" && attachment.previewUrl ? (
+                    <a
+                      href={attachment.previewUrl}
+                      download={attachment.name}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="flex min-h-[72px] items-center gap-2 px-3 py-2 text-left hover:bg-muted/50"
+                      aria-label={`Open ${attachment.name}`}
+                    >
+                      <FileTextIcon className="size-5 shrink-0 text-muted-foreground" />
+                      <span className="min-w-0">
+                        <span className="block truncate text-xs font-medium text-foreground/90">
+                          {attachment.name}
+                        </span>
+                        <span className="block truncate text-[10px] text-muted-foreground">
+                          {attachment.mimeType}
+                        </span>
+                      </span>
+                    </a>
+                  ) : (
+                    <div className="flex min-h-[72px] items-center justify-center gap-2 px-2 py-3 text-center text-[11px] text-muted-foreground/70">
+                      {attachment.type === "video" ? (
+                        <VideoIcon className="size-4 shrink-0" />
+                      ) : attachment.type === "file" ? (
+                        <FileTextIcon className="size-4 shrink-0" />
+                      ) : null}
+                      <span className="truncate">{attachment.name}</span>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
         )}
         {previewAnnotations.map((annotation, index) => (

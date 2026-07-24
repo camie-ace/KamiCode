@@ -1,5 +1,6 @@
 import {
   EnvironmentHttpApi,
+  EnvironmentHttpBadRequestError,
   EnvironmentHttpCommonError,
   type EnvironmentAuthInvalidError,
   type EnvironmentInternalError,
@@ -19,6 +20,7 @@ import { FetchHttpClient, HttpClient, HttpClientError } from "effect/unstable/ht
 import * as HttpApiClient from "effect/unstable/httpapi/HttpApiClient";
 
 const isEnvironmentHttpCommonError = Schema.is(EnvironmentHttpCommonError);
+const isEnvironmentHttpBadRequestError = Schema.is(EnvironmentHttpBadRequestError);
 
 export class RemoteEnvironmentAuthFetchError extends Data.TaggedError(
   "RemoteEnvironmentAuthFetchError",
@@ -73,6 +75,7 @@ export type RemoteEnvironmentRequestError =
   | EnvironmentOperationForbiddenError
   | EnvironmentResourceNotFoundError
   | EnvironmentInternalError
+  | EnvironmentHttpBadRequestError
   | RemoteEnvironmentAuthFetchError
   | RemoteEnvironmentAuthInvalidJsonError
   | RemoteEnvironmentAuthUndeclaredStatusError
@@ -107,6 +110,9 @@ const failRemoteRequest = (
     return Effect.fail(cause);
   }
   if (isEnvironmentHttpCommonError(cause)) {
+    return Effect.fail(cause);
+  }
+  if (isEnvironmentHttpBadRequestError(cause)) {
     return Effect.fail(cause);
   }
   if (Schema.isSchemaError(cause)) {

@@ -46,7 +46,7 @@ describe("workspace file previews", () => {
     },
   );
 
-  it.each(["README.md", "data.csv", "notes.TXT", "spreadsheet.xlsx?download=1"])(
+  it.each(["README.md", "data.csv", "paper.tex", "notes.TXT", "spreadsheet.xlsx?download=1"])(
     "recognizes document preview path %s",
     (path) => {
       expect(isWorkspaceExactFilePreviewPath(path)).toBe(true);
