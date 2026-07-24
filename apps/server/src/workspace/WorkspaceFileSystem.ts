@@ -663,8 +663,8 @@ export const make = Effect.gen(function* () {
           });
         },
         catch: (cause) =>
-          cause instanceof WorkspaceUploadTargetError ||
-          cause instanceof WorkspaceFilePathEscapeError
+          Schema.is(WorkspaceUploadTargetError)(cause) ||
+          Schema.is(WorkspaceFilePathEscapeError)(cause)
             ? cause
             : new WorkspaceUploadOperationError({
                 workspaceRoot: input.cwd,
