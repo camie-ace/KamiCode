@@ -13,6 +13,7 @@
   },
   "devDependencies": {
     "@effect/vitest": "catalog:",
+    "oxlint": "^1.63.0",
     "vite-plus": "catalog:"
   }
 }

@@ -1,3 +1,5 @@
+import * as NodeURL from "node:url";
+
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import * as Data from "effect/Data";
@@ -28,6 +30,9 @@ class OxlintFixtureExpectedFailure extends Data.TaggedError("OxlintFixtureExpect
 }
 
 const encodeOxlintConfig = Schema.encodeEffect(Schema.UnknownFromJsonString);
+const oxlintCliPath = NodeURL.fileURLToPath(
+  new URL("./bin/oxlint", import.meta.resolve("oxlint/package.json")),
+);
 
 interface RuleHarness {
   readonly run: (
@@ -93,14 +98,6 @@ export const createOxlintRuleHarness = (
     const configPath = path.join(fixtureDir, ".oxlintrc.json");
     const sourcePath = path.join(fixtureDir, options.filename ?? "fixture.ts");
     const repoRoot = path.join(import.meta.dirname, "..", "..");
-    const oxlintBin = path.join(
-      repoRoot,
-      "node_modules",
-      ".pnpm",
-      "node_modules",
-      ".bin",
-      "oxlint",
-    );
     const pluginPath = path.join(repoRoot, "oxlint-plugin-t3code", "index.ts");
 
     yield* fs.writeFileString(
@@ -113,7 +110,9 @@ export const createOxlintRuleHarness = (
     yield* fs.writeFileString(sourcePath, source);
 
     const output = yield* spawnAndCollectOutput(
-      ChildProcess.make(oxlintBin, ["--config", configPath, sourcePath], { cwd: repoRoot }),
+      ChildProcess.make(process.execPath, [oxlintCliPath, "--config", configPath, sourcePath], {
+        cwd: repoRoot,
+      }),
     );
 
     if (output.exitCode !== 0) {
