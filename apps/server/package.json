@@ -35,6 +35,7 @@
     "effect": "catalog:",
     "node-pty": "^1.1.0",
     "playwright": "^1.58.2",
+    "yaml": "catalog:",
     "zod": "^4.3.6"
   },
   "devDependencies": {

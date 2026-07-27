@@ -217,7 +217,7 @@ const actionInputSchema = {
 } as const;
 
 export const KAMI_TEST_HARNESS_DYNAMIC_TOOL_SPEC = {
-  namespace: KAMI_TEST_HARNESS_TOOL_NAMESPACE,
+  type: "function",
   name: KAMI_TEST_HARNESS_TOOL_NAME,
   description:
     "Run KamiCode's headless recorded evidence runner for the current project and return observations, screenshots, videos, traces, console errors, and network failures.",

@@ -6,6 +6,7 @@ import {
   EnvironmentHttpApi,
 } from "@t3tools/contracts";
 import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
+import { isDevProxiedPath } from "@t3tools/shared/devProxy";
 import { decodeOtlpTraceRecords } from "@t3tools/shared/observability";
 import * as NodeFSP from "node:fs/promises";
 import * as NodeModule from "node:module";
@@ -36,11 +37,7 @@ import {
 } from "./attachmentPaths.ts";
 import { resolveAttachmentPathById } from "./attachmentStore.ts";
 import * as ServerConfig from "./config.ts";
-import {
-  ASSET_ROUTE_PREFIX,
-  FALLBACK_PROJECT_FAVICON_SVG,
-  resolveAsset,
-} from "./assets/AssetAccess.ts";
+import { ASSET_ROUTE_PREFIX, resolveAsset } from "./assets/AssetAccess.ts";
 import * as BrowserTraceCollector from "./observability/BrowserTraceCollector.ts";
 import { ProjectFaviconResolver } from "./project/ProjectFaviconResolver.ts";
 import * as EnvironmentAuth from "./auth/EnvironmentAuth.ts";
@@ -67,6 +64,7 @@ import {
 import * as ServerEnvironment from "./environment/ServerEnvironment.ts";
 
 const PROJECT_FAVICON_CACHE_CONTROL = "public, max-age=3600";
+const FALLBACK_PROJECT_FAVICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="#6b728080" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-fallback="project-favicon"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-8l-2-2H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2Z"/></svg>`;
 const OTLP_TRACES_PROXY_PATH = "/api/observability/v1/traces";
 const PRIVATE_ASSET_CACHE_CONTROL = "private, max-age=3600";
 
@@ -169,9 +167,17 @@ export const browserApiCorsLayer = Layer.unwrap(
     const devOrigin = config.devUrl?.origin;
     // Dev uses credentialed requests from Vite or the Electron custom origin, so both must be
     // explicit. Packaged desktop omits credentials and uses Effect's default wildcard origin.
+    //
+    // T3CODE_DEV_ALLOWED_ORIGINS covers dev servers reached from a second
+    // origin — a tailnet name, a LAN IP, a phone. Browser dev normally proxies
+    // through Vite and is same-origin (no preflight at all), so this is a
+    // safety net for the desktop renderer and any direct-to-backend caller.
     return HttpRouter.cors({
       ...(devOrigin
-        ? { allowedOrigins: [devOrigin, ...DESKTOP_RENDERER_ORIGINS], credentials: true }
+        ? {
+            allowedOrigins: [devOrigin, ...DESKTOP_RENDERER_ORIGINS, ...config.devAllowedOrigins],
+            credentials: true,
+          }
         : {}),
       allowedMethods: browserApiCorsAllowedMethods,
       allowedHeaders: browserApiCorsAllowedHeaders,
@@ -194,17 +200,6 @@ export function resolveDevRedirectUrl(devUrl: URL, requestUrl: URL): string {
   redirectUrl.search = requestUrl.search;
   redirectUrl.hash = requestUrl.hash;
   return redirectUrl.toString();
-}
-
-function isDevProxyRequestPath(pathname: string): boolean {
-  return (
-    pathname === "/api" ||
-    pathname.startsWith("/api/") ||
-    pathname === "/attachments" ||
-    pathname.startsWith("/attachments/") ||
-    pathname === "/.well-known" ||
-    pathname.startsWith("/.well-known/")
-  );
 }
 
 function normalizePathForPlatform(value: string): string {
@@ -573,17 +568,6 @@ export const assetRouteLayer = HttpRouter.add(
     if (!asset) {
       return HttpServerResponse.text("Not Found", { status: 404 });
     }
-    if (asset.kind === "project-favicon-fallback") {
-      return HttpServerResponse.text(FALLBACK_PROJECT_FAVICON_SVG, {
-        status: 200,
-        contentType: "image/svg+xml",
-        headers: {
-          "Cache-Control": PRIVATE_ASSET_CACHE_CONTROL,
-          "X-Content-Type-Options": "nosniff",
-        },
-      });
-    }
-
     const baseHeaders = {
       "Accept-Ranges": "bytes",
       "Cache-Control": PRIVATE_ASSET_CACHE_CONTROL,
@@ -886,16 +870,16 @@ export const staticAndDevRouteLayer = HttpRouter.add(
     }
 
     const config = yield* ServerConfig.ServerConfig;
-    if (config.devUrl && isLoopbackHostname(url.value.hostname)) {
-      if (isDevProxyRequestPath(url.value.pathname)) {
-        return HttpServerResponse.jsonUnsafe(
-          {
-            error: "Not found.",
-          },
-          { status: 404, headers: browserApiCorsHeaders },
-        );
-      }
+    if (config.devUrl && isDevProxiedPath(url.value.pathname)) {
+      return HttpServerResponse.jsonUnsafe(
+        {
+          error: "Not found.",
+        },
+        { status: 404, headers: browserApiCorsHeaders },
+      );
+    }
 
+    if (config.devUrl && isLoopbackHostname(url.value.hostname)) {
       return HttpServerResponse.redirect(resolveDevRedirectUrl(config.devUrl, url.value), {
         status: 302,
       });

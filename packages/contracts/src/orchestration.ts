@@ -118,6 +118,7 @@ export type ModelSelection = typeof ModelSelection.Type;
 export const RuntimeMode = Schema.Literals([
   "approval-required",
   "auto-accept-edits",
+  "auto",
   "full-access",
 ]);
 export type RuntimeMode = typeof RuntimeMode.Type;
@@ -847,6 +848,16 @@ export const OrchestrationThread = Schema.Struct({
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
   archivedAt: Schema.NullOr(IsoDateTime).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
+  settledOverride: Schema.NullOr(Schema.Literals(["settled", "active"])).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+  settledAt: Schema.NullOr(IsoDateTime).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
+  // Snooze is an overlay on the active lifecycle, not a fourth destination:
+  // a snoozed thread stays "active" in the model and is only suppressed from
+  // the inbox until snoozedUntil passes (or the thread raises its hand).
+  // Optional so payloads from pre-snooze servers still decode.
+  snoozedUntil: Schema.optional(Schema.NullOr(IsoDateTime)),
+  snoozedAt: Schema.optional(Schema.NullOr(IsoDateTime)),
   deletedAt: Schema.NullOr(IsoDateTime),
   messages: Schema.Array(OrchestrationMessage),
   proposedPlans: Schema.Array(OrchestrationProposedPlan).pipe(
@@ -899,6 +910,12 @@ export const OrchestrationThreadShell = Schema.Struct({
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
   archivedAt: Schema.NullOr(IsoDateTime).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
+  settledOverride: Schema.NullOr(Schema.Literals(["settled", "active"])).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+  settledAt: Schema.NullOr(IsoDateTime).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
+  snoozedUntil: Schema.optional(Schema.NullOr(IsoDateTime)),
+  snoozedAt: Schema.optional(Schema.NullOr(IsoDateTime)),
   session: Schema.NullOr(OrchestrationSession),
   latestUserMessageAt: Schema.NullOr(IsoDateTime),
   hasPendingApprovals: Schema.Boolean,
@@ -941,6 +958,9 @@ export type OrchestrationShellStreamEvent = typeof OrchestrationShellStreamEvent
 
 export const OrchestrationShellStreamItem = Schema.Union([
   Schema.Struct({
+    kind: Schema.Literal("synchronized"),
+  }),
+  Schema.Struct({
     kind: Schema.Literal("snapshot"),
     snapshot: OrchestrationShellSnapshot,
   }),
@@ -958,6 +978,11 @@ export const OrchestrationSubscribeShellInput = Schema.Struct({
    * client).
    */
   afterSequence: Schema.optionalKey(NonNegativeInt),
+  /**
+   * Requests an explicit marker after the subscription has emitted its initial
+   * snapshot or catch-up replay and before it begins emitting live events.
+   */
+  requestCompletionMarker: Schema.optionalKey(Schema.Boolean),
 });
 export type OrchestrationSubscribeShellInput = typeof OrchestrationSubscribeShellInput.Type;
 
@@ -971,6 +996,11 @@ export const OrchestrationSubscribeThreadInput = Schema.Struct({
    * sequence on the client).
    */
   afterSequence: Schema.optionalKey(NonNegativeInt),
+  /**
+   * Requests an explicit marker after the subscription has emitted its initial
+   * snapshot or catch-up replay and before it begins emitting live events.
+   */
+  requestCompletionMarker: Schema.optionalKey(Schema.Boolean),
 });
 export type OrchestrationSubscribeThreadInput = typeof OrchestrationSubscribeThreadInput.Type;
 
@@ -1048,6 +1078,43 @@ const ThreadUnarchiveCommand = Schema.Struct({
   threadId: ThreadId,
 });
 
+const ThreadSettleCommand = Schema.Struct({
+  type: Schema.Literal("thread.settle"),
+  commandId: CommandId,
+  threadId: ThreadId,
+});
+
+const ThreadUnsettleCommand = Schema.Struct({
+  type: Schema.Literal("thread.unsettle"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  // Commands only carry "user": activity un-settles are decided server-side
+  // (the decider emits thread.unsettled(reason: "activity") events directly,
+  // never through this command), so a client cannot forge the neutral reset.
+  reason: Schema.Literal("user"),
+});
+
+const ThreadSnoozeCommand = Schema.Struct({
+  type: Schema.Literal("thread.snooze"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  // The wake time. Event-based wake conditions (PR merged, review posted)
+  // will arrive as an optional condition field alongside this; time-based
+  // snooze is just the first kind of condition.
+  snoozedUntil: IsoDateTime,
+});
+
+const ThreadUnsnoozeCommand = Schema.Struct({
+  type: Schema.Literal("thread.unsnooze"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  // Commands only carry "user": activity wakes are decided server-side (the
+  // decider emits thread.unsnoozed(reason: "activity") directly), and timer
+  // wakes need no event at all — clients derive visibility from snoozedUntil,
+  // so a passed wake time simply stops classifying as snoozed.
+  reason: Schema.Literal("user"),
+});
+
 const ThreadMetaUpdateCommand = Schema.Struct({
   type: Schema.Literal("thread.meta.update"),
   commandId: CommandId,
@@ -1055,6 +1122,7 @@ const ThreadMetaUpdateCommand = Schema.Struct({
   title: Schema.optional(TrimmedNonEmptyString),
   modelSelection: Schema.optional(ModelSelection),
   branch: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+  expectedBranch: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   worktreePath: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
 });
 
@@ -1358,6 +1426,10 @@ const DispatchableClientOrchestrationCommand = Schema.Union([
   ThreadDeleteCommand,
   ThreadArchiveCommand,
   ThreadUnarchiveCommand,
+  ThreadSettleCommand,
+  ThreadUnsettleCommand,
+  ThreadSnoozeCommand,
+  ThreadUnsnoozeCommand,
   ThreadMetaUpdateCommand,
   ThreadRuntimeModeSetCommand,
   ThreadInteractionModeSetCommand,
@@ -1383,6 +1455,10 @@ export const ClientOrchestrationCommand = Schema.Union([
   ThreadDeleteCommand,
   ThreadArchiveCommand,
   ThreadUnarchiveCommand,
+  ThreadSettleCommand,
+  ThreadUnsettleCommand,
+  ThreadSnoozeCommand,
+  ThreadUnsnoozeCommand,
   ThreadMetaUpdateCommand,
   ThreadRuntimeModeSetCommand,
   ThreadInteractionModeSetCommand,
@@ -1508,6 +1584,10 @@ export const OrchestrationEventType = Schema.Literals([
   "thread.deleted",
   "thread.archived",
   "thread.unarchived",
+  "thread.settled",
+  "thread.unsettled",
+  "thread.snoozed",
+  "thread.unsnoozed",
   "thread.meta-updated",
   "thread.runtime-mode-set",
   "thread.interaction-mode-set",
@@ -1593,6 +1673,35 @@ export const ThreadArchivedPayload = Schema.Struct({
 
 export const ThreadUnarchivedPayload = Schema.Struct({
   threadId: ThreadId,
+  updatedAt: IsoDateTime,
+});
+
+export const ThreadSettledPayload = Schema.Struct({
+  threadId: ThreadId,
+  settledAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+});
+
+export const ThreadUnsettledPayload = Schema.Struct({
+  threadId: ThreadId,
+  reason: Schema.Literals(["user", "activity"]),
+  updatedAt: IsoDateTime,
+});
+
+export const ThreadSnoozedPayload = Schema.Struct({
+  threadId: ThreadId,
+  snoozedUntil: IsoDateTime,
+  snoozedAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+});
+
+export const ThreadUnsnoozedPayload = Schema.Struct({
+  threadId: ThreadId,
+  // user: explicit "wake now". activity: real work arrived (user message /
+  // session coming alive) and the decider cleared the snooze — mirrors
+  // thread.unsettled's activity resets. Timer wakes emit no event: clients
+  // derive them from snoozedUntil passing.
+  reason: Schema.Literals(["user", "activity"]),
   updatedAt: IsoDateTime,
 });
 
@@ -1795,6 +1904,26 @@ export const OrchestrationEvent = Schema.Union([
   }),
   Schema.Struct({
     ...EventBaseFields,
+    type: Schema.Literal("thread.settled"),
+    payload: ThreadSettledPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.unsettled"),
+    payload: ThreadUnsettledPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.snoozed"),
+    payload: ThreadSnoozedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.unsnoozed"),
+    payload: ThreadUnsnoozedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
     type: Schema.Literal("thread.meta-updated"),
     payload: ThreadMetaUpdatedPayload,
   }),
@@ -1887,6 +2016,9 @@ export const OrchestrationEvent = Schema.Union([
 export type OrchestrationEvent = typeof OrchestrationEvent.Type;
 
 export const OrchestrationThreadStreamItem = Schema.Union([
+  Schema.Struct({
+    kind: Schema.Literal("synchronized"),
+  }),
   Schema.Struct({
     kind: Schema.Literal("snapshot"),
     snapshot: OrchestrationThreadDetailSnapshot,

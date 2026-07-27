@@ -73,6 +73,7 @@ const baseUpdateState: DesktopUpdateState = {
   message: null,
   errorContext: null,
   canRetry: false,
+  releaseNotes: [],
 };
 
 const desktopUpdatesShape = {
@@ -98,6 +99,7 @@ const makeDesktopWindowLayer = (selectedAction: Deferred.Deferred<string>) =>
     showStartupSplash: Effect.void,
     handleBackendReady: () => Effect.void,
     handleBackendNotReady: Effect.void,
+    flushMainWindowBounds: Effect.void,
     dispatchMenuAction: (action) => Deferred.succeed(selectedAction, action).pipe(Effect.asVoid),
     syncAppearance: Effect.void,
   } satisfies DesktopWindow.DesktopWindow["Service"]);

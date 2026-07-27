@@ -31,7 +31,9 @@ export const hostFlag = Flag.string("host").pipe(
   Flag.optional,
 );
 export const baseDirFlag = Flag.string("base-dir").pipe(
-  Flag.withDescription("Base directory path (equivalent to T3CODE_HOME)."),
+  Flag.withDescription(
+    "Explicit T3 Code data directory; runtime state is stored under userdata (equivalent to T3CODE_HOME).",
+  ),
   Flag.optional,
 );
 export const devUrlFlag = Flag.string("dev-url").pipe(
@@ -115,6 +117,15 @@ const EnvServerConfig = Config.all({
   githubOAuthCallbackUrl: Config.url("T3CODE_GITHUB_OAUTH_CALLBACK_URL").pipe(
     Config.option,
     Config.map(Option.getOrUndefined),
+  ),
+  devAllowedOrigins: Config.string("T3CODE_DEV_ALLOWED_ORIGINS").pipe(
+    Config.withDefault(""),
+    Config.map((value) =>
+      value
+        .split(",")
+        .map((entry) => entry.trim())
+        .filter((entry) => entry.length > 0),
+    ),
   ),
   noBrowser: Config.boolean("T3CODE_NO_BROWSER").pipe(
     Config.option,
@@ -271,19 +282,21 @@ export const resolveServerConfig = (
       resolveOptionPrecedence(normalizedFlags.devUrl, Option.fromUndefinedOr(env.devUrl)),
       () => undefined,
     );
+    const explicitBaseDir = resolveOptionPrecedence(
+      normalizedFlags.baseDir,
+      Option.fromUndefinedOr(env.t3Home),
+    ).pipe(Option.filter((value) => value.trim().length > 0));
     const baseDir = yield* resolveBaseDir(
       Option.getOrUndefined(
-        resolveOptionPrecedence(
-          normalizedFlags.baseDir,
-          Option.fromUndefinedOr(env.t3Home),
-          Option.fromUndefinedOr(bootstrap?.t3Home),
-        ),
+        resolveOptionPrecedence(explicitBaseDir, Option.fromUndefinedOr(bootstrap?.t3Home)),
       ),
     );
     const rawCwd = Option.getOrElse(normalizedFlags.cwd, () => process.cwd());
     const cwd = path.resolve(yield* expandHomePath(rawCwd.trim()));
     yield* fs.makeDirectory(cwd, { recursive: true });
-    const derivedPaths = yield* ServerConfig.deriveServerPaths(baseDir, devUrl);
+    const derivedPaths = yield* ServerConfig.deriveServerPaths(baseDir, devUrl, {
+      baseDirIsExplicit: Option.isSome(explicitBaseDir),
+    });
     yield* ServerConfig.ensureServerDirectories(derivedPaths);
     const persistedObservabilitySettings = yield* loadPersistedObservabilitySettings(
       derivedPaths.settingsPath,
@@ -389,6 +402,7 @@ export const resolveServerConfig = (
           Option.fromUndefinedOr(bootstrap?.githubOAuthCallbackUrl),
         ),
       ),
+      devAllowedOrigins: env.devAllowedOrigins,
       noBrowser,
       startupPresentation,
       desktopBootstrapToken,

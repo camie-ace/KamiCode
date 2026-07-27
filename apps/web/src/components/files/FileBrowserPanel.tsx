@@ -1,17 +1,26 @@
+import type {
+  ContextMenuItem as TreeContextMenuItem,
+  ContextMenuOpenContext as TreeContextMenuOpenContext,
+} from "@pierre/trees";
 import type { EnvironmentId, ProjectEntry } from "@t3tools/contracts";
 import { uploadEnvironmentWorkspaceFiles } from "@t3tools/client-runtime/state/filesystem";
 import { FileTree, useFileTree } from "@pierre/trees/react";
+import { serializeComposerFileLink } from "@t3tools/shared/composerTrigger";
 import * as Option from "effect/Option";
 import { LoaderCircle, RefreshCw, Search, Upload } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
+import { toastManager } from "~/components/ui/toast";
+import { useComposerHandleContext } from "~/composerHandleContext";
+import { writeTextToClipboard } from "~/hooks/useCopyToClipboard";
 import { useTheme } from "~/hooks/useTheme";
 import { runtime } from "~/lib/runtime";
 import { cn } from "~/lib/utils";
+import { readLocalApi } from "~/localApi";
 import { T3_PIERRE_ICONS } from "~/pierre-icons";
 import { usePreparedConnection } from "~/state/session";
-import { toastManager } from "~/components/ui/toast";
 
+import { createFileTreeDragMentionController } from "./fileTreeDragMention";
 import { useProjectEntriesQuery } from "./projectFilesQueryState";
 
 interface FileBrowserPanelProps {
@@ -54,6 +63,7 @@ export default function FileBrowserPanel({
 }: FileBrowserPanelProps) {
   const { resolvedTheme } = useTheme();
   const preparedConnection = usePreparedConnection(environmentId);
+  const composerRef = useComposerHandleContext();
   const entriesQuery = useProjectEntriesQuery(environmentId, cwd);
   const entries = entriesQuery.data?.entries ?? [];
   const entryKinds = useMemo(
@@ -69,13 +79,116 @@ export default function FileBrowserPanel({
   const [isUploading, setIsUploading] = useState(false);
   const [isDraggingUpload, setIsDraggingUpload] = useState(false);
 
+  // The tree renders rows in shadow DOM and its anchor rect is unreliable, so
+  // capture the right-click position ourselves; contextmenu is a composed
+  // event, so a capture-phase listener sees it with viewport coordinates.
+  const contextMenuPointerRef = useRef<{ x: number; y: number; at: number } | null>(null);
+  useEffect(() => {
+    const capturePointer = (event: MouseEvent) => {
+      contextMenuPointerRef.current = { x: event.clientX, y: event.clientY, at: event.timeStamp };
+    };
+    document.addEventListener("contextmenu", capturePointer, true);
+    return () => document.removeEventListener("contextmenu", capturePointer, true);
+  }, []);
+
+  const showEntryContextMenu = async (
+    item: TreeContextMenuItem,
+    context: TreeContextMenuOpenContext,
+  ) => {
+    const api = readLocalApi();
+    if (!api) {
+      context.close();
+      return;
+    }
+    const relativePath = item.path.replace(/\/$/, "");
+    const mention = serializeComposerFileLink(relativePath);
+    const pointer = contextMenuPointerRef.current;
+    const pointerIsFresh = pointer !== null && performance.now() - pointer.at < 1000;
+    const anchorRect = context.anchorElement.getBoundingClientRect();
+    const position = pointerIsFresh
+      ? { x: pointer.x, y: pointer.y }
+      : { x: anchorRect.left, y: anchorRect.bottom };
+    try {
+      const clicked = await api.contextMenu.show(
+        [
+          { id: "copy-mention", label: "Copy mention" },
+          { id: "add-to-chat", label: "Add to chat" },
+        ],
+        position,
+      );
+      if (clicked === "copy-mention") {
+        try {
+          await writeTextToClipboard(mention);
+          toastManager.add({ type: "success", title: "Mention copied", description: relativePath });
+        } catch (error) {
+          toastManager.add({
+            type: "error",
+            title: "Failed to copy mention",
+            description: error instanceof Error ? error.message : "An error occurred.",
+          });
+        }
+        return;
+      }
+      if (clicked === "add-to-chat") {
+        const composer = composerRef?.current;
+        if (!composer) {
+          toastManager.add({
+            type: "error",
+            title: "Unable to add to chat",
+            description: "Open a chat for this project and try again.",
+          });
+          return;
+        }
+        const inserted = composer.insertTextAtEnd(`${mention} `, { ensureLeadingBoundary: true });
+        if (!inserted) {
+          toastManager.add({
+            type: "error",
+            title: "Unable to add to chat",
+            description: "The chat isn't ready to accept input right now.",
+          });
+        }
+      }
+    } finally {
+      context.close();
+    }
+  };
+  const showEntryContextMenuRef = useRef(showEntryContextMenu);
+  useEffect(() => {
+    showEntryContextMenuRef.current = showEntryContextMenu;
+  });
+
+  const treeModelRef = useRef<ReturnType<typeof useFileTree>["model"] | null>(null);
+  const dragMention = useMemo(
+    () =>
+      createFileTreeDragMentionController({
+        deselect: (path) => treeModelRef.current?.getItem(path)?.deselect(),
+      }),
+    [],
+  );
   const { model } = useFileTree({
+    composition: {
+      contextMenu: {
+        triggerMode: "right-click",
+        onOpen: (item, context) => {
+          void showEntryContextMenuRef.current(item, context);
+        },
+      },
+    },
+    // Rows only need to be draggable so entries can be dropped into the chat
+    // composer; rearranging files inside the tree stays off.
+    dragAndDrop: { canDrop: () => false },
     density: "compact",
     fileTreeSearchMode: "hide-non-matches",
     flattenEmptyDirectories: true,
     initialExpansion: 1,
     icons: T3_PIERRE_ICONS,
     onSelectionChange: (selectedPaths) => {
+      dragMention.handleSelectionChange(selectedPaths);
+      // Starting a drag selects the dragged row; that selection is a side
+      // effect of the gesture, not a request to open the file.
+      if (dragMention.isDragInProgress()) {
+        return;
+      }
       const selectedPath = selectedPaths.at(-1)?.replace(/\/$/, "");
       if (!selectedPath) {
         setUploadDirectory("");
@@ -189,8 +302,28 @@ export default function FileBrowserPanel({
     void uploadFiles(Array.from(event.dataTransfer.files));
   };
 
+  const panelRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    treeModelRef.current = model;
+  }, [model]);
+  useEffect(() => {
+    const panel = panelRef.current;
+    if (panel === null) {
+      return;
+    }
+    const handleDragStart = (event: DragEvent) => dragMention.handleDragStart(event);
+    const handleDragEnd = () => dragMention.handleDragEnd();
+    panel.addEventListener("dragstart", handleDragStart, true);
+    panel.addEventListener("dragend", handleDragEnd);
+    return () => {
+      panel.removeEventListener("dragstart", handleDragStart, true);
+      panel.removeEventListener("dragend", handleDragEnd);
+    };
+  }, [dragMention]);
+
   return (
     <div
+      ref={panelRef}
       className="relative flex min-h-0 flex-1 flex-col bg-background"
       data-file-browser-panel={`${environmentId}:${cwd}`}
       onDragEnter={onUploadDragEnter}

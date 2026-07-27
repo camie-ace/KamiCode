@@ -45,7 +45,7 @@ const ThreadTemplateInput = Schema.Struct({
   prompt: Schema.String,
   titleSeed: Schema.optionalKey(Schema.String),
   runtimeMode: Schema.optionalKey(
-    Schema.Literals(["approval-required", "auto-accept-edits", "full-access"]),
+    Schema.Literals(["approval-required", "auto", "auto-accept-edits", "full-access"]),
   ),
   interactionMode: Schema.optionalKey(
     Schema.Literals(["default", "plan", "test", "workflow", "trigger"]),
@@ -59,7 +59,7 @@ const PartialThreadTemplateInput = Schema.Struct({
   prompt: Schema.optionalKey(Schema.String),
   titleSeed: Schema.optionalKey(Schema.String),
   runtimeMode: Schema.optionalKey(
-    Schema.Literals(["approval-required", "auto-accept-edits", "full-access"]),
+    Schema.Literals(["approval-required", "auto", "auto-accept-edits", "full-access"]),
   ),
   interactionMode: Schema.optionalKey(
     Schema.Literals(["default", "plan", "test", "workflow", "trigger"]),
@@ -492,7 +492,7 @@ const threadTemplateSchema = {
   properties: {
     prompt: { type: "string", description: "Prompt to send when the trigger fires." },
     titleSeed: { type: "string", description: "Optional title seed for fired threads." },
-    runtimeMode: { enum: ["approval-required", "auto-accept-edits", "full-access"] },
+    runtimeMode: { enum: ["approval-required", "auto", "auto-accept-edits", "full-access"] },
     interactionMode: { enum: ["default", "plan", "test", "workflow", "trigger"] },
     branch: { type: ["string", "null"] },
     worktreePath: { type: ["string", "null"] },
@@ -507,7 +507,7 @@ const updateThreadTemplateSchema = {
 
 export const PROJECT_TRIGGER_DYNAMIC_TOOL_SPECS = [
   {
-    namespace: PROJECT_TRIGGER_TOOL_NAMESPACE,
+    type: "function",
     name: "create_trigger",
     description: "Create a project trigger that starts a new KamiCode thread from a cron schedule.",
     inputSchema: {
@@ -525,7 +525,7 @@ export const PROJECT_TRIGGER_DYNAMIC_TOOL_SPECS = [
     },
   },
   {
-    namespace: PROJECT_TRIGGER_TOOL_NAMESPACE,
+    type: "function",
     name: "update_trigger",
     description: "Update an existing project trigger by id.",
     inputSchema: {
@@ -543,7 +543,7 @@ export const PROJECT_TRIGGER_DYNAMIC_TOOL_SPECS = [
     },
   },
   {
-    namespace: PROJECT_TRIGGER_TOOL_NAMESPACE,
+    type: "function",
     name: "set_trigger_enabled",
     description: "Enable or disable an existing project trigger.",
     inputSchema: {
@@ -557,7 +557,7 @@ export const PROJECT_TRIGGER_DYNAMIC_TOOL_SPECS = [
     },
   },
   {
-    namespace: PROJECT_TRIGGER_TOOL_NAMESPACE,
+    type: "function",
     name: "delete_trigger",
     description: "Delete an existing project trigger by id.",
     inputSchema: {
@@ -570,7 +570,7 @@ export const PROJECT_TRIGGER_DYNAMIC_TOOL_SPECS = [
     },
   },
   {
-    namespace: PROJECT_TRIGGER_TOOL_NAMESPACE,
+    type: "function",
     name: "list_triggers",
     description: "List project triggers for a project.",
     inputSchema: {

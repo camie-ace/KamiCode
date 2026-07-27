@@ -57,6 +57,8 @@ import Migration0041 from "./Migrations/041_ProjectTriggers.ts";
 import Migration0042 from "./Migrations/042_ProjectTriggerProvenanceAndRuntime.ts";
 import Migration0043 from "./Migrations/043_SharedThreadLinks.ts";
 import Migration0044 from "./Migrations/044_WorkflowLaneThreadMetadata.ts";
+import Migration0045 from "./Migrations/033_ProjectionThreadsSettled.ts";
+import Migration0046 from "./Migrations/034_ProjectionThreadsSnoozed.ts";
 
 /**
  * Migration loader with all migrations defined inline.
@@ -116,6 +118,10 @@ export const migrationEntries = [
   [42, "ProjectTriggerProvenanceAndRuntime", Migration0042],
   [43, "SharedThreadLinks", Migration0043],
   [44, "WorkflowLaneThreadMetadata", Migration0044],
+  // Upstream introduced these as ids 33/34 after the fork had already claimed
+  // that range. Keep the SQL intact but append it under fork-safe ids.
+  [45, "ProjectionThreadsSettled", Migration0045],
+  [46, "ProjectionThreadsSnoozed", Migration0046],
 ] as const;
 
 export const makeMigrationLoader = (throughId?: number) =>
@@ -150,15 +156,11 @@ export interface RunMigrationsOptions {
 export const runMigrations = Effect.fn("runMigrations")(function* ({
   toMigrationInclusive,
 }: RunMigrationsOptions = {}) {
-  yield* Effect.log(
-    toMigrationInclusive === undefined
-      ? "Running all migrations..."
-      : `Running migrations 1 through ${toMigrationInclusive}...`,
-  );
   const executedMigrations = yield* run({ loader: makeMigrationLoader(toMigrationInclusive) });
-  yield* Effect.log("Migrations ran successfully").pipe(
-    Effect.annotateLogs({ migrations: executedMigrations.map(([id, name]) => `${id}_${name}`) }),
-  );
+  const migrations = executedMigrations.map(([id, name]) => `${id}_${name}`);
+  yield* migrations.length === 0
+    ? Effect.logDebug("Database schema is current")
+    : Effect.log("Migrations ran successfully").pipe(Effect.annotateLogs({ migrations }));
   return executedMigrations;
 });
 

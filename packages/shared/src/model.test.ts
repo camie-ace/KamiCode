@@ -69,15 +69,15 @@ const claudeCaps: ModelCapabilities = createModelCapabilities({
 
 describe("descriptor helpers", () => {
   it("uses GPT-5.6 Codex defaults", () => {
-    expect(DEFAULT_MODEL).toBe("gpt-5.6");
-    expect(DEFAULT_GIT_TEXT_GENERATION_MODEL).toBe("gpt-5.6-terra");
-    expect(DEFAULT_MODEL_BY_PROVIDER[ProviderDriverKind.make("codex")]).toBe("gpt-5.6");
+    expect(DEFAULT_MODEL).toBe("gpt-5.6-sol");
+    expect(DEFAULT_GIT_TEXT_GENERATION_MODEL).toBe("gpt-5.6-luna");
+    expect(DEFAULT_MODEL_BY_PROVIDER[ProviderDriverKind.make("codex")]).toBe("gpt-5.6-sol");
   });
 
   it("normalizes GPT-5.6 Codex shorthand and named variants", () => {
     const codex = ProviderDriverKind.make("codex");
 
-    expect(normalizeModelSlug("5.6", codex)).toBe("gpt-5.6");
+    expect(normalizeModelSlug("5.6", codex)).toBe("gpt-5.6-sol");
     expect(normalizeModelSlug("sol", codex)).toBe("gpt-5.6-sol");
     expect(normalizeModelSlug("5.6-sol", codex)).toBe("gpt-5.6-sol");
     expect(normalizeModelSlug("terra", codex)).toBe("gpt-5.6-terra");

@@ -24,6 +24,7 @@ import * as DesktopAssets from "../app/DesktopAssets.ts";
 import * as DesktopConfig from "../app/DesktopConfig.ts";
 import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
 import * as DesktopState from "../app/DesktopState.ts";
+import * as DesktopAppSettings from "../settings/DesktopAppSettings.ts";
 import * as ElectronMenu from "../electron/ElectronMenu.ts";
 import * as ElectronShell from "../electron/ElectronShell.ts";
 import * as ElectronTheme from "../electron/ElectronTheme.ts";
@@ -157,6 +158,18 @@ function makeDesktopEnvironmentLayer(
 }
 
 const desktopEnvironmentLayer = makeDesktopEnvironmentLayer();
+const desktopAppSettingsLayer = Layer.mock(DesktopAppSettings.DesktopAppSettings)({
+  get: Effect.succeed(DesktopAppSettings.DEFAULT_DESKTOP_SETTINGS),
+  setMainWindowBounds: (bounds, isMaximized) =>
+    Effect.succeed({
+      settings: {
+        ...DesktopAppSettings.DEFAULT_DESKTOP_SETTINGS,
+        mainWindowBounds: bounds,
+        mainWindowMaximized: isMaximized,
+      },
+      changed: true,
+    }),
+});
 
 function makeTestLayer(input: {
   readonly window: Electron.BrowserWindow;
@@ -191,6 +204,7 @@ function makeTestLayer(input: {
       Layer.mergeAll(
         makeDesktopAssetsLayer(input.iconPaths),
         makeDesktopEnvironmentLayer(input.environmentInput),
+        desktopAppSettingsLayer,
         desktopServerExposureLayer,
         DesktopState.layer,
         electronMenuLayer,
@@ -261,6 +275,7 @@ const makeSplashScenario = (createOutcomes: readonly (Electron.BrowserWindow | n
                 webPreferences: {
                   preload: null,
                   partition: null,
+                  backgroundThrottling: null,
                   sandbox: null,
                   contextIsolation: null,
                   nodeIntegration: null,
@@ -289,6 +304,7 @@ const makeSplashScenario = (createOutcomes: readonly (Electron.BrowserWindow | n
         Layer.mergeAll(
           desktopAssetsLayer,
           desktopEnvironmentLayer,
+          desktopAppSettingsLayer,
           desktopServerExposureLayer,
           electronMenuLayer,
           Layer.succeed(ElectronShell.ElectronShell, {

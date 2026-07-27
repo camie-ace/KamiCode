@@ -8,11 +8,9 @@ import * as CodexErrors from "effect-codex-app-server/errors";
 import * as CodexRpc from "effect-codex-app-server/rpc";
 
 import {
+  buildCodexDeveloperInstructions,
   CODEX_DEFAULT_MODE_DEVELOPER_INSTRUCTIONS,
   CODEX_PLAN_MODE_DEVELOPER_INSTRUCTIONS,
-  CODEX_TEST_MODE_DEVELOPER_INSTRUCTIONS,
-  CODEX_TRIGGER_MODE_DEVELOPER_INSTRUCTIONS,
-  CODEX_WORKFLOW_MODE_DEVELOPER_INSTRUCTIONS,
 } from "../CodexDeveloperInstructions.ts";
 import {
   buildTurnStartParams,
@@ -120,6 +118,7 @@ describe("buildTurnStartParams", () => {
     NodeAssert.deepStrictEqual(params, {
       threadId: "provider-thread-1",
       approvalPolicy: "never",
+      approvalsReviewer: "user",
       sandboxPolicy: {
         type: "dangerFullAccess",
       },
@@ -137,7 +136,10 @@ describe("buildTurnStartParams", () => {
           model: "gpt-5.3-codex",
           reasoning_effort: "medium",
           developer_instructions: appendProjectMemoryInstructions(
-            CODEX_PLAN_MODE_DEVELOPER_INSTRUCTIONS,
+            buildCodexDeveloperInstructions("plan", {
+              model: "gpt-5.3-codex",
+              reasoningEffort: "medium",
+            }),
             undefined,
           ),
         },
@@ -165,6 +167,7 @@ describe("buildTurnStartParams", () => {
     NodeAssert.deepStrictEqual(params, {
       threadId: "provider-thread-1",
       approvalPolicy: "on-request",
+      approvalsReviewer: "user",
       sandboxPolicy: {
         type: "workspaceWrite",
       },
@@ -185,7 +188,10 @@ describe("buildTurnStartParams", () => {
           model: "gpt-5.3-codex",
           reasoning_effort: "medium",
           developer_instructions: appendProjectMemoryInstructions(
-            CODEX_DEFAULT_MODE_DEVELOPER_INSTRUCTIONS,
+            buildCodexDeveloperInstructions("default", {
+              model: "gpt-5.3-codex",
+              reasoningEffort: "medium",
+            }),
             undefined,
           ),
         },
@@ -207,6 +213,7 @@ describe("buildTurnStartParams", () => {
     assert.deepStrictEqual(params, {
       threadId: "provider-thread-1",
       approvalPolicy: "never",
+      approvalsReviewer: "user",
       sandboxPolicy: {
         type: "dangerFullAccess",
       },
@@ -223,7 +230,10 @@ describe("buildTurnStartParams", () => {
           model: "gpt-5.3-codex",
           reasoning_effort: "medium",
           developer_instructions: appendProjectMemoryInstructions(
-            CODEX_TEST_MODE_DEVELOPER_INSTRUCTIONS,
+            buildCodexDeveloperInstructions("test", {
+              model: "gpt-5.3-codex",
+              reasoningEffort: "medium",
+            }),
             undefined,
           ),
         },
@@ -245,6 +255,7 @@ describe("buildTurnStartParams", () => {
     assert.deepStrictEqual(params, {
       threadId: "provider-thread-1",
       approvalPolicy: "never",
+      approvalsReviewer: "user",
       sandboxPolicy: {
         type: "dangerFullAccess",
       },
@@ -261,7 +272,10 @@ describe("buildTurnStartParams", () => {
           model: "gpt-5.3-codex",
           reasoning_effort: "medium",
           developer_instructions: appendProjectMemoryInstructions(
-            CODEX_WORKFLOW_MODE_DEVELOPER_INSTRUCTIONS,
+            buildCodexDeveloperInstructions("workflow", {
+              model: "gpt-5.3-codex",
+              reasoningEffort: "medium",
+            }),
             undefined,
           ),
         },
@@ -283,6 +297,7 @@ describe("buildTurnStartParams", () => {
     assert.deepStrictEqual(params, {
       threadId: "provider-thread-1",
       approvalPolicy: "never",
+      approvalsReviewer: "user",
       sandboxPolicy: {
         type: "dangerFullAccess",
       },
@@ -299,7 +314,10 @@ describe("buildTurnStartParams", () => {
           model: "gpt-5.3-codex",
           reasoning_effort: "medium",
           developer_instructions: appendProjectMemoryInstructions(
-            CODEX_TRIGGER_MODE_DEVELOPER_INSTRUCTIONS,
+            buildCodexDeveloperInstructions("trigger", {
+              model: "gpt-5.3-codex",
+              reasoningEffort: "medium",
+            }),
             undefined,
           ),
         },
@@ -353,6 +371,7 @@ describe("buildTurnStartParams", () => {
     NodeAssert.deepStrictEqual(params, {
       threadId: "provider-thread-1",
       approvalPolicy: "untrusted",
+      approvalsReviewer: "user",
       sandboxPolicy: {
         type: "readOnly",
       },
@@ -511,6 +530,7 @@ describe("openCodexThread", () => {
         approvalPolicy: "never",
         sandbox: "danger-full-access",
         dynamicTools: [KAMI_TEST_HARNESS_DYNAMIC_TOOL_SPEC],
+        approvalsReviewer: "user",
         model: "gpt-5.3-codex",
       });
     }),
@@ -556,6 +576,7 @@ describe("openCodexThread", () => {
         approvalPolicy: "never",
         sandbox: "danger-full-access",
         dynamicTools: [KAMI_TEST_HARNESS_DYNAMIC_TOOL_SPEC, ...PROJECT_TRIGGER_DYNAMIC_TOOL_SPECS],
+        approvalsReviewer: "user",
         model: "gpt-5.3-codex",
       });
     }),
@@ -683,6 +704,7 @@ describe("openCodexThread", () => {
         approvalPolicy: "never",
         sandbox: "danger-full-access",
         dynamicTools: [KAMI_TEST_HARNESS_DYNAMIC_TOOL_SPEC],
+        approvalsReviewer: "user",
         model: "gpt-5.3-codex",
       });
     }),

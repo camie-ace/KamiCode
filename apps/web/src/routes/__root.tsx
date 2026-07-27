@@ -117,7 +117,7 @@ function RootRouteView() {
     };
   }, [pathname]);
 
-  if (pathname === "/pair") {
+  if (pathname === "/pair" || pathname === "/connect" || pathname.startsWith("/connect/")) {
     return (
       <>
         <DocumentTitleSync />
@@ -157,6 +157,7 @@ function RootRouteView() {
     <ToastProvider>
       <AnchoredToastProvider>
         <DocumentTitleSync />
+        <GlassAppearanceSync />
         {primaryEnvironmentAuthenticated ? <AuthenticatedTracingBootstrap /> : null}
         <RelayClientInstallDialog />
         <ConnectOnboardingDialog />
@@ -170,6 +171,16 @@ function RootRouteView() {
       </AnchoredToastProvider>
     </ToastProvider>
   );
+}
+
+function GlassAppearanceSync() {
+  const glassOpacity = useClientSettings((settings) => settings.glassOpacity);
+
+  useEffect(() => {
+    document.documentElement.style.setProperty("--glass-opacity", `${glassOpacity}%`);
+  }, [glassOpacity]);
+
+  return null;
 }
 
 function DocumentTitleSync() {

@@ -3,7 +3,8 @@ import { KeyboardAwareLegendList } from "@legendapp/list/keyboard";
 import { type LegendListRef } from "@legendapp/list/react-native";
 import type { EnvironmentId, MessageId, ThreadId, TurnId } from "@t3tools/contracts";
 import { CHAT_LIST_ANCHOR_OFFSET, resolveChatListAnchoredEndSpace } from "@t3tools/shared/chatList";
-import { SymbolView } from "expo-symbols";
+import { formatElapsed } from "@t3tools/shared/orchestrationTiming";
+import { SymbolView } from "../../components/AppSymbol";
 import { HeaderHeightContext } from "@react-navigation/elements";
 import { useNavigation } from "@react-navigation/native";
 import {
@@ -47,11 +48,11 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Animated, {
   FadeIn,
   FadeInUp,
-  FadeOut,
   LinearTransition,
   type SharedValue,
 } from "react-native-reanimated";
 import { useThemeColor } from "../../lib/useThemeColor";
+import { useFontFamily } from "../../lib/useFontFamily";
 import { copyTextWithHaptic } from "../../lib/copyTextWithHaptic";
 import {
   hasNativeSelectableMarkdownText,
@@ -66,6 +67,7 @@ import {
   parseReviewCommentMessageSegments,
   type ReviewInlineComment,
 } from "../review/reviewCommentSelection";
+import type { ReviewDiffTheme } from "../review/shikiReviewHighlighter";
 import { resolveNativeReviewDiffView } from "../diffs/nativeReviewDiffSurface";
 import {
   buildNativeReviewDiffData,
@@ -90,6 +92,7 @@ import {
 } from "../../lib/threadActivity";
 import type { ThreadContentPresentation } from "./threadContentPresentation";
 import { ThreadWorkGroupToggle, ThreadWorkLog } from "./thread-work-log";
+import { useMarkdownCodeHighlight } from "./markdownCodeHighlightState";
 import { useAssetUrl } from "../../state/assets";
 import { resolveWorkspaceRelativeFilePath } from "../files/filePath";
 
@@ -126,6 +129,7 @@ export interface ThreadFeedProps {
   readonly contentPresentation: ThreadContentPresentation;
   readonly agentLabel: string;
   readonly latestTurn: ThreadFeedLatestTurn | null;
+  readonly activeWorkStartedAt: string | null;
   readonly listRef: RefObject<LegendListRef | null>;
   readonly freeze: SharedValue<boolean>;
   readonly anchorMessageId: MessageId | null;
@@ -202,6 +206,12 @@ const MARKDOWN_COLORS = {
   },
 } as const;
 
+const MARKDOWN_MONO_FONT = Platform.select({
+  ios: "ui-monospace",
+  android: "monospace",
+  default: "monospace",
+});
+
 interface MarkdownStyleSets {
   readonly user: MarkdownStyleSet;
   readonly assistant: MarkdownStyleSet;
@@ -234,10 +244,6 @@ const markdownLinkStyles = StyleSheet.create({
   favicon: {
     borderRadius: 3,
   },
-  file: {
-    fontFamily: "DMSans_700Bold",
-    fontWeight: "700",
-  },
 });
 
 const MarkdownExternalLink = memo(function MarkdownExternalLink(props: {
@@ -250,12 +256,12 @@ const MarkdownExternalLink = memo(function MarkdownExternalLink(props: {
 
   return (
     <NativeText
+      className="font-sans"
       onPress={() => {
         void Linking.openURL(props.href);
       }}
       style={{
         color: props.color,
-        fontFamily: "DMSans_400Regular",
         textDecorationLine: "none",
       }}
     >
@@ -277,6 +283,122 @@ const MarkdownExternalLink = memo(function MarkdownExternalLink(props: {
     </NativeText>
   );
 });
+
+function MarkdownCodeBlock(props: {
+  readonly backgroundColor: string;
+  readonly borderColor: string;
+  readonly content: string;
+  readonly copyTintColor: ColorValue;
+  readonly headerTextColor: string;
+  readonly fontSize: number;
+  readonly highlightCode: boolean;
+  readonly language?: string | null;
+  readonly lineHeight: number;
+  readonly textColor: string;
+  readonly theme: ReviewDiffTheme;
+}) {
+  const content = props.content.replace(/\n$/, "");
+  const languageLabel = props.language?.trim() || "text";
+  const highlighted = useMarkdownCodeHighlight({
+    code: content,
+    enabled: props.highlightCode && Boolean(props.language?.trim()),
+    language: props.language,
+    theme: props.theme,
+  });
+  let tokenOffset = 0;
+
+  return (
+    <View
+      className="my-3 min-w-0 max-w-full self-stretch overflow-hidden rounded-lg border"
+      style={{ backgroundColor: props.backgroundColor, borderColor: props.borderColor }}
+    >
+      <View
+        className="flex-row items-center justify-between gap-2 border-b py-1 pr-1.5 pl-3.5"
+        style={{ borderBottomColor: props.borderColor }}
+      >
+        <NativeText
+          className="flex-1 font-mono uppercase opacity-70"
+          numberOfLines={1}
+          style={{
+            color: props.headerTextColor,
+            fontSize: props.fontSize,
+            ...(Platform.OS === "android" ? { includeFontPadding: false } : null),
+          }}
+        >
+          {languageLabel}
+        </NativeText>
+        <CopyTextButton
+          accessibilityLabel="Copy code"
+          text={content}
+          tintColor={props.copyTintColor}
+          buttonSize={32}
+          iconSize={16}
+        />
+      </View>
+      <ScrollView
+        horizontal
+        bounces={false}
+        nestedScrollEnabled={Platform.OS === "android"}
+        showsHorizontalScrollIndicator={false}
+        contentContainerClassName="px-3.5 py-3"
+      >
+        <NativeText
+          selectable
+          className="font-mono"
+          style={{
+            color: props.textColor,
+            fontSize: props.fontSize,
+            lineHeight: props.lineHeight,
+            ...(Platform.OS === "android" ? { includeFontPadding: false } : null),
+          }}
+        >
+          {highlighted
+            ? highlighted.map((line, lineIndex) => {
+                const lineStartOffset = tokenOffset;
+                const lineText = line.map((token) => token.content).join("");
+                const renderedLine = (
+                  <NativeText key={`line:${lineStartOffset}:${lineText}`}>
+                    {line.map((token) => {
+                      const startOffset = tokenOffset;
+                      tokenOffset += token.content.length;
+                      const fontStyle =
+                        token.fontStyle !== null && (token.fontStyle & 1) === 1
+                          ? ("italic" as const)
+                          : ("normal" as const);
+                      const fontWeight =
+                        token.fontStyle !== null && (token.fontStyle & 2) === 2
+                          ? ("700" as const)
+                          : ("400" as const);
+
+                      return (
+                        <NativeText
+                          key={`${startOffset}:${token.content}:${token.color ?? ""}:${
+                            token.fontStyle ?? ""
+                          }`}
+                          style={{
+                            color: token.color ?? props.textColor,
+                            fontStyle,
+                            fontWeight,
+                          }}
+                        >
+                          {token.content}
+                        </NativeText>
+                      );
+                    })}
+                    {lineIndex + 1 < highlighted.length ? "\n" : ""}
+                  </NativeText>
+                );
+                if (lineIndex + 1 < highlighted.length) {
+                  tokenOffset += 1;
+                }
+                return renderedLine;
+              })
+            : content}
+        </NativeText>
+      </ScrollView>
+    </View>
+  );
+}
 
 function useReviewCommentColors(): ReviewCommentColors {
   const colorScheme = useColorScheme();
@@ -312,8 +434,13 @@ function useMarkdownStyles(onLinkPress: (href: string) => void): MarkdownStyleSe
     () => resolveNativeMarkdownTypography(appearance.baseFontSize),
     [appearance.baseFontSize],
   );
-  const colors = MARKDOWN_COLORS[colorScheme === "dark" ? "dark" : "light"];
+  const themeMode = colorScheme === "dark" ? "dark" : "light";
+  const colors = MARKDOWN_COLORS[themeMode];
+  const iconSubtleColor = String(useThemeColor("--color-icon-subtle"));
   const inlineSkillForeground = String(useThemeColor("--color-inline-skill-foreground"));
+  const userBubbleForegroundMuted = String(useThemeColor("--color-user-bubble-foreground-muted"));
+  const regularFontFamily = useFontFamily("regular");
+  const boldFontFamily = useFontFamily("bold");
 
   return useMemo(() => {
     const markdownBodyColor = colors.body;
@@ -339,6 +466,7 @@ function useMarkdownStyles(onLinkPress: (href: string) => void): MarkdownStyleSe
         link: markdownLinkColor,
         blockquote: markdownBlockquoteBorder,
         border: markdownHrColor,
+        surface: "transparent",
         surfaceLight: markdownBlockquoteBg,
         accent: markdownLinkColor,
         tableBorder: markdownHrColor,
@@ -365,9 +493,9 @@ function useMarkdownStyles(onLinkPress: (href: string) => void): MarkdownStyleSe
         h6: markdownFontSizes.h6,
       },
       fontFamilies: {
-        regular: "DMSans_400Regular",
-        heading: "DMSans_700Bold",
-        mono: "ui-monospace",
+        regular: regularFontFamily,
+        heading: boldFontFamily,
+        mono: MARKDOWN_MONO_FONT,
       },
       headingWeight: "700",
       borderRadius: {
@@ -388,7 +516,7 @@ function useMarkdownStyles(onLinkPress: (href: string) => void): MarkdownStyleSe
       bold: {
         fontWeight: "700",
         color: markdownStrongColor,
-        fontFamily: "DMSans_700Bold",
+        fontFamily: boldFontFamily,
       },
       italic: { fontStyle: "italic" },
       link: {
@@ -404,7 +532,7 @@ function useMarkdownStyles(onLinkPress: (href: string) => void): MarkdownStyleSe
         marginVertical: 10,
       },
       heading: {
-        fontFamily: "DMSans_700Bold",
+        fontFamily: boldFontFamily,
         color: markdownStrongColor,
         marginTop: 18,
         marginBottom: 8,
@@ -421,15 +549,18 @@ function useMarkdownStyles(onLinkPress: (href: string) => void): MarkdownStyleSe
       inlineCodeTextColor: string,
       blockBackgroundColor: string,
       blockTextColor: string,
+      copyTintColor: ColorValue,
       preserveSoftBreaks: boolean,
+      highlightCode: boolean,
     ): CustomRenderers => ({
       link: ({ children, href = "" }) => {
         const presentation = resolveMarkdownLinkPresentation(href);
         if (presentation.kind === "file") {
           return (
             <NativeText
+              className="font-t3-bold"
               onPress={() => onLinkPress(href)}
-              style={[markdownLinkStyles.file, { color: inlineTextColor }]}
+              style={{ color: inlineTextColor }}
             >
               <Image
                 source={markdownFileIconSource(presentation.icon)}
@@ -453,6 +584,7 @@ function useMarkdownStyles(onLinkPress: (href: string) => void): MarkdownStyleSe
         const linkHref = presentation.href;
         return (
           <NativeText
+            className="underline"
             onPress={
               linkHref
                 ? () => {
@@ -460,17 +592,14 @@ function useMarkdownStyles(onLinkPress: (href: string) => void): MarkdownStyleSe
                   }
                 : undefined
             }
-            style={{
-              color: markdownLinkColor,
-              textDecorationLine: "underline",
-            }}
+            style={{ color: markdownLinkColor }}
           >
             {children}
           </NativeText>
         );
       },
       list: ({ node, Renderer, ordered = false, start = 1 }) => (
-        <View style={{ marginTop: 2, marginBottom: 8 }}>
+        <View className="mt-0.5 mb-2">
           {node.children?.map((child, index) => {
             const childKey = `${child.type}:${child.beg ?? "unknown"}:${child.end ?? "unknown"}`;
             if (child.type === "task_list_item") {
@@ -479,20 +608,13 @@ function useMarkdownStyles(onLinkPress: (href: string) => void): MarkdownStyleSe
               );
             }
             return (
-              <View
-                key={childKey}
-                style={{
-                  flexDirection: "row",
-                  alignItems: "flex-start",
-                  marginBottom: 3,
-                }}
-              >
+              <View className="mb-[3px] flex-row items-start" key={childKey}>
                 <NativeText
+                  className="font-sans"
                   style={{
                     width: ordered ? 22 : 12,
                     marginRight: 5,
                     color: inlineTextColor,
-                    fontFamily: "DMSans_400Regular",
                     fontSize: markdownFontSizes.m,
                     lineHeight: markdownFontSizes.bodyLineHeight,
                     textAlign: ordered ? "right" : "center",
@@ -500,7 +622,7 @@ function useMarkdownStyles(onLinkPress: (href: string) => void): MarkdownStyleSe
                 >
                   {ordered ? `${start + index}.` : "•"}
                 </NativeText>
-                <View style={{ flex: 1, minWidth: 0 }}>
+                <View className="min-w-0 flex-1">
                   <Renderer node={child} depth={1} inListItem parentIsText={false} />
                 </View>
               </View>
@@ -512,9 +634,9 @@ function useMarkdownStyles(onLinkPress: (href: string) => void): MarkdownStyleSe
         const value = content ?? "";
         return (
           <NativeText
+            className="font-mono"
             style={{
               color: inlineCodeTextColor,
-              fontFamily: "ui-monospace",
               fontSize: markdownFontSizes.codeBlockFontSize,
               lineHeight: markdownFontSizes.bodyLineHeight,
             }}
@@ -528,58 +650,20 @@ function useMarkdownStyles(onLinkPress: (href: string) => void): MarkdownStyleSe
             soft_break: () => <NativeText>{"\n"}</NativeText>,
           }
         : {}),
-      code_block: ({ content, language }) => (
-        <View
-          style={{
-            backgroundColor: blockBackgroundColor,
-            borderRadius: 10,
-            borderWidth: 1,
-            borderColor: markdownHrColor,
-            marginVertical: 12,
-            overflow: "hidden",
-          }}
-        >
-          {language ? (
-            <View
-              style={{
-                borderBottomWidth: 1,
-                borderBottomColor: markdownHrColor,
-                paddingHorizontal: 14,
-                paddingVertical: 8,
-              }}
-            >
-              <NativeText
-                style={{
-                  color: markdownBodyColor,
-                  fontFamily: "ui-monospace",
-                  fontSize: markdownFontSizes.codeBlockFontSize,
-                  opacity: 0.7,
-                  textTransform: "uppercase",
-                }}
-              >
-                {language}
-              </NativeText>
-            </View>
-          ) : null}
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            bounces={false}
-            contentContainerStyle={{ paddingHorizontal: 14, paddingVertical: 12 }}
-          >
-            <NativeText
-              selectable
-              style={{
-                color: blockTextColor,
-                fontFamily: "ui-monospace",
-                fontSize: markdownFontSizes.codeBlockFontSize,
-                lineHeight: markdownFontSizes.codeBlockLineHeight,
-              }}
-            >
-              {content}
-            </NativeText>
-          </ScrollView>
-        </View>
+      code_block: ({ content = "", language }) => (
+        <MarkdownCodeBlock
+          backgroundColor={blockBackgroundColor}
+          borderColor={markdownHrColor}
+          content={content}
+          copyTintColor={copyTintColor}
+          fontSize={markdownFontSizes.codeBlockFontSize}
+          headerTextColor={blockTextColor}
+          highlightCode={highlightCode}
+          language={language}
+          lineHeight={markdownFontSizes.codeBlockLineHeight}
+          textColor={blockTextColor}
+          theme={themeMode}
+        />
       ),
     });
 
@@ -601,7 +685,7 @@ function useMarkdownStyles(onLinkPress: (href: string) => void): MarkdownStyleSe
       bold: {
         fontWeight: "700",
         color: markdownUserBodyColor,
-        fontFamily: "DMSans_700Bold",
+        fontFamily: boldFontFamily,
       },
       heading: {
         ...baseStyles.heading,
@@ -637,7 +721,9 @@ function useMarkdownStyles(onLinkPress: (href: string) => void): MarkdownStyleSe
           markdownUserInlineCodeText,
           markdownUserFenceBg,
           markdownUserFenceText,
+          userBubbleForegroundMuted,
           true,
+          false,
         ),
         nativeTextStyle: {
           color: markdownUserBodyColor,
@@ -655,9 +741,9 @@ function useMarkdownStyles(onLinkPress: (href: string) => void): MarkdownStyleSe
           fontSize: nativeMarkdownTypography.fontSize,
           lineHeight: nativeMarkdownTypography.lineHeight,
           headingFontSizes: nativeMarkdownTypography.headingFontSizes,
-          fontFamily: "DMSans_400Regular",
-          headingFontFamily: "DMSans_700Bold",
-          boldFontFamily: "DMSans_700Bold",
+          fontFamily: regularFontFamily,
+          headingFontFamily: boldFontFamily,
+          boldFontFamily,
         },
       },
       assistant: {
@@ -668,7 +754,9 @@ function useMarkdownStyles(onLinkPress: (href: string) => void): MarkdownStyleSe
           markdownInlineCodeText,
           markdownCodeBg,
           markdownCodeText,
+          iconSubtleColor,
           false,
+          true,
         ),
         nativeTextStyle: {
           color: markdownBodyColor,
@@ -686,13 +774,24 @@ function useMarkdownStyles(onLinkPress: (href: string) => void): MarkdownStyleSe
           fontSize: nativeMarkdownTypography.fontSize,
           lineHeight: nativeMarkdownTypography.lineHeight,
           headingFontSizes: nativeMarkdownTypography.headingFontSizes,
-          fontFamily: "DMSans_400Regular",
-          headingFontFamily: "DMSans_700Bold",
-          boldFontFamily: "DMSans_700Bold",
+          fontFamily: regularFontFamily,
+          headingFontFamily: boldFontFamily,
+          boldFontFamily,
         },
       },
     };
-  }, [colors, inlineSkillForeground, markdownFontSizes, nativeMarkdownTypography, onLinkPress]);
+  }, [
+    boldFontFamily,
+    colors,
+    iconSubtleColor,
+    inlineSkillForeground,
+    markdownFontSizes,
+    nativeMarkdownTypography,
+    onLinkPress,
+    regularFontFamily,
+    themeMode,
+    userBubbleForegroundMuted,
+  ]);
 }
 
 function renderFeedEntry(
@@ -718,6 +817,10 @@ function renderFeedEntry(
 ) {
   const entry = info.item;
   const { markdownStyles, iconSubtleColor, userBubbleColor } = props;
+
+  if (entry.type === "working") {
+    return <WorkingTimelineRow startedAt={entry.createdAt} />;
+  }
 
   if (entry.type === "turn-fold") {
     return (
@@ -896,6 +999,32 @@ function renderFeedEntry(
   );
 }
 
+const WorkingTimelineRow = memo(function WorkingTimelineRow(props: { readonly startedAt: string }) {
+  const [nowMs, setNowMs] = useState(() => Date.now());
+
+  useEffect(() => {
+    const intervalId = setInterval(() => {
+      setNowMs(Date.now());
+    }, 1_000);
+    return () => clearInterval(intervalId);
+  }, [props.startedAt]);
+
+  const durationLabel = formatElapsed(props.startedAt, new Date(nowMs).toISOString()) ?? "0s";
+
+  return (
+    <View className="mb-4 flex-row items-center gap-2 px-1.5 py-1">
+      <View className="flex-row items-center gap-1">
+        <View className="h-1 w-1 rounded-full bg-neutral-400 dark:bg-neutral-500" />
+        <View className="h-1 w-1 rounded-full bg-neutral-400/80 dark:bg-neutral-500/80" />
+        <View className="h-1 w-1 rounded-full bg-neutral-400/60 dark:bg-neutral-500/60" />
+      </View>
+      <Text className="font-t3-medium text-xs tabular-nums text-neutral-600 dark:text-neutral-400">
+        Working for {durationLabel}
+      </Text>
+    </View>
+  );
+});
+
 function UserMessageContent(props: {
   readonly text: string;
   readonly markdownStyles: MarkdownStyleSet;
@@ -1019,11 +1148,10 @@ const ReviewCommentCard = memo(function ReviewCommentCard(props: {
 
   return (
     <View
-      className="w-full overflow-hidden rounded-[16px] border"
+      className="w-full overflow-hidden rounded-[16px] border border-continuous"
       style={{
         backgroundColor: props.colors.background,
         borderColor: props.colors.border,
-        borderCurve: "continuous",
       }}
     >
       <View
@@ -1031,8 +1159,8 @@ const ReviewCommentCard = memo(function ReviewCommentCard(props: {
         style={{ borderColor: props.colors.border }}
       >
         <View
-          className="size-6 items-center justify-center rounded-[7px]"
-          style={{ backgroundColor: props.colors.mutedBackground, borderCurve: "continuous" }}
+          className="size-6 items-center justify-center rounded-[7px] border-continuous"
+          style={{ backgroundColor: props.colors.mutedBackground }}
         >
           <SymbolView
             name="doc.text"
@@ -1085,9 +1213,9 @@ const ReviewCommentCard = memo(function ReviewCommentCard(props: {
         >
           <NativeText
             selectable
+            className="font-mono"
             style={{
               color: props.colors.text,
-              fontFamily: "ui-monospace",
               fontSize: codeSurface.fontSize,
               lineHeight: codeSurface.rowHeight,
             }}
@@ -1319,8 +1447,15 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
         props.latestTurn,
         expandedTurnIds,
         expandedWorkGroupIds,
+        props.activeWorkStartedAt,
       ),
-    [expandedTurnIds, expandedWorkGroupIds, props.feed, props.latestTurn],
+    [
+      expandedTurnIds,
+      expandedWorkGroupIds,
+      props.activeWorkStartedAt,
+      props.feed,
+      props.latestTurn,
+    ],
   );
 
   // The empty↔filled key below remounts the list, which resets its imperative
@@ -1559,8 +1694,8 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
 
   return (
     <>
-      <View style={{ flex: 1 }} onLayout={handleViewportLayout}>
-        <View style={{ flex: 1 }}>
+      <View className="flex-1" onLayout={handleViewportLayout}>
+        <View className="flex-1">
           <KeyboardAwareLegendList
             ref={props.listRef}
             // The empty↔filled key remounts the list when messages first
@@ -1665,7 +1800,9 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
             }}
           />
         </View>
-        {props.feed.length === 0 && props.contentPresentation.kind === "ready" ? (
+        {props.feed.length === 0 &&
+        props.activeWorkStartedAt === null &&
+        props.contentPresentation.kind === "ready" ? (
           <View pointerEvents="none" style={StyleSheet.absoluteFill}>
             <ThreadFeedPlaceholder
               title="No conversation yet"

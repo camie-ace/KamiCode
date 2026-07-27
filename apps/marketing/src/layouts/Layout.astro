@@ -2,6 +2,7 @@
 interface Props {
   title?: string;
   description?: string;
+  pageClass?: string;
 }
 
 import { REPOSITORY_URL } from "../lib/releases";
@@ -9,6 +10,7 @@ import { REPOSITORY_URL } from "../lib/releases";
 const {
   title = "KamiCode",
   description = "Stop trusting AI. Start verifying it. KamiCode orchestrates Claude Code, Codex, OpenCode and Cursor with screenshots, recordings and verifiable traces attached to every change.",
+  pageClass,
 } = Astro.props;
 ---
 
@@ -30,7 +32,7 @@ const {
     <title>{title}</title>
   </head>
   <body>
-    <div class="page">
+    <div class:list={["page", pageClass]}>
       <nav class="nav">
         <div class="nav-inner">
           <a href="/" class="nav-brand" aria-label="KamiCode home">
@@ -68,6 +70,9 @@ const {
             <a href={REPOSITORY_URL} target="_blank" rel="noopener noreferrer">GitHub</a>
             <a href="https://discord.gg/jn4EGJjrvv" target="_blank" rel="noopener noreferrer">Discord</a>
             <a href="/download">Download</a>
+            <a href="/terms-of-service">Terms</a>
+            <a href="/privacy-policy">Privacy</a>
+            <a href="/security-policy">Security</a>
           </div>
         </div>
       </footer>
@@ -397,6 +402,8 @@ const {
 
   .footer-links {
     display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
     gap: 20px;
   }
 
@@ -415,6 +422,30 @@ const {
     .footer-inner {
       padding-left: 20px;
       padding-right: 20px;
+    }
+  }
+
+  @media (max-width: 640px) {
+    .legal-document-page .nav {
+      display: none;
+    }
+
+    .footer {
+      padding-bottom: max(32px, env(safe-area-inset-bottom));
+    }
+
+    .footer-inner {
+      align-items: flex-start;
+      flex-direction: column;
+      gap: 28px;
+    }
+
+    .footer-links {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      width: 100%;
+      gap: 14px 20px;
+      justify-content: initial;
     }
   }
 </style>

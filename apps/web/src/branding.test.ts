@@ -59,6 +59,17 @@ describe("branding", () => {
     expect(branding.HOSTED_APP_CHANNEL_LABEL).toBeNull();
   });
 
+  it("does not label the latest hosted app channel", async () => {
+    vi.stubEnv("VITE_HOSTED_APP_CHANNEL", "latest");
+
+    const branding = await import("./branding");
+
+    expect(branding.HOSTED_APP_CHANNEL).toBe("latest");
+    expect(branding.HOSTED_APP_CHANNEL_LABEL).toBe("Latest");
+    expect(branding.APP_STAGE_LABEL).toBe("Latest");
+    expect(branding.APP_DISPLAY_NAME).toBe("T3 Code");
+  });
+
   it("ignores unknown hosted app channels", async () => {
     vi.stubEnv("VITE_HOSTED_APP_CHANNEL", "preview");
 
