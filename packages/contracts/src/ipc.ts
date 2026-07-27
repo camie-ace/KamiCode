@@ -34,18 +34,26 @@ import type {
 import type {
   ProjectTriggerCreateInput,
   ProjectTriggerCreateResult,
+  ProjectTriggerCancelRunInput,
+  ProjectTriggerCancelRunResult,
   ProjectTriggerDeleteInput,
   ProjectTriggerDeleteResult,
   ProjectTriggerFireInput,
   ProjectTriggerFireResult,
   ProjectTriggerGetInput,
   ProjectTriggerGetResult,
+  ProjectTriggerGetRunInput,
+  ProjectTriggerGetRunResult,
   ProjectTriggerListInput,
   ProjectTriggerListResult,
   ProjectTriggerListRunsInput,
   ProjectTriggerListRunsResult,
   ProjectTriggerStreamEvent,
   ProjectTriggerSubscribeInput,
+  ProjectTriggerRetryRunInput,
+  ProjectTriggerRetryRunResult,
+  ProjectTriggerRotateWebhookSecretInput,
+  ProjectTriggerRotateWebhookSecretResult,
   ProjectTriggerUpdateInput,
   ProjectTriggerUpdateResult,
 } from "./projectTriggers.ts";
@@ -1215,6 +1223,12 @@ export interface EnvironmentApi {
     update: (input: ProjectTriggerUpdateInput) => Promise<ProjectTriggerUpdateResult>;
     delete: (input: ProjectTriggerDeleteInput) => Promise<ProjectTriggerDeleteResult>;
     fire: (input: ProjectTriggerFireInput) => Promise<ProjectTriggerFireResult>;
+    getRun: (input: ProjectTriggerGetRunInput) => Promise<ProjectTriggerGetRunResult>;
+    cancelRun: (input: ProjectTriggerCancelRunInput) => Promise<ProjectTriggerCancelRunResult>;
+    retryRun: (input: ProjectTriggerRetryRunInput) => Promise<ProjectTriggerRetryRunResult>;
+    rotateWebhookSecret: (
+      input: ProjectTriggerRotateWebhookSecretInput,
+    ) => Promise<ProjectTriggerRotateWebhookSecretResult>;
     listRuns: (input: ProjectTriggerListRunsInput) => Promise<ProjectTriggerListRunsResult>;
     subscribe: (
       input: ProjectTriggerSubscribeInput,

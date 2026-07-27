@@ -1,6 +1,7 @@
 import * as Schema from "effect/Schema";
 
 import {
+  CommandId,
   IsoDateTime,
   NonNegativeInt,
   PositiveInt,
@@ -10,7 +11,12 @@ import {
   ThreadId,
   TrimmedNonEmptyString,
 } from "./baseSchemas.ts";
-import { ModelSelection, ProviderInteractionMode, RuntimeMode } from "./orchestration.ts";
+import {
+  ModelSelection,
+  ProviderInteractionMode,
+  RuntimeMode,
+  TriggerEventKind,
+} from "./orchestration.ts";
 
 const PROJECT_TRIGGER_NAME_MAX_LENGTH = 160;
 const PROJECT_TRIGGER_DESCRIPTION_MAX_LENGTH = 2_000;
@@ -18,6 +24,10 @@ const PROJECT_TRIGGER_CRON_EXPRESSION_MAX_LENGTH = 256;
 const PROJECT_TRIGGER_TIMEZONE_MAX_LENGTH = 128;
 const PROJECT_TRIGGER_PROMPT_MAX_LENGTH = 120_000;
 const PROJECT_TRIGGER_LIST_RUNS_MAX_LIMIT = 100;
+const PROJECT_TRIGGER_IDEMPOTENCY_KEY_MAX_LENGTH = 200;
+const PROJECT_TRIGGER_CANCELLATION_REASON_MAX_LENGTH = 2_000;
+
+export const PROJECT_TRIGGER_WEBHOOK_MAX_BODY_BYTES = 64 * 1024;
 
 export const ProjectTriggerRuntimeTarget = Schema.Literals(["local", "remote"]);
 export type ProjectTriggerRuntimeTarget = typeof ProjectTriggerRuntimeTarget.Type;
@@ -68,6 +78,14 @@ export const ProjectTriggerRunStatus = Schema.Literals([
 ]);
 export type ProjectTriggerRunStatus = typeof ProjectTriggerRunStatus.Type;
 
+export const ProjectTriggerWebhookDescriptor = Schema.Struct({
+  publicId: TrimmedNonEmptyString,
+  configured: Schema.Boolean,
+  endpointPath: TrimmedNonEmptyString,
+  secretVersion: NonNegativeInt,
+});
+export type ProjectTriggerWebhookDescriptor = typeof ProjectTriggerWebhookDescriptor.Type;
+
 export const ProjectTriggerRecord = Schema.Struct({
   id: ProjectTriggerId,
   projectId: ProjectId,
@@ -78,6 +96,7 @@ export const ProjectTriggerRecord = Schema.Struct({
   enabled: Schema.Boolean,
   schedule: ProjectTriggerSchedule,
   threadTemplate: ProjectTriggerThreadTemplate,
+  webhook: ProjectTriggerWebhookDescriptor,
   lastRunId: Schema.NullOr(ProjectTriggerRunId),
   lastRunAt: Schema.NullOr(IsoDateTime),
   lastRunStatus: Schema.NullOr(ProjectTriggerRunStatus),
@@ -87,7 +106,7 @@ export const ProjectTriggerRecord = Schema.Struct({
 });
 export type ProjectTriggerRecord = typeof ProjectTriggerRecord.Type;
 
-export const ProjectTriggerRunInitiator = Schema.Literals(["manual", "cron"]);
+export const ProjectTriggerRunInitiator = Schema.Literals(["manual", "cron", "webhook", "retry"]);
 export type ProjectTriggerRunInitiator = typeof ProjectTriggerRunInitiator.Type;
 
 export const ProjectTriggerRunErrorPayload = Schema.Struct({
@@ -102,10 +121,16 @@ export const ProjectTriggerRunRecord = Schema.Struct({
   projectId: ProjectId,
   initiator: ProjectTriggerRunInitiator,
   status: ProjectTriggerRunStatus,
+  commandId: CommandId,
   threadId: Schema.NullOr(ThreadId),
+  eventKind: Schema.NullOr(TriggerEventKind),
+  idempotencyKey: Schema.NullOr(TrimmedNonEmptyString),
+  retryOfRunId: Schema.NullOr(ProjectTriggerRunId),
   scheduledFor: Schema.NullOr(IsoDateTime),
   startedAt: Schema.NullOr(IsoDateTime),
   completedAt: Schema.NullOr(IsoDateTime),
+  failureReason: Schema.NullOr(TrimmedNonEmptyString),
+  cancellationReason: Schema.NullOr(TrimmedNonEmptyString),
   error: Schema.NullOr(ProjectTriggerRunErrorPayload),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
@@ -191,6 +216,9 @@ export type ProjectTriggerDeleteResult = typeof ProjectTriggerDeleteResult.Type;
 
 export const ProjectTriggerFireInput = Schema.Struct({
   triggerId: ProjectTriggerId,
+  idempotencyKey: Schema.optionalKey(
+    TrimmedNonEmptyString.check(Schema.isMaxLength(PROJECT_TRIGGER_IDEMPOTENCY_KEY_MAX_LENGTH)),
+  ),
 });
 export type ProjectTriggerFireInput = typeof ProjectTriggerFireInput.Type;
 
@@ -199,6 +227,91 @@ export const ProjectTriggerFireResult = Schema.Struct({
   threadId: ThreadId,
 });
 export type ProjectTriggerFireResult = typeof ProjectTriggerFireResult.Type;
+
+export const ProjectTriggerGetRunInput = Schema.Struct({
+  runId: ProjectTriggerRunId,
+});
+export type ProjectTriggerGetRunInput = typeof ProjectTriggerGetRunInput.Type;
+
+export const ProjectTriggerGetRunResult = Schema.Struct({
+  run: ProjectTriggerRunRecord,
+});
+export type ProjectTriggerGetRunResult = typeof ProjectTriggerGetRunResult.Type;
+
+export const ProjectTriggerCancelRunInput = Schema.Struct({
+  runId: ProjectTriggerRunId,
+  reason: Schema.optionalKey(
+    TrimmedNonEmptyString.check(Schema.isMaxLength(PROJECT_TRIGGER_CANCELLATION_REASON_MAX_LENGTH)),
+  ),
+});
+export type ProjectTriggerCancelRunInput = typeof ProjectTriggerCancelRunInput.Type;
+
+export const ProjectTriggerCancelRunResult = Schema.Struct({
+  run: ProjectTriggerRunRecord,
+});
+export type ProjectTriggerCancelRunResult = typeof ProjectTriggerCancelRunResult.Type;
+
+export const ProjectTriggerRetryRunInput = Schema.Struct({
+  runId: ProjectTriggerRunId,
+  idempotencyKey: Schema.optionalKey(
+    TrimmedNonEmptyString.check(Schema.isMaxLength(PROJECT_TRIGGER_IDEMPOTENCY_KEY_MAX_LENGTH)),
+  ),
+});
+export type ProjectTriggerRetryRunInput = typeof ProjectTriggerRetryRunInput.Type;
+
+export const ProjectTriggerRetryRunResult = Schema.Struct({
+  run: ProjectTriggerRunRecord,
+  threadId: ThreadId,
+});
+export type ProjectTriggerRetryRunResult = typeof ProjectTriggerRetryRunResult.Type;
+
+export const ProjectTriggerRotateWebhookSecretInput = Schema.Struct({
+  triggerId: ProjectTriggerId,
+});
+export type ProjectTriggerRotateWebhookSecretInput =
+  typeof ProjectTriggerRotateWebhookSecretInput.Type;
+
+export const ProjectTriggerWebhookCredentials = Schema.Struct({
+  triggerId: ProjectTriggerId,
+  publicId: TrimmedNonEmptyString,
+  endpointPath: TrimmedNonEmptyString,
+  secret: TrimmedNonEmptyString,
+  secretVersion: PositiveInt,
+  algorithm: Schema.Literal("hmac-sha256"),
+  signatureHeader: Schema.Literal("x-kamicode-signature"),
+  timestampHeader: Schema.Literal("x-kamicode-timestamp"),
+  nonceHeader: Schema.Literal("x-kamicode-nonce"),
+  idempotencyHeader: Schema.Literal("idempotency-key"),
+});
+export type ProjectTriggerWebhookCredentials = typeof ProjectTriggerWebhookCredentials.Type;
+
+export const ProjectTriggerRotateWebhookSecretResult = Schema.Struct({
+  credentials: ProjectTriggerWebhookCredentials,
+});
+export type ProjectTriggerRotateWebhookSecretResult =
+  typeof ProjectTriggerRotateWebhookSecretResult.Type;
+
+export const ProjectTriggerWebhookEventInput = Schema.Struct({
+  eventKind: Schema.optionalKey(TriggerEventKind),
+  occurredAt: Schema.optionalKey(IsoDateTime),
+  payload: Schema.optionalKey(Schema.Json),
+});
+export type ProjectTriggerWebhookEventInput = typeof ProjectTriggerWebhookEventInput.Type;
+
+export const ProjectTriggerRunCorrelation = Schema.Struct({
+  runId: ProjectTriggerRunId,
+  threadId: ThreadId,
+  threadPath: TrimmedNonEmptyString,
+  statusPath: TrimmedNonEmptyString,
+});
+export type ProjectTriggerRunCorrelation = typeof ProjectTriggerRunCorrelation.Type;
+
+export const ProjectTriggerWebhookRunResult = Schema.Struct({
+  run: ProjectTriggerRunRecord,
+  correlation: ProjectTriggerRunCorrelation,
+  idempotentReplay: Schema.Boolean,
+});
+export type ProjectTriggerWebhookRunResult = typeof ProjectTriggerWebhookRunResult.Type;
 
 export const ProjectTriggerListRunsInput = Schema.Struct({
   triggerId: ProjectTriggerId,
@@ -279,6 +392,10 @@ export class ProjectTriggerStoreError extends Schema.TaggedErrorClass<ProjectTri
       "update",
       "delete",
       "fire",
+      "getRun",
+      "cancelRun",
+      "retryRun",
+      "rotateWebhookSecret",
       "listRuns",
       "subscribe",
     ]),
@@ -296,10 +413,22 @@ export class ProjectTriggerFireError extends Schema.TaggedErrorClass<ProjectTrig
   },
 ) {}
 
+export class ProjectTriggerRunNotFoundError extends Schema.TaggedErrorClass<ProjectTriggerRunNotFoundError>()(
+  "ProjectTriggerRunNotFoundError",
+  {
+    runId: ProjectTriggerRunId,
+  },
+) {
+  override get message(): string {
+    return `Project trigger run not found: ${this.runId}`;
+  }
+}
+
 export const ProjectTriggerError = Schema.Union([
   ProjectTriggerNotFoundError,
   ProjectTriggerValidationError,
   ProjectTriggerStoreError,
   ProjectTriggerFireError,
+  ProjectTriggerRunNotFoundError,
 ]);
 export type ProjectTriggerError = typeof ProjectTriggerError.Type;

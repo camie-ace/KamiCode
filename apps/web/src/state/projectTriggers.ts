@@ -28,6 +28,22 @@ export const projectTriggerEnvironment = {
     label: "project-triggers:fire",
     tag: WS_METHODS.projectTriggersFire,
   }),
+  getRun: createEnvironmentRpcCommand(connectionAtomRuntime, {
+    label: "project-triggers:get-run",
+    tag: WS_METHODS.projectTriggersGetRun,
+  }),
+  cancelRun: createEnvironmentRpcCommand(connectionAtomRuntime, {
+    label: "project-triggers:cancel-run",
+    tag: WS_METHODS.projectTriggersCancelRun,
+  }),
+  retryRun: createEnvironmentRpcCommand(connectionAtomRuntime, {
+    label: "project-triggers:retry-run",
+    tag: WS_METHODS.projectTriggersRetryRun,
+  }),
+  rotateWebhookSecret: createEnvironmentRpcCommand(connectionAtomRuntime, {
+    label: "project-triggers:rotate-webhook-secret",
+    tag: WS_METHODS.projectTriggersRotateWebhookSecret,
+  }),
   listRuns: createEnvironmentRpcCommand(connectionAtomRuntime, {
     label: "project-triggers:list-runs",
     tag: WS_METHODS.projectTriggersListRuns,

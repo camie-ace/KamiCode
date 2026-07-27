@@ -1,3 +1,4 @@
+import { CommandId } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
@@ -5,7 +6,10 @@ import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Schedule from "effect/Schedule";
+import * as Stream from "effect/Stream";
 
+import { OrchestrationEngineService } from "../../orchestration/Services/OrchestrationEngine.ts";
+import { ProjectionSnapshotQuery } from "../../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { ServerOrchestrationDispatcher } from "../../orchestration/Services/ServerOrchestrationDispatcher.ts";
 import { makeProjectTriggerRunRow } from "../commands.ts";
 import { ProjectTriggerRepository } from "../Services/ProjectTriggerRepository.ts";
@@ -54,6 +58,8 @@ const makeProjectTriggerScheduler = (options?: ProjectTriggerSchedulerLiveOption
   Effect.gen(function* () {
     const repository = yield* ProjectTriggerRepository;
     const dispatcher = yield* ServerOrchestrationDispatcher;
+    const orchestrationEngine = yield* OrchestrationEngineService;
+    const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
 
     const pollIntervalMs = Math.max(1, options?.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS);
     const claimTtlMs = Math.max(1, options?.claimTtlMs ?? DEFAULT_CLAIM_TTL_MS);
@@ -112,10 +118,10 @@ const makeProjectTriggerScheduler = (options?: ProjectTriggerSchedulerLiveOption
 
     const skipRun = (run: ProjectTriggerRunRow, skippedAt: string, skipReason: string) =>
       repository
-        .markRunSkipped({
+        .markRunCancelled({
           runId: run.runId,
-          skippedAt,
-          skipReason,
+          cancelledAt: skippedAt,
+          cancellationReason: skipReason,
         })
         .pipe(Effect.map((marked) => (marked ? "skipped" : "lost-claim")));
 
@@ -143,19 +149,214 @@ const makeProjectTriggerScheduler = (options?: ProjectTriggerSchedulerLiveOption
               .pipe(Effect.map((marked) => (marked ? "failed" : "lost-claim"))),
           onSuccess: (result) =>
             repository
-              .markRunDispatched({
+              .markRunStarting({
                 runId: run.runId,
                 dispatchedAt,
                 resultSequence: result.sequence,
               })
-              .pipe(Effect.map((marked) => (marked ? "dispatched" : "lost-claim"))),
+              .pipe(
+                Effect.flatMap((marked) => {
+                  if (marked) return Effect.succeed("dispatched" as const);
+                  return repository.getRunById({ runId: run.runId }).pipe(
+                    Effect.flatMap((current) => {
+                      if (Option.isNone(current) || current.value.status === "queued") {
+                        return Effect.succeed("lost-claim" as const);
+                      }
+                      if (current.value.status !== "cancelled") {
+                        return Effect.succeed(
+                          current.value.status === "starting" || current.value.status === "running"
+                            ? ("dispatched" as const)
+                            : ("lost-claim" as const),
+                        );
+                      }
+                      // Cancellation can win while dispatch is in flight. Once
+                      // the start command has been accepted, interrupt the same
+                      // thread so a cancelled run never keeps executing unseen.
+                      return dispatcher
+                        .dispatch({
+                          type: "thread.turn.interrupt",
+                          commandId: CommandId.make(
+                            `project-trigger:${run.runId}:cancel-after-dispatch`,
+                          ),
+                          threadId: run.threadId,
+                          createdAt: dispatchedAt,
+                        })
+                        .pipe(Effect.ignoreCause({ log: true }), Effect.as("skipped" as const));
+                    }),
+                  );
+                }),
+              ),
         }),
       );
     });
 
+    const applyThreadSessionLifecycle = (input: {
+      readonly threadId: ProjectTriggerRunRow["threadId"];
+      readonly status:
+        | "idle"
+        | "starting"
+        | "running"
+        | "ready"
+        | "interrupted"
+        | "stopped"
+        | "error";
+      readonly activeTurnId: string | null;
+      readonly lastError: string | null;
+      readonly updatedAt: string;
+    }) => {
+      switch (input.status) {
+        case "running":
+          return input.activeTurnId === null
+            ? Effect.void
+            : repository
+                .markRunRunning({
+                  threadId: input.threadId,
+                  startedAt: input.updatedAt,
+                })
+                .pipe(Effect.asVoid);
+        case "ready":
+          return repository
+            .markRunSucceeded({
+              threadId: input.threadId,
+              completedAt: input.updatedAt,
+            })
+            .pipe(Effect.asVoid);
+        case "error":
+          return repository
+            .settleRunByThread({
+              threadId: input.threadId,
+              completedAt: input.updatedAt,
+              status: "failed",
+              detail: failureDetail(input.lastError, "Trigger turn failed."),
+            })
+            .pipe(Effect.asVoid);
+        case "interrupted":
+        case "stopped":
+          return repository
+            .settleRunByThread({
+              threadId: input.threadId,
+              completedAt: input.updatedAt,
+              status: "cancelled",
+              detail:
+                input.status === "interrupted"
+                  ? "Trigger turn was interrupted."
+                  : "Trigger session stopped.",
+            })
+            .pipe(Effect.asVoid);
+        case "idle":
+        case "starting":
+          return Effect.void;
+      }
+    };
+
+    const reconcileActiveRuns = (now: string) =>
+      repository.listActiveRuns({ limit: 200 }).pipe(
+        Effect.flatMap((runs) =>
+          Effect.forEach(
+            runs,
+            (run) => {
+              if (run.status === "queued") return Effect.void;
+              return projectionSnapshotQuery.getThreadDetailById(run.threadId).pipe(
+                Effect.flatMap(
+                  Option.match({
+                    onNone: () => {
+                      if (
+                        run.dispatchedAt !== null &&
+                        Date.parse(run.dispatchedAt) + claimTtlMs <= Date.parse(now)
+                      ) {
+                        return repository
+                          .markRunFailed({
+                            runId: run.runId,
+                            failedAt: now,
+                            failureDetail: "Trigger thread was not found after dispatch.",
+                          })
+                          .pipe(Effect.asVoid);
+                      }
+                      return Effect.void;
+                    },
+                    onSome: (thread) => {
+                      const latestTurn = thread.latestTurn;
+                      if (latestTurn?.state === "running") {
+                        return repository
+                          .markRunRunning({
+                            threadId: run.threadId,
+                            startedAt: latestTurn.startedAt ?? thread.updatedAt,
+                          })
+                          .pipe(Effect.asVoid);
+                      }
+                      if (latestTurn?.state === "completed") {
+                        return repository
+                          .markRunRunning({
+                            threadId: run.threadId,
+                            startedAt: latestTurn.startedAt ?? thread.updatedAt,
+                          })
+                          .pipe(
+                            Effect.flatMap(() =>
+                              repository.markRunSucceeded({
+                                threadId: run.threadId,
+                                completedAt: latestTurn.completedAt ?? thread.updatedAt,
+                              }),
+                            ),
+                            Effect.asVoid,
+                          );
+                      }
+                      if (latestTurn?.state === "error") {
+                        return repository
+                          .settleRunByThread({
+                            threadId: run.threadId,
+                            completedAt: latestTurn.completedAt ?? thread.updatedAt,
+                            status: "failed",
+                            detail: failureDetail(
+                              thread.session?.lastError,
+                              "Trigger turn failed.",
+                            ),
+                          })
+                          .pipe(Effect.asVoid);
+                      }
+                      if (latestTurn?.state === "interrupted") {
+                        return repository
+                          .settleRunByThread({
+                            threadId: run.threadId,
+                            completedAt: latestTurn.completedAt ?? thread.updatedAt,
+                            status: "cancelled",
+                            detail: "Trigger turn was interrupted.",
+                          })
+                          .pipe(Effect.asVoid);
+                      }
+                      return thread.session === null
+                        ? Effect.void
+                        : applyThreadSessionLifecycle(thread.session);
+                    },
+                  }),
+                ),
+              );
+            },
+            { concurrency: dispatchConcurrency, discard: true },
+          ),
+        ),
+      );
+
+    const lifecycleConsumer = orchestrationEngine.streamDomainEvents.pipe(
+      Stream.filter((event) => event.type === "thread.session-set"),
+      Stream.runForEach((event) =>
+        event.type === "thread.session-set"
+          ? applyThreadSessionLifecycle(event.payload.session).pipe(
+              Effect.catch((cause) =>
+                Effect.logWarning("project trigger lifecycle update failed", {
+                  threadId: event.payload.threadId,
+                  cause,
+                }),
+              ),
+            )
+          : Effect.void,
+      ),
+    );
+
     const runTick = Effect.gen(function* () {
       const now = yield* nowIso;
       const claimExpiresAt = addMillisIso(now, claimTtlMs);
+
+      yield* reconcileActiveRuns(now);
 
       const recoveredTriggerClaims = yield* repository.recoverExpiredTriggerClaims({ now });
       const recoveredRunClaims = yield* repository.recoverExpiredRunClaims({ now });
@@ -216,11 +417,16 @@ const makeProjectTriggerScheduler = (options?: ProjectTriggerSchedulerLiveOption
     );
 
     const start: ProjectTriggerSchedulerShape["start"] = () =>
-      tick.pipe(
-        Effect.repeat(Schedule.spaced(Duration.millis(pollIntervalMs))),
-        Effect.asVoid,
-        Effect.forkScoped,
-        Effect.asVoid,
+      Effect.all(
+        [
+          tick.pipe(
+            Effect.repeat(Schedule.spaced(Duration.millis(pollIntervalMs))),
+            Effect.asVoid,
+            Effect.forkScoped,
+          ),
+          lifecycleConsumer.pipe(Effect.forkScoped),
+        ],
+        { discard: true },
       );
 
     return {

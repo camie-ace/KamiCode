@@ -81,6 +81,8 @@ import {
 import {
   ProjectTriggerCreateInput,
   ProjectTriggerCreateResult,
+  ProjectTriggerCancelRunInput,
+  ProjectTriggerCancelRunResult,
   ProjectTriggerDeleteInput,
   ProjectTriggerDeleteResult,
   ProjectTriggerError,
@@ -88,12 +90,18 @@ import {
   ProjectTriggerFireResult,
   ProjectTriggerGetInput,
   ProjectTriggerGetResult,
+  ProjectTriggerGetRunInput,
+  ProjectTriggerGetRunResult,
   ProjectTriggerListInput,
   ProjectTriggerListResult,
   ProjectTriggerListRunsInput,
   ProjectTriggerListRunsResult,
   ProjectTriggerStreamEvent,
   ProjectTriggerSubscribeInput,
+  ProjectTriggerRetryRunInput,
+  ProjectTriggerRetryRunResult,
+  ProjectTriggerRotateWebhookSecretInput,
+  ProjectTriggerRotateWebhookSecretResult,
   ProjectTriggerUpdateInput,
   ProjectTriggerUpdateResult,
 } from "./projectTriggers.ts";
@@ -180,6 +188,10 @@ export const WS_METHODS = {
   projectTriggersUpdate: "projectTriggers.update",
   projectTriggersDelete: "projectTriggers.delete",
   projectTriggersFire: "projectTriggers.fire",
+  projectTriggersGetRun: "projectTriggers.getRun",
+  projectTriggersCancelRun: "projectTriggers.cancelRun",
+  projectTriggersRetryRun: "projectTriggers.retryRun",
+  projectTriggersRotateWebhookSecret: "projectTriggers.rotateWebhookSecret",
   projectTriggersListRuns: "projectTriggers.listRuns",
   projectTriggersSubscribe: "projectTriggers.subscribe",
 
@@ -444,6 +456,33 @@ export const WsProjectTriggersFireRpc = Rpc.make(WS_METHODS.projectTriggersFire,
   success: ProjectTriggerFireResult,
   error: ProjectTriggerRpcError,
 });
+
+export const WsProjectTriggersGetRunRpc = Rpc.make(WS_METHODS.projectTriggersGetRun, {
+  payload: ProjectTriggerGetRunInput,
+  success: ProjectTriggerGetRunResult,
+  error: ProjectTriggerRpcError,
+});
+
+export const WsProjectTriggersCancelRunRpc = Rpc.make(WS_METHODS.projectTriggersCancelRun, {
+  payload: ProjectTriggerCancelRunInput,
+  success: ProjectTriggerCancelRunResult,
+  error: ProjectTriggerRpcError,
+});
+
+export const WsProjectTriggersRetryRunRpc = Rpc.make(WS_METHODS.projectTriggersRetryRun, {
+  payload: ProjectTriggerRetryRunInput,
+  success: ProjectTriggerRetryRunResult,
+  error: ProjectTriggerRpcError,
+});
+
+export const WsProjectTriggersRotateWebhookSecretRpc = Rpc.make(
+  WS_METHODS.projectTriggersRotateWebhookSecret,
+  {
+    payload: ProjectTriggerRotateWebhookSecretInput,
+    success: ProjectTriggerRotateWebhookSecretResult,
+    error: ProjectTriggerRpcError,
+  },
+);
 
 export const WsProjectTriggersListRunsRpc = Rpc.make(WS_METHODS.projectTriggersListRuns, {
   payload: ProjectTriggerListRunsInput,
@@ -789,6 +828,10 @@ export const WsRpcGroup = RpcGroup.make(
   WsProjectTriggersUpdateRpc,
   WsProjectTriggersDeleteRpc,
   WsProjectTriggersFireRpc,
+  WsProjectTriggersGetRunRpc,
+  WsProjectTriggersCancelRunRpc,
+  WsProjectTriggersRetryRunRpc,
+  WsProjectTriggersRotateWebhookSecretRpc,
   WsProjectTriggersListRunsRpc,
   WsProjectTriggersSubscribeRpc,
   WsShellOpenInEditorRpc,

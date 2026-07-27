@@ -1,5 +1,6 @@
 import {
   AuthAdministrativeScopes,
+  AuthProjectTriggerRunScope,
   AuthSessionId,
   AuthStandardClientScopes,
 } from "@t3tools/contracts";
@@ -78,6 +79,13 @@ const baseUrlFlag = Flag.string("base-url").pipe(
 
 const tokenOnlyFlag = Flag.boolean("token-only").pipe(
   Flag.withDescription("Print only the issued bearer token."),
+  Flag.withDefault(false),
+);
+
+const projectTriggerOnlyFlag = Flag.boolean("project-trigger-only").pipe(
+  Flag.withDescription(
+    "Issue a least-privilege controller token with only the project-trigger:run scope.",
+  ),
   Flag.withDefault(false),
 );
 
@@ -164,6 +172,7 @@ const sessionIssueCommand = Command.make("issue", {
   ttl: ttlFlag,
   label: labelFlag,
   subject: subjectFlag,
+  projectTriggerOnly: projectTriggerOnlyFlag,
   tokenOnly: tokenOnlyFlag,
   json: jsonFlag,
 }).pipe(
@@ -174,7 +183,9 @@ const sessionIssueCommand = Command.make("issue", {
       (environmentAuth) =>
         Effect.gen(function* () {
           const issued = yield* environmentAuth.issueSession({
-            scopes: AuthAdministrativeScopes,
+            scopes: flags.projectTriggerOnly
+              ? [AuthProjectTriggerRunScope]
+              : AuthAdministrativeScopes,
             ...(Option.isSome(flags.ttl) ? { ttl: flags.ttl.value } : {}),
             ...(Option.isSome(flags.label) ? { label: flags.label.value } : {}),
             ...(Option.isSome(flags.subject) ? { subject: flags.subject.value } : {}),

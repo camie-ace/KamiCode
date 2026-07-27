@@ -309,6 +309,12 @@ function saveFromTool(input: {
     scheduleOnceAt: null,
     timezone: input.schedule.timezone ?? input.existing?.timezone ?? "UTC",
     runtimeTarget: input.schedule.runtime ?? input.existing?.runtimeTarget ?? "local",
+    ...(input.existing === undefined
+      ? {}
+      : {
+          webhookPublicId: input.existing.webhookPublicId,
+          webhookSecretVersion: input.existing.webhookSecretVersion,
+        }),
     prompt: template.prompt,
     modelSelection: template.modelSelection,
     runtimeMode: template.runtimeMode,

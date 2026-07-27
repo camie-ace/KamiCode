@@ -2,6 +2,7 @@ import { assert, it } from "@effect/vitest";
 import { ProviderInstanceId } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 
 import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
 import { ProjectTriggerRepositoryLive } from "./Layers/ProjectTriggerRepository.ts";
@@ -74,6 +75,12 @@ layer("project trigger dynamic tools", (it) => {
       assert.equal(created.tool, "create_trigger");
       assert.equal((created.trigger as { id: string }).id, triggerId);
 
+      const rotated = yield* repository.rotateWebhookSecretVersion({
+        triggerId,
+        updatedAt: "2026-07-19T19:00:00.000Z",
+      });
+      assert.equal(Option.getOrThrow(rotated), 1);
+
       const listed = readResponseJson(
         yield* runner({
           tool: "list_triggers",
@@ -95,6 +102,10 @@ layer("project trigger dynamic tools", (it) => {
         }),
       );
       assert.equal((updated.trigger as { name: string }).name, "Weekday triage updated");
+      const persistedAfterUpdate = yield* repository.getTriggerById({ triggerId });
+      const persisted = Option.getOrThrow(persistedAfterUpdate);
+      assert.equal(persisted.webhookPublicId, triggerId);
+      assert.equal(persisted.webhookSecretVersion, 1);
 
       const disabled = readResponseJson(
         yield* runner({

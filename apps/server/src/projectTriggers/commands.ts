@@ -1,4 +1,13 @@
-import { CommandId, MessageId, ThreadId } from "@t3tools/contracts";
+import * as NodeCrypto from "node:crypto";
+
+import {
+  CommandId,
+  MessageId,
+  ThreadId,
+  type ProjectTriggerRunInitiator,
+  type ProjectTriggerWebhookEventInput,
+  type TriggerEventKind,
+} from "@t3tools/contracts";
 
 import {
   ProjectTriggerRunId,
@@ -6,6 +15,7 @@ import {
   type ProjectTriggerRunRow,
   type ProjectTriggerTurnStartCommand,
 } from "./Services/ProjectTriggerRepository.ts";
+import { formatProjectTriggerPrompt } from "./eventPayload.ts";
 
 export interface ProjectTriggerRunIds {
   readonly runId: ProjectTriggerRunId;
@@ -17,8 +27,11 @@ export interface ProjectTriggerRunIds {
 export function makeProjectTriggerRunIds(
   triggerId: ProjectTriggerRow["triggerId"],
   fireAt: string,
+  runKey = fireAt,
 ): ProjectTriggerRunIds {
-  const key = `${triggerId}:${fireAt}`;
+  const key = NodeCrypto.createHash("sha256")
+    .update(`${triggerId}\0${runKey}`, "utf8")
+    .digest("base64url");
   return {
     runId: ProjectTriggerRunId.make(`project-trigger-run:${key}`),
     commandId: CommandId.make(`project-trigger:${key}:thread-turn-start`),
@@ -31,6 +44,8 @@ export function makeProjectTriggerRunCommand(input: {
   readonly trigger: ProjectTriggerRow;
   readonly fireAt: string;
   readonly ids: ProjectTriggerRunIds;
+  readonly eventKind: TriggerEventKind;
+  readonly event: ProjectTriggerWebhookEventInput | null;
 }): ProjectTriggerTurnStartCommand {
   const createThreadTemplate = input.trigger.bootstrap?.createThread;
   const bootstrap = {
@@ -46,7 +61,7 @@ export function makeProjectTriggerRunCommand(input: {
         kind: "trigger",
         triggerId: input.trigger.triggerId,
         triggerName: input.trigger.name,
-        eventKind: "cron",
+        eventKind: input.eventKind,
         firedAt: input.fireAt,
       } as const,
       createdAt: input.fireAt,
@@ -66,7 +81,7 @@ export function makeProjectTriggerRunCommand(input: {
     message: {
       messageId: input.ids.messageId,
       role: "user",
-      text: input.trigger.prompt,
+      text: formatProjectTriggerPrompt(input.trigger.prompt, input.event),
       attachments: input.trigger.attachments,
     },
     modelSelection: input.trigger.modelSelection,
@@ -85,23 +100,44 @@ export function makeProjectTriggerRunRow(input: {
   readonly trigger: ProjectTriggerRow;
   readonly fireAt: string;
   readonly queuedAt: string;
+  readonly initiator?: ProjectTriggerRunInitiator;
+  readonly eventKind?: TriggerEventKind;
+  readonly event?: ProjectTriggerWebhookEventInput | null;
+  readonly idempotencyKey?: string | null;
+  readonly requestDigest?: string | null;
+  readonly retryOfRunId?: ProjectTriggerRunId | null;
+  readonly runKey?: string;
 }): ProjectTriggerRunRow {
-  const ids = makeProjectTriggerRunIds(input.trigger.triggerId, input.fireAt);
+  const initiator = input.initiator ?? "cron";
+  const eventKind =
+    input.eventKind ??
+    (initiator === "cron" ? "cron" : initiator === "manual" ? "manual" : "webhook");
+  const event = input.event ?? null;
+  const ids = makeProjectTriggerRunIds(input.trigger.triggerId, input.fireAt, input.runKey);
   const command = makeProjectTriggerRunCommand({
     trigger: input.trigger,
     fireAt: input.fireAt,
     ids,
+    eventKind,
+    event,
   });
 
   return {
     runId: ids.runId,
     triggerId: input.trigger.triggerId,
+    initiator,
     status: "queued",
+    eventKind,
+    eventPayload: event?.payload ?? null,
+    idempotencyKey: input.idempotencyKey ?? null,
+    requestDigest: input.requestDigest ?? null,
+    retryOfRunId: input.retryOfRunId ?? null,
     fireAt: input.fireAt,
     queuedAt: input.queuedAt,
     claimedAt: null,
     claimExpiresAt: null,
     dispatchedAt: null,
+    startedAt: null,
     completedAt: null,
     commandId: ids.commandId,
     threadId: ids.threadId,
@@ -109,6 +145,6 @@ export function makeProjectTriggerRunRow(input: {
     command,
     resultSequence: null,
     failureDetail: null,
-    skipReason: null,
+    cancellationReason: null,
   };
 }

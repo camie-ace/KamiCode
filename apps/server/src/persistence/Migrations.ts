@@ -57,6 +57,7 @@ import Migration0041 from "./Migrations/041_ProjectTriggers.ts";
 import Migration0042 from "./Migrations/042_ProjectTriggerProvenanceAndRuntime.ts";
 import Migration0043 from "./Migrations/043_SharedThreadLinks.ts";
 import Migration0044 from "./Migrations/044_WorkflowLaneThreadMetadata.ts";
+import Migration0045 from "./Migrations/045_ProjectTriggerRuntime.ts";
 
 /**
  * Migration loader with all migrations defined inline.
@@ -116,6 +117,7 @@ export const migrationEntries = [
   [42, "ProjectTriggerProvenanceAndRuntime", Migration0042],
   [43, "SharedThreadLinks", Migration0043],
   [44, "WorkflowLaneThreadMetadata", Migration0044],
+  [45, "ProjectTriggerRuntime", Migration0045],
 ] as const;
 
 export const makeMigrationLoader = (throughId?: number) =>
