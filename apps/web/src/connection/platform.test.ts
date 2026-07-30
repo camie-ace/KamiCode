@@ -4,13 +4,16 @@ import {
   PRIMARY_LOCAL_ENVIRONMENT_ID,
   type DesktopBridge,
   type DesktopSshEnvironmentTarget,
+  type ExecutionEnvironmentDescriptor,
 } from "@t3tools/contracts";
 import { describe, expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
+import { afterEach, vi } from "vite-plus/test";
 
 import {
   canRetainCachedPlatformRegistrationAfterRefreshFailure,
   canReuseCachedPlatformRegistration,
+  loadPrimaryConnectionRegistration,
   primaryRegistrationToRetainAfterTopologyRead,
   provisionDesktopSshEnvironment,
   readPrimaryEnvironmentTargetResult,
@@ -18,6 +21,15 @@ import {
   secondaryBearerExpiresAtEpochMs,
   secondaryBearerRefreshAtEpochMs,
 } from "./platform.ts";
+import {
+  resetPrimaryEnvironmentDescriptorForTests,
+  writePrimaryEnvironmentDescriptor,
+} from "../environments/primary/context";
+
+afterEach(() => {
+  resetPrimaryEnvironmentDescriptorForTests();
+  vi.unstubAllGlobals();
+});
 
 const TARGET: DesktopSshEnvironmentTarget = {
   alias: "devbox",
@@ -222,4 +234,40 @@ describe("primary topology cache", () => {
       }),
     ).toBeUndefined();
   });
+
+  it.effect("reuses the descriptor already resolved by route bootstrap", () =>
+    Effect.gen(function* () {
+      const descriptor = {
+        environmentId: EnvironmentId.make("environment-primary"),
+        label: "Primary environment",
+        platform: {
+          os: "linux",
+          arch: "x64",
+        },
+        serverVersion: "0.1.10-nightly.20260730.f8f53fe20",
+        capabilities: {
+          repositoryIdentity: true,
+        },
+      } satisfies ExecutionEnvironmentDescriptor;
+      const fetch = vi.fn(() => Promise.reject(new Error("duplicate descriptor request")));
+      vi.stubGlobal("fetch", fetch);
+      writePrimaryEnvironmentDescriptor(descriptor);
+
+      const registration = yield* loadPrimaryConnectionRegistration({
+        source: "window-origin",
+        target: {
+          httpBaseUrl: "https://web.kamicode.dev/",
+          wsBaseUrl: "wss://web.kamicode.dev/",
+        },
+      });
+
+      expect(registration.target).toMatchObject({
+        environmentId: descriptor.environmentId,
+        label: descriptor.label,
+        httpBaseUrl: "https://web.kamicode.dev/",
+        wsBaseUrl: "wss://web.kamicode.dev/",
+      });
+      expect(fetch).not.toHaveBeenCalled();
+    }),
+  );
 });
