@@ -15,6 +15,7 @@ import { resolveShortcutCommand, shortcutLabelForCommand } from "../keybindings"
 import { cn, isMacPlatform } from "../lib/utils";
 import { primaryServerKeybindingsAtom } from "../state/server";
 import { useClientSettings } from "../hooks/useSettings";
+import { consumePostPairingProjectReveal } from "../postPairing";
 import ThreadSidebar from "./Sidebar";
 import ThreadSidebarV2 from "./SidebarV2";
 import { useSidebarStageBackdropVariant } from "./SidebarStageBackdrop";
@@ -113,6 +114,21 @@ function SidebarControl() {
   );
 }
 
+function PostPairingProjectReveal() {
+  const { setOpen, setOpenMobile } = useSidebar();
+
+  useEffect(() => {
+    if (!consumePostPairingProjectReveal()) {
+      return;
+    }
+
+    setOpen(true);
+    setOpenMobile(true);
+  }, [setOpen, setOpenMobile]);
+
+  return null;
+}
+
 export function AppSidebarLayout({ children }: { children: ReactNode }) {
   const navigate = useNavigate();
   const sidebarV2Enabled = useClientSettings((settings) => settings.sidebarV2Enabled);
@@ -181,6 +197,7 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
 
   return (
     <SidebarProvider className="h-dvh! min-h-0!" defaultOpen style={sidebarProviderStyle}>
+      <PostPairingProjectReveal />
       <Sidebar
         side="left"
         collapsible="offcanvas"
