@@ -114,40 +114,68 @@ function persistenceError(
   });
 }
 
-const openDatabase = Effect.fn("web.connectionStorage.openDatabase")(function* () {
-  return yield* Effect.callback<IDBDatabase, ConnectionTransientError>((resume) => {
-    if (typeof indexedDB === "undefined") {
-      resume(
-        Effect.fail(catalogError("open", "IndexedDB is unavailable in this browser context.")),
-      );
-      return;
-    }
-    const request = indexedDB.open(DATABASE_NAME, DATABASE_VERSION);
-    request.addEventListener("upgradeneeded", () => {
-      if (!request.result.objectStoreNames.contains(CATALOG_STORE_NAME)) {
-        request.result.createObjectStore(CATALOG_STORE_NAME);
+export const openConnectionStorageDatabase = Effect.fn("web.connectionStorage.openDatabase")(
+  function* () {
+    return yield* Effect.callback<IDBDatabase, ConnectionTransientError>((resume) => {
+      if (typeof indexedDB === "undefined") {
+        resume(
+          Effect.fail(catalogError("open", "IndexedDB is unavailable in this browser context.")),
+        );
+        return;
       }
-      if (!request.result.objectStoreNames.contains(SHELL_STORE_NAME)) {
-        request.result.createObjectStore(SHELL_STORE_NAME);
-      }
-      if (!request.result.objectStoreNames.contains(THREAD_STORE_NAME)) {
-        request.result.createObjectStore(THREAD_STORE_NAME);
-      }
-      if (!request.result.objectStoreNames.contains(SERVER_CONFIG_STORE_NAME)) {
-        request.result.createObjectStore(SERVER_CONFIG_STORE_NAME);
-      }
-      if (!request.result.objectStoreNames.contains(VCS_REFS_STORE_NAME)) {
-        request.result.createObjectStore(VCS_REFS_STORE_NAME);
-      }
+      const request = indexedDB.open(DATABASE_NAME, DATABASE_VERSION);
+      let settled = false;
+      const fail = (cause: unknown) => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        resume(Effect.fail(catalogError("open", cause)));
+      };
+      request.addEventListener("upgradeneeded", () => {
+        if (!request.result.objectStoreNames.contains(CATALOG_STORE_NAME)) {
+          request.result.createObjectStore(CATALOG_STORE_NAME);
+        }
+        if (!request.result.objectStoreNames.contains(SHELL_STORE_NAME)) {
+          request.result.createObjectStore(SHELL_STORE_NAME);
+        }
+        if (!request.result.objectStoreNames.contains(THREAD_STORE_NAME)) {
+          request.result.createObjectStore(THREAD_STORE_NAME);
+        }
+        if (!request.result.objectStoreNames.contains(SERVER_CONFIG_STORE_NAME)) {
+          request.result.createObjectStore(SERVER_CONFIG_STORE_NAME);
+        }
+        if (!request.result.objectStoreNames.contains(VCS_REFS_STORE_NAME)) {
+          request.result.createObjectStore(VCS_REFS_STORE_NAME);
+        }
+      });
+      request.addEventListener("blocked", () => {
+        fail(
+          "A different KamiCode tab is finishing a local database upgrade. Retrying will continue automatically.",
+        );
+      });
+      request.addEventListener("error", () => {
+        fail(request.error ?? "Unknown IndexedDB error");
+      });
+      request.addEventListener("success", () => {
+        if (settled) {
+          // A request that reported `blocked` cannot be cancelled. If it later
+          // succeeds after this Effect has failed, close the abandoned handle so
+          // it cannot block the retry that replaces it.
+          request.result.close();
+          return;
+        }
+        settled = true;
+        request.result.addEventListener("versionchange", () => {
+          // IndexedDB upgrades wait until every older connection closes. Let a
+          // newer KamiCode tab upgrade immediately instead of hanging forever.
+          request.result.close();
+        });
+        resume(Effect.succeed(request.result));
+      });
     });
-    request.addEventListener("error", () => {
-      resume(Effect.fail(catalogError("open", request.error ?? "Unknown IndexedDB error")));
-    });
-    request.addEventListener("success", () => {
-      resume(Effect.succeed(request.result));
-    });
-  });
-});
+  },
+);
 
 function readDatabaseValue(database: IDBDatabase, storeName: string, key: IDBValidKey) {
   return Effect.callback<unknown, ConnectionTransientError>((resume) => {
@@ -360,7 +388,7 @@ export const makeCatalogStore = Effect.fn("web.connectionStorage.makeCatalogStor
 
 export const connectionStorageLayer = Layer.effectContext(
   Effect.gen(function* () {
-    const database = yield* Effect.acquireRelease(openDatabase(), (database) =>
+    const database = yield* Effect.acquireRelease(openConnectionStorageDatabase(), (database) =>
       Effect.sync(() => database.close()),
     );
     const catalog = yield* makeCatalogStore(makeCatalogBackend(database));
