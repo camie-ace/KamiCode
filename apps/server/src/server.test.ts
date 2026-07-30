@@ -7201,6 +7201,99 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
+  it.effect("routes attachment-bearing bootstrap turns through the HTTP dispatcher", () =>
+    Effect.gen(function* () {
+      const dispatchedCommands: Array<OrchestrationCommand> = [];
+      yield* buildAppUnderTest({
+        layers: {
+          orchestrationEngine: {
+            dispatch: (command) =>
+              Effect.sync(() => {
+                dispatchedCommands.push(command);
+                return { sequence: dispatchedCommands.length };
+              }),
+          },
+        },
+      });
+
+      const createdAt = "2026-01-01T00:00:00.000Z";
+      const videoSizeBytes = 4_300_000;
+      const wholeBase64Groups = Math.floor(videoSizeBytes / 3);
+      const videoBase64 = `${"AAAA".repeat(wholeBase64Groups)}AA==`;
+      const response = yield* HttpClient.post("/api/orchestration/dispatch", {
+        headers: {
+          cookie: yield* getAuthenticatedSessionCookieHeader(),
+          "content-type": "application/json",
+        },
+        body: HttpBody.text(
+          // @effect-diagnostics-next-line preferSchemaOverJson:off
+          JSON.stringify({
+            type: "thread.turn.start",
+            commandId: "cmd-http-video-bootstrap",
+            threadId: "thread-http-video-bootstrap",
+            message: {
+              messageId: "msg-http-video-bootstrap",
+              role: "user",
+              text: "Review this video",
+              attachments: [
+                {
+                  type: "video",
+                  name: "kc-4.3mb-upload-test.mp4",
+                  mimeType: "video/mp4",
+                  sizeBytes: videoSizeBytes,
+                  dataUrl: `data:video/mp4;base64,${videoBase64}`,
+                },
+              ],
+            },
+            modelSelection: defaultModelSelection,
+            runtimeMode: "full-access",
+            interactionMode: "default",
+            bootstrap: {
+              createThread: {
+                projectId: defaultProjectId,
+                title: "HTTP video bootstrap",
+                modelSelection: defaultModelSelection,
+                runtimeMode: "full-access",
+                interactionMode: "default",
+                branch: "main",
+                worktreePath: null,
+                createdAt,
+              },
+            },
+            createdAt,
+          }),
+          "application/json",
+        ),
+      });
+
+      assert.equal(response.status, 200);
+      assert.deepEqual(yield* responseJsonEffect(response), { sequence: 2 });
+      assert.deepEqual(
+        dispatchedCommands.map((command) => command.type),
+        ["thread.create", "thread.turn.start"],
+      );
+
+      const finalCommand = dispatchedCommands[1];
+      assertTrue(finalCommand?.type === "thread.turn.start");
+      if (finalCommand?.type === "thread.turn.start") {
+        assert.equal(finalCommand.bootstrap, undefined);
+        assert.equal(finalCommand.message.attachments.length, 1);
+        const attachment = finalCommand.message.attachments[0];
+        assert.isDefined(attachment);
+        if (attachment) {
+          assert.deepEqual(attachment, {
+            type: "video",
+            id: attachment.id,
+            name: "kc-4.3mb-upload-test.mp4",
+            mimeType: "video/mp4",
+            sizeBytes: videoSizeBytes,
+          });
+          assert.match(attachment.id, /^thread-http-video-bootstrap-[0-9a-f-]+$/);
+        }
+      }
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
   it.effect(
     "bootstraps first-send worktree turns on the server before dispatching turn start",
     () =>

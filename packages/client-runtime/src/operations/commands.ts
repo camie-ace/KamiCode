@@ -6,16 +6,31 @@ import {
 import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
 import * as Schedule from "effect/Schedule";
+import * as SubscriptionRef from "effect/SubscriptionRef";
+import { HttpClient } from "effect/unstable/http";
 
-import type { EnvironmentSupervisor } from "../connection/supervisor.ts";
+import type { PreparedConnection } from "../connection/model.ts";
+import { EnvironmentSupervisor } from "../connection/supervisor.ts";
+import { environmentEndpointUrl } from "../environment/endpoint.ts";
+import { ManagedRelayDpopSigner } from "../relay/managedRelay.ts";
 import {
   type EnvironmentRpcFailure,
   type EnvironmentRpcSuccess,
-  type EnvironmentRpcUnavailableError,
+  EnvironmentRpcUnavailableError,
   isEnvironmentRpcTransportFailure,
   request,
 } from "../rpc/client.ts";
+import {
+  executeEnvironmentHttpRequest,
+  makeEnvironmentHttpApiClient,
+  type RemoteEnvironmentRequestError,
+} from "../rpc/http.ts";
+import {
+  buildEnvironmentAuthHeaders,
+  withEnvironmentCredentials,
+} from "../state/environmentHttpAuth.ts";
 
 type CommandType = ClientOrchestrationCommand["type"];
 type CommandOf<T extends CommandType> = Extract<ClientOrchestrationCommand, { readonly type: T }>;
@@ -61,6 +76,15 @@ type CommandEffect = Effect.Effect<
   EnvironmentRpcFailure<DispatchTag> | EnvironmentRpcUnavailableError,
   Crypto.Crypto | EnvironmentSupervisor
 >;
+type AttachmentCommandEffect = Effect.Effect<
+  EnvironmentRpcSuccess<DispatchTag>,
+  | EnvironmentRpcFailure<DispatchTag>
+  | EnvironmentRpcUnavailableError
+  | RemoteEnvironmentRequestError,
+  Crypto.Crypto | EnvironmentSupervisor | HttpClient.HttpClient
+>;
+
+const ATTACHMENT_TURN_HTTP_TIMEOUT_MS = 5 * 60 * 1_000;
 
 function commandId(input: { readonly commandId?: CommandId }) {
   return Effect.gen(function* () {
@@ -94,6 +118,59 @@ function dispatch(command: ClientOrchestrationCommand) {
     }),
   );
 }
+
+const currentPreparedConnection = Effect.fn("EnvironmentCommands.currentPreparedConnection")(
+  function* () {
+    const supervisor = yield* EnvironmentSupervisor;
+    return yield* SubscriptionRef.get(supervisor.prepared).pipe(
+      Effect.flatMap(
+        Option.match({
+          onNone: () =>
+            Effect.fail(
+              new EnvironmentRpcUnavailableError({
+                environmentId: supervisor.target.environmentId,
+                message: `${supervisor.target.label} is not ready to upload attachments.`,
+              }),
+            ),
+          onSome: (prepared: PreparedConnection) => Effect.succeed(prepared),
+        }),
+      ),
+    );
+  },
+);
+
+function isEnvironmentHttpTransportFailure(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "_tag" in error &&
+    (error._tag === "RemoteEnvironmentAuthFetchError" ||
+      error._tag === "RemoteEnvironmentAuthTimeoutError")
+  );
+}
+
+const dispatchAttachmentTurn = Effect.fn("EnvironmentCommands.dispatchAttachmentTurn")(function* (
+  command: Extract<ClientOrchestrationCommand, { readonly type: "thread.turn.start" }>,
+) {
+  const prepared = yield* currentPreparedConnection();
+  const requestUrl = environmentEndpointUrl(prepared.httpBaseUrl, "/api/orchestration/dispatch");
+  const client = yield* makeEnvironmentHttpApiClient(prepared.httpBaseUrl);
+  const signer = yield* Effect.serviceOption(ManagedRelayDpopSigner);
+  const headers = yield* buildEnvironmentAuthHeaders(
+    prepared.httpAuthorization,
+    "POST",
+    requestUrl,
+    signer,
+  );
+  return yield* executeEnvironmentHttpRequest(
+    requestUrl,
+    ATTACHMENT_TURN_HTTP_TIMEOUT_MS,
+    withEnvironmentCredentials(
+      prepared.httpAuthorization,
+      client.orchestration.dispatch({ headers, payload: command }),
+    ),
+  );
+});
 
 export const createProject: (input: CreateProjectInput) => CommandEffect = Effect.fn(
   "EnvironmentCommands.createProject",
@@ -264,16 +341,26 @@ export const updateThreadQueuedTurn: (input: UpdateThreadQueuedTurnInput) => Com
     });
   });
 
-export const startThreadTurn: (input: StartThreadTurnInput) => CommandEffect = Effect.fn(
+export const startThreadTurn: (input: StartThreadTurnInput) => AttachmentCommandEffect = Effect.fn(
   "EnvironmentCommands.startThreadTurn",
 )(function* (input) {
   const metadata = yield* timestampedCommandMetadata(input);
-  return yield* dispatch({
+  const command = {
     ...input,
     type: "thread.turn.start",
     commandId: metadata.commandId,
     createdAt: metadata.createdAt,
-  });
+  } satisfies Extract<ClientOrchestrationCommand, { readonly type: "thread.turn.start" }>;
+  if (command.message.attachments.length === 0) {
+    return yield* dispatch(command);
+  }
+  return yield* dispatchAttachmentTurn(command).pipe(
+    Effect.retry({
+      schedule: Schedule.spaced("500 millis"),
+      times: 1,
+      while: isEnvironmentHttpTransportFailure,
+    }),
+  );
 });
 
 export const appendThreadActivity: (input: AppendThreadActivityInput) => CommandEffect = Effect.fn(

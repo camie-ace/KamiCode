@@ -9,6 +9,7 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
   CommandId,
   EnvironmentOrchestrationHttpApi,
+  OrchestrationDispatchCommandError,
   ProviderInstanceId,
   ThreadId,
 } from "@t3tools/contracts";
@@ -29,6 +30,7 @@ import { cli, makeCli } from "./bin.ts";
 import * as ServerConfig from "./config.ts";
 import * as ProjectionSnapshotQuery from "./orchestration/Services/ProjectionSnapshotQuery.ts";
 import * as OrchestrationEngine from "./orchestration/Services/OrchestrationEngine.ts";
+import { ServerOrchestrationDispatcher } from "./orchestration/Services/ServerOrchestrationDispatcher.ts";
 import { OrchestrationLayerLive } from "./orchestration/runtimeLayer.ts";
 import { orchestrationHttpApiLayer } from "./orchestration/http.ts";
 import { layerConfig as SqlitePersistenceLayerLive } from "./persistence/Layers/Sqlite.ts";
@@ -104,6 +106,25 @@ const makeProjectPersistenceLayer = (config: ServerConfig.ServerConfig["Service"
     WorkspacePaths.layer,
   ).pipe(Layer.provideMerge(NodeServices.layer), Layer.provide(ServerConfig.layer(config)));
 
+const projectCliOrchestrationDispatcherLayer = Layer.effect(
+  ServerOrchestrationDispatcher,
+  Effect.gen(function* () {
+    const orchestrationEngine = yield* OrchestrationEngine.OrchestrationEngineService;
+    return ServerOrchestrationDispatcher.of({
+      dispatch: (command) =>
+        orchestrationEngine.dispatch(command).pipe(
+          Effect.mapError(
+            (cause) =>
+              new OrchestrationDispatchCommandError({
+                message: cause.message,
+                cause,
+              }),
+          ),
+        ),
+    });
+  }),
+);
+
 const readPersistedSnapshot = (baseDir: string) =>
   Effect.gen(function* () {
     const config = yield* makeCliTestServerConfig(baseDir);
@@ -118,6 +139,7 @@ const withLiveProjectCliServer = <A, E, R>(baseDir: string, run: () => Effect.Ef
     const config = yield* makeCliTestServerConfig(baseDir);
     const routesLayer = HttpApiBuilder.layer(ProjectCliHttpApi).pipe(
       Layer.provide(orchestrationHttpApiLayer),
+      Layer.provide(projectCliOrchestrationDispatcherLayer),
       Layer.provide(environmentAuthenticatedAuthLayer),
     );
     const appLayer = HttpRouter.serve(routesLayer, {

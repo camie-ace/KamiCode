@@ -1,5 +1,6 @@
 import * as Crypto from "effect/Crypto";
 import { Atom } from "effect/unstable/reactivity";
+import { HttpClient } from "effect/unstable/http";
 
 import { createAtomCommandScheduler, createEnvironmentCommand } from "./runtime.ts";
 import {
@@ -73,7 +74,7 @@ export type {
 } from "../operations/commands.ts";
 
 export function createThreadEnvironmentAtoms<R, E>(
-  runtime: Atom.AtomRuntime<EnvironmentRegistry | Crypto.Crypto | R, E>,
+  runtime: Atom.AtomRuntime<EnvironmentRegistry | Crypto.Crypto | HttpClient.HttpClient | R, E>,
 ) {
   const scheduler = createAtomCommandScheduler();
   const concurrency = {

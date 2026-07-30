@@ -16,15 +16,15 @@ import {
   failEnvironmentNotFound,
   requireEnvironmentScope,
 } from "../auth/http.ts";
-import { OrchestrationEngineService } from "./Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "./Services/ProjectionSnapshotQuery.ts";
+import { ServerOrchestrationDispatcher } from "./Services/ServerOrchestrationDispatcher.ts";
 
 export const orchestrationHttpApiLayer = HttpApiBuilder.group(
   EnvironmentHttpApi,
   "orchestration",
   Effect.fnUntraced(function* (handlers) {
     const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
-    const orchestrationEngine = yield* OrchestrationEngineService;
+    const orchestrationDispatcher = yield* ServerOrchestrationDispatcher;
 
     return handlers
       .handle(
@@ -81,7 +81,7 @@ export const orchestrationHttpApiLayer = HttpApiBuilder.group(
           const normalizedCommand = yield* normalizeDispatchCommand(args.payload).pipe(
             Effect.catch(() => failEnvironmentInvalidRequest("invalid_command")),
           );
-          return yield* orchestrationEngine
+          return yield* orchestrationDispatcher
             .dispatch(normalizedCommand)
             .pipe(
               Effect.catch((cause) =>

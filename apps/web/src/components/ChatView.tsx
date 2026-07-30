@@ -6462,7 +6462,12 @@ function ChatViewContent(props: ChatViewProps) {
           detectTrigger: true,
         });
       }
-      if (!isAtomCommandInterrupted(failure)) {
+      if (isAtomCommandInterrupted(failure) && composerAttachmentsSnapshot.length > 0) {
+        setThreadError(
+          threadIdForSend,
+          "Attachment upload was interrupted. Your draft was restored; check the connection and try again.",
+        );
+      } else if (!isAtomCommandInterrupted(failure)) {
         const error = squashAtomCommandFailure(failure);
         setThreadError(
           threadIdForSend,

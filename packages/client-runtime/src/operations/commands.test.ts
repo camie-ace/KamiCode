@@ -1,8 +1,10 @@
 import {
   CommandId,
   EnvironmentId,
+  MessageId,
   ORCHESTRATION_WS_METHODS,
   ProjectId,
+  ProviderInstanceId,
   ThreadId,
   type ClientOrchestrationCommand,
 } from "@t3tools/contracts";
@@ -24,7 +26,8 @@ import {
 import * as EnvironmentSupervisor from "../connection/supervisor.ts";
 import * as RpcSession from "../rpc/session.ts";
 import type { WsRpcProtocolClient } from "../rpc/protocol.ts";
-import { archiveThread, createProject, stopThreadSession } from "./commands.ts";
+import { remoteHttpClientLayer } from "../rpc/http.ts";
+import { archiveThread, createProject, startThreadTurn, stopThreadSession } from "./commands.ts";
 
 const TEST_CRYPTO_LAYER = Layer.succeed(
   Crypto.Crypto,
@@ -43,6 +46,7 @@ const TARGET = new PrimaryConnectionTarget({
 
 const makeSupervisor = Effect.fn("TestEnvironmentCommands.makeSupervisor")(function* (
   dispatched: ClientOrchestrationCommand[],
+  preparedConnection?: PreparedConnection,
 ) {
   const client = {
     [ORCHESTRATION_WS_METHODS.dispatchCommand]: (command: ClientOrchestrationCommand) =>
@@ -62,7 +66,11 @@ const makeSupervisor = Effect.fn("TestEnvironmentCommands.makeSupervisor")(funct
     target: TARGET,
     state: yield* SubscriptionRef.make(AVAILABLE_CONNECTION_STATE),
     session: yield* SubscriptionRef.make(Option.some(session)),
-    prepared: yield* SubscriptionRef.make(Option.none<PreparedConnection>()),
+    prepared: yield* SubscriptionRef.make(
+      preparedConnection === undefined
+        ? Option.none<PreparedConnection>()
+        : Option.some(preparedConnection),
+    ),
     connect: Effect.void,
     disconnect: Effect.void,
     retryNow: Effect.void,
@@ -191,6 +199,88 @@ describe("environment commands", () => {
       expect(dispatched).toHaveLength(2);
       expect(dispatched[0]?.commandId).toBe("retry-safe-command");
       expect(dispatched[1]?.commandId).toBe("retry-safe-command");
+    }).pipe(Effect.provide(TEST_CRYPTO_LAYER)),
+  );
+
+  it.effect("sends a 4.3MB video turn over authenticated HTTP instead of WebSocket", () =>
+    Effect.gen(function* () {
+      const dispatched: ClientOrchestrationCommand[] = [];
+      const prepared: PreparedConnection = {
+        environmentId: TARGET.environmentId,
+        label: TARGET.label,
+        httpBaseUrl: TARGET.httpBaseUrl,
+        socketUrl: "wss://environment.example.test/ws",
+        httpAuthorization: null,
+        target: TARGET,
+      };
+      const supervisor = yield* makeSupervisor(dispatched, prepared);
+      const requests: Request[] = [];
+      const requestBodies: unknown[] = [];
+      const fetchFn: typeof globalThis.fetch = async (input, init) => {
+        const request = new Request(input, init);
+        requests.push(request);
+        requestBodies.push(JSON.parse(await request.text()));
+        return new Response(JSON.stringify({ sequence: 73 }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      };
+      const videoSizeBytes = 4_300_000;
+      const fullTriplets = Math.floor(videoSizeBytes / 3);
+      const remainder = videoSizeBytes % 3;
+      const videoDataUrl = `data:video/mp4;base64,${"AAAA".repeat(fullTriplets)}${
+        remainder === 1 ? "AA==" : remainder === 2 ? "AAA=" : ""
+      }`;
+
+      const result = yield* startThreadTurn({
+        threadId: ThreadId.make("thread-video"),
+        message: {
+          messageId: MessageId.make("message-video"),
+          role: "user",
+          text: "Review this video",
+          attachments: [
+            {
+              type: "video",
+              name: "sample.mp4",
+              mimeType: "video/mp4",
+              sizeBytes: videoSizeBytes,
+              dataUrl: videoDataUrl,
+            },
+          ],
+        },
+        modelSelection: {
+          instanceId: ProviderInstanceId.make("codex"),
+          model: "gpt-5.4",
+        },
+        titleSeed: "Video review",
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        dispatchPolicy: "immediate",
+        createdAt: "2026-07-30T00:00:00.000Z",
+      }).pipe(
+        Effect.provideService(EnvironmentSupervisor.EnvironmentSupervisor, supervisor),
+        Effect.provide(remoteHttpClientLayer(fetchFn)),
+      );
+
+      expect(result).toEqual({ sequence: 73 });
+      expect(dispatched).toEqual([]);
+      expect(requests).toHaveLength(1);
+      expect(requests[0]?.method).toBe("POST");
+      expect(requests[0]?.url).toBe("https://environment.example.test/api/orchestration/dispatch");
+      expect(requestBodies[0]).toMatchObject({
+        type: "thread.turn.start",
+        threadId: "thread-video",
+        message: {
+          attachments: [
+            {
+              type: "video",
+              name: "sample.mp4",
+              sizeBytes: videoSizeBytes,
+              dataUrl: videoDataUrl,
+            },
+          ],
+        },
+      });
     }).pipe(Effect.provide(TEST_CRYPTO_LAYER)),
   );
 });
