@@ -1,5 +1,5 @@
 import type { DesktopAppBranding } from "@t3tools/contracts";
-import { formatAppDisplayName } from "./branding.logic";
+import { formatAppDisplayName, isNightlyAppVersion } from "./branding.logic";
 
 function readInjectedDesktopAppBranding(): DesktopAppBranding | null {
   if (typeof window === "undefined") {
@@ -16,13 +16,14 @@ export const HOSTED_APP_CHANNEL =
   hostedAppChannel === "latest" || hostedAppChannel === "nightly" ? hostedAppChannel : null;
 export const HOSTED_APP_CHANNEL_LABEL =
   HOSTED_APP_CHANNEL === "nightly" ? "Nightly" : HOSTED_APP_CHANNEL === "latest" ? "Stable" : null;
+export const APP_VERSION = import.meta.env.APP_VERSION || "0.0.0";
 export const APP_BASE_NAME = injectedDesktopAppBranding?.baseName ?? "KamiCode";
 export const APP_STAGE_LABEL =
   injectedDesktopAppBranding?.stageLabel ??
   HOSTED_APP_CHANNEL_LABEL ??
+  (isNightlyAppVersion(APP_VERSION) ? "Nightly" : null) ??
   (import.meta.env.DEV ? "Dev" : "Alpha");
 export const APP_DISPLAY_NAME =
   injectedDesktopAppBranding?.displayName ??
   formatAppDisplayName({ baseName: APP_BASE_NAME, stageLabel: APP_STAGE_LABEL });
-export const APP_VERSION = import.meta.env.APP_VERSION || "0.0.0";
 export const APP_ICON_SRC = "/kamicode-logo.svg?v=transparent-mark-v3";

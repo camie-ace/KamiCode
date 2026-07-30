@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import {
+  isNightlyAppVersion,
   resolveServerBackedAppDisplayName,
   resolveServerBackedAppStageLabel,
 } from "./branding.logic";
@@ -7,6 +8,7 @@ import {
 const originalWindow = globalThis.window;
 
 afterEach(() => {
+  vi.unstubAllEnvs();
   vi.resetModules();
 
   if (originalWindow === undefined) {
@@ -46,6 +48,17 @@ describe("branding", () => {
 
     expect(branding.HOSTED_APP_CHANNEL).toBe("nightly");
     expect(branding.HOSTED_APP_CHANNEL_LABEL).toBe("Nightly");
+    expect(branding.APP_STAGE_LABEL).toBe("Nightly");
+    expect(branding.APP_DISPLAY_NAME).toBe("KamiCode (Nightly)");
+  });
+
+  it("labels a single-origin commit build as nightly without enabling hosted-static mode", async () => {
+    vi.stubEnv("APP_VERSION", "0.1.10-nightly.20260730.f8f53fe20");
+
+    const branding = await import("./branding");
+
+    expect(branding.HOSTED_APP_CHANNEL).toBeNull();
+    expect(branding.HOSTED_APP_CHANNEL_LABEL).toBeNull();
     expect(branding.APP_STAGE_LABEL).toBe("Nightly");
     expect(branding.APP_DISPLAY_NAME).toBe("KamiCode (Nightly)");
   });
@@ -97,6 +110,16 @@ describe("branding logic", () => {
         fallbackStageLabel: "Alpha",
       }),
     ).toBe("Nightly");
+  });
+
+  it("returns Nightly for commit-derived nightly primary server versions", () => {
+    expect(
+      resolveServerBackedAppStageLabel({
+        primaryServerVersion: "0.1.10-nightly.20260730.f8f53fe20",
+        fallbackStageLabel: "Alpha",
+      }),
+    ).toBe("Nightly");
+    expect(isNightlyAppVersion("0.1.10-nightly.20260730.f8f53fe20")).toBe(true);
   });
 
   it("updates the display name for nightly primary server versions", () => {

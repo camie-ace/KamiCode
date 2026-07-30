@@ -1,4 +1,8 @@
-const NIGHTLY_SERVER_VERSION_PATTERN = /-nightly\.\d{8}\.\d+$/;
+const NIGHTLY_VERSION_PATTERN = /-nightly\.\d{8}\.(?:\d+|[0-9a-f]{7,40})$/i;
+
+export function isNightlyAppVersion(version: string | null | undefined): boolean {
+  return typeof version === "string" && NIGHTLY_VERSION_PATTERN.test(version);
+}
 
 export function formatAppDisplayName(input: {
   readonly baseName: string;
@@ -18,7 +22,7 @@ export function resolveServerBackedAppStageLabel(input: {
   if (!input.primaryServerVersion) {
     return input.fallbackStageLabel;
   }
-  if (NIGHTLY_SERVER_VERSION_PATTERN.test(input.primaryServerVersion)) {
+  if (isNightlyAppVersion(input.primaryServerVersion)) {
     return "Nightly";
   }
   return input.fallbackStageLabel;
