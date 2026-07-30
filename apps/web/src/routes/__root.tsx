@@ -47,17 +47,32 @@ import { hasHostedPairingRequest, isHostedStaticApp } from "../hostedPairing";
 import { shellEnvironment } from "../state/shell";
 import { useAtomValue } from "@effect/atom-react";
 import { useAtomCommand } from "../state/use-atom-command";
-import { useEnvironments, usePrimaryEnvironment } from "../state/environments";
+import {
+  useEnvironments,
+  usePrimaryEnvironment,
+  usePrimaryEnvironmentId,
+} from "../state/environments";
 import {
   primaryServerConfigAtom,
   primaryServerConfigEventAtom,
   primaryServerWelcomeAtom,
 } from "../state/server";
-import { readProject, setActiveEnvironmentId, useActiveEnvironmentId } from "../state/entities";
+import {
+  readProject,
+  setActiveEnvironmentId,
+  useActiveEnvironmentId,
+  useAllEnvironmentShellsBootstrapped,
+  useProjects,
+} from "../state/entities";
 import {
   createKeybindingsUpdateToastController,
   type KeybindingsUpdateToastController,
 } from "../components/KeybindingsUpdateToast.logic";
+import { environmentCatalog } from "../connection/catalog";
+import {
+  clearProjectBootstrapRecoveryMarker,
+  startProjectBootstrapRecovery,
+} from "../projectBootstrapRecovery";
 
 export const Route = createRootRoute({
   beforeLoad: async ({ location }) => {
@@ -164,6 +179,7 @@ function RootRouteView() {
         <SshPasswordPromptDialog />
         <SlowRpcRequestToastCoordinator />
         <HostedStaticEnvironmentBootstrap />
+        {primaryEnvironmentAuthenticated ? <ProjectBootstrapRecoveryCoordinator /> : null}
         {primaryEnvironmentAuthenticated ? <EventRouter /> : null}
         {primaryEnvironmentAuthenticated ? <ProviderUpdateLaunchNotification /> : null}
         {primaryEnvironmentAuthenticated ? <TurnCompletionSoundCoordinator /> : null}
@@ -171,6 +187,44 @@ function RootRouteView() {
       </AnchoredToastProvider>
     </ToastProvider>
   );
+}
+
+function ProjectBootstrapRecoveryCoordinator() {
+  const projects = useProjects();
+  const bootstrapped = useAllEnvironmentShellsBootstrapped();
+  const primaryEnvironmentId = usePrimaryEnvironmentId();
+  const retryEnvironment = useAtomCommand(environmentCatalog.retryNow, {
+    reportFailure: false,
+  });
+  const stalled = projects.length === 0 && !bootstrapped;
+
+  useEffect(() => {
+    if (!stalled) {
+      clearProjectBootstrapRecoveryMarker(readSessionStorage());
+      return;
+    }
+    return startProjectBootstrapRecovery({
+      retry: async () => {
+        if (primaryEnvironmentId !== null) {
+          await retryEnvironment(primaryEnvironmentId);
+        }
+      },
+      reload: () => {
+        window.location.reload();
+      },
+      storage: readSessionStorage(),
+    });
+  }, [primaryEnvironmentId, retryEnvironment, stalled]);
+
+  return null;
+}
+
+function readSessionStorage(): Storage | null {
+  try {
+    return window.sessionStorage;
+  } catch {
+    return null;
+  }
 }
 
 function GlassAppearanceSync() {

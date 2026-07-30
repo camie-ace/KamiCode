@@ -20,6 +20,7 @@ describe("post-pairing handoff", () => {
   it("stays in the loaded app, wakes projects, and reveals them exactly once", async () => {
     const sessionStorage = createSessionStorage();
     const replace = vi.fn();
+    const notifySessionChanged = vi.fn();
     const calls: string[] = [];
 
     await completeSameOriginPairing({
@@ -27,6 +28,7 @@ describe("post-pairing handoff", () => {
         calls.push("finish");
       },
       location: { replace },
+      notifySessionChanged,
       retryProjectConnection: async () => {
         calls.push("retry");
       },
@@ -34,6 +36,7 @@ describe("post-pairing handoff", () => {
     });
 
     expect(calls).toEqual(["retry", "finish"]);
+    expect(notifySessionChanged).toHaveBeenCalledOnce();
     expect(replace).not.toHaveBeenCalled();
     expect(consumePostPairingProjectReveal(sessionStorage)).toBe(true);
     expect(consumePostPairingProjectReveal(sessionStorage)).toBe(false);

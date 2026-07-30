@@ -6,6 +6,7 @@ import {
   PairingPendingSurface,
   PairingRouteSurface,
 } from "../components/auth/PairingRouteSurface";
+import { publishBrowserSessionChanged } from "../browserSessionSync";
 import { environmentCatalog } from "../connection/catalog";
 import { completeSameOriginPairing } from "../postPairing";
 import { usePrimaryEnvironmentId } from "../state/environments";
@@ -41,6 +42,7 @@ function PairRouteView() {
   const finishPairing = useCallback(
     () =>
       completeSameOriginPairing({
+        notifySessionChanged: publishBrowserSessionChanged,
         ...(primaryEnvironmentId === null
           ? {}
           : {

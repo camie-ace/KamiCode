@@ -15,11 +15,13 @@ function markPostPairingProjectReveal(sessionStorage: SessionStorage): void {
 export async function completeSameOriginPairing(options: {
   readonly finishInApp: () => Promise<void>;
   readonly location?: BrowserLocation;
+  readonly notifySessionChanged?: () => void;
   readonly retryProjectConnection?: () => Promise<void>;
   readonly sessionStorage?: SessionStorage;
 }): Promise<void> {
   const sessionStorage = options.sessionStorage ?? window.sessionStorage;
   markPostPairingProjectReveal(sessionStorage);
+  options.notifySessionChanged?.();
 
   try {
     await options.retryProjectConnection?.();
