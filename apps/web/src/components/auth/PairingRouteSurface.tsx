@@ -1,7 +1,7 @@
 import type { AuthSessionState } from "@t3tools/contracts";
 import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 import { CheckIcon, CopyIcon } from "lucide-react";
-import React, { startTransition, useEffect, useRef, useState, useCallback } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 
 import { APP_DISPLAY_NAME } from "../../branding";
 import { connectPairing } from "../../connection/onboarding";
@@ -48,7 +48,7 @@ export function PairingRouteSurface({
 }: {
   auth: AuthSessionState["auth"];
   initialErrorMessage?: string;
-  onAuthenticated: () => void;
+  onAuthenticated: () => Promise<void> | void;
 }) {
   const autoPairTokenRef = useRef<string | null>(peekPairingTokenFromUrl());
   const [credential, setCredential] = useState(() => autoPairTokenRef.current ?? "");
@@ -61,21 +61,14 @@ export function PairingRouteSurface({
       setIsSubmitting(true);
       setErrorMessage("");
 
-      const submitError = await submitServerAuthCredential(nextCredential).then(
-        () => null,
-        (error) => errorMessageFromUnknown(error),
-      );
-
-      setIsSubmitting(false);
-
-      if (submitError) {
-        setErrorMessage(submitError);
+      try {
+        await submitServerAuthCredential(nextCredential);
+        await onAuthenticated();
+      } catch (error) {
+        setIsSubmitting(false);
+        setErrorMessage(errorMessageFromUnknown(error));
         return;
       }
-
-      startTransition(() => {
-        onAuthenticated();
-      });
     },
     [onAuthenticated],
   );

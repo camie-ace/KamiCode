@@ -310,6 +310,54 @@ describe("resolveInitialServerAuthGateState", () => {
     expect(testApi.calls.session).toBe(2);
   });
 
+  it("waits for a manually paired browser session to become observable", async () => {
+    vi.useFakeTimers();
+    const nextSession = sequence(
+      unauthenticatedSession(LOOPBACK_AUTH),
+      unauthenticatedSession(LOOPBACK_AUTH),
+      authenticatedSession(LOOPBACK_AUTH),
+    );
+    const testApi = await installAuthApi({
+      session: nextSession,
+      browserSession: () => Effect.succeed(browserSession(["orchestration:read"])),
+    });
+    const { resolveInitialServerAuthGateState, submitServerAuthCredential } =
+      await import("./environments/primary");
+
+    await expect(resolveInitialServerAuthGateState()).resolves.toMatchObject({
+      status: "requires-auth",
+    });
+    const submitPromise = submitServerAuthCredential("retry-token");
+    await vi.advanceTimersByTimeAsync(100);
+
+    await expect(submitPromise).resolves.toBeUndefined();
+    await expect(resolveInitialServerAuthGateState()).resolves.toEqual({
+      status: "authenticated",
+    });
+    expect(testApi.calls.session).toBe(3);
+  });
+
+  it("does not finish manual pairing when the browser session is not usable", async () => {
+    vi.useFakeTimers();
+    const testApi = await installAuthApi({
+      session: () => unauthenticatedSession(LOOPBACK_AUTH),
+      browserSession: () => Effect.succeed(browserSession(["orchestration:read"])),
+    });
+    const { submitServerAuthCredential } = await import("./environments/primary");
+
+    const submitResult = submitServerAuthCredential("retry-token").then(
+      () => null,
+      (error: unknown) => error,
+    );
+    await vi.advanceTimersByTimeAsync(2_000);
+
+    await expect(submitResult).resolves.toMatchObject({
+      _tag: "PrimaryEnvironmentAuthSessionTimeoutError",
+      message: "Timed out waiting for authenticated session after bootstrap.",
+    });
+    expect(testApi.calls.browserSession).toEqual([{ credential: "retry-token" }]);
+  });
+
   it("rejects a blank pairing token with a structured validation error", async () => {
     const { PrimaryEnvironmentPairingCredentialRequiredError, submitServerAuthCredential } =
       await import("./environments/primary/auth");

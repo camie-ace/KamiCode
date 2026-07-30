@@ -82,6 +82,7 @@ import { isTerminalFocused } from "../lib/terminalFocus";
 import { isMacPlatform } from "../lib/utils";
 import {
   readThreadShell,
+  useAllEnvironmentShellsBootstrapped,
   useProject,
   useProjects,
   useThreadShells,
@@ -3514,6 +3515,7 @@ interface SidebarProjectsContentProps {
 const SidebarProjectsContent = memo(function SidebarProjectsContent(
   props: SidebarProjectsContentProps,
 ) {
+  const projectsBootstrapped = useAllEnvironmentShellsBootstrapped();
   const {
     showArm64IntelBuildWarning,
     arm64IntelBuildWarningDescription,
@@ -3725,7 +3727,7 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
 
         {projectsLength === 0 && (
           <div className="px-2 pt-4 text-center text-xs text-muted-foreground/60">
-            No projects yet
+            {projectsBootstrapped ? "No projects yet" : "Loading projects…"}
           </div>
         )}
       </SidebarGroup>

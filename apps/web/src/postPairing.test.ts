@@ -17,22 +17,31 @@ function createSessionStorage() {
 }
 
 describe("post-pairing handoff", () => {
-  it("reloads the app and reveals projects exactly once", () => {
+  it("stays in the loaded app, wakes projects, and reveals them exactly once", async () => {
     const sessionStorage = createSessionStorage();
     const replace = vi.fn();
+    const calls: string[] = [];
 
-    completeSameOriginPairing({
+    await completeSameOriginPairing({
+      finishInApp: async () => {
+        calls.push("finish");
+      },
       location: { replace },
+      retryProjectConnection: async () => {
+        calls.push("retry");
+      },
       sessionStorage,
     });
 
-    expect(replace).toHaveBeenCalledWith("/");
+    expect(calls).toEqual(["retry", "finish"]);
+    expect(replace).not.toHaveBeenCalled();
     expect(consumePostPairingProjectReveal(sessionStorage)).toBe(true);
     expect(consumePostPairingProjectReveal(sessionStorage)).toBe(false);
   });
 
-  it("still reloads when session storage is unavailable", () => {
+  it("still finishes in-app when session storage is unavailable", async () => {
     const replace = vi.fn();
+    const finishInApp = vi.fn<() => Promise<void>>().mockResolvedValue(undefined);
     const sessionStorage = {
       getItem: () => {
         throw new Error("blocked");
@@ -45,12 +54,28 @@ describe("post-pairing handoff", () => {
       },
     };
 
-    completeSameOriginPairing({
+    await completeSameOriginPairing({
+      finishInApp,
       location: { replace },
       sessionStorage,
     });
 
-    expect(replace).toHaveBeenCalledWith("/");
+    expect(finishInApp).toHaveBeenCalledOnce();
+    expect(replace).not.toHaveBeenCalled();
     expect(consumePostPairingProjectReveal(sessionStorage)).toBe(false);
+  });
+
+  it("uses a hard navigation only when the in-app handoff fails", async () => {
+    const replace = vi.fn();
+
+    await completeSameOriginPairing({
+      finishInApp: async () => {
+        throw new Error("router failed");
+      },
+      location: { replace },
+      sessionStorage: createSessionStorage(),
+    });
+
+    expect(replace).toHaveBeenCalledWith("/");
   });
 });

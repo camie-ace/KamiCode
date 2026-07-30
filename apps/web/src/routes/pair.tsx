@@ -1,11 +1,15 @@
-import { createFileRoute, redirect } from "@tanstack/react-router";
+import { createFileRoute, redirect, useRouter } from "@tanstack/react-router";
+import { useCallback } from "react";
 
 import {
   HostedPairingRouteSurface,
   PairingPendingSurface,
   PairingRouteSurface,
 } from "../components/auth/PairingRouteSurface";
+import { environmentCatalog } from "../connection/catalog";
 import { completeSameOriginPairing } from "../postPairing";
+import { usePrimaryEnvironmentId } from "../state/environments";
+import { useAtomCommand } from "../state/use-atom-command";
 
 export const Route = createFileRoute("/pair")({
   beforeLoad: async ({ context }) => {
@@ -29,6 +33,28 @@ export const Route = createFileRoute("/pair")({
 
 function PairRouteView() {
   const { authGateState } = Route.useRouteContext();
+  const router = useRouter();
+  const primaryEnvironmentId = usePrimaryEnvironmentId();
+  const retryEnvironment = useAtomCommand(environmentCatalog.retryNow, {
+    reportFailure: false,
+  });
+  const finishPairing = useCallback(
+    () =>
+      completeSameOriginPairing({
+        ...(primaryEnvironmentId === null
+          ? {}
+          : {
+              retryProjectConnection: async () => {
+                await retryEnvironment(primaryEnvironmentId);
+              },
+            }),
+        finishInApp: async () => {
+          await router.invalidate();
+          await router.navigate({ to: "/", replace: true });
+        },
+      }),
+    [primaryEnvironmentId, retryEnvironment, router],
+  );
 
   if (!authGateState) {
     return null;
@@ -41,7 +67,7 @@ function PairRouteView() {
   return (
     <PairingRouteSurface
       auth={authGateState.auth}
-      onAuthenticated={completeSameOriginPairing}
+      onAuthenticated={finishPairing}
       {...(authGateState.errorMessage ? { initialErrorMessage: authGateState.errorMessage } : {})}
     />
   );

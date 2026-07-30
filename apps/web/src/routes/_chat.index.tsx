@@ -1,6 +1,6 @@
 import { scopeProjectRef } from "@t3tools/client-runtime/environment";
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { LinkIcon, PlusIcon, RotateCcwIcon } from "lucide-react";
+import { LinkIcon, LoaderCircleIcon, PlusIcon, RotateCcwIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { openCommandPalette } from "../commandPaletteBus";
@@ -66,7 +66,7 @@ function IndexDraftLanding() {
   }, [handleNewThread, mostRecentProject, startState.retryRequest]);
 
   if (!bootstrapped) {
-    return null;
+    return <ProjectsLoadingState />;
   }
   if (mostRecentProject !== null) {
     return startState.failed ? (
@@ -81,6 +81,17 @@ function IndexDraftLanding() {
     ) : null;
   }
   return <NoProjectsHero />;
+}
+
+function ProjectsLoadingState() {
+  return (
+    <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground">
+      <div className="flex flex-1 items-center justify-center gap-2 text-sm text-muted-foreground">
+        <LoaderCircleIcon className="size-4 animate-spin" />
+        Loading your projects…
+      </div>
+    </SidebarInset>
+  );
 }
 
 function DraftStartError({ onRetry }: { readonly onRetry: () => void }) {
