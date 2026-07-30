@@ -8,6 +8,7 @@ import {
 } from "@t3tools/contracts";
 import { describe, expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
 import { afterEach, vi } from "vite-plus/test";
 
 import {
@@ -22,12 +23,15 @@ import {
   secondaryBearerRefreshAtEpochMs,
 } from "./platform.ts";
 import {
+  resolveInitialPrimaryEnvironmentDescriptor,
   resetPrimaryEnvironmentDescriptorForTests,
   writePrimaryEnvironmentDescriptor,
 } from "../environments/primary/context";
+import { __setPrimaryHttpRunnerForTests } from "../lib/runtime";
 
 afterEach(() => {
   resetPrimaryEnvironmentDescriptorForTests();
+  __setPrimaryHttpRunnerForTests();
   vi.unstubAllGlobals();
 });
 
@@ -268,6 +272,52 @@ describe("primary topology cache", () => {
         wsBaseUrl: "wss://web.kamicode.dev/",
       });
       expect(fetch).not.toHaveBeenCalled();
+    }),
+  );
+
+  it.effect("joins the route bootstrap request while its descriptor is still loading", () =>
+    Effect.gen(function* () {
+      const descriptor = {
+        environmentId: EnvironmentId.make("environment-primary"),
+        label: "Primary environment",
+        platform: {
+          os: "linux",
+          arch: "x64",
+        },
+        serverVersion: "0.1.10-nightly.20260730.f8f53fe20",
+        capabilities: {
+          repositoryIdentity: true,
+        },
+      } satisfies ExecutionEnvironmentDescriptor;
+      let releaseDescriptor!: () => void;
+      const descriptorGate = new Promise<void>((resolve) => {
+        releaseDescriptor = resolve;
+      });
+      const primaryHttpRunner = vi.fn(async () => {
+        await descriptorGate;
+        return descriptor;
+      });
+      __setPrimaryHttpRunnerForTests(primaryHttpRunner as never);
+
+      const routeBootstrap = resolveInitialPrimaryEnvironmentDescriptor();
+      const platformBootstrap = yield* Effect.forkChild(
+        loadPrimaryConnectionRegistration({
+          source: "window-origin",
+          target: {
+            httpBaseUrl: "https://web.kamicode.dev/",
+            wsBaseUrl: "wss://web.kamicode.dev/",
+          },
+        }),
+      );
+      yield* Effect.yieldNow;
+
+      expect(primaryHttpRunner).toHaveBeenCalledTimes(1);
+      releaseDescriptor();
+      yield* Effect.promise(() => routeBootstrap);
+      const registration = yield* Fiber.join(platformBootstrap);
+
+      expect(primaryHttpRunner).toHaveBeenCalledTimes(1);
+      expect(registration.target.environmentId).toBe(descriptor.environmentId);
     }),
   );
 });

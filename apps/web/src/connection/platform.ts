@@ -43,8 +43,7 @@ import * as Stream from "effect/Stream";
 import { FetchHttpClient } from "effect/unstable/http";
 
 import { readDesktopPrimaryBearerToken } from "../environments/primary/desktopAuth";
-import { readPrimaryEnvironmentDescriptor } from "../environments/primary/context";
-import { primaryEnvironmentHttpLayer } from "../environments/primary/httpLayer";
+import { resolveInitialPrimaryEnvironmentDescriptor } from "../environments/primary/context";
 import {
   readPrimaryEnvironmentTarget,
   type PrimaryEnvironmentTarget,
@@ -287,14 +286,19 @@ const capabilitiesLayer = Layer.effectContext(
 export const loadPrimaryConnectionRegistration = Effect.fn(
   "web.connectionPlatform.loadPrimaryConnectionRegistration",
 )(function* (resolved: PrimaryEnvironmentTarget) {
-  const descriptor =
-    readPrimaryEnvironmentDescriptor() ??
-    (yield* fetchRemoteEnvironmentDescriptor({
-      httpBaseUrl: resolved.target.httpBaseUrl,
-    }).pipe(
-      Effect.provide(primaryEnvironmentHttpLayer),
-      Effect.mapError(mapRemoteEnvironmentError),
-    ));
+  // Route bootstrap and the connection runtime start concurrently. Reuse the
+  // route's in-flight descriptor request so a slow browser cannot start a
+  // second, short-lived request on every topology poll and repeatedly abort it.
+  const descriptor = yield* Effect.tryPromise({
+    try: resolveInitialPrimaryEnvironmentDescriptor,
+    catch: (cause) =>
+      new ConnectionTransientError({
+        reason: "remote-unavailable",
+        detail: `Could not discover the primary environment: ${
+          cause instanceof Error ? cause.message : String(cause)
+        }`,
+      }),
+  });
   return new PrimaryConnectionRegistration({
     target: new PrimaryConnectionTarget({
       environmentId: descriptor.environmentId,
