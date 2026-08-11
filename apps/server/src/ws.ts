@@ -290,6 +290,7 @@ const PROVIDER_STATUS_DEBOUNCE_MS = 200;
 // past this gap a single O(active-threads) snapshot is cheaper and bounded.
 // Matches the event store's default page size (DEFAULT_READ_FROM_SEQUENCE_LIMIT).
 const SHELL_RESUME_MAX_GAP = 1_000;
+const THREAD_RESUME_MAX_GAP = 1_000;
 
 const RPC_REQUIRED_SCOPE = new Map<string, AuthEnvironmentScope>([
   [ORCHESTRATION_WS_METHODS.dispatchCommand, AuthOrchestrationOperateScope],
@@ -1367,14 +1368,59 @@ const makeWsRpcLayer = (
               // catch-up followed by the buffered/ongoing live events. Overlapping
               // events are deduped by sequence on the client.
               //
-              // Read the full range after the cursor (not the store's default
-              // page-bounded limit): the range is normally tiny (a fresh HTTP
-              // snapshot sequence) and the per-thread filter runs after reading,
-              // so a global cap could otherwise omit this thread's events.
+              // Resume incrementally only while the global gap is bounded. A
+              // stale client gets a fresh per-thread snapshot instead of making
+              // the server decode every unrelated historical event.
               if (input.afterSequence !== undefined) {
                 const afterSequence = input.afterSequence;
+                const headSequence = yield* orchestrationEngine.latestSequence;
+                const replayGap = headSequence - afterSequence;
+                // A thread cursor can be days behind the global event stream.
+                // Never scan that entire stream just to discard other threads'
+                // events: beyond this bounded gap, one projected thread snapshot
+                // is both cheaper and safer. A cursor ahead of the authoritative
+                // head is invalid and is reset the same way.
+                if (replayGap < 0 || replayGap > THREAD_RESUME_MAX_GAP) {
+                  const snapshot = yield* projectionSnapshotQuery
+                    .getThreadDetailSnapshot(input.threadId)
+                    .pipe(
+                      Effect.mapError(
+                        (cause) =>
+                          new OrchestrationGetSnapshotError({
+                            message: `Failed to load thread ${input.threadId}`,
+                            cause,
+                          }),
+                      ),
+                    );
+
+                  if (Option.isNone(snapshot)) {
+                    return yield* new OrchestrationGetSnapshotError({
+                      message: `Thread ${input.threadId} was not found`,
+                      cause: input.threadId,
+                    });
+                  }
+
+                  const afterSnapshot =
+                    input.requestCompletionMarker === true
+                      ? Stream.concat(
+                          Stream.fromEffect(
+                            Queue.offer(liveBuffer, { kind: "synchronized" as const }),
+                          ).pipe(Stream.drain),
+                          bufferedLiveStream,
+                        )
+                      : bufferedLiveStream;
+                  return Stream.concat(
+                    Stream.make({
+                      kind: "snapshot" as const,
+                      snapshot: projectThreadDetailSnapshot(snapshot.value),
+                    }),
+                    afterSnapshot,
+                  );
+                }
                 const catchUpStream = orchestrationEngine
-                  .readEvents(afterSequence, Number.MAX_SAFE_INTEGER)
+                  // Stop at the authoritative head captured above. New events
+                  // are already buffered by the live subscription.
+                  .readEvents(afterSequence, replayGap)
                   .pipe(
                     Stream.filter(isThisThreadDetailEvent),
                     Stream.map((event) => ({

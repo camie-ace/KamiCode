@@ -158,7 +158,7 @@ interface SubscriptionOptions<TTag extends EnvironmentSubscriptionRpcTag> {
   readonly onExpectedFailure?: (
     cause: Cause.Cause<EnvironmentRpcStreamFailure<TTag>>,
   ) => Effect.Effect<void, never, never>;
-  readonly retryExpectedFailureAfter?: Duration.Input;
+  readonly retryExpectedFailureAfter?: Duration.Input | ((failureCount: number) => Duration.Input);
   readonly resubscribe?: Stream.Stream<unknown, never, never>;
 }
 
@@ -195,7 +195,9 @@ export function subscribeDynamic<TTag extends EnvironmentSubscriptionRpcTag>(
                   EnvironmentRpcStreamValue<TTag>,
                   EnvironmentRpcStreamFailure<TTag>
                 >;
-                const subscribeToSession = (): Stream.Stream<
+                const subscribeToSession = (
+                  expectedFailureCount = 0,
+                ): Stream.Stream<
                   EnvironmentRpcStreamValue<TTag>,
                   EnvironmentRpcStreamFailure<TTag>
                 > =>
@@ -236,13 +238,15 @@ export function subscribeDynamic<TTag extends EnvironmentSubscriptionRpcTag>(
                                 if (options.retryExpectedFailureAfter === undefined) {
                                   return handled;
                                 }
+                                const retryDelay =
+                                  typeof options.retryExpectedFailureAfter === "function"
+                                    ? options.retryExpectedFailureAfter(expectedFailureCount)
+                                    : options.retryExpectedFailureAfter;
                                 return handled.pipe(
                                   Stream.concat(
-                                    Stream.fromEffect(
-                                      Effect.sleep(options.retryExpectedFailureAfter),
-                                    ).pipe(Stream.drain),
+                                    Stream.fromEffect(Effect.sleep(retryDelay)).pipe(Stream.drain),
                                   ),
-                                  Stream.concat(subscribeToSession()),
+                                  Stream.concat(subscribeToSession(expectedFailureCount + 1)),
                                 );
                               }
                               return Stream.failCause(cause);

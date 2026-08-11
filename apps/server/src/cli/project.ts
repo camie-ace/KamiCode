@@ -337,7 +337,9 @@ const dispatchLiveOrchestrationCommand = (
 
 const getOfflineSnapshot = Effect.fn("getOfflineSnapshot")(function* () {
   const projectionSnapshotQuery = yield* ProjectionSnapshotQuery.ProjectionSnapshotQuery;
-  return yield* projectionSnapshotQuery.getSnapshot();
+  // Project mutations only need project/thread command state. Avoid decoding
+  // the complete historical activity payload corpus in offline mode.
+  return yield* projectionSnapshotQuery.getCommandReadModel();
 });
 
 const tryResolveLiveProjectExecutionMode = Effect.fn("tryResolveLiveProjectExecutionMode")(

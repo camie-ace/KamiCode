@@ -32,8 +32,12 @@ export const orchestrationHttpApiLayer = HttpApiBuilder.group(
         Effect.fn("environment.orchestration.snapshot")(function* (args) {
           yield* annotateEnvironmentRequest(args.endpoint.name);
           yield* requireEnvironmentScope(AuthOrchestrationReadScope);
+          // This is the legacy all-in-one endpoint. Current clients hydrate the
+          // shell and individual thread details separately; returning the
+          // command read model here preserves the legacy schema without loading
+          // every historical activity payload into one Node heap.
           return yield* projectionSnapshotQuery
-            .getSnapshot()
+            .getCommandReadModel()
             .pipe(
               Effect.catch((cause) =>
                 failEnvironmentInternal("orchestration_snapshot_failed", cause),

@@ -21,8 +21,8 @@ import * as SynchronizedRef from "effect/SynchronizedRef";
 
 import { toSafeThreadAttachmentSegment } from "../../attachmentStore.ts";
 
-const DEFAULT_MAX_BYTES = 10 * 1024 * 1024;
-const DEFAULT_MAX_FILES = 10;
+const DEFAULT_MAX_BYTES = 2 * 1024 * 1024;
+const DEFAULT_MAX_FILES = 1;
 const DEFAULT_BATCH_WINDOW_MS = 200;
 const GLOBAL_THREAD_SEGMENT = "_global";
 const LOG_SCOPE = "provider-observability";
@@ -212,7 +212,13 @@ export const makeEventNdjsonLogger = Effect.fn("makeEventNdjsonLogger")(function
       }
 
       return makeThreadWriter({
-        filePath: NodePath.join(NodePath.dirname(filePath), `${threadSegment}.log`),
+        // Native and canonical loggers intentionally share the configured base
+        // path. Include the stream in the actual per-thread filename so their
+        // independent rotation sinks never race over the same files.
+        filePath: NodePath.join(
+          NodePath.dirname(filePath),
+          `${threadSegment}.${options.stream}.log`,
+        ),
         maxBytes,
         maxFiles,
         batchWindowMs,

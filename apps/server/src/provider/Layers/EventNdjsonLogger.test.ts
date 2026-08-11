@@ -87,8 +87,8 @@ describe("EventNdjsonLogger", () => {
         );
         yield* logger.close();
 
-        const threadOnePath = NodePath.join(tempDir, "thread-1.log");
-        const threadTwoPath = NodePath.join(tempDir, "thread-2.log");
+        const threadOnePath = NodePath.join(tempDir, "thread-1.native.log");
+        const threadTwoPath = NodePath.join(tempDir, "thread-2.native.log");
         assert.equal(NodeFS.existsSync(threadOnePath), true);
         assert.equal(NodeFS.existsSync(threadTwoPath), true);
 
@@ -105,6 +105,44 @@ describe("EventNdjsonLogger", () => {
           second.payload,
           '{"type":"turn.completed","threadId":"provider-thread-2","id":"evt-2"}',
         );
+      } finally {
+        NodeFS.rmSync(tempDir, { recursive: true, force: true });
+      }
+    }),
+  );
+
+  it.effect("keeps native and canonical rotation files independent", () =>
+    Effect.gen(function* () {
+      const tempDir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-provider-log-"));
+      const basePath = NodePath.join(tempDir, "events.log");
+
+      try {
+        const native = yield* makeEventNdjsonLogger(basePath, {
+          stream: "native",
+          batchWindowMs: 0,
+        });
+        const canonical = yield* makeEventNdjsonLogger(basePath, {
+          stream: "canonical",
+          batchWindowMs: 0,
+        });
+        assert.exists(native);
+        assert.exists(canonical);
+        if (!native || !canonical) return;
+
+        const threadId = ThreadId.make("thread-shared");
+        yield* native.write({ id: "native-event" }, threadId);
+        yield* canonical.write({ id: "canonical-event" }, threadId);
+        yield* native.close();
+        yield* canonical.close();
+
+        const nativePath = NodePath.join(tempDir, "thread-shared.native.log");
+        const canonicalPath = NodePath.join(tempDir, "thread-shared.canonical.log");
+        assert.equal(NodeFS.existsSync(nativePath), true);
+        assert.equal(NodeFS.existsSync(canonicalPath), true);
+        assert.include(NodeFS.readFileSync(nativePath, "utf8"), '"id":"native-event"');
+        assert.notInclude(NodeFS.readFileSync(nativePath, "utf8"), "canonical-event");
+        assert.include(NodeFS.readFileSync(canonicalPath, "utf8"), '"id":"canonical-event"');
+        assert.notInclude(NodeFS.readFileSync(canonicalPath, "utf8"), "native-event");
       } finally {
         NodeFS.rmSync(tempDir, { recursive: true, force: true });
       }
@@ -129,7 +167,7 @@ describe("EventNdjsonLogger", () => {
           yield* logger.write({ id: "evt-invalid-thread" }, "!!!" as unknown as ThreadId);
           yield* logger.close();
 
-          const globalPath = NodePath.join(tempDir, "_global.log");
+          const globalPath = NodePath.join(tempDir, "_global.orchestration.log");
           assert.equal(NodeFS.existsSync(globalPath), true);
           const lines = NodeFS.readFileSync(globalPath, "utf8")
             .trim()
@@ -172,7 +210,7 @@ describe("EventNdjsonLogger", () => {
         );
         yield* logger.close();
 
-        const globalPath = NodePath.join(tempDir, "_global.log");
+        const globalPath = NodePath.join(tempDir, "_global.canonical.log");
         assert.equal(NodeFS.existsSync(globalPath), true);
         const lines = NodeFS.readFileSync(globalPath, "utf8")
           .trim()
@@ -218,7 +256,7 @@ describe("EventNdjsonLogger", () => {
         }
         yield* logger.close();
 
-        const fileStem = "thread-rotate.log";
+        const fileStem = "thread-rotate.native.log";
         const matchingFiles = NodeFS.readdirSync(tempDir)
           .filter((entry) => entry === fileStem || entry.startsWith(`${fileStem}.`))
           .toSorted();
