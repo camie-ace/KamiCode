@@ -288,7 +288,7 @@ const hostedIdentityHeaders = (user: AuthenticatedUser, token: string): Record<s
   return headers;
 };
 
-const decodeHostedPayloadJson = Schema.decodeEffect(Schema.UnknownFromJsonString);
+const decodeHostedPayloadJson = Schema.decodeEffect(Schema.fromJsonString(Schema.Unknown));
 
 const hostedSharedProjectRequest = <T>(input: {
   readonly user: AuthenticatedUser;

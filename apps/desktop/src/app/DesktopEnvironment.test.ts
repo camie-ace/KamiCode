@@ -59,24 +59,27 @@ describe("DesktopEnvironment", () => {
         "/Users/alice/Library/Application Support",
       );
       assert.equal(toPortablePath(environment.baseDir), "/tmp/t3");
-      assert.equal(toPortablePath(environment.stateDir), "/tmp/t3/dev");
+      assert.equal(toPortablePath(environment.stateDir), "/tmp/t3/userdata");
       assert.equal(
         toPortablePath(environment.desktopSettingsPath),
-        "/tmp/t3/dev/desktop-settings.json",
+        "/tmp/t3/userdata/desktop-settings.json",
       );
       assert.equal(
         toPortablePath(environment.clientSettingsPath),
-        "/tmp/t3/dev/client-settings.json",
+        "/tmp/t3/userdata/client-settings.json",
       );
       assert.equal(
         toPortablePath(environment.savedEnvironmentRegistryPath),
-        "/tmp/t3/dev/saved-environments.json",
+        "/tmp/t3/userdata/saved-environments.json",
       );
-      assert.equal(toPortablePath(environment.serverSettingsPath), "/tmp/t3/dev/settings.json");
-      assert.equal(toPortablePath(environment.logDir), "/tmp/t3/dev/logs");
+      assert.equal(
+        toPortablePath(environment.serverSettingsPath),
+        "/tmp/t3/userdata/settings.json",
+      );
+      assert.equal(toPortablePath(environment.logDir), "/tmp/t3/userdata/logs");
       assert.equal(
         toPortablePath(environment.browserArtifactsDir),
-        "/tmp/t3/dev/browser-artifacts",
+        "/tmp/t3/userdata/browser-artifacts",
       );
       assert.equal(toPortablePath(environment.rootDir), "/repo");
       assert.equal(toPortablePath(environment.appRoot), "/repo");

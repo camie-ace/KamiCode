@@ -43,6 +43,7 @@ projectionRepositoriesLayer("Projection repositories", (it) => {
           instanceId: ProviderInstanceId.make("codex"),
           model: "gpt-5.4",
         },
+        defaultThreadEnvMode: null,
         scripts: [],
         testEnvironments: [],
         createdAt: "2026-03-24T00:00:00.000Z",
@@ -106,6 +107,7 @@ projectionRepositoriesLayer("Projection repositories", (it) => {
         settledAt: null,
         snoozedUntil: null,
         snoozedAt: null,
+        pinnedAt: null,
         latestUserMessageAt: null,
         pendingApprovalCount: 0,
         pendingUserInputCount: 0,
@@ -222,6 +224,7 @@ projectionRepositoriesLayer("Projection repositories", (it) => {
           createdAt: now,
           updatedAt: now,
           archivedAt,
+          pinnedAt: null,
           settledOverride: null,
           settledAt: null,
           snoozedUntil: null,
@@ -331,6 +334,71 @@ projectionRepositoriesLayer("Projection repositories", (it) => {
           turnId: "turn-recover-started",
         },
       ]);
+    }),
+  );
+
+  it.effect("round-trips non-null settlement values through the thread row", () =>
+    Effect.gen(function* () {
+      const threads = yield* ProjectionThreadRepository;
+
+      yield* threads.upsert({
+        threadId: ThreadId.make("thread-settled"),
+        projectId: ProjectId.make("project-1"),
+        title: "Settled thread",
+        modelSelection: {
+          instanceId: ProviderInstanceId.make("codex"),
+          model: "gpt-5.4",
+        },
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        branch: null,
+        worktreePath: null,
+        latestTurnId: null,
+        createdAt: "2026-03-24T00:00:00.000Z",
+        updatedAt: "2026-03-25T00:00:00.000Z",
+        archivedAt: null,
+        settledOverride: "settled",
+        settledAt: "2026-03-25T00:00:00.000Z",
+        snoozedUntil: "2026-03-26T09:00:00.000Z",
+        snoozedAt: "2026-03-25T00:00:00.000Z",
+        pinnedAt: "2026-03-25T00:00:00.000Z",
+        latestUserMessageAt: null,
+        pendingApprovalCount: 0,
+        pendingUserInputCount: 0,
+        hasActionableProposedPlan: 0,
+        deletedAt: null,
+      });
+
+      const persisted = yield* threads.getById({
+        threadId: ThreadId.make("thread-settled"),
+      });
+      const row = Option.getOrNull(persisted);
+      if (!row) {
+        return yield* Effect.die("Expected settled projection_threads row to exist.");
+      }
+      assert.strictEqual(row.settledOverride, "settled");
+      assert.strictEqual(row.settledAt, "2026-03-25T00:00:00.000Z");
+      assert.strictEqual(row.snoozedUntil, "2026-03-26T09:00:00.000Z");
+      assert.strictEqual(row.snoozedAt, "2026-03-25T00:00:00.000Z");
+      assert.strictEqual(row.pinnedAt, "2026-03-25T00:00:00.000Z");
+
+      yield* threads.upsert({
+        ...row,
+        settledOverride: "active",
+        settledAt: null,
+        snoozedUntil: null,
+        snoozedAt: null,
+        pinnedAt: null,
+      });
+      const repersisted = yield* threads.getById({
+        threadId: ThreadId.make("thread-settled"),
+      });
+      const updated = Option.getOrNull(repersisted);
+      assert.strictEqual(updated?.settledOverride, "active");
+      assert.strictEqual(updated?.settledAt, null);
+      assert.strictEqual(updated?.snoozedUntil, null);
+      assert.strictEqual(updated?.snoozedAt, null);
+      assert.strictEqual(updated?.pinnedAt, null);
     }),
   );
 });

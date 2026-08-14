@@ -22,6 +22,7 @@ import {
   HttpBody,
   HttpClient,
   HttpClientResponse,
+  HttpMiddleware,
   HttpRouter,
   HttpServerResponse,
   HttpServerRequest,
@@ -160,6 +161,21 @@ const requireFromHttp = NodeModule.createRequire(import.meta.url);
 const hostProcessPlatform = Effect.runSync(HostProcessPlatform);
 let playwrightTraceViewerRoot: string | undefined;
 const DESKTOP_RENDERER_ORIGINS = ["t3code://app", "t3code-dev://app"];
+const SVG_CONTENT_SECURITY_POLICY = "default-src 'none'; style-src 'unsafe-inline'; sandbox";
+
+export function assetResponseHeaders(filePath: string): Record<string, string> {
+  return {
+    "Cache-Control": PRIVATE_ASSET_CACHE_CONTROL,
+    "X-Content-Type-Options": "nosniff",
+    ...(filePath.toLowerCase().endsWith(".svg")
+      ? { "Content-Security-Policy": SVG_CONTENT_SECURITY_POLICY }
+      : {}),
+  };
+}
+
+export const httpCompressionLayer = HttpRouter.middleware(HttpMiddleware.compression(), {
+  global: true,
+});
 
 export const browserApiCorsLayer = Layer.unwrap(
   Effect.gen(function* () {
@@ -569,9 +585,8 @@ export const assetRouteLayer = HttpRouter.add(
       return HttpServerResponse.text("Not Found", { status: 404 });
     }
     const baseHeaders = {
+      ...assetResponseHeaders(asset.path),
       "Accept-Ranges": "bytes",
-      "Cache-Control": PRIVATE_ASSET_CACHE_CONTROL,
-      "X-Content-Type-Options": "nosniff",
     };
     const rangeHeader = request.headers["range"];
     if (typeof rangeHeader === "string") {

@@ -8,9 +8,11 @@
 import type {
   DesktopPreviewAnnotationTheme,
   DesktopPreviewColorScheme,
+  DesktopPreviewFavicon,
   DesktopPreviewPointerEvent,
   PreviewAnnotationPayload,
   PreviewAnnotationRect,
+  PreviewAnnotationSubmissionResult,
   DesktopPreviewRecordingArtifact,
   DesktopPreviewRecordingFrame,
   DesktopPreviewScreenshotArtifact,
@@ -61,6 +63,7 @@ import {
 import { isPreviewAnnotationPayload } from "./PickedElementPayload.ts";
 import { playwrightInjectedRuntimeInstallExpression } from "./PlaywrightInjectedRuntime.ts";
 import { makePreviewAutomationKeySequence } from "./PreviewKeyboard.ts";
+import { captureFavicon, safeHttpOrigin, selectFaviconCandidates } from "./FaviconCapture.ts";
 
 export type PreviewNavStatus =
   | { kind: "Idle" }
@@ -84,6 +87,7 @@ export interface PreviewTabState {
   pictureInPicture: boolean;
   colorScheme: DesktopPreviewColorScheme;
   controller: "human" | "agent" | "none";
+  favicon?: DesktopPreviewFavicon;
   updatedAt: string;
 }
 
@@ -104,11 +108,12 @@ const PICTURE_IN_PICTURE_INITIAL_WIDTH = 480;
 const PICTURE_IN_PICTURE_INITIAL_HEIGHT = 320;
 const PICTURE_IN_PICTURE_MIN_WIDTH = 240;
 const PICTURE_IN_PICTURE_MIN_HEIGHT = 160;
+const PICTURE_IN_PICTURE_ASPECT_RATIO_EPSILON = 0.002;
 const DIAGNOSTIC_BUFFER_LIMIT = 200;
 const MAX_ARTIFACT_SITE_SLUG_LENGTH = 80;
 const AGENT_CURSOR_MOVE_MS = 160;
 const AGENT_CURSOR_CLICK_LEAD_MS = 40;
-const encodeUnknownJson = Schema.encodeUnknownEffect(Schema.UnknownFromJsonString);
+const encodeUnknownJson = Schema.encodeUnknownEffect(Schema.fromJsonString(Schema.Unknown));
 const DEFAULT_ANNOTATION_THEME: DesktopPreviewAnnotationTheme = {
   colorScheme: "light",
   radius: "0.625rem",
@@ -164,8 +169,8 @@ export const fitPictureInPictureContentSize = (
 ): readonly [width: number, height: number] => {
   const currentWidth = Math.max(1, current[0] ?? PICTURE_IN_PICTURE_INITIAL_WIDTH);
   const currentHeight = Math.max(1, current[1] ?? PICTURE_IN_PICTURE_INITIAL_HEIGHT);
-  let width =
-    currentWidth / currentHeight > aspectRatio ? currentHeight * aspectRatio : currentWidth;
+  const currentArea = currentWidth * currentHeight;
+  let width = Math.sqrt(currentArea * aspectRatio);
   let height = width / aspectRatio;
   const minimumScale = Math.max(
     1,
@@ -344,7 +349,10 @@ type PreviewInputSignal =
   | { readonly kind: "key"; readonly key: string; readonly code: string };
 
 interface ManagedListeners {
+  readonly attachmentId: symbol;
+  readonly cancelFaviconCapture: () => void;
   readonly scope: Scope.Closeable;
+  readonly webContents: Electron.WebContents;
 }
 
 type FrameCaptureConsumer = "picture-in-picture" | "recording";
@@ -404,6 +412,13 @@ const APP_FORWARDED_SHORTCUTS: ReadonlyArray<{
   // mod+W → close tab/panel
   { key: "w", meta: true, shift: false, control: false },
 ]);
+
+export const isPreviewRefreshShortcut = (input: Electron.Input): boolean =>
+  input.type === "keyDown" &&
+  input.key.toLowerCase() === "r" &&
+  (input.meta || input.control) &&
+  !input.shift &&
+  !input.alt;
 
 const isPreviewInputSignal = (value: unknown): value is PreviewInputSignal => {
   if (typeof value !== "object" || value === null || !("kind" in value)) return false;
@@ -604,6 +619,15 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
     );
   });
 
+  const emitIfCurrent = Effect.fn("PreviewManager.emitIfCurrent")(function* (
+    tabId: string,
+    state: PreviewTabState,
+  ) {
+    if ((yield* SynchronizedRef.get(tabsRef)).get(tabId) === state) {
+      yield* emit(tabId, state);
+    }
+  });
+
   const update = Effect.fn("PreviewManager.update")(function* (
     tabId: string,
     patch: Partial<PreviewTabState>,
@@ -670,10 +694,17 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
       ),
     );
 
+  const tabIdForWebContents = Effect.fnUntraced(function* (webContentsId: number) {
+    const tabs = yield* SynchronizedRef.get(tabsRef);
+    return (
+      Array.from(tabs.entries()).find(([, tab]) => tab.webContentsId === webContentsId)?.[0] ?? null
+    );
+  });
+
   const pushBounded = <A>(buffer: ReadonlyArray<A>, entry: A): ReadonlyArray<A> =>
     [...buffer, entry].slice(-DIAGNOSTIC_BUFFER_LIMIT);
 
-  const captureDiagnosticMessage = Effect.fn("PreviewManager.captureDiagnosticMessage")(function* (
+  const captureDiagnosticMessage = Effect.fnUntraced(function* (
     webContentsId: number,
     method: string,
     params: Record<string, unknown>,
@@ -851,11 +882,53 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
         const createControlSession = Effect.fn("PreviewManager.createControlSession")(function* () {
           const semaphore = yield* Semaphore.make(1);
           const scope = yield* Scope.fork(parentScope, "sequential");
-          const handleDebuggerMessage = Effect.fn("PreviewManager.handleDebuggerMessage")(
-            function* (method: string, params: Record<string, unknown>) {
-              yield* captureDiagnosticMessage(wc.id, method, params);
-            },
-          );
+          const handleDebuggerMessage = Effect.fnUntraced(function* (
+            method: string,
+            params: Record<string, unknown>,
+          ) {
+            if (method === "Page.screencastFrame") {
+              const sessionId = params["sessionId"];
+              if (typeof sessionId === "number") {
+                yield* attemptPromise(
+                  {
+                    operation: "ackScreencastFrame",
+                    webContentsId: wc.id,
+                  },
+                  () => wc.debugger.sendCommand("Page.screencastFrameAck", { sessionId }),
+                ).pipe(Effect.ignore);
+              }
+              const tabId = yield* tabIdForWebContents(wc.id);
+              const metadata =
+                typeof params["metadata"] === "object" && params["metadata"] !== null
+                  ? (params["metadata"] as Record<string, unknown>)
+                  : {};
+              if (tabId && typeof params["data"] === "string") {
+                const captureSession = (yield* SynchronizedRef.get(frameCaptureSessionsRef)).get(
+                  tabId,
+                );
+                if (captureSession?.consumers.has("recording")) {
+                  const receivedAt = yield* currentIso;
+                  const listeners = yield* Ref.get(recordingFrameListenersRef);
+                  const frame: DesktopPreviewRecordingFrame = {
+                    tabId,
+                    data: params["data"],
+                    width:
+                      typeof metadata["deviceWidth"] === "number" ? metadata["deviceWidth"] : 0,
+                    height:
+                      typeof metadata["deviceHeight"] === "number" ? metadata["deviceHeight"] : 0,
+                    receivedAt,
+                  };
+                  yield* Effect.forEach(
+                    listeners,
+                    (listener) =>
+                      deliverEvent("recording-frame", frame.tabId, () => listener(frame)),
+                    { discard: true },
+                  );
+                }
+              }
+            }
+            yield* captureDiagnosticMessage(wc.id, method, params);
+          });
           const onMessage: BrowserControlSession["onMessage"] = (_event, method, params) => {
             runFork(handleDebuggerMessage(method, params));
           };
@@ -1146,7 +1219,10 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
         copy.delete(webContentsId);
       }),
     ]);
-    if (managed) yield* Scope.close(managed.scope, Exit.void).pipe(Effect.ignore);
+    if (managed) {
+      managed.cancelFaviconCapture();
+      yield* Scope.close(managed.scope, Exit.void).pipe(Effect.ignore);
+    }
   });
 
   const isAppShortcut = (input: Electron.Input): boolean =>
@@ -1210,8 +1286,23 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
     wc: Electron.WebContents,
   ) {
     const scope = yield* Scope.fork(parentScope, "sequential");
+    const attachmentId = Symbol();
+    let documentId = 0;
+    let nextRequestId = 0;
+    let activeCapture: {
+      readonly controller: AbortController;
+      readonly documentId: number;
+      readonly eventKey: string;
+      readonly requestId: number;
+    } | null = null;
+    const cancelFaviconCapture = () => {
+      documentId += 1;
+      activeCapture?.controller.abort();
+      activeCapture = null;
+    };
     const syncState = Effect.fn("PreviewManager.syncWebContentsState")(function* (
       preserveLoadFailure: boolean,
+      confirmedNavigation = false,
     ) {
       if (wc.isDestroyed()) return;
       const zoomFactor = yield* attempt(
@@ -1224,7 +1315,9 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
       const updatedAt = yield* currentIso;
       const next = yield* SynchronizedRef.modify(tabsRef, (tabs) => {
         const current = tabs.get(tabId);
-        if (!current) return [Option.none<PreviewTabState>(), tabs] as const;
+        if (!current || current.webContentsId !== wc.id || webContents.fromId(wc.id) !== wc) {
+          return [Option.none<PreviewTabState>(), tabs] as const;
+        }
         // Electron emits did-stop-loading after did-fail-load. At that point the
         // failed guest is no longer "loading", but it has not successfully
         // navigated anywhere. Keep the failure until a new load actually starts.
@@ -1234,8 +1327,14 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
           computedNavStatus.kind === "Success"
             ? current.navStatus
             : computedNavStatus;
+        const clearFavicon =
+          confirmedNavigation &&
+          current.favicon !== undefined &&
+          safeHttpOrigin(current.favicon.pageUrl) !==
+            safeHttpOrigin(navStatus.kind === "Idle" ? wc.getURL() : navStatus.url);
+        const { favicon: _favicon, ...currentWithoutFavicon } = current;
         const state: PreviewTabState = {
-          ...current,
+          ...(clearFavicon ? currentWithoutFavicon : current),
           navStatus,
           canGoBack,
           canGoForward,
@@ -1249,10 +1348,109 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
           }),
         ] as const;
       });
-      if (Option.isSome(next)) yield* emit(tabId, next.value);
+      if (Option.isSome(next)) yield* emitIfCurrent(tabId, next.value);
     });
     const sync = () => runFork(syncState(true));
-    const syncNavigation = () => runFork(syncState(false));
+    const syncNavigation = () => runFork(syncState(false, true));
+    const syncInPageNavigation = () => runFork(syncState(false));
+    const navigationStarted = (
+      event: Electron.Event<Electron.WebContentsDidStartNavigationEventParams>,
+    ) => {
+      if (event.isMainFrame && !event.isSameDocument) cancelFaviconCapture();
+    };
+    const publishFavicon = Effect.fn("PreviewManager.publishFavicon")(function* (input: {
+      readonly captureDocumentId: number;
+      readonly dataUrl: string;
+      readonly pageUrl: string;
+      readonly requestId: number;
+    }) {
+      const pageOrigin = safeHttpOrigin(input.pageUrl);
+      const managed = (yield* Ref.get(attachedRef)).get(wc.id);
+      if (
+        !pageOrigin ||
+        wc.isDestroyed() ||
+        webContents.fromId(wc.id) !== wc ||
+        managed?.attachmentId !== attachmentId ||
+        activeCapture?.documentId !== input.captureDocumentId ||
+        activeCapture.requestId !== input.requestId ||
+        safeHttpOrigin(wc.getURL()) !== pageOrigin
+      ) {
+        return;
+      }
+      const capturedAt = yield* currentMillis;
+      const updatedAt = yield* currentIso;
+      const next = yield* SynchronizedRef.modify(tabsRef, (tabs) => {
+        const current = tabs.get(tabId);
+        if (
+          !current ||
+          current.webContentsId !== wc.id ||
+          webContents.fromId(wc.id) !== wc ||
+          activeCapture?.documentId !== input.captureDocumentId ||
+          activeCapture.requestId !== input.requestId
+        ) {
+          return [Option.none<PreviewTabState>(), tabs] as const;
+        }
+        const state: PreviewTabState = {
+          ...current,
+          favicon: { dataUrl: input.dataUrl, pageUrl: pageOrigin, capturedAt },
+          updatedAt,
+        };
+        return [
+          Option.some(state),
+          replaceMap(tabs, (copy) => {
+            copy.set(tabId, state);
+          }),
+        ] as const;
+      });
+      if (Option.isSome(next)) yield* emitIfCurrent(tabId, next.value);
+    });
+    const faviconUpdated = (_event: Event, rawCandidates: ReadonlyArray<string>): void => {
+      const pageUrl = wc.getURL();
+      if (!safeHttpOrigin(pageUrl)) return;
+      const candidates = selectFaviconCandidates(rawCandidates);
+      if (candidates.length === 0) return;
+      const eventKey = JSON.stringify([pageUrl, ...candidates]);
+      if (activeCapture?.eventKey === eventKey) return;
+      activeCapture?.controller.abort();
+      const captureDocumentId = documentId;
+      const requestId = ++nextRequestId;
+      const controller = new AbortController();
+      activeCapture = { controller, documentId: captureDocumentId, eventKey, requestId };
+      runFork(
+        Effect.tryPromise({
+          try: () =>
+            captureFavicon({ webContents: wc, pageUrl, candidates, signal: controller.signal }),
+          catch: (cause) =>
+            new PreviewOperationError({
+              operation: "captureFavicon",
+              tabId,
+              webContentsId: wc.id,
+              cause,
+            }),
+        }).pipe(
+          Effect.flatMap((result) =>
+            result.kind === "captured"
+              ? publishFavicon({
+                  captureDocumentId,
+                  dataUrl: result.dataUrl,
+                  pageUrl,
+                  requestId,
+                })
+              : Effect.void,
+          ),
+          Effect.catch((error) =>
+            controller.signal.aborted
+              ? Effect.void
+              : Effect.logDebug("Favicon capture failed.", { error, tabId, webContentsId: wc.id }),
+          ),
+          Effect.ensuring(
+            Effect.sync(() => {
+              if (activeCapture?.requestId === requestId) activeCapture = null;
+            }),
+          ),
+        ),
+      );
+    };
     const failed = (
       _event: Event,
       code: number,
@@ -1315,14 +1513,26 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
       });
     });
     const beforeInput = (event: Electron.Event, input: Electron.Input): void => {
+      if (isPreviewRefreshShortcut(input)) {
+        event.preventDefault();
+        runFork(
+          attempt({ operation: "shortcut.refresh", tabId, webContentsId: wc.id }, () =>
+            wc.reload(),
+          ).pipe(Effect.ignore),
+        );
+        return;
+      }
       runFork(forwardShortcut(event, input));
     };
     yield* Scope.addFinalizer(
       scope,
       attempt({ operation: "detachListeners", tabId, webContentsId: wc.id }, () => {
+        cancelFaviconCapture();
+        wc.off("did-start-navigation", navigationStarted);
         wc.off("did-navigate", syncNavigation);
-        wc.off("did-navigate-in-page", syncNavigation);
+        wc.off("did-navigate-in-page", syncInPageNavigation);
         wc.off("page-title-updated", sync);
+        wc.off("page-favicon-updated", faviconUpdated as never);
         wc.off("did-start-loading", sync);
         wc.off("did-stop-loading", sync);
         wc.off("did-fail-load", failed as never);
@@ -1332,9 +1542,11 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
     );
     const install = Effect.fn("PreviewManager.installWebContentsListeners")(function* () {
       yield* attempt({ operation: "attachListeners", tabId, webContentsId: wc.id }, () => {
+        wc.on("did-start-navigation", navigationStarted);
         wc.on("did-navigate", syncNavigation);
-        wc.on("did-navigate-in-page", syncNavigation);
+        wc.on("did-navigate-in-page", syncInPageNavigation);
         wc.on("page-title-updated", sync);
+        wc.on("page-favicon-updated", faviconUpdated as never);
         wc.on("did-start-loading", sync);
         wc.on("did-stop-loading", sync);
         wc.on("did-fail-load", failed as never);
@@ -1351,7 +1563,7 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
       });
       yield* Ref.update(attachedRef, (attached) =>
         replaceMap(attached, (copy) => {
-          copy.set(wc.id, { scope });
+          copy.set(wc.id, { attachmentId, cancelFaviconCapture, scope, webContents: wc });
         }),
       );
     });
@@ -1494,6 +1706,7 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
     const mainWindow = yield* Ref.get(mainWindowRef);
     if (
       !wc ||
+      wc.isDestroyed() ||
       wc.getType() !== "webview" ||
       (Option.isSome(mainWindow) && wc.hostWebContents !== mainWindow.value.webContents)
     ) {
@@ -1501,7 +1714,8 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
     }
     const attached = yield* Ref.get(attachedRef);
     const annotationTheme = yield* Ref.get(annotationThemeRef);
-    if (tab.webContentsId === webContentsId && attached.has(webContentsId)) {
+    const currentAttachment = attached.get(webContentsId);
+    if (tab.webContentsId === webContentsId && currentAttachment?.webContents === wc) {
       const zoomFactor = yield* attempt(
         { operation: "registerWebview.getZoomFactor", tabId, webContentsId },
         () => wc.getZoomFactor(),
@@ -1513,7 +1727,10 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
       return;
     }
     const replacedWebContentsId =
-      tab.webContentsId != null && tab.webContentsId !== webContentsId ? tab.webContentsId : null;
+      tab.webContentsId != null &&
+      (tab.webContentsId !== webContentsId || currentAttachment?.webContents !== wc)
+        ? tab.webContentsId
+        : null;
     if (replacedWebContentsId !== null) {
       yield* Effect.all(
         [
@@ -1560,8 +1777,9 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
           ] as const;
         }
         const pendingUrl = current.navStatus.kind === "Loading" ? current.navStatus.url : null;
+        const { favicon: _favicon, ...currentWithoutFavicon } = current;
         const next: PreviewTabState = {
-          ...current,
+          ...currentWithoutFavicon,
           webContentsId,
           navStatus: pendingUrl === null ? computeNavStatus(wc) : current.navStatus,
           canGoBack: wc.navigationHistory.canGoBack(),
@@ -1640,6 +1858,7 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
         pictureInPicture: current?.pictureInPicture ?? false,
         colorScheme: current?.colorScheme ?? "system",
         controller: current?.controller ?? "none",
+        ...(current?.favicon ? { favicon: current.favicon } : {}),
         updatedAt,
       };
       return [
@@ -1651,17 +1870,48 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
     });
     yield* emit(tabId, pending);
     if (pending.webContentsId == null) return;
-    const wc = webContents.fromId(pending.webContentsId);
-    if (!wc) {
-      const detached = { ...pending, webContentsId: null };
-      yield* SynchronizedRef.update(tabsRef, (tabs) =>
-        tabs.get(tabId)?.webContentsId !== pending.webContentsId
-          ? tabs
-          : replaceMap(tabs, (copy) => {
-              copy.set(tabId, detached);
-            }),
+    const webContentsId = pending.webContentsId;
+    const wc = webContents.fromId(webContentsId);
+    if (!wc || wc.isDestroyed()) {
+      const expectedAttachment = (yield* Ref.get(attachedRef)).get(webContentsId);
+      yield* withTabLifecycleLock(
+        tabId,
+        Effect.gen(function* () {
+          const currentTab = (yield* SynchronizedRef.get(tabsRef)).get(tabId);
+          const currentAttachment = (yield* Ref.get(attachedRef)).get(webContentsId);
+          const currentWebContents = webContents.fromId(webContentsId);
+          if (
+            currentTab?.webContentsId !== webContentsId ||
+            currentAttachment !== expectedAttachment ||
+            (currentWebContents && !currentWebContents.isDestroyed())
+          ) {
+            return;
+          }
+          yield* Effect.all(
+            [
+              detachControlSession(webContentsId),
+              detachListeners(webContentsId),
+              cancelPickElement(tabId),
+            ],
+            { concurrency: 3, discard: true },
+          );
+          const detached = yield* SynchronizedRef.modify(tabsRef, (tabs) => {
+            const current = tabs.get(tabId);
+            if (current?.webContentsId !== webContentsId) {
+              return [Option.none<PreviewTabState>(), tabs] as const;
+            }
+            const { favicon: _favicon, ...currentWithoutFavicon } = current;
+            const next: PreviewTabState = { ...currentWithoutFavicon, webContentsId: null };
+            return [
+              Option.some(next),
+              replaceMap(tabs, (copy) => {
+                copy.set(tabId, next);
+              }),
+            ] as const;
+          });
+          if (Option.isSome(detached)) yield* emitIfCurrent(tabId, detached.value);
+        }),
       );
-      yield* emit(tabId, detached);
       return;
     }
     if (wc.getURL() === url) {
@@ -1742,7 +1992,7 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
     const wc = yield* requireWebContents(tabId);
     yield* cancelPickElement(tabId);
     const annotationTheme = yield* Ref.get(annotationThemeRef);
-    return yield* Effect.callback<PreviewAnnotationPayload | null, PreviewManagerError>(
+    return yield* Effect.callback<PreviewAnnotationSubmissionResult | null, PreviewManagerError>(
       (resume) => {
         const cleanup = Effect.fn("PreviewManager.cleanupPickElement")(function* () {
           yield* attempt({ operation: "pickElement.cleanup", tabId, webContentsId: wc.id }, () => {
@@ -1757,14 +2007,14 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
           );
         });
         const settlePick = Effect.fn("PreviewManager.settlePickElement")(function* (
-          payload: PreviewAnnotationPayload | null,
+          payload: PreviewAnnotationSubmissionResult | null,
         ) {
           const active = (yield* Ref.get(pickSessionsRef)).get(tabId);
           if (!active || active.cancel !== cancel) return;
           yield* cleanup();
           resume(Effect.succeed(payload));
         });
-        const settle = (payload: PreviewAnnotationPayload | null) => {
+        const settle = (payload: PreviewAnnotationSubmissionResult | null) => {
           runFork(settlePick(payload));
         };
         const cancelPickSession = Effect.fn("PreviewManager.cancelPickSession")(function* () {
@@ -1794,11 +2044,13 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
             return;
           }
           const cropRect = normalizeCaptureRect(args[1]);
+          const submission = args[2] === "send" ? "send" : "attach";
           runFork(
             captureAnnotationScreenshot(tabId, wc, cropRect).pipe(
               Effect.matchEffect({
-                onFailure: () => Effect.sync(() => settle(payload)),
-                onSuccess: (screenshot) => Effect.sync(() => settle({ ...payload, screenshot })),
+                onFailure: () => Effect.sync(() => settle({ annotation: payload, submission })),
+                onSuccess: (screenshot) =>
+                  Effect.sync(() => settle({ annotation: { ...payload, screenshot }, submission })),
               }),
               Effect.ensuring(
                 attempt(
@@ -2074,7 +2326,10 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
               tabId,
             );
             const aspectRatio = frame.width / frame.height;
-            if (previousAspectRatio !== aspectRatio) {
+            if (
+              previousAspectRatio === undefined ||
+              Math.abs(previousAspectRatio - aspectRatio) > PICTURE_IN_PICTURE_ASPECT_RATIO_EPSILON
+            ) {
               yield* attempt(
                 {
                   operation: "pictureInPicture.setAspectRatio",
@@ -3533,7 +3788,7 @@ export class PreviewManager extends Context.Service<
     ) => Effect.Effect<void, PreviewManagerError>;
     readonly pickElement: (
       tabId: string,
-    ) => Effect.Effect<PreviewAnnotationPayload | null, PreviewManagerError>;
+    ) => Effect.Effect<PreviewAnnotationSubmissionResult | null, PreviewManagerError>;
     readonly cancelPickElement: (tabId: string) => Effect.Effect<void, PreviewManagerError>;
     readonly captureScreenshot: (
       tabId: string,

@@ -16,6 +16,7 @@ import {
   ProviderDriverKind,
   ProviderInstanceId,
   PROVIDER_SEND_TURN_MAX_ATTACHMENTS,
+  PROVIDER_SEND_TURN_MAX_IMAGE_BYTES,
 } from "@t3tools/contracts";
 import {
   connectionStatusText,
@@ -60,16 +61,14 @@ import {
   useEffectiveComposerModelState,
 } from "../../composerDraftStore";
 import {
-  EMPTY_PROMPT_STASH_QUEUE,
-  MAX_STASH_ENTRIES_PER_QUEUE,
+  MAX_STASH_ENTRIES,
   partitionStashAttachments,
-  promptStashScopeKey,
   usePromptStashStore,
   type PromptStashEntry,
 } from "../../promptStashStore";
 import { ComposerStashBadge } from "./ComposerStashBadge";
 import { ComposerStashMenu } from "./ComposerStashMenu";
-import { compressImageForStash } from "../../lib/stashImageCompression";
+import { compressImageForStash, compressImageToByteLimit } from "../../lib/imageCompression";
 import { isCommandPaletteOpen } from "../../commandPaletteBus";
 import { getTerminalFocusOwner } from "../../lib/terminalFocus";
 import { resolveShortcutCommand } from "../../keybindings";
@@ -99,7 +98,12 @@ import { ComposerPendingApprovalPanel } from "./ComposerPendingApprovalPanel";
 import { ComposerPendingUserInputPanel } from "./ComposerPendingUserInputPanel";
 import { ComposerPlanFollowUpBanner } from "./ComposerPlanFollowUpBanner";
 import { ComposerAttachmentStrip } from "./ComposerAttachmentStrip";
-import { createComposerAttachment, shouldDisableComposerPromptEditor } from "./ChatComposer.logic";
+import {
+  createComposerAttachment,
+  inferComposerFileMimeType,
+  shouldDisableComposerPromptEditor,
+} from "./ChatComposer.logic";
+import { ComposerControl, ComposerControlIcon, ComposerSelectControl } from "./ComposerControl";
 import { resolveComposerMenuActiveItemId } from "./composerMenuHighlight";
 import { searchSlashCommandItems } from "./composerSlashCommandSearch";
 import {
@@ -114,13 +118,24 @@ import { basenameOfPath } from "../../pierre-icons";
 import { cn, randomUUID } from "~/lib/utils";
 import { Separator } from "../ui/separator";
 
+type ComposerCommandMenuPosition = {
+  bottom: number;
+  left: number;
+  maxHeight: number;
+  width: number;
+};
+
+function composerCommandMenuPositionsEqual(
+  a: ComposerCommandMenuPosition,
+  b: ComposerCommandMenuPosition,
+): boolean {
+  return (
+    a.bottom === b.bottom && a.left === b.left && a.maxHeight === b.maxHeight && a.width === b.width
+  );
+}
+
 function ComposerCommandMenuLayer(props: { anchor: HTMLElement | null; children: ReactNode }) {
-  const [position, setPosition] = useState<{
-    bottom: number;
-    left: number;
-    maxHeight: number;
-    width: number;
-  } | null>(null);
+  const [position, setPosition] = useState<ComposerCommandMenuPosition | null>(null);
 
   useLayoutEffect(() => {
     const anchor = props.anchor;
@@ -131,12 +146,15 @@ function ComposerCommandMenuLayer(props: { anchor: HTMLElement | null; children:
 
     const updatePosition = () => {
       const rect = anchor.getBoundingClientRect();
-      setPosition({
+      const next = {
         bottom: window.innerHeight - rect.top + 8,
         left: rect.left,
         maxHeight: Math.max(96, rect.top - 24),
         width: rect.width,
-      });
+      };
+      setPosition((current) =>
+        current && composerCommandMenuPositionsEqual(current, next) ? current : next,
+      );
     };
 
     updatePosition();
@@ -145,7 +163,16 @@ function ComposerCommandMenuLayer(props: { anchor: HTMLElement | null; children:
 
     const observer =
       typeof ResizeObserver === "undefined" ? null : new ResizeObserver(updatePosition);
-    observer?.observe(anchor);
+    if (observer) {
+      // The composer is centered and capped at a max width, so opening a side
+      // panel slides it sideways without ever resizing it. Watching the anchor
+      // alone would leave the menu behind; the ancestors are what shrink, and
+      // they resize on every frame of the panel animation.
+      observer.observe(anchor);
+      for (let element = anchor.parentElement; element; element = element.parentElement) {
+        observer.observe(element);
+      }
+    }
 
     return () => {
       observer?.disconnect();
@@ -172,7 +199,7 @@ function ComposerCommandMenuLayer(props: { anchor: HTMLElement | null; children:
   );
 }
 import { Button } from "../ui/button";
-import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
+import { Select, SelectItem, SelectPopup, SelectValue } from "../ui/select";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { toastManager } from "../ui/toast";
 import {
@@ -231,7 +258,7 @@ const runtimeModeConfig: Record<
   },
   auto: {
     label: "Auto",
-    description: "An AI reviewer approves routine actions; risky ones still ask.",
+    description: "Supported providers approve routine actions; others still ask.",
     icon: SparklesIcon,
   },
   "full-access": {
@@ -343,10 +370,9 @@ const ComposerFooterModeControls = memo(function ComposerFooterModeControls(prop
       <Tooltip>
         <TooltipTrigger
           render={
-            <Button
-              variant="ghost"
+            <ComposerControl
               className={cn(
-                "shrink-0 whitespace-nowrap px-2 sm:px-3",
+                "shrink-0 whitespace-nowrap",
                 props.interactionMode === "plan"
                   ? "bg-blue-500/10 text-blue-400 hover:bg-blue-500/15 hover:text-blue-300"
                   : props.interactionMode === "test"
@@ -355,9 +381,8 @@ const ComposerFooterModeControls = memo(function ComposerFooterModeControls(prop
                       ? "bg-amber-500/10 text-amber-400 hover:bg-amber-500/15 hover:text-amber-300"
                       : props.interactionMode === "trigger"
                         ? "bg-[#2323FF]/10 text-[#5d5dff] hover:bg-[#2323FF]/15 hover:text-[#7777ff]"
-                        : "text-muted-foreground/70 hover:text-foreground/80",
+                        : "text-secondary-label hover:text-foreground",
               )}
-              size="sm"
               type="button"
               onClick={() => props.onInteractionModeChange(nextInteractionMode)}
               aria-label={interactionModeTooltip}
@@ -365,15 +390,15 @@ const ComposerFooterModeControls = memo(function ComposerFooterModeControls(prop
           }
         >
           {props.interactionMode === "plan" ? (
-            <PencilRulerIcon className="text-current opacity-100" />
+            <ComposerControlIcon icon={PencilRulerIcon} className="text-current opacity-100" />
           ) : props.interactionMode === "test" ? (
-            <FlaskConicalIcon className="text-current opacity-100" />
+            <ComposerControlIcon icon={FlaskConicalIcon} className="text-current opacity-100" />
           ) : props.interactionMode === "workflow" ? (
-            <ListTodoIcon className="text-current opacity-100" />
+            <ComposerControlIcon icon={ListTodoIcon} className="text-current opacity-100" />
           ) : props.interactionMode === "trigger" ? (
-            <ZapIcon className="text-current opacity-100" />
+            <ComposerControlIcon icon={ZapIcon} className="text-current opacity-100" />
           ) : (
-            <BotIcon />
+            <ComposerControlIcon icon={BotIcon} opticalSize="large" />
           )}
           <span className="sr-only sm:not-sr-only">{interactionModeOption.label}</span>
         </TooltipTrigger>
@@ -392,16 +417,9 @@ const ComposerFooterModeControls = memo(function ComposerFooterModeControls(prop
           onValueChange={(value) => props.onRuntimeModeChange(value!)}
         >
           <TooltipTrigger
-            render={
-              <SelectTrigger
-                variant="ghost"
-                size="sm"
-                className="font-medium"
-                aria-label="Runtime mode"
-              />
-            }
+            render={<ComposerSelectControl className="font-medium" aria-label="Runtime mode" />}
           >
-            <RuntimeModeIcon className="size-4" />
+            <ComposerControlIcon icon={RuntimeModeIcon} />
             <SelectValue>{runtimeModeOption.label}</SelectValue>
           </TooltipTrigger>
           <SelectPopup alignItemWithTrigger={false}>
@@ -437,22 +455,21 @@ const ComposerFooterModeControls = memo(function ComposerFooterModeControls(prop
           <Tooltip>
             <TooltipTrigger
               render={
-                <Button
-                  variant="ghost"
+                <ComposerControl
                   className={cn(
-                    "shrink-0 whitespace-nowrap px-2 sm:px-3",
+                    "shrink-0 whitespace-nowrap",
                     props.planSidebarOpen
                       ? "bg-blue-500/10 text-blue-400 hover:bg-blue-500/15 hover:text-blue-300"
-                      : "text-muted-foreground/70 hover:text-foreground/80",
+                      : "text-secondary-label hover:text-foreground",
                   )}
-                  size="sm"
                   type="button"
                   onClick={props.onTogglePlanSidebar}
                   aria-label={planSidebarTooltip}
                 />
               }
             >
-              <ListTodoIcon
+              <ComposerControlIcon
+                icon={ListTodoIcon}
                 className={props.planSidebarOpen ? "text-current opacity-100" : undefined}
               />
               <span className="sr-only sm:not-sr-only">{props.planSidebarLabel}</span>
@@ -481,6 +498,7 @@ const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryActions(
   showPlanFollowUpPrompt: boolean;
   promptHasText: boolean;
   isSendBusy: boolean;
+  sendDisabledReason: string | null;
   isConnecting: boolean;
   isEnvironmentUnavailable: boolean;
   hasSendableContent: boolean;
@@ -501,7 +519,7 @@ const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryActions(
         />
       ) : null}
       {props.isPreparingWorktree ? (
-        <span className="text-muted-foreground/70 text-xs">Preparing worktree...</span>
+        <span className="text-secondary-label text-xs">Preparing worktree...</span>
       ) : null}
       <ComposerPrimaryActions
         compact={props.compact}
@@ -510,6 +528,7 @@ const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryActions(
         showPlanFollowUpPrompt={props.showPlanFollowUpPrompt}
         promptHasText={props.promptHasText}
         isSendBusy={props.isSendBusy}
+        sendDisabledReason={props.sendDisabledReason}
         isConnecting={props.isConnecting}
         isEnvironmentUnavailable={props.isEnvironmentUnavailable}
         isPreparingWorktree={props.isPreparingWorktree}
@@ -594,6 +613,7 @@ export interface ChatComposerProps {
   phase: SessionPhase;
   isConnecting: boolean;
   isSendBusy: boolean;
+  sendDisabledReason: string | null;
   isPreparingWorktree: boolean;
   environmentUnavailable: {
     readonly label: string;
@@ -708,6 +728,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     phase,
     isConnecting,
     isSendBusy,
+    sendDisabledReason,
     isPreparingWorktree,
     environmentUnavailable,
     activePendingApproval,
@@ -761,6 +782,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     setThreadError,
     onExpandImage,
   } = props;
+  const isSendDisabled = sendDisabledReason !== null;
 
   // ------------------------------------------------------------------
   // Store subscriptions (prompt / images / terminal contexts)
@@ -803,7 +825,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const clearComposerDraftPromptAndImages = useComposerDraftStore(
     (store) => store.clearComposerPromptAndImages,
   );
-  const setComposerDraftModelSelection = useComposerDraftStore((store) => store.setModelSelection);
   const syncComposerDraftPersistedAttachments = useComposerDraftStore(
     (store) => store.syncPersistedAttachments,
   );
@@ -948,14 +969,16 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
 
   const selectedPromptEffort = composerProviderState.promptEffort;
   const selectedModelOptionsForDispatch = composerProviderState.modelOptionsForDispatch;
+  // Plan mode is a legacy feature behind Settings → Beta. With the flag off,
+  // ChatView forces the effective mode to "default", so hiding the toggle
+  // can't trap anyone in plan mode.
+  const planModeUiEnabled = settings.planModeEnabled;
   const composerProviderControls = useMemo(
     () => ({
-      showInteractionModeToggle: getProviderInteractionModeToggle(
-        providerStatuses,
-        selectedProvider,
-      ),
+      showInteractionModeToggle:
+        planModeUiEnabled && getProviderInteractionModeToggle(providerStatuses, selectedProvider),
     }),
-    [providerStatuses, selectedProvider],
+    [planModeUiEnabled, providerStatuses, selectedProvider],
   );
   const selectedModelSelection = useMemo<ModelSelection>(
     () => createModelSelection(selectedInstanceId, selectedModel, selectedModelOptionsForDispatch),
@@ -1053,6 +1076,17 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
    * thread) can still be stashed while an earlier encode is running.
    */
   const stashInFlightRef = useRef<Set<string>>(new Set());
+  /**
+   * Count of pasted images still being compressed, per thread. Reserved
+   * against the attachment limit so concurrent pastes can't overshoot it,
+   * and checked by `submitComposer` so a send can't race an image into the
+   * next draft.
+   */
+  const pendingAttachmentProcessingRef = useRef<Map<string, number>>(new Map());
+  const attachmentProcessingKey =
+    typeof composerDraftTarget === "string"
+      ? `draft:${composerDraftTarget}`
+      : `thread:${composerDraftTarget.environmentId}:${composerDraftTarget.threadId}`;
 
   // ------------------------------------------------------------------
   // Derived: composer send state
@@ -1111,41 +1145,45 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           label: "/model",
           description: "Switch response model for this thread",
         },
-        {
-          id: "slash:plan",
-          type: "slash-command",
-          command: "plan",
-          label: "/plan",
-          description: "Switch this thread into plan mode",
-        },
-        {
-          id: "slash:test",
-          type: "slash-command",
-          command: "test",
-          label: "/test",
-          description: "Switch this thread into test mode",
-        },
-        {
-          id: "slash:workflow",
-          type: "slash-command",
-          command: "workflow",
-          label: "/workflow",
-          description: "Switch this thread into workflow mode",
-        },
-        {
-          id: "slash:trigger",
-          type: "slash-command",
-          command: "trigger",
-          label: "/trigger",
-          description: "Switch this thread into trigger mode",
-        },
-        {
-          id: "slash:default",
-          type: "slash-command",
-          command: "default",
-          label: "/default",
-          description: "Switch this thread back to normal build mode",
-        },
+        ...(planModeUiEnabled
+          ? ([
+              {
+                id: "slash:plan",
+                type: "slash-command",
+                command: "plan",
+                label: "/plan",
+                description: "Switch this thread into plan mode",
+              },
+              {
+                id: "slash:test",
+                type: "slash-command",
+                command: "test",
+                label: "/test",
+                description: "Switch this thread into test mode",
+              },
+              {
+                id: "slash:workflow",
+                type: "slash-command",
+                command: "workflow",
+                label: "/workflow",
+                description: "Switch this thread into workflow mode",
+              },
+              {
+                id: "slash:trigger",
+                type: "slash-command",
+                command: "trigger",
+                label: "/trigger",
+                description: "Switch this thread into trigger mode",
+              },
+              {
+                id: "slash:default",
+                type: "slash-command",
+                command: "default",
+                label: "/default",
+                description: "Switch this thread back to normal build mode",
+              },
+            ] as const)
+          : []),
       ] satisfies ReadonlyArray<Extract<ComposerCommandItem, { type: "slash-command" }>>;
       const providerSlashCommandItems = (selectedProviderStatus?.slashCommands ?? []).map(
         (command) => ({
@@ -1180,7 +1218,13 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       );
     }
     return [];
-  }, [composerTrigger, selectedProvider, selectedProviderStatus, workspaceEntries.entries]);
+  }, [
+    composerTrigger,
+    planModeUiEnabled,
+    selectedProvider,
+    selectedProviderStatus,
+    workspaceEntries.entries,
+  ]);
 
   const composerMenuOpen = Boolean(composerTrigger);
   const composerMenuSearchKey = composerTrigger
@@ -1321,6 +1365,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const collapsedComposerPrimaryActionDisabled =
     phase === "running" ||
     isSendBusy ||
+    isSendDisabled ||
     isConnecting ||
     noProviderAvailable ||
     projectSelectionRequired ||
@@ -1889,6 +1934,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     if (!isMobileViewport) return false;
     if (
       isSendBusy ||
+      isSendDisabled ||
       isConnecting ||
       noProviderAvailable ||
       environmentUnavailable !== null ||
@@ -1908,6 +1954,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     isConnecting,
     isMobileViewport,
     isSendBusy,
+    isSendDisabled,
     noProviderAvailable,
     phase,
     showPlanFollowUpPrompt,
@@ -1918,8 +1965,21 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       event?: { preventDefault: () => void },
       options?: { dispatchPolicy?: "immediate" | "queue" },
     ) => {
-      if (noProviderAvailable) {
+      if (noProviderAvailable || isSendDisabled) {
         event?.preventDefault();
+        return;
+      }
+      // A send while a pasted image is still compressing would strand that
+      // image: the turn snapshot wouldn't include it, and it would surface
+      // in the *next* draft instead. Only oversized images hit this — small
+      // files clear the pending counter within a microtask.
+      if ((pendingAttachmentProcessingRef.current.get(attachmentProcessingKey) ?? 0) > 0) {
+        event?.preventDefault();
+        toastManager.add({
+          type: "info",
+          title: "Still preparing an attachment.",
+          description: "Send again once its preview appears.",
+        });
         return;
       }
       onSend(event, options);
@@ -1927,7 +1987,14 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         blurMobileComposerAfterSend();
       }
     },
-    [blurMobileComposerAfterSend, noProviderAvailable, onSend, shouldBlurMobileComposerOnSubmit],
+    [
+      attachmentProcessingKey,
+      blurMobileComposerAfterSend,
+      isSendDisabled,
+      noProviderAvailable,
+      onSend,
+      shouldBlurMobileComposerOnSubmit,
+    ],
   );
   const queueShortcutLabel = useMemo(
     () =>
@@ -1970,6 +2037,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     event: KeyboardEvent,
   ) => {
     if (key === "Tab" && event.shiftKey) {
+      if (!planModeUiEnabled) return false;
       toggleInteractionMode();
       return true;
     }
@@ -2014,23 +2082,13 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   // ------------------------------------------------------------------
   // Prompt stash (⌘S)
   // ------------------------------------------------------------------
-  const stashScopeInstanceId = noProviderAvailable ? null : selectedInstanceId;
-  const stashScope = promptStashScopeKey(stashScopeInstanceId);
-  const stashQueue = usePromptStashStore(
-    (state) => state.queuesByScopeKey[stashScope] ?? EMPTY_PROMPT_STASH_QUEUE,
-  );
-  const stashOtherScopesCount = usePromptStashStore((state) =>
-    Object.entries(state.queuesByScopeKey).reduce(
-      (total, [key, queue]) => (key === stashScope ? total : total + queue.length),
-      0,
-    ),
-  );
+  // One global queue. Stashed prompts carry only text + images so they can be
+  // restored into any thread or provider — stash, switch, restore is the
+  // whole point.
+  const stashQueue = usePromptStashStore((state) => state.entries);
   const stashEntryToQueue = usePromptStashStore((state) => state.stashEntry);
   const takeStashEntry = usePromptStashStore((state) => state.takeEntry);
   const finalizeStashEntryImages = usePromptStashStore((state) => state.finalizeEntryImages);
-  const stashProviderLabel = noProviderAvailable
-    ? "No provider"
-    : getProviderDisplayName(providerStatuses, selectedProvider);
 
   useEffect(() => {
     return () => {
@@ -2056,10 +2114,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const restoreStashEntry = useCallback(
     (entry: PromptStashEntry) => {
       // Remove first so a double activation (click + Enter) can't restore twice.
-      const { entry: taken, durable } = takeStashEntry(
-        promptStashScopeKey(entry.providerInstanceId),
-        entry.id,
-      );
+      const { entry: taken, durable } = takeStashEntry(entry.id);
       if (!taken) return;
       if (!durable) {
         toastManager.add({
@@ -2122,21 +2177,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         }
       }
 
-      const restorableSelection =
-        entry.modelSelection &&
-        providerInstanceEntries.some(
-          (candidate) =>
-            candidate.instanceId === entry.modelSelection?.instanceId &&
-            candidate.enabled &&
-            candidate.isAvailable,
-        )
-          ? entry.modelSelection
-          : null;
-      if (restorableSelection) {
-        setComposerDraftModelSelection(composerDraftTarget, restorableSelection, {
-          replaceOptions: true,
-        });
-      }
+      // Deliberately no model/provider restore: the stash exists to carry a
+      // prompt across threads and providers, so whatever the composer has
+      // selected right now stays selected.
 
       // Each cause gets its own sentence so "too large" is never blamed for a
       // file that actually failed to decode, or for one the composer simply
@@ -2178,8 +2221,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       composerDraftTarget,
       composerImagesRef,
       promptRef,
-      providerInstanceEntries,
-      setComposerDraftModelSelection,
       setComposerDraftPrompt,
       takeStashEntry,
     ],
@@ -2187,7 +2228,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
 
   const deleteStashEntry = useCallback(
     (entry: PromptStashEntry) => {
-      const { durable } = takeStashEntry(promptStashScopeKey(entry.providerInstanceId), entry.id);
+      const { durable } = takeStashEntry(entry.id);
       if (!durable) {
         toastManager.add({
           type: "warning",
@@ -2223,30 +2264,27 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
 
     const stashTarget = composerDraftTarget;
     const entryId = randomUUID();
-    const scopeKey = promptStashScopeKey(stashScopeInstanceId);
     try {
       // Persist the text-only entry *first*, then clear. Ordering matters in
       // both directions: writing before clearing means a crash or closed tab
       // mid-encode still leaves the prompt recoverable, while clearing before
       // the async image work means edits typed during encoding are not wiped.
       // Images are appended to the stored entry as they finish encoding.
-      const { evicted, durable } = stashEntryToQueue({
+      const { evicted, written, durable } = stashEntryToQueue({
         id: entryId,
         createdAt: new Date().toISOString(),
         prompt,
         attachments: [],
-        providerInstanceId: stashScopeInstanceId,
-        modelSelection: noProviderAvailable ? null : selectedModelSelection,
         droppedImageNames: [],
         unreadableImageNames: [],
         pendingImageCount: images.length,
       });
 
-      // Clearing the composer is only safe once the entry is durable. If the
-      // write was rejected (quota, blocked storage) the store has already
-      // rolled itself back, so leave the composer untouched rather than
-      // making it the second casualty of a reload.
-      if (!durable) {
+      // Clearing the composer is only safe once the write actually landed.
+      // If it was rejected (quota) the store has already rolled itself back,
+      // so leave the composer untouched rather than making it the second
+      // casualty of a reload.
+      if (!written) {
         toastManager.add({
           type: "error",
           title: "Could not stash this prompt",
@@ -2255,6 +2293,18 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           data: { hideCopyButton: true },
         });
         return;
+      }
+      // Written but only into the in-memory fallback (localStorage blocked):
+      // the entry is visible and restorable this session, so proceed with the
+      // clear, but say it won't survive a reload.
+      if (!durable) {
+        toastManager.add({
+          type: "warning",
+          title: "Stashed prompt will not survive a reload",
+          description:
+            "Browser storage is unavailable, so this stash is kept in memory only for this session.",
+          data: { hideCopyButton: true },
+        });
       }
 
       // Only the prompt and images are cleared — terminal/element contexts,
@@ -2270,7 +2320,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         toastManager.add({
           type: "warning",
           title: "Oldest stashed prompt discarded",
-          description: `The ${stashProviderLabel} stash holds ${MAX_STASH_ENTRIES_PER_QUEUE} prompts; the oldest was removed to make room.`,
+          description: `The stash holds ${MAX_STASH_ENTRIES} prompts; the oldest was removed to make room.`,
           data: { hideCopyButton: true },
         });
       }
@@ -2302,7 +2352,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       }
       const { kept, droppedNames } = partitionStashAttachments(candidateAttachments);
 
-      const { attached, durable: imagesDurable } = finalizeStashEntryImages(scopeKey, entryId, {
+      const { attached, durable: imagesDurable } = finalizeStashEntryImages(entryId, {
         attachments: kept,
         droppedImageNames: [...oversizedImageNames, ...droppedNames],
         unreadableImageNames,
@@ -2311,8 +2361,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         // The second phase can be rejected on its own: the text-only entry
         // fit, but adding image payloads pushed past the quota. Disk would
         // then still hold the phase-one entry with pendingImageCount set,
-        // which reads as an orphan after reload — so say so now.
-        if (!imagesDurable && images.length > 0) {
+        // which reads as an orphan after reload — so say so now. Gated on the
+        // entry write having been durable: on the in-memory fallback nothing
+        // is ever durable, and the session-only warning already covered it.
+        if (!imagesDurable && durable && images.length > 0) {
           toastManager.add({
             type: "warning",
             title: "Stashed images were not saved",
@@ -2342,13 +2394,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     composerDraftTarget,
     composerImagesRef,
     finalizeStashEntryImages,
-    noProviderAvailable,
     promptRef,
     pulseStashBadge,
-    selectedModelSelection,
     stashEntryToQueue,
-    stashProviderLabel,
-    stashScopeInstanceId,
   ]);
 
   const toggleStashMenu = useCallback(() => {
@@ -2419,7 +2467,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     }
   };
 
-  const addComposerAttachments = (files: File[]) => {
+  const addComposerAttachments = async (files: File[]) => {
     if (files.length === 0) return;
     if (pendingUserInputs.length > 0) {
       toastManager.add({
@@ -2428,31 +2476,81 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       });
       return;
     }
-    const nextAttachments: ComposerAttachment[] = [];
-    let nextAttachmentCount = composerAttachmentsRef.current.length;
+
+    // Reserve slots before the first await so concurrent pastes cannot exceed
+    // the provider attachment cap. Capture the target as well: the user may
+    // switch threads while a large image is being compressed.
+    const processingKey = attachmentProcessingKey;
+    const targetThreadId = activeThreadId;
+    const pendingCount = pendingAttachmentProcessingRef.current.get(processingKey) ?? 0;
+    let nextAttachmentCount = composerAttachmentsRef.current.length + pendingCount;
+    const acceptedFiles: File[] = [];
     let error: string | null = null;
     for (const file of files) {
       if (nextAttachmentCount >= PROVIDER_SEND_TURN_MAX_ATTACHMENTS) {
         error = `You can attach up to ${PROVIDER_SEND_TURN_MAX_ATTACHMENTS} files per message.`;
         break;
       }
-      nextAttachments.push(
-        createComposerAttachment(file, {
-          createId: randomUUID,
-          createPreviewUrl: createAttachmentPreviewUrl,
-        }),
-      );
+      acceptedFiles.push(file);
       nextAttachmentCount += 1;
     }
-    if (nextAttachments.length === 1 && nextAttachments[0]) {
-      addComposerAttachment(nextAttachments[0]);
-    } else if (nextAttachments.length > 1) {
-      addComposerAttachmentsToDraft(nextAttachments);
-    }
-    if (activeThreadId) {
-      setThreadError(activeThreadId, error);
+    if (targetThreadId) {
+      setThreadError(targetThreadId, error);
     } else if (error) {
       toastManager.add({ type: "error", title: error });
+    }
+    if (acceptedFiles.length === 0) return;
+
+    pendingAttachmentProcessingRef.current.set(processingKey, pendingCount + acceptedFiles.length);
+    try {
+      const nextAttachments: ComposerAttachment[] = [];
+      let processingError: string | null = null;
+      for (const file of acceptedFiles) {
+        let attachmentFile = file;
+        if (
+          inferComposerFileMimeType(file).startsWith("image/") &&
+          file.size > PROVIDER_SEND_TURN_MAX_IMAGE_BYTES
+        ) {
+          const compressed = await compressImageToByteLimit(
+            file,
+            PROVIDER_SEND_TURN_MAX_IMAGE_BYTES,
+          );
+          if (!compressed.ok) {
+            processingError =
+              compressed.reason === "unreadable"
+                ? `'${file.name}' could not be read as an image.`
+                : `'${file.name}' is too large to attach, even after compression.`;
+            continue;
+          }
+          attachmentFile = compressed.file;
+        }
+        nextAttachments.push(
+          createComposerAttachment(attachmentFile, {
+            createId: randomUUID,
+            createPreviewUrl: createAttachmentPreviewUrl,
+          }),
+        );
+      }
+      if (nextAttachments.length === 1 && nextAttachments[0]) {
+        addComposerAttachment(nextAttachments[0]);
+      } else if (nextAttachments.length > 1) {
+        addComposerAttachmentsToDraft(nextAttachments);
+      }
+      if (processingError) {
+        if (targetThreadId) {
+          setThreadError(targetThreadId, processingError);
+        } else {
+          toastManager.add({ type: "error", title: processingError });
+        }
+      }
+    } finally {
+      const remaining =
+        (pendingAttachmentProcessingRef.current.get(processingKey) ?? 0) - acceptedFiles.length;
+      if (remaining > 0) {
+        pendingAttachmentProcessingRef.current.set(processingKey, remaining);
+      } else {
+        pendingAttachmentProcessingRef.current.delete(processingKey);
+      }
     }
   };
 
@@ -2467,7 +2565,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const onComposerAttachmentInputChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(event.currentTarget.files ?? []);
     event.currentTarget.value = "";
-    addComposerAttachments(files);
+    void addComposerAttachments(files);
     focusComposer();
   };
 
@@ -2478,7 +2576,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     const files = Array.from(event.clipboardData.files);
     if (files.length === 0) return;
     event.preventDefault();
-    addComposerAttachments(files);
+    void addComposerAttachments(files);
   };
 
   const onComposerDragEnter = (event: React.DragEvent<HTMLDivElement>) => {
@@ -2512,7 +2610,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     dragDepthRef.current = 0;
     setIsDragOverComposer(false);
     const files = Array.from(event.dataTransfer.files);
-    addComposerAttachments(files);
+    void addComposerAttachments(files);
     focusComposer();
   };
 
@@ -2894,9 +2992,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     type="button"
                     className={cn(
                       "min-w-0 flex-1 truncate bg-transparent py-1.5 text-left text-sm",
-                      activePendingProgress?.customAnswer
-                        ? "text-foreground"
-                        : "text-muted-foreground/60",
+                      activePendingProgress?.customAnswer ? "text-foreground" : "text-placeholder",
                       !activePendingProgress?.activeQuestion?.multiSelect && "px-3 py-2",
                     )}
                     onPointerDown={(event) => event.preventDefault()}
@@ -2913,6 +3009,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                       showPlanFollowUpPrompt={false}
                       promptHasText={false}
                       isSendBusy={isSendBusy}
+                      sendDisabledReason={sendDisabledReason}
                       isConnecting={isConnecting}
                       isEnvironmentUnavailable={
                         environmentUnavailable !== null ||
@@ -2942,7 +3039,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                   "min-w-0 flex-1 truncate bg-transparent p-0 text-left text-[14px] focus:outline-none",
                   (activePendingProgress ? activePendingProgress.customAnswer : prompt.trim())
                     ? "text-foreground"
-                    : "text-muted-foreground/35",
+                    : "text-placeholder",
                 )}
                 onPointerDown={(event) => event.preventDefault()}
                 onClick={expandMobileComposer}
@@ -2956,7 +3053,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
               </button>
               <button
                 type="button"
-                className="flex size-8 shrink-0 items-center justify-center rounded-full bg-primary/90 text-primary-foreground disabled:opacity-30"
+                className="flex size-8 shrink-0 items-center justify-center rounded-full bg-message-action text-message-action-foreground hover:bg-message-action-hover disabled:opacity-30"
                 disabled={collapsedComposerPrimaryActionDisabled}
                 aria-label={collapsedComposerPrimaryActionLabel}
                 onPointerDown={(event) => event.preventDefault()}
@@ -2998,8 +3095,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
               <ComposerCommandMenuLayer anchor={composerMenuAnchor}>
                 <ComposerStashMenu
                   entries={stashQueue}
-                  providerLabel={stashProviderLabel}
-                  otherScopesCount={stashOtherScopesCount}
                   onRestore={restoreStashEntry}
                   onDelete={deleteStashEntry}
                   onClose={() => setIsStashMenuOpen(false)}
@@ -3145,6 +3240,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     showPlanFollowUpPrompt={false}
                     promptHasText={false}
                     isSendBusy={isSendBusy}
+                    sendDisabledReason={sendDisabledReason}
                     isConnecting={isConnecting}
                     isEnvironmentUnavailable={
                       environmentUnavailable !== null ||
@@ -3167,7 +3263,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
 
           {/* Bottom toolbar */}
           {isComposerCollapsedMobile ? null : activePendingApproval ? (
-            <div className="flex items-center justify-end gap-2 px-2.5 pb-2.5 sm:px-3 sm:pb-3">
+            <div className="flex items-center justify-end gap-2 px-3 pb-3 sm:px-4 sm:pb-4">
               <ComposerPendingApprovalActions
                 requestId={activePendingApproval.requestId}
                 isResponding={respondingRequestIds.includes(activePendingApproval.requestId)}
@@ -3179,7 +3275,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
               data-chat-composer-footer="true"
               data-chat-composer-footer-compact={isComposerFooterCompact ? "true" : "false"}
               className={cn(
-                "flex min-w-0 flex-nowrap items-center justify-between gap-2 overflow-visible px-2.5 pb-2.5 sm:px-3 sm:pb-3",
+                "flex min-w-0 flex-nowrap items-center justify-between gap-2 overflow-visible px-3 pb-3 sm:px-4 sm:pb-4",
                 pendingUserInputs.length > 0 && "pt-2",
                 isComposerFooterCompact ? "gap-1.5" : "gap-2 sm:gap-0",
                 showMobilePendingAnswerActions && "hidden sm:flex",
@@ -3214,7 +3310,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     variant="ghost"
                     disabled
                     data-chat-provider-unavailable="true"
-                    className="shrink-0 gap-2 px-2 text-muted-foreground/70 sm:px-3"
+                    className="shrink-0 gap-2 px-2 text-secondary-label sm:px-3"
                   >
                     <CircleAlertIcon className="size-4" />
                     No provider available
@@ -3297,6 +3393,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                   showPlanFollowUpPrompt={pendingUserInputs.length === 0 && showPlanFollowUpPrompt}
                   promptHasText={prompt.trim().length > 0}
                   isSendBusy={isSendBusy}
+                  sendDisabledReason={sendDisabledReason}
                   isConnecting={isConnecting}
                   isEnvironmentUnavailable={
                     environmentUnavailable !== null ||

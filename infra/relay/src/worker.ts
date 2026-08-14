@@ -72,6 +72,11 @@ const webcryptoLayer = Layer.succeed(
 );
 
 const httpPlatformNotSupportedLayer = Layer.succeed(HttpPlatform.HttpPlatform, {
+  platform: "web",
+  compression: {
+    algorithms: new Set<HttpPlatform.CompressionAlgorithm>(),
+    compressResponse: (response) => Effect.succeed(response),
+  },
   fileResponse: () => Effect.die("Relay API does not serve filesystem responses"),
   fileWebResponse: () => Effect.die("Relay API does not serve file responses"),
 });
@@ -217,7 +222,11 @@ export const ApiLive = Api.make(
       Layer.provideMerge(LiveActivities.layer),
       Layer.provideMerge(DeliveryAttempts.layer),
       Layer.provideMerge(RelayTokens.layer),
-      Layer.provideMerge(Layer.succeed(RelayDb.RelayDb, db)),
+      Layer.provideMerge(
+        RelayDb.RelayTransactions.layer.pipe(
+          Layer.provideMerge(Layer.succeed(RelayDb.RelayDb, db)),
+        ),
+      ),
       Layer.provideMerge(Layer.effect(RelayConfiguration.RelayConfiguration, loadSettings)),
       Layer.provideMerge(webcryptoLayer),
     );

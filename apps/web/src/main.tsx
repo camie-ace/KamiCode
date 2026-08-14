@@ -5,10 +5,6 @@ import { passkeys } from "@clerk/electron/passkeys";
 import { ClerkProvider as ElectronClerkProvider } from "@clerk/electron/react";
 import { createHashHistory, createBrowserHistory } from "@tanstack/react-router";
 
-import "@fontsource-variable/dm-sans/index.css";
-import "@fontsource/jetbrains-mono/400.css";
-import "@fontsource/jetbrains-mono/500.css";
-import "@xterm/xterm/css/xterm.css";
 import "./index.css";
 
 import { isElectron } from "./env";
@@ -21,6 +17,7 @@ import {
 } from "./lib/windowControlsOverlay";
 import { AppRoot } from "./AppRoot";
 import { installBrowserSessionSync } from "./browserSessionSync";
+import { clerkAppearance } from "./components/clerk/clerkAppearance";
 
 // Electron loads the app from a file-backed shell, so hash history avoids path resolution issues.
 const history = isElectron ? createHashHistory() : createBrowserHistory();
@@ -38,15 +35,27 @@ const clerkPublishableKey = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY as string
 
 const app = <AppRoot router={router} />;
 
+// @clerk/electron forwards provider options at runtime, but 0.0.24's Omit-based
+// declaration loses the React provider's appearance property.
+const StyledElectronClerkProvider = ElectronClerkProvider as React.ComponentType<
+  React.ComponentProps<typeof ElectronClerkProvider> & {
+    appearance?: React.ComponentProps<typeof ClerkProvider>["appearance"];
+  }
+>;
+
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>
     {clerkPublishableKey && hasCloudPublicConfig() ? (
       isElectron ? (
-        <ElectronClerkProvider publishableKey={clerkPublishableKey} passkeys={passkeys}>
+        <StyledElectronClerkProvider
+          appearance={clerkAppearance}
+          publishableKey={clerkPublishableKey}
+          passkeys={passkeys}
+        >
           <ManagedRelayAuthProvider>{app}</ManagedRelayAuthProvider>
-        </ElectronClerkProvider>
+        </StyledElectronClerkProvider>
       ) : (
-        <ClerkProvider publishableKey={clerkPublishableKey}>
+        <ClerkProvider appearance={clerkAppearance} publishableKey={clerkPublishableKey}>
           <ManagedRelayAuthProvider>{app}</ManagedRelayAuthProvider>
         </ClerkProvider>
       )

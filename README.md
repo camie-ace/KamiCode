@@ -1,23 +1,28 @@
 # KamiCode
 
-KamiCode is a minimal web GUI for coding agents (currently Codex, Claude, Cursor, and OpenCode, more coming soon).
+KamiCode is an agent-harness control surface for Codex, Claude, Cursor, Grok Build, and OpenCode.
 
 ## Installation
 
 > [!WARNING]
-> KamiCode currently supports Codex, Claude, Cursor, and OpenCode.
+> KamiCode currently supports Codex, Claude, Cursor, Grok Build, and OpenCode.
 > Install and authenticate at least one provider before use:
 >
 > - Codex: install [Codex CLI](https://developers.openai.com/codex/cli) and run `codex login`
 > - Claude: install [Claude Code](https://claude.com/product/claude-code) and run `claude auth login`
-> - Cursor: install [Cursor CLI](https://cursor.com/cli) and run `cursor-agent login`
+> - Cursor: install [Cursor CLI](https://cursor.com/cli) and run `agent login`
+> - Grok Build: install [Grok Build CLI](https://x.ai/cli) and run `grok login`
 > - OpenCode: install [OpenCode](https://opencode.ai) and run `opencode auth login`
 
-### Run without installing
+### Try it out (install-free)
+
+The easiest way to test T3 Code is to run the server in your terminal (requires Node.js 22.16+, 23.11+, or 24.10+):
 
 ```bash
 npx t3@latest
 ```
+
+This will launch T3 Code's backend on your machine as well as the local web app to control your agents.
 
 Tip: Use `npx t3@latest --help` for the full CLI reference.
 
@@ -57,19 +62,23 @@ yay -S t3code-bin
 
 We are very very early in this project. Expect bugs.
 
-We are not accepting contributions yet.
-
-There's no public docs site yet, checkout the miscellaneous markdown files in [docs](./docs).
+We are (mostly) not accepting contributions yet. Small fixes may be considered. Big features will not be.
 
 ## Documentation
 
-- [Getting started](./docs/getting-started/quick-start.md)
-- [Remote access](./docs/user/remote-access.md)
-- [Keeping T3 Code in sync](./docs/user/server-updates.md)
-- [Architecture overview](./docs/architecture/overview.md)
-- [Provider guides](./docs/providers/codex.md)
-- [Operations](./docs/operations/ci.md)
-- [Reference](./docs/reference/encyclopedia.md)
+Full docs live in [docs/](./docs). There's no docs site yet.
+
+- [Install and first run](./docs/user/install.md)
+- [Permission modes](./docs/user/permission-modes.md)
+- [Keyboard shortcuts](./docs/user/keybindings.md)
+- [Customize a project icon](./docs/user/project-settings.md)
+- [Remote access from a phone or another machine](./docs/user/remote-access.md)
+- [Keeping app and server in sync](./docs/user/updating.md)
+- [Source control integrations](./docs/user/source-control.md)
+- Multiple accounts: [Codex](./docs/user/providers-codex.md) · [Claude](./docs/user/providers-claude.md)
+- Linux: [run T3 Code as a background service](./docs/user/background-service.md)
+
+Building from source? Start at [docs/internals/overview.md](./docs/internals/overview.md).
 
 ## If you REALLY want to contribute still.... read this first
 

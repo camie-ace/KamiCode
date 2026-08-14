@@ -57,6 +57,7 @@ import { LATEST_WINDOWS_DOWNLOAD_URL, RELEASES_URL } from "../lib/releases";
         </a>
       </div>
     </section>
+
   </div>
 
   <p class="releases-link">
@@ -77,7 +78,8 @@ import { LATEST_WINDOWS_DOWNLOAD_URL, RELEASES_URL } from "../lib/releases";
 
   async function init() {
     const versionLabel = document.getElementById("version-label");
-    const cards = document.querySelectorAll<HTMLAnchorElement>(".download-card");
+    // Only release-asset cards; mobile store cards have no data-asset and keep their href.
+    const cards = document.querySelectorAll<HTMLAnchorElement>(".download-card[data-asset]");
 
     try {
       const release = await fetchLatestRelease();

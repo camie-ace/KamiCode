@@ -228,8 +228,6 @@ export default function ProjectTriggersSection({
   const selectedExecutionLocation = selectedProject
     ? resolveProjectTriggerExecutionLocation(selectedProject.environmentId, primaryEnvironmentId)
     : "this-runtime";
-  const selectedExecutionLocationLabel =
-    projectTriggerExecutionLocationLabel(selectedExecutionLocation);
 
   const reloadTriggers = useCallback(async () => {
     if (!selectedProject) {

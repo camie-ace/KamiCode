@@ -50,7 +50,10 @@ export const BranchToolbarEnvModeSelector = memo(function BranchToolbarEnvModeSe
 
   if (envLocked) {
     return (
-      <span className="inline-flex items-center gap-1 border border-transparent px-[calc(--spacing(3)-1px)] text-sm font-medium text-muted-foreground/70 sm:text-xs">
+      <span
+        className="inline-flex h-7 shrink-0 items-center gap-1 border border-transparent px-[calc(--spacing(3)-1px)] text-sm font-medium text-muted-foreground/70 sm:h-6 sm:text-xs"
+        data-composer-context-control
+      >
         {activeWorktreePath ? (
           <>
             <FolderGitIcon className="size-3" />
@@ -79,7 +82,13 @@ export const BranchToolbarEnvModeSelector = memo(function BranchToolbarEnvModeSe
       }}
       items={envModeItems}
     >
-      <SelectTrigger variant="ghost" size="xs" className="font-medium" aria-label="Workspace">
+      <SelectTrigger
+        variant="ghost"
+        size="xs"
+        className="min-w-0 shrink font-medium"
+        aria-label="Workspace"
+        data-composer-context-control
+      >
         {effectiveEnvMode === "worktree" ? (
           <FolderGit2Icon className="size-3" />
         ) : activeWorktreePath ? (
@@ -87,7 +96,17 @@ export const BranchToolbarEnvModeSelector = memo(function BranchToolbarEnvModeSe
         ) : (
           <FolderIcon className="size-3" />
         )}
-        <SelectValue />
+        <span
+          data-composer-label
+          className="min-w-0 max-w-[240px] group-data-[compact]/composer-context:max-w-0"
+        >
+          <span
+            data-composer-label-motion
+            className="block w-full min-w-0 max-w-[240px] origin-left truncate transition-[opacity,transform] duration-180 ease-[cubic-bezier(0.32,0.72,0,1)] group-data-[compact]/composer-context:[transform:translateX(-0.25rem)_scaleX(0.95)] group-data-[compact]/composer-context:opacity-0 motion-reduce:transform-none motion-reduce:transition-opacity"
+          >
+            <SelectValue />
+          </span>
+        </span>
       </SelectTrigger>
       <SelectPopup>
         <SelectGroup>

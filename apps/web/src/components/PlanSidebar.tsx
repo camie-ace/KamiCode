@@ -617,12 +617,13 @@ interface PlanSidebarProps {
 }
 
 const EMPTY_PLAN_SIDEBAR_ACTIVITIES: ReadonlyArray<OrchestrationThreadActivity> = [];
+const EMPTY_WORKFLOW_LANE_RUN_DETAILS: ReadonlyArray<WorkflowLaneRunDetail> = [];
 
 const PlanSidebar = memo(function PlanSidebar({
   activePlan,
   activeProposedPlan,
   activities = EMPTY_PLAN_SIDEBAR_ACTIVITIES,
-  workflowLaneRunDetails = [],
+  workflowLaneRunDetails = EMPTY_WORKFLOW_LANE_RUN_DETAILS,
   label = "Plan",
   workflowActive = false,
   currentModelSelection,

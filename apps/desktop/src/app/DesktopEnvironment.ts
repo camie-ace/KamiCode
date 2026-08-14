@@ -13,6 +13,7 @@ import * as Path from "effect/Path";
 
 import * as DesktopAppSettings from "../settings/DesktopAppSettings.ts";
 import * as DesktopConfig from "./DesktopConfig.ts";
+import { resolveDesktopBaseDir, resolveDesktopStateDir } from "./DesktopStatePaths.ts";
 import { isNightlyDesktopVersion } from "../updates/updateChannels.ts";
 
 export interface MakeDesktopEnvironmentInput {
@@ -67,6 +68,8 @@ export class DesktopEnvironment extends Context.Service<
     readonly appUserModelId: string;
     readonly linuxDesktopEntryName: string;
     readonly linuxWmClass: string;
+    readonly linuxApplicationsDir: string;
+    readonly appImagePath: Option.Option<string>;
     readonly userDataDirName: string;
     readonly legacyUserDataDirName: string;
     readonly defaultDesktopSettings: DesktopAppSettings.DesktopSettings;
@@ -167,7 +170,11 @@ const make = Effect.fn("desktop.environment.make")(function* (
   const appUserModelIdOverride = config.kamiAppUserModelIdOverride.pipe(
     Option.orElse(() => (input.isPackaged ? Option.none() : config.legacyT3AppUserModelIdOverride)),
   );
-  const baseDir = Option.getOrElse(configuredHome, () => path.join(homeDirectory, ".kamicode"));
+  const baseDir = resolveDesktopBaseDir({
+    homeDirectory,
+    joinPath: path.join,
+    t3Home: configuredHome,
+  });
   const rootDir = path.resolve(input.dirname, "../../..");
   const appRoot = input.isPackaged ? input.appPath : rootDir;
   const branding = resolveDesktopAppBranding({
@@ -175,9 +182,18 @@ const make = Effect.fn("desktop.environment.make")(function* (
     appVersion: input.appVersion,
   });
   const displayName = branding.displayName;
-  const stateDir = path.join(baseDir, isDevelopment ? "dev" : "userdata");
+  const stateDir = resolveDesktopStateDir({
+    baseDir,
+    isDevelopment,
+    joinPath: path.join,
+    t3Home: configuredHome,
+  });
   const userDataDirName = isDevelopment ? "kamicode-dev" : "kamicode";
   const legacyUserDataDirName = isDevelopment ? "KamiCode (Dev)" : "KamiCode (Alpha)";
+  const linuxApplicationsDir = path.join(
+    Option.getOrElse(config.xdgDataHome, () => path.join(homeDirectory, ".local", "share")),
+    "applications",
+  );
   const resourcesPath = input.resourcesPath;
 
   return DesktopEnvironment.of({
@@ -222,6 +238,8 @@ const make = Effect.fn("desktop.environment.make")(function* (
     ),
     linuxDesktopEntryName: isDevelopment ? "kamicode-dev.desktop" : "kamicode.desktop",
     linuxWmClass: isDevelopment ? "kamicode-dev" : "kamicode",
+    linuxApplicationsDir,
+    appImagePath: config.appImagePath,
     userDataDirName,
     legacyUserDataDirName,
     defaultDesktopSettings: DesktopAppSettings.resolveDefaultDesktopSettings(input.appVersion),

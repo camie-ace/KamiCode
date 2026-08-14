@@ -38,6 +38,7 @@ export const DesktopConfig = Config.all({
   xdgConfigHome: trimmedString("XDG_CONFIG_HOME"),
   kamiHome: trimmedString("KAMICODE_HOME"),
   legacyT3Home: trimmedString("T3CODE_HOME"),
+  xdgDataHome: trimmedString("XDG_DATA_HOME"),
   devServerUrl: Config.url("VITE_DEV_SERVER_URL").pipe(Config.option),
   kamiAppUserModelIdOverride: trimmedString("KAMICODE_DESKTOP_APP_USER_MODEL_ID"),
   legacyT3AppUserModelIdOverride: trimmedString("T3CODE_DESKTOP_APP_USER_MODEL_ID"),

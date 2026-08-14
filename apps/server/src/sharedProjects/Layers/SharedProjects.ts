@@ -1,16 +1,6 @@
 import {
-  ChatAttachment as ChatAttachmentSchema,
-  CheckpointRef,
-  CommandId,
-  EventId,
   KamiUserId,
-  MessageId,
-  ModelSelection as ModelSelectionSchema,
-  OrchestrationCheckpointFile as OrchestrationCheckpointFileSchema,
-  OrchestrationProposedPlan as OrchestrationProposedPlanSchema,
   ProjectId,
-  ProviderInteractionMode as ProviderInteractionModeSchema,
-  RuntimeMode as RuntimeModeSchema,
   SharedContextBundle as SharedContextBundleSchema,
   SharedSessionSnapshot as SharedSessionSnapshotSchema,
   SharedThreadCodeState as SharedThreadCodeStateSchema,
@@ -28,23 +18,10 @@ import {
   SharedSshCredentialId,
   SharedThreadId,
   SharedThreadVisibility,
-  type ImportSharedThreadLinkInput,
-  type ResolveSharedThreadShareInput,
   type ResolvedSharedThreadShare,
   ThreadId,
-  TurnId,
-  type ModelSelection,
-  type OrchestrationCheckpointFile,
-  type OrchestrationCheckpointStatus,
-  type OrchestrationCommand,
-  type OrchestrationProposedPlan,
-  type OrchestrationThreadActivityTone,
-  type ProviderInteractionMode,
-  type RuntimeMode,
   type SharedContextBundle,
   type SharedDeployAssociation,
-  type ImportSharedThreadResult,
-  type ChatAttachment,
   type SharedProjectBootstrapManifest,
   type SharedProjectClaimResult,
   type SharedProjectDetail,
@@ -71,7 +48,6 @@ import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import { ServerSecretStore } from "../../auth/ServerSecretStore.ts";
-import { OrchestrationEngineService } from "../../orchestration/Services/OrchestrationEngine.ts";
 import * as ProcessRunner from "../../processRunner.ts";
 import { RepositoryIdentityResolver } from "../../project/RepositoryIdentityResolver.ts";
 import type { AuthenticatedUser } from "../../userAuth/Services/UserAuth.ts";
@@ -98,8 +74,6 @@ const MAX_CONTEXT_ITEMS = 80;
 const SSH_SECRET_KEY_NAME = "shared-project-ssh-credentials";
 const SSH_SECRET_KEY_BYTES = 32;
 const SSH_SECRET_ALGORITHM = "aes-256-gcm";
-const IMPORTED_SHARED_SESSION_TITLE_PREFIX = "Imported: ";
-
 const ContextBundleJson = Schema.fromJsonString(SharedContextBundleSchema);
 const ThreadCodeStateJson = Schema.fromJsonString(SharedThreadCodeStateSchema);
 const ThreadMessagesJson = Schema.fromJsonString(Schema.Array(SharedThreadMessageSchema));
@@ -140,14 +114,6 @@ const decodeStringArrayJson = Schema.decodeUnknownSync(StringArrayJson);
 const decodePackageJson = Schema.decodeUnknownSync(PackageJson);
 const encodeSshSecretJson = Schema.encodeSync(SshCredentialSecretJson);
 const encodeSshEnvelopeJson = Schema.encodeSync(SshSecretEnvelopeJson);
-const decodeChatAttachment = Schema.decodeUnknownSync(ChatAttachmentSchema);
-const decodeModelSelection = Schema.decodeUnknownSync(ModelSelectionSchema);
-const decodeProviderInteractionMode = Schema.decodeUnknownSync(ProviderInteractionModeSchema);
-const decodeRuntimeMode = Schema.decodeUnknownSync(RuntimeModeSchema);
-const decodeOrchestrationProposedPlan = Schema.decodeUnknownSync(OrchestrationProposedPlanSchema);
-const decodeOrchestrationCheckpointFile = Schema.decodeUnknownSync(
-  OrchestrationCheckpointFileSchema,
-);
 
 type SharedProjectRow = {
   readonly sharedProjectId: string;
@@ -359,100 +325,6 @@ function decodeJsonOr<T>(decode: (value: unknown) => T, value: string | null, fa
   } catch {
     return fallback;
   }
-}
-
-function decodeUnknownOrNull<T>(decode: (value: unknown) => T, value: unknown): T | null {
-  try {
-    return decode(value);
-  } catch {
-    return null;
-  }
-}
-
-function newCommandId(scope: string): CommandId {
-  return CommandId.make(`shared-import:${scope}:${randomUUID()}`);
-}
-
-function newLocalThreadId(): ThreadId {
-  return ThreadId.make(randomUUID());
-}
-
-function newLocalMessageId(): MessageId {
-  return MessageId.make(randomUUID());
-}
-
-function newLocalEventId(): EventId {
-  return EventId.make(randomUUID());
-}
-
-function importThreadTitle(title: string): string {
-  const trimmed = title.trim();
-  return `${IMPORTED_SHARED_SESSION_TITLE_PREFIX}${trimmed.length > 0 ? trimmed : "shared session"}`;
-}
-
-function runtimeModeOrDefault(value: unknown): RuntimeMode {
-  return decodeUnknownOrNull(decodeRuntimeMode, value) ?? "full-access";
-}
-
-function interactionModeOrDefault(value: unknown): ProviderInteractionMode {
-  return decodeUnknownOrNull(decodeProviderInteractionMode, value) ?? "default";
-}
-
-function activityToneOrDefault(value: string): OrchestrationThreadActivityTone {
-  return value === "info" || value === "tool" || value === "approval" || value === "error"
-    ? value
-    : "info";
-}
-
-function checkpointStatusOrDefault(value: string): OrchestrationCheckpointStatus {
-  return value === "ready" || value === "missing" || value === "error" ? value : "missing";
-}
-
-function nonNegativeNumber(value: unknown): OrchestrationCheckpointFile["additions"] {
-  return (
-    typeof value === "number" && Number.isFinite(value) && value > 0 ? Math.floor(value) : 0
-  ) as OrchestrationCheckpointFile["additions"];
-}
-
-function normalizeCheckpointFile(value: unknown): OrchestrationCheckpointFile | null {
-  const decoded = decodeUnknownOrNull(decodeOrchestrationCheckpointFile, value);
-  if (decoded) {
-    return decoded;
-  }
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    return null;
-  }
-  const record = value as Record<string, unknown>;
-  const path = typeof record.path === "string" ? record.path.trim() : "";
-  if (path.length === 0) {
-    return null;
-  }
-  const kind =
-    typeof record.kind === "string" && record.kind.trim().length > 0
-      ? record.kind.trim()
-      : "modified";
-  return {
-    path,
-    kind,
-    additions: nonNegativeNumber(record.additions),
-    deletions: nonNegativeNumber(record.deletions),
-  };
-}
-
-function normalizeMessageAttachment(value: unknown): ChatAttachment | null {
-  return decodeUnknownOrNull(decodeChatAttachment, value);
-}
-
-function decodeImportedProposedPlan(value: unknown): OrchestrationProposedPlan | null {
-  const decoded = decodeUnknownOrNull(decodeOrchestrationProposedPlan, value);
-  if (!decoded) {
-    return null;
-  }
-  return {
-    ...decoded,
-    id: newId("imported_plan"),
-    implementationThreadId: null,
-  };
 }
 
 function toRepositoryState(row: SharedProjectRow): SharedRepositoryState {

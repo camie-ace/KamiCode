@@ -9,8 +9,8 @@
  */
 
 import * as Migrator from "effect/unstable/sql/Migrator";
-import * as Layer from "effect/Layer";
 import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
 
 // Import all migrations statically
 import Migration0001 from "./Migrations/001_OrchestrationEvents.ts";
@@ -59,6 +59,12 @@ import Migration0043 from "./Migrations/043_SharedThreadLinks.ts";
 import Migration0044 from "./Migrations/044_WorkflowLaneThreadMetadata.ts";
 import Migration0045 from "./Migrations/033_ProjectionThreadsSettled.ts";
 import Migration0046 from "./Migrations/034_ProjectionThreadsSnoozed.ts";
+import Migration0047 from "./Migrations/035_ProjectionThreadTitleRegeneration.ts";
+import Migration0048 from "./Migrations/036_ProjectionThreadsPinned.ts";
+import Migration0049 from "./Migrations/037_ProjectionTurnsKeysetIndex.ts";
+import Migration0050 from "./Migrations/038_ProjectionThreadsPinOrderKey.ts";
+import Migration0051 from "./Migrations/039_ProjectionProjectsDefaultThreadEnvMode.ts";
+import Migration0052 from "./Migrations/040_ProjectionProjectFaviconPath.ts";
 
 /**
  * Migration loader with all migrations defined inline.
@@ -122,7 +128,15 @@ export const migrationEntries = [
   // that range. Keep the SQL intact but append it under fork-safe ids.
   [45, "ProjectionThreadsSettled", Migration0045],
   [46, "ProjectionThreadsSnoozed", Migration0046],
+  [47, "ProjectionThreadTitleRegeneration", Migration0047],
+  [48, "ProjectionThreadsPinned", Migration0048],
+  [49, "ProjectionTurnsKeysetIndex", Migration0049],
+  [50, "ProjectionThreadsPinOrderKey", Migration0050],
+  [51, "ProjectionProjectsDefaultThreadEnvMode", Migration0051],
+  [52, "ProjectionProjectFaviconPath", Migration0052],
 ] as const;
+
+export const migrationManifest = migrationEntries.map(([id, name]) => [id, name] as const);
 
 export const makeMigrationLoader = (throughId?: number) =>
   Migrator.fromRecord(

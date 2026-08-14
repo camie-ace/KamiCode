@@ -293,6 +293,17 @@ const makeServerOrchestrationDispatcher = Effect.gen(function* () {
               };
             }
 
+            const hasOriginRemote = yield* gitWorkflow.remoteExists({
+              cwd: prepareWorktree.projectCwd,
+              remoteName: "origin",
+            });
+            if (!hasOriginRemote) {
+              return {
+                refName: prepareWorktree.baseBranch,
+                baseRefName: prepareWorktree.baseBranch,
+              };
+            }
+
             yield* gitWorkflow.fetchRemote({
               cwd: prepareWorktree.projectCwd,
               remoteName: "origin",

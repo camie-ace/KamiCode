@@ -18,7 +18,12 @@ import type {
   VcsStatusInput,
   VcsStatusResult,
 } from "./git.ts";
-import type { ReviewDiffPreviewInput, ReviewDiffPreviewResult } from "./review.ts";
+import type {
+  ReviewDiffFileContentsInput,
+  ReviewDiffFileContentsResult,
+  ReviewDiffPreviewInput,
+  ReviewDiffPreviewResult,
+} from "./review.ts";
 import type { FilesystemBrowseInput, FilesystemBrowseResult } from "./filesystem.ts";
 import type { AssetCreateUrlInput, AssetCreateUrlResult } from "./assets.ts";
 import type {
@@ -49,20 +54,6 @@ import type {
   ProjectTriggerUpdateInput,
   ProjectTriggerUpdateResult,
 } from "./projectTriggers.ts";
-import type { ProviderInstanceId } from "./providerInstance.ts";
-import type {
-  ServerConfig,
-  ServerProcessDiagnosticsResult,
-  ServerProcessResourceHistoryInput,
-  ServerProcessResourceHistoryResult,
-  ServerProviderUpdateInput,
-  ServerProviderUpdatedPayload,
-  ServerRemoveKeybindingResult,
-  ServerSignalProcessInput,
-  ServerSignalProcessResult,
-  ServerTraceDiagnosticsResult,
-  ServerUpsertKeybindingResult,
-} from "./server.ts";
 import type {
   TerminalAttachInput,
   TerminalAttachStreamEvent,
@@ -75,7 +66,6 @@ import type {
   TerminalSessionSnapshot,
   TerminalWriteInput,
 } from "./terminal.ts";
-import type { ServerRemoveKeybindingInput, ServerUpsertKeybindingInput } from "./server.ts";
 import * as Schema from "effect/Schema";
 import type {
   DiscoveredLocalServerList,
@@ -118,13 +108,11 @@ import type {
 import { EnvironmentId } from "./baseSchemas.ts";
 import { AuthAccessTokenResult, AuthSessionState, AuthWebSocketTicketResult } from "./auth.ts";
 import { AdvertisedEndpoint } from "./remoteAccess.ts";
-import { EditorId } from "./editor.ts";
 import { ExecutionEnvironmentDescriptor } from "./environment.ts";
-import type { ClientSettings, ServerSettings, ServerSettingsPatch } from "./settings.ts";
+import type { ClientSettings } from "./settings.ts";
 import type {
   SourceControlCloneRepositoryInput,
   SourceControlCloneRepositoryResult,
-  SourceControlDiscoveryResult,
   SourceControlPublishRepositoryInput,
   SourceControlPublishRepositoryResult,
   SourceControlRepositoryInfo,
@@ -490,6 +478,23 @@ export const PickFolderOptionsSchema = Schema.Struct({
   targetEnvironmentId: Schema.optionalKey(Schema.String),
 });
 
+/**
+ * A file returned by the desktop theme-file picker. Oversized files carry an
+ * empty text so the renderer can reject them by size without the main
+ * process ever holding their contents.
+ */
+export interface PickedThemeFile {
+  name: string;
+  size: number;
+  text: string;
+}
+
+export const PickedThemeFileSchema = Schema.Struct({
+  name: Schema.String,
+  size: Schema.Number,
+  text: Schema.String,
+});
+
 export interface DesktopWslDistro {
   name: string;
   isDefault: boolean;
@@ -562,6 +567,28 @@ export type DesktopPreviewColorScheme = "system" | "light" | "dark";
 export const DesktopPreviewColorSchemeSchema: Schema.Codec<DesktopPreviewColorScheme> =
   Schema.Literals(["system", "light", "dark"]);
 
+export const FAVICON_DATA_URL_MAX_LENGTH = 8192;
+export const FAVICON_CAPTURED_AT_MAX = 8_640_000_000_000_000;
+
+export interface DesktopPreviewFavicon {
+  dataUrl: string;
+  pageUrl: string;
+  capturedAt: number;
+}
+
+export const DesktopPreviewFaviconSchema: Schema.Codec<DesktopPreviewFavicon> = Schema.Struct({
+  dataUrl: Schema.String.check(
+    Schema.isMaxLength(FAVICON_DATA_URL_MAX_LENGTH),
+    Schema.isPattern(/^data:image\/png;base64,[a-z0-9+/]+={0,2}$/i),
+  ),
+  pageUrl: Schema.String.check(Schema.isMaxLength(2_048)),
+  capturedAt: Schema.Number.check(
+    Schema.isFinite(),
+    Schema.isGreaterThanOrEqualTo(0),
+    Schema.isLessThanOrEqualTo(FAVICON_CAPTURED_AT_MAX),
+  ),
+});
+
 export interface DesktopPreviewTabState {
   tabId: string;
   webContentsId: number | null;
@@ -574,6 +601,7 @@ export interface DesktopPreviewTabState {
   pictureInPicture: boolean;
   colorScheme: DesktopPreviewColorScheme;
   controller: "human" | "agent" | "none";
+  favicon?: DesktopPreviewFavicon;
   updatedAt: string;
 }
 
@@ -612,6 +640,7 @@ export const DesktopPreviewTabStateSchema: Schema.Codec<DesktopPreviewTabState> 
   pictureInPicture: Schema.Boolean,
   colorScheme: DesktopPreviewColorSchemeSchema,
   controller: Schema.Literals(["human", "agent", "none"]),
+  favicon: Schema.optionalKey(DesktopPreviewFaviconSchema),
   updatedAt: Schema.String,
 });
 
@@ -951,6 +980,20 @@ export const PreviewAnnotationPayloadSchema: Schema.Codec<PreviewAnnotationPaylo
   },
 );
 
+export type PreviewAnnotationSubmission = "attach" | "send";
+export const PreviewAnnotationSubmissionSchema: Schema.Codec<PreviewAnnotationSubmission> =
+  Schema.Literals(["attach", "send"]);
+
+export interface PreviewAnnotationSubmissionResult {
+  annotation: PreviewAnnotationPayload;
+  submission: PreviewAnnotationSubmission;
+}
+export const PreviewAnnotationSubmissionResultSchema: Schema.Codec<PreviewAnnotationSubmissionResult> =
+  Schema.Struct({
+    annotation: PreviewAnnotationPayloadSchema,
+    submission: PreviewAnnotationSubmissionSchema,
+  });
+
 export const DesktopPreviewTabInputSchema = Schema.Struct({
   tabId: DesktopPreviewTabIdSchema,
 });
@@ -1063,7 +1106,12 @@ export interface DesktopBridge {
   setWslDistro: (distro: string | null) => Promise<DesktopWslState>;
   setWslOnly: (enabled: boolean) => Promise<DesktopWslState>;
   pickFolder: (options?: PickFolderOptions) => Promise<string | null>;
-  confirm: (message: string) => Promise<boolean>;
+  /**
+   * Multi-select JSON file picker that opens in the VS Code extensions
+   * directory when one exists. Optional: older desktop builds lack it, and
+   * web callers fall back to a plain file input.
+   */
+  pickThemeFiles?: () => Promise<readonly PickedThemeFile[] | null>;
   setTheme: (theme: DesktopTheme) => Promise<void>;
   showContextMenu: <T extends string>(
     items: readonly ContextMenuItem<T>[],
@@ -1121,10 +1169,11 @@ export interface DesktopPreviewBridge {
   setAnnotationTheme: (theme: DesktopPreviewAnnotationTheme) => Promise<void>;
   /**
    * Activate the in-page element picker for the given tab. Resolves with
-   * the picked payload, or `null` when the user cancels (Escape / nav). The
-   * promise rejects if the picker can't be activated (no webview, etc.).
+   * the picked annotation and its attach/send intent, or `null` when the
+   * user cancels (Escape / nav). The promise rejects if the picker can't be
+   * activated (no webview, etc.).
    */
-  pickElement: (tabId: string) => Promise<PreviewAnnotationPayload | null>;
+  pickElement: (tabId: string) => Promise<PreviewAnnotationSubmissionResult | null>;
   /** Cancel an in-flight preview annotation session. */
   cancelPickElement: (tabId: string) => Promise<void>;
   captureScreenshot: (tabId: string) => Promise<DesktopPreviewScreenshotArtifact>;
@@ -1158,11 +1207,17 @@ export interface DesktopPreviewBridge {
   onPointerEvent: (listener: (event: DesktopPreviewPointerEvent) => void) => () => void;
 }
 
+export type ConfirmDialogVariant = "default" | "destructive";
+
+export interface ConfirmDialogOptions {
+  readonly variant?: ConfirmDialogVariant;
+}
+
 /**
  * APIs bound to the local app shell, not to any particular backend environment.
  *
  * These capabilities describe the desktop/browser host that the user is
- * currently running: dialogs, editor/external-link opening, context menus, and
+ * currently running: dialogs, external-link opening, context menus, and
  * app-level settings/config access. They must not be used as a proxy for
  * "whatever environment the user is targeting", because in a multi-environment
  * world the local shell and a selected backend environment are distinct
@@ -1171,10 +1226,9 @@ export interface DesktopPreviewBridge {
 export interface LocalApi {
   dialogs: {
     pickFolder: (options?: PickFolderOptions) => Promise<string | null>;
-    confirm: (message: string) => Promise<boolean>;
+    confirm: (message: string, options?: ConfirmDialogOptions) => Promise<boolean>;
   };
   shell: {
-    openInEditor: (cwd: string, editor: EditorId) => Promise<void>;
     openExternal: (url: string) => Promise<void>;
     revealLocalMediaFile: (input: RevealLocalMediaFileInput) => Promise<boolean>;
   };
@@ -1187,29 +1241,6 @@ export interface LocalApi {
   persistence: {
     getClientSettings: () => Promise<ClientSettings | null>;
     setClientSettings: (settings: ClientSettings) => Promise<void>;
-  };
-  server: {
-    getConfig: () => Promise<ServerConfig>;
-    /**
-     * Refresh provider snapshots. When `input.instanceId` is supplied only that
-     * configured instance is probed; otherwise every configured instance is
-     * refreshed (legacy untargeted refresh).
-     */
-    refreshProviders: (input?: {
-      readonly instanceId?: ProviderInstanceId;
-    }) => Promise<ServerProviderUpdatedPayload>;
-    updateProvider: (input: ServerProviderUpdateInput) => Promise<ServerProviderUpdatedPayload>;
-    upsertKeybinding: (input: ServerUpsertKeybindingInput) => Promise<ServerUpsertKeybindingResult>;
-    removeKeybinding: (input: ServerRemoveKeybindingInput) => Promise<ServerRemoveKeybindingResult>;
-    getSettings: () => Promise<ServerSettings>;
-    updateSettings: (patch: ServerSettingsPatch) => Promise<ServerSettings>;
-    discoverSourceControl: () => Promise<SourceControlDiscoveryResult>;
-    getTraceDiagnostics: () => Promise<ServerTraceDiagnosticsResult>;
-    getProcessDiagnostics: () => Promise<ServerProcessDiagnosticsResult>;
-    getProcessResourceHistory: (
-      input: ServerProcessResourceHistoryInput,
-    ) => Promise<ServerProcessResourceHistoryResult>;
-    signalProcess: (input: ServerSignalProcessInput) => Promise<ServerSignalProcessResult>;
   };
 }
 
@@ -1308,6 +1339,9 @@ export interface EnvironmentApi {
   };
   review: {
     getDiffPreview: (input: ReviewDiffPreviewInput) => Promise<ReviewDiffPreviewResult>;
+    getDiffFileContents: (
+      input: ReviewDiffFileContentsInput,
+    ) => Promise<ReviewDiffFileContentsResult>;
   };
   orchestration: {
     dispatchCommand: (command: ClientOrchestrationCommand) => Promise<{ sequence: number }>;

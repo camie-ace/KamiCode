@@ -81,6 +81,9 @@ export class ServerConfig extends Context.Service<
     readonly githubOAuthClientId?: string | undefined;
     readonly githubOAuthClientSecret?: string | undefined;
     readonly githubOAuthCallbackUrl?: URL | undefined;
+    readonly desktopTelemetryFd?: number | undefined;
+    readonly desktopTelemetryControlFd?: number | undefined;
+    readonly resourceMonitorPath?: string | undefined;
     readonly autoBootstrapProjectFromCwd: boolean;
     readonly logWebSocketEvents: boolean;
     readonly tailscaleServeEnabled: boolean;
@@ -194,6 +197,9 @@ const makeTest = Effect.fn("ServerConfig.makeTest")(function* (
     githubOAuthClientId: undefined,
     githubOAuthClientSecret: undefined,
     githubOAuthCallbackUrl: undefined,
+    desktopTelemetryFd: undefined,
+    desktopTelemetryControlFd: undefined,
+    resourceMonitorPath: undefined,
     staticDir: undefined,
     devUrl,
     devAllowedOrigins: [],

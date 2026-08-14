@@ -1,4 +1,4 @@
-export const GITHUB_REPOSITORY_URL = "https://github.com/pingdotgg/t3code";
+export const GITHUB_REPOSITORY_URL = "https://github.com/camie-ace/KamiCode";
 
 export const MARKETING_STATS = {
   githubStars: "14k+",

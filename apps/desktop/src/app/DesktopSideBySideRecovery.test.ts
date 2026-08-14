@@ -21,7 +21,7 @@ import * as DesktopSideBySideRecovery from "./DesktopSideBySideRecovery.ts";
 const makeDialogLayer = (dialogs: Array<Record<string, unknown>>, response: number) =>
   Layer.succeed(ElectronDialog.ElectronDialog, {
     pickFolder: () => Effect.succeed(Option.none()),
-    confirm: () => Effect.succeed(false),
+    pickFiles: () => Effect.succeed([]),
     showMessageBox: (options) =>
       Effect.sync(() => {
         dialogs.push(options as unknown as Record<string, unknown>);

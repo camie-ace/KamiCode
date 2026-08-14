@@ -5,6 +5,7 @@ import * as NodePath from "node:path";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
+  assetResponseHeaders,
   isLoopbackHostname,
   listTestHarnessRuns,
   resolveDevRedirectUrl,
@@ -211,5 +212,24 @@ describe("test harness run history", () => {
         cwd: NodePath.join(NodeOS.tmpdir(), "missing-project"),
       }),
     ).resolves.toEqual({ runs: [] });
+  });
+});
+
+describe("assetResponseHeaders", () => {
+  it("sandboxes SVG assets", () => {
+    expect(assetResponseHeaders("/attachments/user-image.svg")).toMatchObject({
+      "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; sandbox",
+      "X-Content-Type-Options": "nosniff",
+    });
+    expect(assetResponseHeaders("/attachments/user-image.SVG")).toHaveProperty(
+      "Content-Security-Policy",
+    );
+  });
+
+  it("does not apply document policy to raster images", () => {
+    expect(assetResponseHeaders("/attachments/user-image.png")).toEqual({
+      "Cache-Control": "private, max-age=3600",
+      "X-Content-Type-Options": "nosniff",
+    });
   });
 });

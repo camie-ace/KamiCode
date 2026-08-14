@@ -25,6 +25,7 @@ import {
   SharedSshCredentialId,
 } from "@t3tools/contracts";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
+import { useAtomValue } from "@effect/atom-react";
 import { useNavigate } from "@tanstack/react-router";
 import {
   CloudIcon,
@@ -79,11 +80,12 @@ import {
   toSharedSessionSnapshot,
   toSharedThreadMessages,
 } from "../../sharedSessionSnapshot";
-import { readLocalApi } from "../../localApi";
+import { ensureLocalApi } from "../../localApi";
 import { resolveInitialPrimaryEnvironmentDescriptor } from "../../environments/primary";
 import { usePrimarySettings, useUpdatePrimarySettings } from "../../hooks/useSettings";
 import { newMessageId, newProjectId, newThreadId } from "../../lib/utils";
 import { projectEnvironment } from "../../state/projects";
+import { primaryServerConfigAtom } from "../../state/server";
 import { threadEnvironment } from "../../state/threads";
 import { useAtomCommand } from "../../state/use-atom-command";
 import type { Project, ThreadShell } from "../../types";
@@ -378,6 +380,7 @@ function EmptyRow({ children }: { readonly children: ReactNode }) {
 
 export function SharedProjectsSettings() {
   const navigate = useNavigate();
+  const primaryServerConfig = useAtomValue(primaryServerConfigAtom);
   const hostedCollaboration = usePrimarySettings((settings) => settings.hostedCollaboration);
   const updatePrimarySettings = useUpdatePrimarySettings();
   const createProject = useAtomCommand(projectEnvironment.create, {
@@ -702,13 +705,6 @@ export function SharedProjectsSettings() {
         ...hostedCollaboration,
         ...hostedCollaborationPatch,
       };
-      const localApi = readLocalApi();
-      if (localApi) {
-        await localApi.server.updateSettings({
-          hostedCollaboration: nextHostedCollaboration,
-        });
-        return;
-      }
       updatePrimarySettings({
         hostedCollaboration: {
           ...nextHostedCollaboration,
@@ -890,7 +886,7 @@ export function SharedProjectsSettings() {
           throw new Error("Select a saved SSH connection before deploying.");
         }
         if (options?.installDocker && options.confirmRepair !== false) {
-          const accepted = await window.desktopBridge.confirm(
+          const accepted = await ensureLocalApi().dialogs.confirm(
             "Run guided deploy repair on the selected SSH server and then deploy the collaboration server? KamiCode will only run allowlisted prerequisite fixes, and this may use sudo/root privileges on that server.",
           );
           if (!accepted) {
@@ -956,11 +952,8 @@ export function SharedProjectsSettings() {
         const descriptor = workspaceProject
           ? null
           : await resolveInitialPrimaryEnvironmentDescriptor();
-        const localApi = readLocalApi();
-        const serverConfig =
-          workspaceProject || !localApi ? null : await localApi.server.getConfig();
         const environmentId = workspaceProject?.environmentId ?? descriptor?.environmentId ?? null;
-        const workspaceRoot = workspaceProject?.workspaceRoot ?? serverConfig?.cwd ?? null;
+        const workspaceRoot = workspaceProject?.workspaceRoot ?? primaryServerConfig?.cwd ?? null;
         if (!environmentId || !workspaceRoot) {
           throw new Error(
             "Cannot find a workspace for the AI repair thread. Open any local project once, then click Ask AI to repair again.",
@@ -1047,6 +1040,7 @@ export function SharedProjectsSettings() {
       lastCollabDeployFailure,
       localProjects,
       navigate,
+      primaryServerConfig,
       runAction,
       startThreadTurn,
     ],

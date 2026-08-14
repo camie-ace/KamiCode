@@ -9,6 +9,7 @@ import {
   resolveDraftEnvModeAfterBranchChange,
   resolveEffectiveEnvMode,
   resolveEnvModeLabel,
+  resolveBranchTriggerLabel,
   resolveBranchToolbarPrBranch,
   resolveBranchToolbarValue,
   resolveLockedWorkspaceLabel,
@@ -16,6 +17,7 @@ import {
   resolvePreviousWorktreeLabel,
   resolvePreviousWorktreeSeed,
   shouldIncludeBranchPickerItem,
+  shouldShowComposerContextStrip,
   shouldShowEnvironmentIndicator,
 } from "./BranchToolbar.logic";
 
@@ -174,6 +176,101 @@ describe("resolveBranchToolbarValue", () => {
   });
 });
 
+describe("resolveBranchTriggerLabel", () => {
+  it("shows the origin ref when a new worktree will start from origin", () => {
+    expect(
+      resolveBranchTriggerLabel({
+        activeWorktreePath: null,
+        effectiveEnvMode: "worktree",
+        resolvedActiveBranch: "main",
+        resolvedActiveBranchIsRemote: false,
+        startFromOrigin: true,
+      }),
+    ).toBe("From origin/main");
+  });
+
+  it("shows the origin ref for local branch names that contain slashes", () => {
+    expect(
+      resolveBranchTriggerLabel({
+        activeWorktreePath: null,
+        effectiveEnvMode: "worktree",
+        resolvedActiveBranch: "feature/demo",
+        resolvedActiveBranchIsRemote: false,
+        startFromOrigin: true,
+      }),
+    ).toBe("From origin/feature/demo");
+  });
+
+  it("shows the local ref when start from origin is disabled", () => {
+    expect(
+      resolveBranchTriggerLabel({
+        activeWorktreePath: null,
+        effectiveEnvMode: "worktree",
+        resolvedActiveBranch: "main",
+        resolvedActiveBranchIsRemote: false,
+        startFromOrigin: false,
+      }),
+    ).toBe("From main");
+  });
+
+  it("does not duplicate the origin prefix for an explicit remote ref", () => {
+    expect(
+      resolveBranchTriggerLabel({
+        activeWorktreePath: null,
+        effectiveEnvMode: "worktree",
+        resolvedActiveBranch: "origin/feature/demo",
+        resolvedActiveBranchIsRemote: true,
+        startFromOrigin: true,
+      }),
+    ).toBe("From origin/feature/demo");
+  });
+
+  it("preserves an explicit ref from a non-origin remote", () => {
+    expect(
+      resolveBranchTriggerLabel({
+        activeWorktreePath: null,
+        effectiveEnvMode: "worktree",
+        resolvedActiveBranch: "upstream/feature/demo",
+        resolvedActiveBranchIsRemote: true,
+        startFromOrigin: true,
+      }),
+    ).toBe("From upstream/feature/demo");
+  });
+
+  it("keeps current-checkout labels and empty state unchanged", () => {
+    expect(
+      resolveBranchTriggerLabel({
+        activeWorktreePath: null,
+        effectiveEnvMode: "local",
+        resolvedActiveBranch: "main",
+        resolvedActiveBranchIsRemote: false,
+        startFromOrigin: true,
+      }),
+    ).toBe("main");
+    expect(
+      resolveBranchTriggerLabel({
+        activeWorktreePath: null,
+        effectiveEnvMode: "worktree",
+        resolvedActiveBranch: null,
+        resolvedActiveBranchIsRemote: null,
+        startFromOrigin: true,
+      }),
+    ).toBe("Select ref");
+  });
+
+  it("does not fabricate an origin ref while branch metadata is loading", () => {
+    expect(
+      resolveBranchTriggerLabel({
+        activeWorktreePath: null,
+        effectiveEnvMode: "worktree",
+        resolvedActiveBranch: "upstream/feature/demo",
+        resolvedActiveBranchIsRemote: null,
+        startFromOrigin: true,
+      }),
+    ).toBe("From upstream/feature/demo");
+  });
+});
+
 describe("resolveBranchToolbarPrBranch", () => {
   it("uses the explicit thread branch when it matches the displayed branch", () => {
     expect(
@@ -322,6 +419,38 @@ describe("shouldShowEnvironmentIndicator", () => {
         canPickEnvironment: false,
       }),
     ).toBe(false);
+  });
+});
+
+describe("shouldShowComposerContextStrip", () => {
+  it("keeps the environment indicator visible for a non-Git project", () => {
+    expect(
+      shouldShowComposerContextStrip({
+        hasActiveProject: true,
+        isGitRepo: false,
+        showEnvironmentIndicator: true,
+      }),
+    ).toBe(true);
+  });
+
+  it("hides the strip when a non-Git project has no environment indicator", () => {
+    expect(
+      shouldShowComposerContextStrip({
+        hasActiveProject: true,
+        isGitRepo: false,
+        showEnvironmentIndicator: false,
+      }),
+    ).toBe(false);
+  });
+
+  it("shows Git controls without requiring an environment indicator", () => {
+    expect(
+      shouldShowComposerContextStrip({
+        hasActiveProject: true,
+        isGitRepo: true,
+        showEnvironmentIndicator: false,
+      }),
+    ).toBe(true);
   });
 });
 
