@@ -30,6 +30,9 @@ interface ComposerPrimaryActionsProps {
   sendLabel?: string;
   queueShortcutLabel: string | null | undefined;
   preserveComposerFocusOnPointerDown?: boolean;
+  /** Enter-to-send is disabled on mobile viewports, where stop would otherwise
+   * be the only primary action and a running turn could not be steered. */
+  showSendWhileRunning?: boolean;
   onPreviousPendingQuestion: () => void;
   onQueueMessage: () => void;
   onInterrupt: () => void;
@@ -73,6 +76,7 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
   sendLabel,
   queueShortcutLabel = null,
   preserveComposerFocusOnPointerDown = false,
+  showSendWhileRunning = false,
   onPreviousPendingQuestion,
   onQueueMessage,
   onInterrupt,
@@ -92,7 +96,11 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
       type="button"
       className={cn(
         "flex cursor-pointer items-center justify-center rounded-full bg-destructive/90 text-white shadow-xs shadow-destructive/24 inset-shadow-[0_1px_--theme(--color-white/16%)] transition-all duration-150 hover:bg-destructive hover:scale-105 active:inset-shadow-[0_1px_--theme(--color-black/8%)] active:shadow-none",
-        insidePendingAction ? "size-8 sm:size-7" : "size-8 sm:h-8 sm:w-8",
+        insidePendingAction
+          ? "size-8 sm:size-7"
+          : showSendWhileRunning && hasSendableContent
+            ? "size-9 sm:size-8"
+            : "size-8 sm:h-8 sm:w-8",
       )}
       {...pointerFocusProps}
       onClick={onInterrupt}
@@ -103,6 +111,25 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
       </svg>
     </button>
   );
+
+  const renderQueueMessageButton = () => {
+    const queueTitle = queueShortcutLabel
+      ? `Queue message (${queueShortcutLabel})`
+      : "Queue message";
+    return (
+      <button
+        type="button"
+        className="flex size-8 items-center justify-center rounded-full border border-border/70 bg-background/80 text-muted-foreground transition-all duration-150 enabled:cursor-pointer enabled:hover:border-border enabled:hover:bg-accent enabled:hover:text-foreground enabled:hover:scale-105 disabled:pointer-events-none disabled:opacity-35 sm:h-8 sm:w-8"
+        {...pointerFocusProps}
+        onClick={onQueueMessage}
+        disabled={!hasSendableContent}
+        aria-label="Queue message"
+        title={queueTitle}
+      >
+        <ListPlusIcon className="size-4" aria-hidden="true" />
+      </button>
+    );
+  };
 
   if (pendingAction) {
     return (
@@ -159,28 +186,14 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
     );
   }
 
-  if (isRunning) {
-    const queueTitle = queueShortcutLabel
-      ? `Queue message (${queueShortcutLabel})`
-      : "Queue message";
+  if (isRunning && !showSendWhileRunning) {
     return (
       <div className="flex items-center justify-end gap-1.5">
-        <button
-          type="button"
-          className="flex size-8 items-center justify-center rounded-full border border-border/70 bg-background/80 text-muted-foreground transition-all duration-150 enabled:cursor-pointer enabled:hover:border-border enabled:hover:bg-accent enabled:hover:text-foreground enabled:hover:scale-105 disabled:pointer-events-none disabled:opacity-35 sm:h-8 sm:w-8"
-          {...pointerFocusProps}
-          onClick={onQueueMessage}
-          disabled={!hasSendableContent}
-          aria-label="Queue message"
-          title={queueTitle}
-        >
-          <ListPlusIcon className="size-4" aria-hidden="true" />
-        </button>
+        {renderQueueMessageButton()}
         {renderStopGenerationButton(false)}
       </div>
     );
   }
-
   if (showPlanFollowUpPrompt) {
     if (promptHasText) {
       return (
@@ -238,7 +251,7 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
     );
   }
 
-  return (
+  const sendButton = (
     <button
       type="submit"
       className={cn(
@@ -291,5 +304,17 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
         </svg>
       )}
     </button>
+  );
+
+  if (!isRunning) {
+    return sendButton;
+  }
+
+  return (
+    <div className="flex items-center justify-end gap-1.5">
+      {renderQueueMessageButton()}
+      {renderStopGenerationButton(false)}
+      {showSendWhileRunning && hasSendableContent ? sendButton : null}
+    </div>
   );
 });

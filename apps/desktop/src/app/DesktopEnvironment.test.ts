@@ -83,6 +83,7 @@ describe("DesktopEnvironment", () => {
       );
       assert.equal(toPortablePath(environment.rootDir), "/repo");
       assert.equal(toPortablePath(environment.appRoot), "/repo");
+      assert.equal(toPortablePath(environment.serverRoot), "/repo");
       assert.equal(toPortablePath(environment.backendEntryPath), "/repo/apps/server/dist/bin.mjs");
       assert.equal(toPortablePath(environment.backendCwd), "/repo");
       assert.equal(environment.appUserModelId, "tech.camie.kamicode.dev");
@@ -122,6 +123,37 @@ describe("DesktopEnvironment", () => {
         toPortablePath(environment.serverSettingsPath),
         "/tmp/t3/userdata/settings.json",
       );
+    }),
+  );
+
+  it.effect("uses the packaged Windows server sidecar as the backend root", () =>
+    Effect.gen(function* () {
+      const environment = yield* makeEnvironment({
+        platform: "win32",
+        isPackaged: true,
+        appPath: "/install/resources/app.asar",
+        resourcesPath: "/install/resources",
+      });
+
+      assert.equal(toPortablePath(environment.appRoot), "/install/resources/app.asar");
+      assert.equal(toPortablePath(environment.serverRoot), "/install/resources/server.asar");
+      assert.equal(
+        toPortablePath(environment.backendEntryPath),
+        "/install/resources/server.asar/apps/server/dist/bin.mjs",
+      );
+    }),
+  );
+
+  it.effect("keeps implicit development state separate from production state", () =>
+    Effect.gen(function* () {
+      const development = yield* makeEnvironment(
+        {},
+        { VITE_DEV_SERVER_URL: "http://localhost:5173" },
+      );
+      const production = yield* makeEnvironment();
+
+      assert.equal(toPortablePath(development.stateDir), "/Users/alice/.kamicode/dev");
+      assert.equal(toPortablePath(production.stateDir), "/Users/alice/.kamicode/userdata");
     }),
   );
 
