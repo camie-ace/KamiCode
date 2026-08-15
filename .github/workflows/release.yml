@@ -70,7 +70,7 @@ jobs:
       !failure() && !cancelled() &&
       (github.event_name != 'schedule' || needs.check_changes.outputs.has_changes == 'true')
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 30
     outputs:
       release_channel: ${{ steps.release_meta.outputs.release_channel }}
       version: ${{ steps.release_meta.outputs.version }}
