@@ -9,6 +9,7 @@ import {
 } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
+import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Queue from "effect/Queue";
@@ -48,6 +49,9 @@ function statusWithoutLiveData(data: Option.Option<OrchestrationThread>): Enviro
  */
 export const INITIAL_THREAD_USER_TURN_LIMIT = 10;
 export const OLDER_THREAD_PAGE_USER_TURN_LIMIT = 20;
+
+const threadExpectedFailureRetryDelay = (failureCount: number) =>
+  Duration.millis(Math.min(30_000, 250 * 2 ** Math.min(failureCount, 7)));
 
 function pageStateFromSnapshot(
   page: OrchestrationThreadDetailPage | undefined,
@@ -638,7 +642,10 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
       }),
       {
         onExpectedFailure: setStreamError,
-        retryExpectedFailureAfter: "250 millis",
+        // A newly-created draft can briefly be absent, so retry quickly once.
+        // Back off stale/deleted browser routes instead of hammering the HTTP
+        // snapshot and WebSocket subscription endpoints forever.
+        retryExpectedFailureAfter: threadExpectedFailureRetryDelay,
         resubscribe: foregroundResubscriptions,
       },
     ).pipe(Stream.runForEach(applyItem)),
