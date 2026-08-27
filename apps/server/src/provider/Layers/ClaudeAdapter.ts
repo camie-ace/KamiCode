@@ -57,6 +57,7 @@ import {
   getModelSelectionBooleanOptionValue,
   getModelSelectionStringOptionValue,
   getProviderOptionDescriptors,
+  isClaudeSlashCommand,
   resolvePromptInjectedEffort,
 } from "@t3tools/shared/model";
 import { z } from "zod";
@@ -4784,7 +4785,10 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       });
     }
 
-    const injectProjectMemory = !context.projectMemoryInjected;
+    // Claude commands must remain the literal first token. Keep memory pending
+    // so the first ordinary prompt still receives the session context.
+    const injectProjectMemory =
+      !context.projectMemoryInjected && !isClaudeSlashCommand(input.input ?? "");
     const message = yield* buildUserMessageEffect(input, {
       fileSystem,
       attachmentsDir: serverConfig.attachmentsDir,

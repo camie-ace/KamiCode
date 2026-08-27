@@ -18,6 +18,7 @@ import {
   getProviderOptionDescriptors,
   getProviderOptionBooleanSelectionValue,
   getProviderOptionStringSelectionValue,
+  isClaudeSlashCommand,
   normalizeCustomModelSlug,
   normalizeModelSlug,
 } from "./model.ts";
@@ -209,5 +210,13 @@ describe("applyClaudePromptEffortPrefix", () => {
     expect(applyClaudePromptEffortPrefix("/home/theo/app.ts crashed on load", "ultrathink")).toBe(
       "Ultrathink:\n/home/theo/app.ts crashed on load",
     );
+  });
+});
+
+describe("isClaudeSlashCommand", () => {
+  it("distinguishes Claude commands from absolute paths", () => {
+    expect(isClaudeSlashCommand(" /compact keep recent errors ")).toBe(true);
+    expect(isClaudeSlashCommand("/plugin:skill run")).toBe(true);
+    expect(isClaudeSlashCommand("/home/theo/app.ts crashed on load")).toBe(false);
   });
 });

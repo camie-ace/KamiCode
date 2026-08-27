@@ -8,13 +8,13 @@ import * as NodeSqliteClient from "../NodeSqliteClient.ts";
 
 const layer = it.layer(Layer.mergeAll(NodeSqliteClient.layerMemory()));
 
-layer("042_ProjectionThreadLinkedPullRequest", (it) => {
+layer("054_ProjectionThreadLinkedPullRequest", (it) => {
   it.effect("adds the linked pull request column", () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient;
 
-      yield* runMigrations({ toMigrationInclusive: 41 });
-      yield* runMigrations({ toMigrationInclusive: 42 });
+      yield* runMigrations({ toMigrationInclusive: 53 });
+      yield* runMigrations({ toMigrationInclusive: 54 });
 
       const columns = yield* sql<{ readonly name: string }>`
         PRAGMA table_info(projection_threads)

@@ -362,15 +362,19 @@ export function applyClaudePromptEffortPrefix(
   if (!trimmed) {
     return trimmed;
   }
-  // Prefixing a slash command turns it into plain prose, so Claude never
-  // runs it. Command names come from arbitrary file names ("/deploy.prod",
-  // "/plugin:skill"), so accept any first token without a second slash;
-  // absolute paths like "/home/theo/app.ts" keep the prefix.
-  if (effort !== "ultrathink" || /^\/[^\s/]+(?:\s|$)/u.test(trimmed)) {
+  if (effort !== "ultrathink" || isClaudeSlashCommand(trimmed)) {
     return trimmed;
   }
   if (trimmed.startsWith("Ultrathink:")) {
     return trimmed;
   }
   return `Ultrathink:\n${trimmed}`;
+}
+
+export function isClaudeSlashCommand(text: string): boolean {
+  // Prefixing a slash command turns it into plain prose, so Claude never
+  // runs it. Command names come from arbitrary file names ("/deploy.prod",
+  // "/plugin:skill"), so accept any first token without a second slash;
+  // absolute paths like "/home/theo/app.ts" are not commands.
+  return /^\/[^\s/]+(?:\s|$)/u.test(text.trim());
 }
