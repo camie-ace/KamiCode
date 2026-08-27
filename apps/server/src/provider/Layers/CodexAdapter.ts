@@ -67,6 +67,7 @@ import { ProjectTriggerService } from "../../projectTriggers/Services/ProjectTri
 import {
   CodexResumeCursorSchema,
   CodexSessionRuntimeThreadIdMissingError,
+  describeMcpElicitation,
   makeCodexSessionRuntime,
   type CodexSessionRuntimeError,
   type CodexSessionRuntimeOptions,
@@ -372,6 +373,8 @@ function toRequestTypeFromMethod(method: string): CanonicalRequestType {
       return "file_read_approval";
     case "item/fileChange/requestApproval":
       return "file_change_approval";
+    case "mcpServer/elicitation/request":
+      return "mcp_elicitation_approval";
     case "applyPatchApproval":
       return "apply_patch_approval";
     case "execCommandApproval":
@@ -395,6 +398,8 @@ function toRequestTypeFromKind(kind: ProviderRequestKind | undefined): Canonical
       return "file_read_approval";
     case "file-change":
       return "file_change_approval";
+    case "mcp-elicitation":
+      return "mcp_elicitation_approval";
     default:
       return "unknown";
   }
@@ -550,7 +555,9 @@ function mapItemLifecycle(
     lifecycle === "item.started"
       ? "inProgress"
       : lifecycle === "item.completed"
-        ? "completed"
+        ? "status" in item && (item.status === "failed" || item.status === "declined")
+          ? item.status
+          : "completed"
         : undefined;
 
   return {
@@ -658,14 +665,9 @@ function mapCollabAgentEvent(
           },
         ];
       }
-      // interacted → the child is (again) actively driven.
-      return [
-        {
-          ...base,
-          type: "task.updated",
-          payload: { taskId, status: "running", ...statusLinkage },
-        },
-      ];
+      // Reading a child's result also emits "interacted" after its turn is idle.
+      // Only the child's turn or thread lifecycle can prove it resumed work.
+      return [];
     }
     case "collabAgent/turnStarted":
       return [
@@ -873,6 +875,11 @@ function mapToRuntimeEvents(
       ];
     }
 
+    const elicitation =
+      event.method === "mcpServer/elicitation/request"
+        ? readPayload(EffectCodexSchema.McpServerElicitationRequestParams, event.payload)
+        : undefined;
+    const elicitationApproval = elicitation ? describeMcpElicitation(elicitation) : undefined;
     const detail = (() => {
       switch (event.method) {
         case "item/commandExecution/requestApproval": {
@@ -889,6 +896,8 @@ function mapToRuntimeEvents(
           );
           return payload?.reason ?? undefined;
         }
+        case "mcpServer/elicitation/request":
+          return elicitation?.message;
         case "applyPatchApproval": {
           const payload = readPayload(
             EffectCodexSchema.ServerRequest__ApplyPatchApprovalParams,
@@ -922,6 +931,12 @@ function mapToRuntimeEvents(
         payload: {
           requestType: toRequestTypeFromMethod(event.method),
           ...(detail ? { detail } : {}),
+          ...(elicitationApproval
+            ? {
+                appName: elicitationApproval.appName,
+                options: elicitationApproval.options,
+              }
+            : {}),
           ...(event.payload !== undefined ? { args: event.payload } : {}),
         },
       },
@@ -2024,6 +2039,17 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
     );
   };
 
+  const uploadFeedback: CodexAdapterShape["uploadFeedback"] = (input) =>
+    requireSession(input.threadId).pipe(
+      Effect.flatMap((session) => session.runtime.uploadFeedback(input.reason)),
+      Effect.map(({ threadId }) => ({ feedbackId: threadId })),
+      Effect.mapError((cause) =>
+        cause._tag === "ProviderAdapterSessionNotFoundError"
+          ? cause
+          : mapCodexRuntimeError(input.threadId, "feedback/upload", cause),
+      ),
+    );
+
   const respondToRequest: CodexAdapterShape["respondToRequest"] = (threadId, requestId, decision) =>
     requireSession(threadId).pipe(
       Effect.flatMap((session) => session.runtime.respondToRequest(requestId, decision)),
@@ -2111,6 +2137,7 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
     interruptTurn,
     readThread,
     rollbackThread,
+    uploadFeedback,
     respondToRequest,
     respondToUserInput,
     stopSession,

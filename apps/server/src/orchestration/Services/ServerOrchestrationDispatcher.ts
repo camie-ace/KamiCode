@@ -1,10 +1,11 @@
-import type { OrchestrationCommand } from "@t3tools/contracts";
+import type { OrchestrationClientOrigin, OrchestrationCommand } from "@t3tools/contracts";
 import { OrchestrationDispatchCommandError } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import type * as Effect from "effect/Effect";
 
 export interface ServerOrchestrationDispatchOptions {
   readonly cleanupCreatedThreadOnFailure?: boolean;
+  readonly origin?: OrchestrationClientOrigin;
 }
 
 export interface ServerOrchestrationDispatcherShape {

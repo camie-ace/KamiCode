@@ -73,6 +73,18 @@ model_reasoning_effort = "high"
 If Codex reports service tiers for a model, KamiCode shows a Service Tier control and forwards the
 selected tier to Codex for the thread or turn.
 
+## Send feedback to OpenAI
+
+In an existing Codex thread, send `/feedback` or `/feedback` followed by a description of the
+issue. KamiCode uploads the thread and Codex logs to OpenAI and shows a thread ID that you can copy
+and share with OpenAI employees.
+
+## Approve access to other apps
+
+When a Codex tool needs access to an app such as Safari, KamiCode shows the app name and asks for
+approval. You can approve, decline, or cancel the request from the desktop app, web app, or mobile
+app. Some tools also offer approval for the current session or permanent approval.
+
 ## I Want Work And Personal Codex Accounts
 
 Use one real Codex home and one shadow home.

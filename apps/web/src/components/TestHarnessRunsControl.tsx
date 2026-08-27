@@ -32,6 +32,7 @@ import {
   SheetPopup,
   SheetTitle,
 } from "./ui/sheet";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 
 type TestHarnessRunStatus = "pass" | "fail" | "blocked" | "error";
 
@@ -197,17 +198,23 @@ function ArtifactLink(props: {
   }
   const Icon = props.icon;
   return (
-    <a
-      href={testHarnessArtifactUrl(props.path)}
-      target="_blank"
-      rel="noreferrer"
-      title={artifactFileName(props.path)}
-      className="inline-flex items-center gap-1.5 rounded-md border border-border/60 bg-background/60 px-2 py-1 text-[11px] text-muted-foreground transition-colors hover:border-border hover:text-foreground"
-    >
-      <Icon className="size-3" />
-      {props.label}
-      <ExternalLinkIcon className="size-2.5 opacity-55" />
-    </a>
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <a
+            href={testHarnessArtifactUrl(props.path)}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex items-center gap-1.5 rounded-md border border-border/60 bg-background/60 px-2 py-1 text-[11px] text-muted-foreground transition-colors hover:border-border hover:text-foreground"
+          />
+        }
+      >
+        <Icon className="size-3" />
+        {props.label}
+        <ExternalLinkIcon className="size-2.5 opacity-55" />
+      </TooltipTrigger>
+      <TooltipPopup side="top">{artifactFileName(props.path)}</TooltipPopup>
+    </Tooltip>
   );
 }
 
@@ -245,41 +252,54 @@ function ScreenshotGallery({
 
   return (
     <div className="border-b border-border/55 bg-background/45">
-      <a
-        href={testHarnessArtifactUrl(latestScreenshot.path)}
-        target="_blank"
-        rel="noreferrer"
-        className="block"
-        title={`Open ${artifactFileName(latestScreenshot.path)}`}
-      >
-        <img
-          src={testHarnessArtifactUrl(latestScreenshot.path)}
-          alt={latestScreenshot.label}
-          loading="lazy"
-          className="max-h-48 w-full object-contain"
-        />
-      </a>
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <a
+              href={testHarnessArtifactUrl(latestScreenshot.path)}
+              target="_blank"
+              rel="noreferrer"
+              className="block"
+            />
+          }
+        >
+          <img
+            src={testHarnessArtifactUrl(latestScreenshot.path)}
+            alt={latestScreenshot.label}
+            loading="lazy"
+            className="max-h-48 w-full object-contain"
+          />
+        </TooltipTrigger>
+        <TooltipPopup side="top">Open {artifactFileName(latestScreenshot.path)}</TooltipPopup>
+      </Tooltip>
       {thumbnailScreenshots.length > 1 ? (
         <div className="flex gap-1 overflow-x-auto border-t border-border/45 p-1.5">
           {thumbnailScreenshots.map((screenshot) => (
-            <a
-              key={screenshot.path}
-              href={testHarnessArtifactUrl(screenshot.path)}
-              target="_blank"
-              rel="noreferrer"
-              title={artifactFileName(screenshot.path)}
-              className={cn(
-                "h-12 w-20 shrink-0 overflow-hidden rounded-md border bg-background/70",
-                screenshot.path === latestScreenshot.path ? "border-ring" : "border-border/60",
-              )}
-            >
-              <img
-                src={testHarnessArtifactUrl(screenshot.path)}
-                alt={screenshot.label}
-                loading="lazy"
-                className="size-full object-cover"
-              />
-            </a>
+            <Tooltip key={screenshot.path}>
+              <TooltipTrigger
+                render={
+                  <a
+                    href={testHarnessArtifactUrl(screenshot.path)}
+                    target="_blank"
+                    rel="noreferrer"
+                    className={cn(
+                      "h-12 w-20 shrink-0 overflow-hidden rounded-md border bg-background/70",
+                      screenshot.path === latestScreenshot.path
+                        ? "border-ring"
+                        : "border-border/60",
+                    )}
+                  />
+                }
+              >
+                <img
+                  src={testHarnessArtifactUrl(screenshot.path)}
+                  alt={screenshot.label}
+                  loading="lazy"
+                  className="size-full object-cover"
+                />
+              </TooltipTrigger>
+              <TooltipPopup side="top">{artifactFileName(screenshot.path)}</TooltipPopup>
+            </Tooltip>
           ))}
         </div>
       ) : null}

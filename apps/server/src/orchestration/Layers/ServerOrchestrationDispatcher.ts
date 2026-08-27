@@ -81,14 +81,24 @@ const makeServerOrchestrationDispatcher = Effect.gen(function* () {
       .refreshStatus(cwd)
       .pipe(Effect.ignoreCause({ log: true }), Effect.forkDetach, Effect.asVoid);
 
-  const dispatchDirect = (command: OrchestrationCommand) =>
-    orchestrationEngine
-      .dispatch(command)
-      .pipe(
-        Effect.mapError((cause) =>
-          toDispatchCommandError(cause, "Failed to dispatch orchestration command."),
-        ),
-      );
+  const dispatchWithOrigin = (
+    command: OrchestrationCommand,
+    options?: ServerOrchestrationDispatchOptions,
+  ) =>
+    orchestrationEngine.dispatch(
+      command,
+      options?.origin === undefined ? undefined : { origin: options.origin },
+    );
+
+  const dispatchDirect = (
+    command: OrchestrationCommand,
+    options?: ServerOrchestrationDispatchOptions,
+  ) =>
+    dispatchWithOrigin(command, options).pipe(
+      Effect.mapError((cause) =>
+        toDispatchCommandError(cause, "Failed to dispatch orchestration command."),
+      ),
+    );
 
   const dispatchBootstrapTurnStart = (
     command: Extract<OrchestrationCommand, { readonly type: "thread.turn.start" }>,
@@ -105,14 +115,15 @@ const makeServerOrchestrationDispatcher = Effect.gen(function* () {
 
       const cleanupCreatedThread = () =>
         createdThread && cleanupCreatedThreadOnFailure
-          ? orchestrationEngine
-              .dispatch({
+          ? dispatchWithOrigin(
+              {
                 type: "thread.delete",
                 commandId: childCommandId(command, "bootstrap-thread-delete"),
                 threadId: command.threadId,
-              })
-              .pipe(Effect.ignoreCause({ log: true }))
-          : Effect.void;
+              },
+              options,
+            ).pipe(Effect.as(true))
+          : Effect.succeed(false);
 
       const appendSetupScriptActivity = (input: {
         readonly activityKey: string;
@@ -122,21 +133,24 @@ const makeServerOrchestrationDispatcher = Effect.gen(function* () {
         readonly payload: Record<string, unknown>;
         readonly tone: "info" | "error";
       }) =>
-        orchestrationEngine.dispatch({
-          type: "thread.activity.append",
-          commandId: childCommandId(command, `setup-script-activity:${input.activityKey}`),
-          threadId: command.threadId,
-          activity: {
-            id: childEventId(command, `setup-script-activity:${input.activityKey}`),
-            tone: input.tone,
-            kind: input.kind,
-            summary: input.summary,
-            payload: input.payload,
-            turnId: null,
+        dispatchWithOrigin(
+          {
+            type: "thread.activity.append",
+            commandId: childCommandId(command, `setup-script-activity:${input.activityKey}`),
+            threadId: command.threadId,
+            activity: {
+              id: childEventId(command, `setup-script-activity:${input.activityKey}`),
+              tone: input.tone,
+              kind: input.kind,
+              summary: input.summary,
+              payload: input.payload,
+              turnId: null,
+              createdAt: input.createdAt,
+            },
             createdAt: input.createdAt,
           },
-          createdAt: input.createdAt,
-        });
+          options,
+        );
 
       const recordSetupScriptLaunchFailure = (input: {
         readonly error: unknown;
@@ -255,31 +269,34 @@ const makeServerOrchestrationDispatcher = Effect.gen(function* () {
 
       const bootstrapProgram = Effect.gen(function* () {
         if (bootstrap?.createThread) {
-          yield* orchestrationEngine.dispatch({
-            type: "thread.create",
-            commandId: childCommandId(command, "bootstrap-thread-create"),
-            threadId: command.threadId,
-            projectId: bootstrap.createThread.projectId,
-            title: bootstrap.createThread.title,
-            modelSelection: bootstrap.createThread.modelSelection,
-            runtimeMode: bootstrap.createThread.runtimeMode,
-            interactionMode: bootstrap.createThread.interactionMode,
-            branch: bootstrap.createThread.branch,
-            worktreePath: bootstrap.createThread.worktreePath,
-            ...(bootstrap.createThread.startedBy !== undefined
-              ? { startedBy: bootstrap.createThread.startedBy }
-              : {}),
-            ...(bootstrap.createThread.workflowParentThreadId !== undefined
-              ? { workflowParentThreadId: bootstrap.createThread.workflowParentThreadId }
-              : {}),
-            ...(bootstrap.createThread.workflowLaneId !== undefined
-              ? { workflowLaneId: bootstrap.createThread.workflowLaneId }
-              : {}),
-            ...(bootstrap.createThread.workflowLaneRole !== undefined
-              ? { workflowLaneRole: bootstrap.createThread.workflowLaneRole }
-              : {}),
-            createdAt: bootstrap.createThread.createdAt,
-          });
+          yield* dispatchWithOrigin(
+            {
+              type: "thread.create",
+              commandId: childCommandId(command, "bootstrap-thread-create"),
+              threadId: command.threadId,
+              projectId: bootstrap.createThread.projectId,
+              title: bootstrap.createThread.title,
+              modelSelection: bootstrap.createThread.modelSelection,
+              runtimeMode: bootstrap.createThread.runtimeMode,
+              interactionMode: bootstrap.createThread.interactionMode,
+              branch: bootstrap.createThread.branch,
+              worktreePath: bootstrap.createThread.worktreePath,
+              ...(bootstrap.createThread.startedBy !== undefined
+                ? { startedBy: bootstrap.createThread.startedBy }
+                : {}),
+              ...(bootstrap.createThread.workflowParentThreadId !== undefined
+                ? { workflowParentThreadId: bootstrap.createThread.workflowParentThreadId }
+                : {}),
+              ...(bootstrap.createThread.workflowLaneId !== undefined
+                ? { workflowLaneId: bootstrap.createThread.workflowLaneId }
+                : {}),
+              ...(bootstrap.createThread.workflowLaneRole !== undefined
+                ? { workflowLaneRole: bootstrap.createThread.workflowLaneRole }
+                : {}),
+              createdAt: bootstrap.createThread.createdAt,
+            },
+            options,
+          );
           createdThread = true;
         }
 
@@ -327,19 +344,22 @@ const makeServerOrchestrationDispatcher = Effect.gen(function* () {
           });
           targetProjectCwd = prepareWorktree.projectCwd;
           targetWorktreePath = worktree.worktree.path;
-          yield* orchestrationEngine.dispatch({
-            type: "thread.meta.update",
-            commandId: childCommandId(command, "bootstrap-thread-meta-update"),
-            threadId: command.threadId,
-            branch: worktree.worktree.refName,
-            worktreePath: targetWorktreePath,
-          });
+          yield* dispatchWithOrigin(
+            {
+              type: "thread.meta.update",
+              commandId: childCommandId(command, "bootstrap-thread-meta-update"),
+              threadId: command.threadId,
+              branch: worktree.worktree.refName,
+              worktreePath: targetWorktreePath,
+            },
+            options,
+          );
           yield* refreshGitStatus(targetWorktreePath);
         }
 
         yield* runSetupProgram();
 
-        return yield* dispatchDirect(finalTurnStartCommand);
+        return yield* dispatchDirect(finalTurnStartCommand, options);
       });
 
       return yield* bootstrapProgram.pipe(
@@ -348,7 +368,27 @@ const makeServerOrchestrationDispatcher = Effect.gen(function* () {
           if (Cause.hasInterruptsOnly(cause)) {
             return Effect.fail(dispatchError);
           }
-          return cleanupCreatedThread().pipe(Effect.flatMap(() => Effect.fail(dispatchError)));
+          return Effect.uninterruptible(cleanupCreatedThread()).pipe(
+            Effect.matchCauseEffect({
+              onFailure: (cleanupCause) =>
+                Effect.logWarning("bootstrap thread cleanup failed", {
+                  threadId: command.threadId,
+                  detail: Cause.pretty(cleanupCause),
+                }).pipe(Effect.flatMap(() => Effect.fail(dispatchError))),
+              onSuccess: (threadDeleted) =>
+                Effect.fail(
+                  threadDeleted
+                    ? new OrchestrationDispatchCommandError({
+                        message: dispatchError.message,
+                        ...(dispatchError.cause !== undefined
+                          ? { cause: dispatchError.cause }
+                          : {}),
+                        bootstrapThreadDisposition: "deleted",
+                      })
+                    : dispatchError,
+                ),
+            }),
+          );
         }),
       );
     });
@@ -357,7 +397,7 @@ const makeServerOrchestrationDispatcher = Effect.gen(function* () {
     const dispatchEffect =
       command.type === "thread.turn.start" && command.bootstrap
         ? dispatchBootstrapTurnStart(command, options)
-        : dispatchDirect(command);
+        : dispatchDirect(command, options);
 
     return startup
       .enqueueCommand(dispatchEffect)

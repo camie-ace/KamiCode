@@ -202,7 +202,7 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
 
   return (
     <Collapsible
-      className={cn("py-3", isAuthPrompt && "bg-amber-500/5")}
+      className={cn("py-2", isAuthPrompt && "bg-amber-500/5")}
       open={!isCollapsed}
       onOpenChange={(open) => {
         setCollapsedQuestionId(open ? null : activeQuestion.id);
@@ -214,13 +214,13 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
           header label and the chevron still line up with the left and right
           edges of the question text below. The negative block margin keeps the
           taller hit area from pushing the panel down. */}
-      <div className="px-1.5 sm:px-2.5">
+      <div className="flex items-center gap-1 px-1 sm:px-2">
         <CollapsibleTrigger
           title={
             isCollapsed ? "Show the question and its options" : "Hide the question and its options"
           }
           data-pending-user-input-toggle={isCollapsed ? "collapsed" : "expanded"}
-          className="group -my-1 flex w-full items-center gap-3 rounded-md px-2.5 py-1.5 text-left outline-none transition-colors duration-150 hover:bg-muted/40 focus-visible:ring-1 focus-visible:ring-primary/25"
+          className="group -my-1 flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1.5 text-left outline-none transition-colors duration-150 hover:bg-muted/35 focus-visible:ring-1 focus-visible:ring-primary/25"
         >
           {isAuthPrompt ? (
             <>
@@ -232,12 +232,12 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
               </span>
             </>
           ) : (
-            <span className="text-secondary-label text-[11px] font-semibold tracking-widest uppercase group-hover:text-foreground">
+            <span className="text-xs font-medium text-muted-foreground group-hover:text-foreground/85">
               {activeQuestion.header}
             </span>
           )}
           {prompt.questions.length > 1 ? (
-            <span className="flex h-5 items-center rounded-md bg-muted/60 px-1.5 text-secondary-label text-[10px] font-medium tabular-nums">
+            <span className="text-[10px] font-medium text-muted-foreground tabular-nums">
               {questionIndex + 1}/{prompt.questions.length}
             </span>
           ) : null}
@@ -263,18 +263,18 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
       {/* The panel carries the horizontal padding itself: it clips its content
           while the height animates, so the option buttons have to sit inside
           that padding or their focus rings get shaved off at the edges. */}
-      <CollapsiblePanel className="px-4 sm:px-5">
+      <CollapsiblePanel className="px-3 sm:px-4">
         <div className="pt-2 pb-0.5">
           {isAuthPrompt ? (
             <p className="mb-2 text-xs text-muted-foreground/75">
               The agent needs an authenticated path before it can verify a gated feature.
             </p>
           ) : null}
-          <p className="text-sm text-foreground/90">{activeQuestion.question}</p>
+          <p className="text-sm text-foreground/85">{activeQuestion.question}</p>
           {activeQuestion.multiSelect ? (
             <p className="mt-1 text-secondary-label text-xs">Select one or more options.</p>
           ) : null}
-          <div className="mt-3 space-y-1.5">
+          <div className="mt-2 space-y-0.5">
             {activeQuestion.options.map((option, index) => {
               const isOptimisticallySelected =
                 optimisticSingleSelect?.questionId === activeQuestion.id &&
@@ -284,14 +284,14 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
                 (!customAnswerActive && progress.selectedOptionLabels.includes(option.label));
               const shortcutKey = index < 9 ? index + 1 : null;
               const className = cn(
-                "group flex w-full items-center gap-3 rounded-lg border px-3 py-2 text-left outline-none transition-all duration-150 focus-visible:border-primary/40 focus-visible:ring-1 focus-visible:ring-primary/25",
+                "group flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left outline-none transition-colors duration-150 focus-visible:ring-1 focus-visible:ring-primary/25",
                 isSelected
                   ? isAuthPrompt
-                    ? "border-amber-500/40 bg-amber-500/10 text-foreground"
-                    : "border-primary/30 bg-primary/8 text-foreground"
+                    ? "border border-amber-500/40 bg-amber-500/10 text-foreground"
+                    : "bg-muted/55 text-foreground"
                   : isAuthPrompt
-                    ? "border-amber-500/15 bg-background/60 text-foreground/85 hover:border-amber-500/30 hover:bg-amber-500/8"
-                    : "border-transparent bg-muted/22 text-foreground/85 hover:border-border/45 hover:bg-muted/34",
+                    ? "border border-amber-500/15 bg-background/60 text-foreground/85 hover:border-amber-500/30 hover:bg-amber-500/8"
+                    : "bg-transparent text-foreground/85 hover:bg-muted/30",
                 isResponding && "opacity-50 cursor-not-allowed",
                 !isResponding && "cursor-pointer",
               );
@@ -312,7 +312,7 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
                   <div className="min-w-0 flex-1 flex flex-col gap-0.5">
                     <span className="text-sm font-medium">{option.label}</span>
                     {option.description && option.description !== option.label ? (
-                      <span className="text-secondary-label text-xs">{option.description}</span>
+                      <span className="text-secondary-label text-[11px]">{option.description}</span>
                     ) : null}
                   </div>
                   {isSelected ? (
@@ -325,8 +325,7 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
                   ) : shortcutKey !== null ? (
                     <kbd
                       className={cn(
-                        "flex size-5 shrink-0 items-center justify-center rounded border border-border/50 text-[11px] font-medium tabular-nums transition-colors duration-150",
-                        "bg-background/35 text-secondary-label group-hover:border-border/70 group-hover:text-foreground",
+                        "flex size-5 shrink-0 items-center justify-center text-[10px] font-medium text-muted-foreground tabular-nums",
                       )}
                     >
                       {shortcutKey}

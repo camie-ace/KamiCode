@@ -65,6 +65,9 @@ import Migration0049 from "./Migrations/037_ProjectionTurnsKeysetIndex.ts";
 import Migration0050 from "./Migrations/038_ProjectionThreadsPinOrderKey.ts";
 import Migration0051 from "./Migrations/039_ProjectionProjectsDefaultThreadEnvMode.ts";
 import Migration0052 from "./Migrations/040_ProjectionProjectFaviconPath.ts";
+import Migration0053 from "./Migrations/041_AuthSessionClientConnection.ts";
+import Migration0054 from "./Migrations/042_ProjectionThreadLinkedPullRequest.ts";
+import Migration0055 from "./Migrations/043_ProjectionThreadsUnsettledAt.ts";
 
 /**
  * Migration loader with all migrations defined inline.
@@ -134,6 +137,11 @@ export const migrationEntries = [
   [50, "ProjectionThreadsPinOrderKey", Migration0050],
   [51, "ProjectionProjectsDefaultThreadEnvMode", Migration0051],
   [52, "ProjectionProjectFaviconPath", Migration0052],
+  // Upstream's ids 41-43 also collide with existing fork migrations. Preserve
+  // the shipped SQL and append it under the next fork-safe ids.
+  [53, "AuthSessionClientConnection", Migration0053],
+  [54, "ProjectionThreadLinkedPullRequest", Migration0054],
+  [55, "ProjectionThreadsUnsettledAt", Migration0055],
 ] as const;
 
 export const migrationManifest = migrationEntries.map(([id, name]) => [id, name] as const);

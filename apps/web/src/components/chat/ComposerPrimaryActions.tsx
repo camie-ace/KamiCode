@@ -6,6 +6,7 @@ import { StageBackdropButtonArt, useSidebarStageBackdropVariant } from "../Sideb
 import { Button } from "../ui/button";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
 import { Spinner } from "../ui/spinner";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 
 interface PendingActionState {
   questionIndex: number;
@@ -117,17 +118,21 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
       ? `Queue message (${queueShortcutLabel})`
       : "Queue message";
     return (
-      <button
-        type="button"
-        className="flex size-8 items-center justify-center rounded-full border border-border/70 bg-background/80 text-muted-foreground transition-all duration-150 enabled:cursor-pointer enabled:hover:border-border enabled:hover:bg-accent enabled:hover:text-foreground enabled:hover:scale-105 disabled:pointer-events-none disabled:opacity-35 sm:h-8 sm:w-8"
-        {...pointerFocusProps}
-        onClick={onQueueMessage}
-        disabled={!hasSendableContent}
-        aria-label="Queue message"
-        title={queueTitle}
-      >
-        <ListPlusIcon className="size-4" aria-hidden="true" />
-      </button>
+      <Tooltip>
+        <TooltipTrigger render={<span className="inline-flex" />}>
+          <button
+            type="button"
+            className="flex size-8 items-center justify-center rounded-full border border-border/70 bg-background/80 text-muted-foreground transition-all duration-150 enabled:cursor-pointer enabled:hover:border-border enabled:hover:bg-accent enabled:hover:text-foreground enabled:hover:scale-105 disabled:pointer-events-none disabled:opacity-35 sm:h-8 sm:w-8"
+            {...pointerFocusProps}
+            onClick={onQueueMessage}
+            disabled={!hasSendableContent}
+            aria-label="Queue message"
+          >
+            <ListPlusIcon className="size-4" aria-hidden="true" />
+          </button>
+        </TooltipTrigger>
+        <TooltipPopup side="top">{queueTitle}</TooltipPopup>
+      </Tooltip>
     );
   };
 

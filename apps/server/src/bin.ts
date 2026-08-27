@@ -1,5 +1,4 @@
 // @effect-diagnostics anyUnknownInErrorContext:off missingEffectContext:off - CLI composition relies on framework-owned command requirements.
-import * as NodeURL from "node:url";
 
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
 import * as NodeServices from "@effect/platform-node/NodeServices";
@@ -15,11 +14,13 @@ import { connectCommand } from "./cli/connect.ts";
 import { pairCommand } from "./cli/pair.ts";
 import { hasCloudPublicConfig } from "./cloud/publicConfig.ts";
 import { sharedServerCommandFlags } from "./cli/config.ts";
+import { isEntrypoint } from "./entrypoint.ts";
 import { projectCommand } from "./cli/project.ts";
 import { runServerCommand, serveCommand, startCommand } from "./cli/server.ts";
 import { testCommand } from "./cli/test.ts";
 import { serviceCommand } from "./cli/service.ts";
 import { servicePreflightCommand } from "./cli/servicePreflight.ts";
+import { triageCommand } from "./cli/triage.ts";
 
 const CliRuntimeLayer = Layer.mergeAll(NodeServices.layer, NetService.layer);
 
@@ -59,6 +60,7 @@ export const makeCli = ({ cloudEnabled = hasCloudPublicConfig } = {}) =>
       projectCommand,
       serviceCommand,
       servicePreflightCommand,
+      triageCommand,
       cloudEnabled ? connectCommand : connectUnavailableCommand,
       testCommand,
     ]),
@@ -66,11 +68,13 @@ export const makeCli = ({ cloudEnabled = hasCloudPublicConfig } = {}) =>
 
 export const cli = makeCli();
 
-const isDirectlyExecuted =
-  import.meta.main ||
-  (process.argv[1] ? import.meta.url === NodeURL.pathToFileURL(process.argv[1]).href : false);
-
-if (isDirectlyExecuted) {
+if (
+  isEntrypoint({
+    moduleUrl: import.meta.url,
+    entryPath: process.argv[1],
+    runtimeMain: import.meta.main,
+  })
+) {
   const mainEffect = Command.run(cli, { version: packageJson.version }).pipe(
     Effect.scoped,
     Effect.provide(CliRuntimeLayer),

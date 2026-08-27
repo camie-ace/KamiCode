@@ -1,5 +1,7 @@
-import { CircleAlertIcon, FileIcon, VideoIcon, XIcon } from "lucide-react";
+import { CircleAlertIcon, FileIcon, RotateCcwIcon, VideoIcon, XIcon } from "lucide-react";
 import type { ComposerAttachment, ComposerImageAttachment } from "~/composerDraftStore";
+import type { AttachmentUploadState } from "~/lib/attachmentUploadState";
+import { formatAttachmentUploadProgress } from "~/lib/attachmentUploadState";
 import { cn } from "~/lib/utils";
 import { Button } from "../ui/button";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
@@ -44,9 +46,11 @@ export function ComposerAttachmentStrip(props: {
   attachments: ReadonlyArray<ComposerAttachment>;
   images: ReadonlyArray<ComposerImageAttachment>;
   nonPersistedAttachmentIds: ReadonlySet<string>;
+  uploadsByImageId?: Readonly<Record<string, AttachmentUploadState>>;
   className?: string;
   onExpandImage: (preview: ExpandedImagePreview) => void;
   onRemove: (attachmentId: string) => void;
+  onRetryUpload?: (image: ComposerImageAttachment) => void;
 }) {
   if (props.attachments.length === 0) {
     return null;
@@ -57,6 +61,8 @@ export function ComposerAttachmentStrip(props: {
       {props.attachments.map((attachment) => {
         const isUnsupported = attachment.status === "unsupported";
         const showPersistenceWarning = props.nonPersistedAttachmentIds.has(attachment.id);
+        const upload =
+          attachment.type === "image" ? props.uploadsByImageId?.[attachment.id] : undefined;
         return (
           <div
             key={attachment.id}
@@ -103,6 +109,37 @@ export function ComposerAttachmentStrip(props: {
                 <FileIcon className="size-5 text-muted-foreground/70" />
               )}
             </div>
+
+            {upload?.status === "uploading" ? (
+              <span className="pointer-events-none absolute bottom-0 left-0 w-16 bg-background/85 px-1 text-center text-[10px] text-foreground">
+                {formatAttachmentUploadProgress(upload.progress)}
+              </span>
+            ) : null}
+
+            {upload?.status === "failed" && props.onRetryUpload ? (
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon-xs"
+                      className="absolute bottom-1 left-1 bg-background/85 hover:bg-background/95"
+                      onClick={() => {
+                        const image = props.images.find((entry) => entry.id === attachment.id);
+                        if (image) props.onRetryUpload?.(image);
+                      }}
+                      aria-label={`Retry upload for ${attachment.name}`}
+                    />
+                  }
+                >
+                  <RotateCcwIcon />
+                </TooltipTrigger>
+                <TooltipPopup side="top" className="max-w-64 whitespace-normal leading-tight">
+                  {upload.reason}
+                </TooltipPopup>
+              </Tooltip>
+            ) : null}
 
             <div className="grid min-w-0 flex-1 content-center gap-0.5 px-2.5 py-2 pr-8">
               <div className="truncate text-xs font-medium text-foreground/90">

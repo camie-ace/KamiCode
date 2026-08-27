@@ -410,12 +410,14 @@ export const MediaArtifactCard = memo(function MediaArtifactCard({
               <p className="truncate text-sm font-semibold tracking-[-0.01em] text-foreground">
                 {artifact.title}
               </p>
-              <p
-                className="mt-0.5 truncate text-[11px] text-muted-foreground/72"
-                title={compactMetadata}
-              >
-                {compactMetadata}
-              </p>
+              <Tooltip>
+                <TooltipTrigger
+                  render={<p className="mt-0.5 truncate text-[11px] text-muted-foreground/72" />}
+                >
+                  {compactMetadata}
+                </TooltipTrigger>
+                <TooltipPopup side="top">{compactMetadata}</TooltipPopup>
+              </Tooltip>
             </div>
             {showPreviewWarning ? (
               <div className="flex items-start gap-1.5 rounded-lg border border-warning/25 bg-warning/8 px-2 py-1.5 text-[11px] text-muted-foreground/85">
@@ -626,15 +628,23 @@ export const MediaArtifactCard = memo(function MediaArtifactCard({
               {artifact.origin ? <MediaBadge>{originLabel(artifact.origin)}</MediaBadge> : null}
             </div>
           </div>
-          <p
-            className={cn(
-              "mt-1 truncate font-mono text-[11px] text-muted-foreground/70",
-              compact && "text-[10px]",
-            )}
-            title={displayPath}
-          >
-            {displayPath}
-          </p>
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <p
+                  className={cn(
+                    "mt-1 truncate font-mono text-[11px] text-muted-foreground/70",
+                    compact && "text-[10px]",
+                  )}
+                />
+              }
+            >
+              {displayPath}
+            </TooltipTrigger>
+            <TooltipPopup side="top" className="max-w-96 break-all">
+              {displayPath}
+            </TooltipPopup>
+          </Tooltip>
           {showPreviewWarning ? (
             <div
               className={cn(
@@ -652,12 +662,14 @@ export const MediaArtifactCard = memo(function MediaArtifactCard({
             </div>
           ) : null}
           {compact ? (
-            <p
-              className="mt-1 truncate text-[11px] text-muted-foreground/70"
-              title={compactMetadata}
-            >
-              {compactMetadata}
-            </p>
+            <Tooltip>
+              <TooltipTrigger
+                render={<p className="mt-1 truncate text-[11px] text-muted-foreground/70" />}
+              >
+                {compactMetadata}
+              </TooltipTrigger>
+              <TooltipPopup side="top">{compactMetadata}</TooltipPopup>
+            </Tooltip>
           ) : (
             <dl className="mt-2 grid gap-1 text-[11px] sm:grid-cols-2">
               {metadataRows.map((row) => (
@@ -668,9 +680,12 @@ export const MediaArtifactCard = memo(function MediaArtifactCard({
                   <dt className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground/50">
                     {row.label}
                   </dt>
-                  <dd className="truncate text-muted-foreground/85" title={row.value}>
-                    {row.value}
-                  </dd>
+                  <Tooltip>
+                    <TooltipTrigger render={<dd className="truncate text-muted-foreground/85" />}>
+                      {row.value}
+                    </TooltipTrigger>
+                    <TooltipPopup side="top">{row.value}</TooltipPopup>
+                  </Tooltip>
                 </div>
               ))}
             </dl>
@@ -854,9 +869,16 @@ export function MediaArtifactViewer(props: {
               <p className="truncate text-sm font-semibold tracking-[-0.01em] text-white">
                 {props.artifact.title}
               </p>
-              <p className="truncate font-mono text-[11px] text-white/42" title={displayPath}>
-                {displayPath}
-              </p>
+              <Tooltip>
+                <TooltipTrigger
+                  render={<p className="truncate font-mono text-[11px] text-white/42" />}
+                >
+                  {displayPath}
+                </TooltipTrigger>
+                <TooltipPopup side="bottom" className="max-w-96 break-all">
+                  {displayPath}
+                </TooltipPopup>
+              </Tooltip>
             </div>
           </div>
           {isImageLike ? (
@@ -1045,9 +1067,12 @@ export function MediaArtifactViewer(props: {
                   className="min-w-0 rounded-xl border border-white/8 bg-black/20 px-2.5 py-2"
                 >
                   <dt className="uppercase tracking-[0.14em] text-white/35">{row.label}</dt>
-                  <dd className="mt-0.5 truncate text-white/76" title={row.value}>
-                    {row.value}
-                  </dd>
+                  <Tooltip>
+                    <TooltipTrigger render={<dd className="mt-0.5 truncate text-white/76" />}>
+                      {row.value}
+                    </TooltipTrigger>
+                    <TooltipPopup side="left">{row.value}</TooltipPopup>
+                  </Tooltip>
                 </div>
               ))}
             </dl>

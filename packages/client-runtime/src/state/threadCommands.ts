@@ -1,8 +1,13 @@
 import * as Crypto from "effect/Crypto";
 import { Atom } from "effect/unstable/reactivity";
 import { HttpClient } from "effect/unstable/http";
+import { WS_METHODS } from "@t3tools/contracts";
 
-import { createAtomCommandScheduler, createEnvironmentCommand } from "./runtime.ts";
+import {
+  createAtomCommandScheduler,
+  createEnvironmentCommand,
+  createEnvironmentRpcCommand,
+} from "./runtime.ts";
 import {
   type ArchiveThreadInput,
   type CreateThreadInput,
@@ -233,6 +238,12 @@ export function createThreadEnvironmentAtoms<R, E>(
     stopSession: createEnvironmentCommand(runtime, {
       label: "environment-data:commands:thread:stop-session",
       execute: (input: StopThreadSessionInput) => stopThreadSession(input),
+      scheduler,
+      concurrency,
+    }),
+    uploadFeedback: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:commands:thread:upload-feedback",
+      tag: WS_METHODS.providerUploadFeedback,
       scheduler,
       concurrency,
     }),

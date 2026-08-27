@@ -2,13 +2,21 @@ import { assert, describe, it } from "@effect/vitest";
 import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
+import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
+import { vi } from "vite-plus/test";
 
 import * as DesktopBackendManager from "../../backend/DesktopBackendManager.ts";
 import * as DesktopBackendPool from "../../backend/DesktopBackendPool.ts";
+import * as ElectronDialog from "../../electron/ElectronDialog.ts";
 import * as ElectronShell from "../../electron/ElectronShell.ts";
-import { getLocalEnvironmentBootstraps, revealLocalMediaFile } from "./window.ts";
+import * as ElectronWindow from "../../electron/ElectronWindow.ts";
+import {
+  getLocalEnvironmentBootstraps,
+  pickProjectFavicon,
+  revealLocalMediaFile,
+} from "./window.ts";
 
 function provideShell<A, E>(
   effect: Effect.Effect<A, E, ElectronShell.ElectronShell>,
@@ -181,6 +189,41 @@ describe("window IPC methods", () => {
 
       const error = Cause.findErrorOption(exit.cause);
       assert.isTrue(Option.isSome(error) && Schema.isSchemaError(error.value));
+    }),
+  );
+});
+
+describe("pickProjectFavicon", () => {
+  it.effect("opens a single-image picker from the project directory", () =>
+    Effect.gen(function* () {
+      const pickFiles = vi.fn(() => Effect.succeed(["/pictures/icon.png"]));
+      const result = yield* pickProjectFavicon.handler("/project").pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            Layer.mock(ElectronDialog.ElectronDialog)({ pickFiles }),
+            Layer.mock(ElectronWindow.ElectronWindow)({
+              focusedMainOrFirst: Effect.succeed(Option.none()),
+            }),
+          ),
+        ),
+      );
+
+      assert.strictEqual(result, "/pictures/icon.png");
+      assert.deepEqual(pickFiles.mock.calls, [
+        [
+          {
+            owner: Option.none(),
+            defaultPath: Option.some("/project"),
+            multiple: false,
+            filters: [
+              {
+                name: "Images",
+                extensions: ["avif", "gif", "ico", "jpeg", "jpg", "png", "svg", "webp"],
+              },
+            ],
+          },
+        ],
+      ]);
     }),
   );
 });
