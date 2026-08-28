@@ -97,6 +97,11 @@ const errorMessage = (cause: unknown): string =>
 
 const errorName = (cause: unknown): string => (cause instanceof Error ? cause.name : "");
 
+const runtimeFailureDetail = (cause: unknown) => ({
+  causeName: errorName(cause) || "UnknownError",
+  causeMessage: errorMessage(cause).slice(0, 2_000),
+});
+
 const classifyFailure = (
   cause: unknown,
   operation: PreviewAutomationOperation,
@@ -319,15 +324,24 @@ export class HostedPreviewAutomationController {
 
   private async ensureContext(): Promise<BrowserContext> {
     if (this.context) return this.context;
-    const playwrightPackage = "playwright";
-    const playwright = await import(playwrightPackage);
-    const context = await playwright.chromium.launchPersistentContext(this.options.profileDir, {
-      headless: true,
-      viewport: DEFAULT_VIEWPORT,
-      acceptDownloads: true,
-      userAgent: "KamiCode-HostedBrowser/1.0",
-      args: ["--disable-dev-shm-usage"],
-    });
+    let context: BrowserContext;
+    try {
+      const playwrightPackage = "playwright";
+      const playwright = await import(playwrightPackage);
+      context = await playwright.chromium.launchPersistentContext(this.options.profileDir, {
+        headless: true,
+        viewport: DEFAULT_VIEWPORT,
+        acceptDownloads: true,
+        userAgent: "KamiCode-HostedBrowser/1.0",
+        args: ["--disable-dev-shm-usage"],
+      });
+    } catch (cause) {
+      throw new HostedPreviewAutomationError(
+        "PreviewAutomationUnavailableError",
+        "The VPS-hosted Chromium runtime could not start.",
+        runtimeFailureDetail(cause),
+      );
+    }
     context.setDefaultTimeout(15_000);
     context.setDefaultNavigationTimeout(15_000);
     for (const page of context.pages()) await page.close().catch(() => {});
@@ -462,8 +476,18 @@ export class HostedPreviewAutomationController {
           `The VPS-hosted browser tab limit (${this.maxTabs}) has been reached. Reuse an existing tab or wait for idle cleanup.`,
         );
       }
-      const context = await this.ensureContext();
-      const page = await context.newPage();
+      let page: Page;
+      try {
+        const context = await this.ensureContext();
+        page = await context.newPage();
+      } catch (cause) {
+        if (cause instanceof HostedPreviewAutomationError) throw cause;
+        throw new HostedPreviewAutomationError(
+          "PreviewAutomationUnavailableError",
+          "The VPS-hosted Chromium runtime could not create a tab.",
+          runtimeFailureDetail(cause),
+        );
+      }
       const tabId = PreviewTabId.make(`hosted-${NodeCrypto.randomUUID()}`);
       tab = {
         tabId,
@@ -796,17 +820,25 @@ export const layer = Layer.effectDiscard(
       }).pipe(
         Effect.matchEffect({
           onFailure: (error) =>
-            broker.respond({
-              clientId,
-              connectionId: event.connectionId,
-              requestId: event.request.requestId,
-              ok: false,
-              error: {
-                _tag: error._tag,
-                message: error.message,
-                ...(error.detail === undefined ? {} : { detail: error.detail }),
-              },
-            }),
+            Effect.logWarning("VPS-hosted preview automation request failed.", {
+              operation: event.request.operation,
+              errorTag: error._tag,
+              ...(error.detail === undefined ? {} : { errorDetail: error.detail }),
+            }).pipe(
+              Effect.andThen(
+                broker.respond({
+                  clientId,
+                  connectionId: event.connectionId,
+                  requestId: event.request.requestId,
+                  ok: false,
+                  error: {
+                    _tag: error._tag,
+                    message: error.message,
+                    ...(error.detail === undefined ? {} : { detail: error.detail }),
+                  },
+                }),
+              ),
+            ),
           onSuccess: (result) =>
             broker.respond({
               clientId,

@@ -41,9 +41,12 @@ describe("shouldBundleCliDependency", () => {
     assert.strictEqual(shouldBundleCliDependency("node:fs"), false);
   });
 
-  it("leaves native addons and their dlopen wrappers external", () => {
+  it("leaves runtime-loaded packages and native wrappers external", () => {
     for (const id of [
       "node-pty",
+      "playwright",
+      "playwright-core",
+      "fsevents",
       "ffi-rs",
       "@yuuang/ffi-rs-win32-x64-msvc",
       "@ff-labs/fff-node",
@@ -76,10 +79,12 @@ describe("selectCliRuntimeExternalDependencies", () => {
         "@ff-labs/fff-node": "2.0.0",
         effect: "3.0.0",
         "node-pty": "4.0.0",
+        playwright: "1.61.1",
       }),
       {
         "@ff-labs/fff-node": "2.0.0",
         "node-pty": "4.0.0",
+        playwright: "1.61.1",
       },
     );
   });
@@ -87,7 +92,7 @@ describe("selectCliRuntimeExternalDependencies", () => {
   it("selects every external root declared by the server", () => {
     assert.deepStrictEqual(
       Object.keys(selectCliRuntimeExternalDependencies(serverPackageJson.dependencies)).sort(),
-      ["@ff-labs/fff-node", "msgpackr-extract", "node-pty"],
+      ["@ff-labs/fff-node", "msgpackr-extract", "node-pty", "playwright"],
     );
   });
 });

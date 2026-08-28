@@ -27,6 +27,13 @@
  */
 export const CLI_RUNTIME_EXTERNAL_PREFIXES = [
   "node-pty",
+  // Playwright resolves browser artifacts and lazily loaded protocol modules
+  // relative to its installed package. Bundling it rewrites those boundaries
+  // and leaves Chromium's BiDi modules unresolved in the emitted CLI chunk.
+  // The prefix intentionally covers playwright-core as well.
+  "playwright",
+  // Optional macOS watcher loaded by Playwright from the real filesystem.
+  "fsevents",
   "ffi-rs",
   "@yuuang/",
   "@ff-labs/",
