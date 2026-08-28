@@ -131,6 +131,11 @@ const EnvServerConfig = Config.all({
     Config.option,
     Config.map(Option.getOrUndefined),
   ),
+  hostedBrowserEnabled: Config.boolean("T3CODE_HOSTED_BROWSER").pipe(Config.withDefault(false)),
+  hostedBrowserMaxTabs: Config.int("T3CODE_HOSTED_BROWSER_MAX_TABS").pipe(Config.withDefault(2)),
+  hostedBrowserIdleTimeoutMs: Config.int("T3CODE_HOSTED_BROWSER_IDLE_TIMEOUT_MS").pipe(
+    Config.withDefault(10 * 60 * 1_000),
+  ),
   bootstrapFd: Config.int("T3CODE_BOOTSTRAP_FD").pipe(
     Config.option,
     Config.map(Option.getOrUndefined),
@@ -407,6 +412,9 @@ export const resolveServerConfig = (
       ),
       devAllowedOrigins: env.devAllowedOrigins,
       noBrowser,
+      hostedBrowserEnabled: env.hostedBrowserEnabled,
+      hostedBrowserMaxTabs: env.hostedBrowserMaxTabs,
+      hostedBrowserIdleTimeoutMs: env.hostedBrowserIdleTimeoutMs,
       startupPresentation,
       desktopBootstrapToken,
       desktopTelemetryFd,

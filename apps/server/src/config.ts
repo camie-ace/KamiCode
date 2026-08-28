@@ -79,6 +79,10 @@ export class ServerConfig extends Context.Service<
     readonly devUrl: URL | undefined;
     readonly devAllowedOrigins: ReadonlyArray<string>;
     readonly noBrowser: boolean;
+    /** Enables the resource-bounded Chromium host used by preview_* tools in web mode. */
+    readonly hostedBrowserEnabled?: boolean;
+    readonly hostedBrowserMaxTabs?: number;
+    readonly hostedBrowserIdleTimeoutMs?: number;
     readonly startupPresentation: StartupPresentation;
     readonly desktopBootstrapToken: string | undefined;
     readonly githubOAuthClientId?: string | undefined;
@@ -215,6 +219,9 @@ const makeTest = Effect.fn("ServerConfig.makeTest")(function* (
     devUrl,
     devAllowedOrigins: [],
     noBrowser: false,
+    hostedBrowserEnabled: false,
+    hostedBrowserMaxTabs: 2,
+    hostedBrowserIdleTimeoutMs: 10 * 60 * 1_000,
     startupPresentation: "browser",
   });
 });
