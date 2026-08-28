@@ -331,6 +331,120 @@ function makeProviderServiceLayer() {
   };
 }
 
+function makeCompatibleCodexHandoffFixture(input?: { readonly failReplacementStart?: boolean }) {
+  const replacementInstanceId = ProviderInstanceId.make("codex_work");
+  const primary = makeFakeCodexAdapter();
+  const replacement = makeFakeCodexAdapter();
+  const operations: Array<string> = [];
+
+  const primaryStartSession = vi.fn((startInput: ProviderSessionStartInput) =>
+    Effect.sync(() => {
+      operations.push("primary:start");
+    }).pipe(Effect.andThen(primary.startSession(startInput))),
+  );
+  const primaryStopSession = vi.fn((threadId: ThreadId) =>
+    Effect.sync(() => {
+      operations.push("primary:stop");
+    }).pipe(Effect.andThen(primary.stopSession(threadId))),
+  );
+  const replacementStartSession = vi.fn((startInput: ProviderSessionStartInput) =>
+    Effect.gen(function* () {
+      operations.push("replacement:start");
+      if (yield* primary.hasSession(startInput.threadId)) {
+        return yield* new ProviderAdapterRequestError({
+          provider: String(CODEX_DRIVER),
+          method: "startSession",
+          detail: `Thread '${startInput.threadId}' already has an active writer.`,
+        });
+      }
+      if (input?.failReplacementStart === true) {
+        return yield* new ProviderAdapterRequestError({
+          provider: String(CODEX_DRIVER),
+          method: "startSession",
+          detail: "Simulated replacement start failure.",
+        });
+      }
+      return yield* replacement.startSession(startInput);
+    }),
+  );
+
+  const primaryAdapter: ProviderAdapterShape<ProviderAdapterError> = {
+    ...primary.adapter,
+    startSession: primaryStartSession,
+    stopSession: primaryStopSession,
+  };
+  const replacementAdapter: ProviderAdapterShape<ProviderAdapterError> = {
+    ...replacement.adapter,
+    startSession: replacementStartSession,
+  };
+  const adapters = new Map<ProviderInstanceId, ProviderAdapterShape<ProviderAdapterError>>([
+    [codexInstanceId, primaryAdapter],
+    [replacementInstanceId, replacementAdapter],
+  ]);
+  const unsupported = () => new ProviderUnsupportedError({ provider: CODEX_DRIVER });
+  const registry: ProviderAdapterRegistry.ProviderAdapterRegistry["Service"] = {
+    getByInstance: (instanceId) => {
+      const adapter = adapters.get(instanceId);
+      return adapter ? Effect.succeed(adapter) : Effect.fail(unsupported());
+    },
+    getInstanceInfo: (instanceId) =>
+      adapters.has(instanceId)
+        ? Effect.succeed({
+            instanceId,
+            driverKind: CODEX_DRIVER,
+            displayName: undefined,
+            enabled: true,
+            continuationIdentity: {
+              driverKind: CODEX_DRIVER,
+              continuationKey: "codex:home:/shared",
+            },
+          })
+        : Effect.fail(unsupported()),
+    listInstances: () => Effect.succeed([codexInstanceId, replacementInstanceId]),
+    listProviders: () => Effect.succeed([CODEX_DRIVER]),
+    streamChanges: Stream.empty,
+    subscribeChanges: Effect.flatMap(PubSub.unbounded<void>(), (pubsub) =>
+      PubSub.subscribe(pubsub),
+    ),
+  };
+  const providerAdapterLayer = Layer.succeed(
+    ProviderAdapterRegistry.ProviderAdapterRegistry,
+    registry,
+  );
+  const runtimeRepositoryLayer = ProviderSessionRuntime.layer.pipe(
+    Layer.provide(SqlitePersistenceMemory),
+  );
+  const directoryLayer = ProviderSessionDirectoryLive.pipe(Layer.provide(runtimeRepositoryLayer));
+  const layer = Layer.mergeAll(
+    makeProviderServiceLive().pipe(
+      Layer.provide(providerAdapterLayer),
+      Layer.provide(directoryLayer),
+      Layer.provide(defaultServerSettingsLayer),
+      Layer.provide(serverConfigTestLayer),
+      Layer.provideMerge(AnalyticsService.layerTest),
+      Layer.provide(
+        Layer.succeed(
+          ProviderEventLoggers.ProviderEventLoggers,
+          ProviderEventLoggers.NoOpProviderEventLoggers,
+        ),
+      ),
+    ),
+    directoryLayer,
+    runtimeRepositoryLayer,
+    NodeServices.layer,
+  );
+
+  return {
+    layer,
+    operations,
+    primary,
+    replacement,
+    primaryStartSession,
+    replacementStartSession,
+    replacementInstanceId,
+  };
+}
+
 it.effect("ProviderServiceLive catches stopAll failures during shutdown", () =>
   Effect.gen(function* () {
     const codex = makeFakeCodexAdapter();
@@ -602,6 +716,84 @@ it.effect("ProviderServiceLive rejects new sessions for disabled custom instance
     assert.equal(codex.startSession.mock.calls.length, 0);
   }).pipe(Effect.provide(NodeServices.layer)),
 );
+
+it.effect("releases a compatible provider instance before resuming through another", () => {
+  const fixture = makeCompatibleCodexHandoffFixture();
+  return Effect.gen(function* () {
+    const provider = yield* ProviderService.ProviderService;
+    const directory = yield* ProviderSessionDirectory.ProviderSessionDirectory;
+    const threadId = asThreadId("thread-compatible-instance-handoff");
+    const initial = yield* provider.startSession(threadId, {
+      provider: CODEX_DRIVER,
+      providerInstanceId: codexInstanceId,
+      threadId,
+      cwd: "/tmp/project-compatible-instance-handoff",
+      runtimeMode: "full-access",
+    });
+    fixture.operations.length = 0;
+
+    const resumed = yield* provider.startSession(threadId, {
+      provider: CODEX_DRIVER,
+      providerInstanceId: fixture.replacementInstanceId,
+      threadId,
+      cwd: "/tmp/project-compatible-instance-handoff",
+      resumeCursor: initial.resumeCursor,
+      runtimeMode: "full-access",
+    });
+
+    assert.deepEqual(fixture.operations, ["primary:stop", "replacement:start"]);
+    assert.equal(resumed.providerInstanceId, fixture.replacementInstanceId);
+    assert.equal(yield* fixture.primary.hasSession(threadId), false);
+    assert.equal(yield* fixture.replacement.hasSession(threadId), true);
+    assert.deepEqual(
+      fixture.replacementStartSession.mock.calls[0]?.[0].resumeCursor,
+      initial.resumeCursor,
+    );
+    const binding = Option.getOrUndefined(yield* directory.getBinding(threadId));
+    assert.equal(binding?.providerInstanceId, fixture.replacementInstanceId);
+  }).pipe(Effect.provide(fixture.layer));
+});
+
+it.effect("restores the original provider instance when a compatible handoff fails", () => {
+  const fixture = makeCompatibleCodexHandoffFixture({ failReplacementStart: true });
+  return Effect.gen(function* () {
+    const provider = yield* ProviderService.ProviderService;
+    const directory = yield* ProviderSessionDirectory.ProviderSessionDirectory;
+    const threadId = asThreadId("thread-compatible-instance-handoff-rollback");
+    const initial = yield* provider.startSession(threadId, {
+      provider: CODEX_DRIVER,
+      providerInstanceId: codexInstanceId,
+      threadId,
+      cwd: "/tmp/project-compatible-instance-handoff-rollback",
+      runtimeMode: "full-access",
+    });
+    fixture.operations.length = 0;
+
+    const failure = yield* provider
+      .startSession(threadId, {
+        provider: CODEX_DRIVER,
+        providerInstanceId: fixture.replacementInstanceId,
+        threadId,
+        cwd: "/tmp/project-compatible-instance-handoff-rollback",
+        resumeCursor: initial.resumeCursor,
+        runtimeMode: "full-access",
+      })
+      .pipe(Effect.flip);
+
+    assert.instanceOf(failure, ProviderAdapterRequestError);
+    assert.include(failure.detail, "Simulated replacement start failure");
+    assert.deepEqual(fixture.operations, ["primary:stop", "replacement:start", "primary:start"]);
+    assert.equal(yield* fixture.primary.hasSession(threadId), true);
+    assert.equal(yield* fixture.replacement.hasSession(threadId), false);
+    assert.deepEqual(
+      fixture.primaryStartSession.mock.calls.at(-1)?.[0].resumeCursor,
+      initial.resumeCursor,
+    );
+    const binding = Option.getOrUndefined(yield* directory.getBinding(threadId));
+    assert.equal(binding?.providerInstanceId, codexInstanceId);
+    assert.equal(binding?.status, "running");
+  }).pipe(Effect.provide(fixture.layer));
+});
 
 const routing = makeProviderServiceLayer();
 

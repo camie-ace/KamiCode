@@ -604,6 +604,71 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
     );
   });
 
+  const resolveCompatibleInstanceHandoff = Effect.fn("resolveCompatibleInstanceHandoff")(
+    function* (input: {
+      readonly threadId: ThreadId;
+      readonly persistedBinding: ProviderSessionDirectory.ProviderRuntimeBinding | undefined;
+      readonly desiredInstanceId: ProviderInstanceId;
+      readonly desiredInstanceInfo: ProviderAdapterRegistry.ProviderInstanceRoutingInfo;
+      readonly hasResumeCursor: boolean;
+    }) {
+      const previousInstanceId = input.persistedBinding?.providerInstanceId;
+      if (
+        !input.hasResumeCursor ||
+        !input.persistedBinding ||
+        previousInstanceId === undefined ||
+        previousInstanceId === input.desiredInstanceId
+      ) {
+        return undefined;
+      }
+
+      const previousInstanceInfo = Option.getOrUndefined(
+        yield* registry.getInstanceInfo(previousInstanceId).pipe(Effect.option),
+      );
+      if (
+        !previousInstanceInfo ||
+        previousInstanceInfo.driverKind !== input.desiredInstanceInfo.driverKind ||
+        previousInstanceInfo.continuationIdentity.continuationKey !==
+          input.desiredInstanceInfo.continuationIdentity.continuationKey
+      ) {
+        return undefined;
+      }
+
+      const previousAdapter = Option.getOrUndefined(
+        yield* registry.getByInstance(previousInstanceId).pipe(Effect.option),
+      );
+      if (!previousAdapter || !(yield* previousAdapter.hasSession(input.threadId))) {
+        return undefined;
+      }
+
+      return {
+        adapter: previousAdapter,
+        binding: input.persistedBinding,
+        instanceId: previousInstanceId,
+      } as const;
+    },
+  );
+
+  const restoreCompatibleInstanceHandoff = Effect.fn("restoreCompatibleInstanceHandoff")(
+    function* (input: {
+      readonly threadId: ThreadId;
+      readonly binding: ProviderSessionDirectory.ProviderRuntimeBinding;
+      readonly previousInstanceId: ProviderInstanceId;
+      readonly failedInstanceId: ProviderInstanceId;
+    }) {
+      yield* clearMcpSession(input.threadId);
+      yield* recoverSessionForThread({
+        binding: input.binding,
+        operation: "ProviderService.startSession:restore-compatible-instance-handoff",
+      });
+      yield* Effect.logWarning("provider.session.compatible-instance-handoff-restored", {
+        threadId: input.threadId,
+        previousInstanceId: input.previousInstanceId,
+        failedInstanceId: input.failedInstanceId,
+      });
+    },
+  );
+
   const startSession: ProviderServiceMethod<"startSession"> = Effect.fn("startSession")(
     function* (threadId, rawInput) {
       const parsed = yield* decodeInputOrValidationError({
@@ -675,23 +740,68 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
           "provider.cwd.effective": effectiveCwd ?? "",
         });
         const adapter = yield* registry.getByInstance(resolvedInstanceId);
-        yield* prepareMcpSession(threadId, resolvedInstanceId);
-        const session = yield* adapter
-          .startSession({
+        const compatibleHandoff = yield* resolveCompatibleInstanceHandoff({
+          threadId,
+          persistedBinding,
+          desiredInstanceId: resolvedInstanceId,
+          desiredInstanceInfo: instanceInfo,
+          hasResumeCursor: effectiveResumeCursor !== undefined,
+        });
+        const startRequestedSession = Effect.gen(function* () {
+          yield* prepareMcpSession(threadId, resolvedInstanceId);
+          const started = yield* adapter.startSession({
             ...input,
             providerInstanceId: resolvedInstanceId,
             ...(effectiveCwd !== undefined ? { cwd: effectiveCwd } : {}),
             ...(effectiveResumeCursor !== undefined ? { resumeCursor: effectiveResumeCursor } : {}),
-          })
-          .pipe(Effect.onError(() => clearMcpSession(threadId)));
+          });
 
-        if (session.provider !== adapter.provider) {
-          yield* clearMcpSession(threadId);
-          return yield* toValidationError(
-            "ProviderService.startSession",
-            `Adapter/provider mismatch: requested '${adapter.provider}', received '${session.provider}'.`,
-          );
-        }
+          if (started.provider !== adapter.provider) {
+            yield* adapter.stopSession(threadId).pipe(Effect.ignore);
+            yield* clearMcpSession(threadId);
+            return yield* toValidationError(
+              "ProviderService.startSession",
+              `Adapter/provider mismatch: requested '${adapter.provider}', received '${started.provider}'.`,
+            );
+          }
+          return started;
+        });
+        const session = yield* compatibleHandoff
+          ? Effect.gen(function* () {
+              yield* Effect.logInfo("provider.session.compatible-instance-handoff-started", {
+                threadId,
+                previousInstanceId: compatibleHandoff.instanceId,
+                desiredInstanceId: resolvedInstanceId,
+              });
+              yield* compatibleHandoff.adapter.stopSession(threadId);
+              yield* analytics.record("provider.session.stopped", {
+                provider: compatibleHandoff.adapter.provider,
+              });
+              return yield* startRequestedSession.pipe(
+                Effect.catchCause((cause) =>
+                  restoreCompatibleInstanceHandoff({
+                    threadId,
+                    binding: compatibleHandoff.binding,
+                    previousInstanceId: compatibleHandoff.instanceId,
+                    failedInstanceId: resolvedInstanceId,
+                  }).pipe(
+                    Effect.catchCause((restoreCause) =>
+                      Effect.logWarning(
+                        "provider.session.compatible-instance-handoff-restore-failed",
+                        {
+                          threadId,
+                          previousInstanceId: compatibleHandoff.instanceId,
+                          failedInstanceId: resolvedInstanceId,
+                          cause: restoreCause,
+                        },
+                      ),
+                    ),
+                    Effect.andThen(Effect.failCause(cause)),
+                  ),
+                ),
+              );
+            })
+          : startRequestedSession.pipe(Effect.onError(() => clearMcpSession(threadId)));
         const sessionWithInstance = {
           ...session,
           providerInstanceId: resolvedInstanceId,
@@ -706,6 +816,13 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         yield* upsertSessionBinding(sessionWithInstance, threadId, {
           modelSelection: input.modelSelection,
         });
+        if (compatibleHandoff) {
+          yield* Effect.logInfo("provider.session.compatible-instance-handoff-completed", {
+            threadId,
+            previousInstanceId: compatibleHandoff.instanceId,
+            desiredInstanceId: resolvedInstanceId,
+          });
+        }
         yield* analytics.record("provider.session.started", {
           provider: sessionWithInstance.provider,
           runtimeMode: input.runtimeMode,
