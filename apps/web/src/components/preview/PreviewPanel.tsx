@@ -3,8 +3,6 @@
 import type { PreviewAnnotationPayload, ScopedThreadRef } from "@t3tools/contracts";
 
 import type { ComposerImageAttachment } from "~/composerDraftStore";
-import { isPreviewSupportedInRuntime } from "~/previewStateStore";
-
 import { PreviewPanelShell, type PreviewPanelMode } from "./PreviewPanelShell";
 import { PreviewView } from "./PreviewView";
 
@@ -14,6 +12,7 @@ interface Props {
   tabId?: string | null;
   configuredUrls?: ReadonlyArray<string> | undefined;
   visible: boolean;
+  browserAvailable: boolean;
   onSendAnnotation?: (
     annotation: PreviewAnnotationPayload,
     image: ComposerImageAttachment | null,
@@ -26,19 +25,22 @@ export function PreviewPanel({
   tabId,
   configuredUrls,
   visible,
+  browserAvailable,
   onSendAnnotation,
 }: Props) {
-  if (!isPreviewSupportedInRuntime()) {
+  if (!browserAvailable) {
     return (
       <PreviewPanelShell mode={mode}>
         <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 p-8 text-center">
           <p className="max-w-sm text-sm text-muted-foreground">
-            Preview is only available in the T3 Code desktop app.
+            Browser preview is not available on this server.
           </p>
         </div>
       </PreviewPanelShell>
     );
   }
+
+  const hostedBrowser = typeof window !== "undefined" && !window.desktopBridge?.preview;
 
   return (
     <PreviewPanelShell mode={mode}>
@@ -47,6 +49,7 @@ export function PreviewPanel({
         {...(tabId !== undefined ? { tabId } : {})}
         configuredUrls={configuredUrls}
         visible={visible}
+        hostedBrowser={hostedBrowser}
         {...(onSendAnnotation ? { onSendAnnotation } : {})}
       />
     </PreviewPanelShell>

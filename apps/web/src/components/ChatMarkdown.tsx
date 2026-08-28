@@ -1662,6 +1662,7 @@ function ChatMarkdown({
   const threadServerConfig = useAtomValue(
     serverEnvironment.configValueAtom(threadRef?.environmentId ?? environmentId),
   );
+  const previewSupported = isPreviewSupportedInRuntime(threadServerConfig);
   const projects = useProjects();
   const availableEditors = serverConfig?.availableEditors ?? [];
   const [preferredEditor] = usePreferredEditor(availableEditors);
@@ -1828,11 +1829,12 @@ function ChatMarkdown({
         threadRef,
         filePath: path,
         httpBaseUrl: preparedConnection.value.httpBaseUrl,
+        serverConfig: threadServerConfig,
         createAssetUrl,
         openPreview,
       });
     },
-    [createAssetUrl, openPreview, preparedConnection, threadRef],
+    [createAssetUrl, openPreview, preparedConnection, threadRef, threadServerConfig],
   );
   const findWorkspaceBasenameMatch = useCallback(
     async (workspaceRelativePath: string) => {
@@ -1931,9 +1933,7 @@ function ChatMarkdown({
           }
           revealLabel={revealInFileManagerLabel}
           onOpenInBrowser={
-            threadRef &&
-            isPreviewSupportedInRuntime() &&
-            isBrowserPreviewFile(fileLinkMeta.filePath)
+            threadRef && previewSupported && isBrowserPreviewFile(fileLinkMeta.filePath)
               ? () => openMarkdownFileInPreview(fileLinkMeta.filePath)
               : undefined
           }
@@ -2024,7 +2024,7 @@ function ChatMarkdown({
           const faviconHost = resolveExternalWebLinkHost(href);
           const isSameDocumentLink = href?.startsWith("#") ?? false;
           const onClick = props.onClick;
-          const canOpenInPreview = Boolean(threadRef) && isPreviewSupportedInRuntime();
+          const canOpenInPreview = Boolean(threadRef) && previewSupported;
           const link = (
             <a
               {...props}
@@ -2222,6 +2222,7 @@ function ChatMarkdown({
     openExternalLinkInPreview,
     openMarkdownFileInPreview,
     preferredEditorMenuLabel,
+    previewSupported,
     resolveThreadPullRequest,
     resolvedTheme,
     revealMarkdownFileInFileManager,

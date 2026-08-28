@@ -6,7 +6,7 @@ import { isCommandPaletteOpen } from "../commandPaletteBus";
 import { useClientSettings, useLegacySidebarEnabled } from "../hooks/useSettings";
 import { openCommandPalette } from "../commandPaletteBus";
 import { useProjects } from "../state/entities";
-import { usePrimaryEnvironmentId } from "../state/environments";
+import { useEnvironment, usePrimaryEnvironmentId } from "../state/environments";
 import { selectProjectGroupingSettings } from "../logicalProject";
 import { buildSidebarProjectSnapshots } from "../sidebarProjectGrouping";
 import { dispatchPreviewAction } from "../components/preview/previewActionBus";
@@ -32,6 +32,8 @@ function ChatRouteGlobalShortcuts() {
   const projectGroupingSettings = useClientSettings(selectProjectGroupingSettings);
   const projects = useProjects();
   const primaryEnvironmentId = usePrimaryEnvironmentId();
+  const previewEnvironment = useEnvironment(routeThreadRef?.environmentId ?? primaryEnvironmentId);
+  const browserAvailable = isPreviewSupportedInRuntime(previewEnvironment?.serverConfig ?? null);
   const projectGroupCount = useMemo(
     () =>
       buildSidebarProjectSnapshots({
@@ -112,12 +114,12 @@ function ChatRouteGlobalShortcuts() {
         event.preventDefault();
         event.stopPropagation();
         if (!routeThreadRef) return;
-        if (!isPreviewSupportedInRuntime()) {
+        if (!browserAvailable) {
           toastManager.add(
             stackedThreadToast({
               type: "info",
-              title: "Preview is desktop-only",
-              description: "Open T3 Code in the desktop app to use the in-app preview.",
+              title: "Browser preview is unavailable",
+              description: "This environment does not provide an in-app browser.",
             }),
           );
           return;
@@ -159,6 +161,7 @@ function ChatRouteGlobalShortcuts() {
   }, [
     activeDraftThread,
     activeThread,
+    browserAvailable,
     clearSelection,
     handleNewThread,
     keybindings,

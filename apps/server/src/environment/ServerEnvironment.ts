@@ -156,6 +156,9 @@ export const make = Effect.gen(function* () {
       threadPullRequestLinking: true,
       ...(serverSelfUpdate === null ? {} : { serverSelfUpdate }),
       ...(serverSelfUpdate === "boot-service" ? { serverSelfUpdateProgress: true } : {}),
+      ...(serverConfig.mode === "web" && serverConfig.hostedBrowserEnabled
+        ? { hostedBrowserPreview: true }
+        : {}),
     },
   };
 

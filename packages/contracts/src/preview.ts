@@ -184,6 +184,12 @@ export const PreviewOpenInput = Schema.Struct({
    * later (which the user would see as a visible reflow).
    */
   viewport: Schema.optional(PreviewViewportSetting),
+  /**
+   * Ask connected clients to reveal the new tab. Server-side automation uses
+   * this when preview_open is invoked with its default human-visible mode.
+   * Ordinary UI callers already open their own panel and may omit it.
+   */
+  reveal: Schema.optional(Schema.Literal(true)),
 });
 export type PreviewOpenInput = typeof PreviewOpenInput.Type;
 
@@ -237,6 +243,105 @@ export const PreviewListResult = Schema.Struct({
 });
 export type PreviewListResult = typeof PreviewListResult.Type;
 
+/** A compressed frame from a server-hosted browser tab. */
+export const HostedPreviewFrameInput = Schema.Struct({
+  threadId: ThreadId,
+  tabId: PreviewTabId,
+  /** Omit the encoded frame when the client already has this sequence. */
+  afterSequence: Schema.optional(NonNegativeInt),
+});
+export type HostedPreviewFrameInput = typeof HostedPreviewFrameInput.Type;
+
+export const HostedPreviewFrameResult = Schema.Struct({
+  state: Schema.Literals(["ready", "pending", "not-found", "unavailable"]),
+  sequence: NonNegativeInt,
+  frame: Schema.NullOr(
+    Schema.Struct({
+      mimeType: Schema.Literal("image/jpeg"),
+      data: Schema.String,
+      width: PositiveInt,
+      height: PositiveInt,
+    }),
+  ),
+  url: Schema.NullOr(Schema.String),
+  title: Schema.NullOr(Schema.String),
+  loading: Schema.Boolean,
+  canGoBack: Schema.Boolean,
+  canGoForward: Schema.Boolean,
+  message: Schema.optional(Schema.String),
+});
+export type HostedPreviewFrameResult = typeof HostedPreviewFrameResult.Type;
+
+const HostedPreviewCoordinate = Schema.Number.check(Schema.isGreaterThanOrEqualTo(0)).check(
+  Schema.isLessThanOrEqualTo(PREVIEW_VIEWPORT_MAX_DIMENSION),
+);
+const HostedPreviewWheelDelta = Schema.Number.check(
+  Schema.isBetween({
+    minimum: -PREVIEW_VIEWPORT_MAX_DIMENSION,
+    maximum: PREVIEW_VIEWPORT_MAX_DIMENSION,
+  }),
+);
+
+export const HostedPreviewMouseButton = Schema.Literals(["left", "middle", "right"]);
+export type HostedPreviewMouseButton = typeof HostedPreviewMouseButton.Type;
+
+export const HostedPreviewControlAction = Schema.Union([
+  Schema.TaggedStruct("pointerMove", {
+    x: HostedPreviewCoordinate,
+    y: HostedPreviewCoordinate,
+  }),
+  Schema.TaggedStruct("pointerDown", {
+    x: HostedPreviewCoordinate,
+    y: HostedPreviewCoordinate,
+    button: HostedPreviewMouseButton,
+  }),
+  Schema.TaggedStruct("pointerUp", {
+    x: HostedPreviewCoordinate,
+    y: HostedPreviewCoordinate,
+    button: HostedPreviewMouseButton,
+  }),
+  Schema.TaggedStruct("pointerClick", {
+    x: HostedPreviewCoordinate,
+    y: HostedPreviewCoordinate,
+    button: HostedPreviewMouseButton,
+    clickCount: Schema.optional(
+      Schema.Int.check(Schema.isGreaterThan(0)).check(Schema.isLessThanOrEqualTo(3)),
+    ),
+  }),
+  Schema.TaggedStruct("wheel", {
+    x: HostedPreviewCoordinate,
+    y: HostedPreviewCoordinate,
+    deltaX: HostedPreviewWheelDelta,
+    deltaY: HostedPreviewWheelDelta,
+  }),
+  Schema.TaggedStruct("key", {
+    key: TrimmedNonEmptyString.check(Schema.isMaxLength(64)),
+    modifiers: Schema.Array(Schema.Literals(["Alt", "Control", "Meta", "Shift"])).check(
+      Schema.isMaxLength(4),
+    ),
+  }),
+  Schema.TaggedStruct("insertText", {
+    text: Schema.String.check(Schema.isMaxLength(4_096)),
+  }),
+  Schema.TaggedStruct("history", {
+    direction: Schema.Literals(["back", "forward"]),
+  }),
+]);
+export type HostedPreviewControlAction = typeof HostedPreviewControlAction.Type;
+
+export const HostedPreviewControlInput = Schema.Struct({
+  threadId: ThreadId,
+  tabId: PreviewTabId,
+  action: HostedPreviewControlAction,
+});
+export type HostedPreviewControlInput = typeof HostedPreviewControlInput.Type;
+
+export const HostedPreviewControlResult = Schema.Struct({
+  ok: Schema.Boolean,
+  message: Schema.optional(Schema.String),
+});
+export type HostedPreviewControlResult = typeof HostedPreviewControlResult.Type;
+
 const PreviewEventBaseSchema = Schema.Struct({
   threadId: TrimmedNonEmptyString,
   tabId: PreviewTabId,
@@ -251,6 +356,7 @@ const PreviewOpenedEvent = Schema.Struct({
   ...PreviewEventBaseSchema.fields,
   type: Schema.Literal("opened"),
   snapshot: PreviewSessionSnapshot,
+  reveal: Schema.optional(Schema.Literal(true)),
 });
 
 const PreviewNavigatedEvent = Schema.Struct({

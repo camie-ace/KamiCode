@@ -39,4 +39,17 @@ describe("ExecutionEnvironmentDescriptor", () => {
       }).capabilities.attachmentUploads,
     ).toBe(true);
   });
+
+  it("treats a missing hosted-browser capability as unsupported", () => {
+    expect(decodeDescriptor(descriptor).capabilities.hostedBrowserPreview).toBeUndefined();
+  });
+
+  it("preserves an advertised hosted-browser capability", () => {
+    expect(
+      decodeDescriptor({
+        ...descriptor,
+        capabilities: { ...descriptor.capabilities, hostedBrowserPreview: true },
+      }).capabilities.hostedBrowserPreview,
+    ).toBe(true);
+  });
 });

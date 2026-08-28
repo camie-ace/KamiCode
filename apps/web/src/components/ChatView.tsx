@@ -157,6 +157,7 @@ import {
 } from "../previewStateStore";
 import { previewRuntimeTabId } from "../browser/previewRuntimeTabId";
 import { addBrowserSurface } from "./preview/addBrowserSurface";
+import { usePreviewSession } from "./preview/usePreviewSession";
 import { closePreviewSession } from "./preview/closePreviewSession";
 import { ThreadPreviewMiniPlayer } from "./preview/ThreadPreviewMiniPlayer";
 import { subscribePreviewAction } from "./preview/previewActionBus";
@@ -1132,6 +1133,7 @@ const TYPE_TO_FOCUS_INTERACTIVE_SELECTOR = [
   '[role="radio"]',
   '[role="switch"]',
   '[role="tab"]',
+  "[data-hosted-browser-view]",
 ].join(",");
 const TYPE_TO_FOCUS_FLOATING_LAYER_SELECTOR = [
   '[data-slot="dialog"]',
@@ -2586,6 +2588,11 @@ function ChatViewContent(props: ChatViewProps) {
   const activeFileSurface =
     activeRightPanelSurface?.kind === "file" ? activeRightPanelSurface : null;
   const activePreviewState = useThreadPreviewState(activeThreadRef);
+  usePreviewSession(activeThreadRef);
+  const serverConfig = activeThreadEnvironmentId
+    ? (environmentById.get(activeThreadEnvironmentId)?.serverConfig ?? null)
+    : (primaryEnvironment?.serverConfig ?? null);
+  const browserAvailable = isPreviewSupportedInRuntime(serverConfig);
   const activePreviewServerEpoch = activePreviewState.serverEpoch;
   const resolvePreviewRuntimeTabId = useMemo(
     () =>
@@ -2610,7 +2617,7 @@ function ChatViewContent(props: ChatViewProps) {
     () => [...new Set([...activeKnownTerminalIds, ...panelTerminalIds])],
     [activeKnownTerminalIds, panelTerminalIds],
   );
-  const previewPanelOpen = activeRightPanelKind === "preview" && isPreviewSupportedInRuntime();
+  const previewPanelOpen = activeRightPanelKind === "preview" && browserAvailable;
   const rightPanelOpen = rightPanelState.isOpen;
   const canMaximizeRightPanel = rightPanelOpen && !shouldUseRightPanelSheet;
   const rightPanelMaximized =
@@ -3002,9 +3009,6 @@ function ChatViewContent(props: ChatViewProps) {
   });
   // Once a thread selects an environment, never substitute the primary
   // environment's config while the selected environment is still loading.
-  const serverConfig = activeThread
-    ? (activeEnvironment?.serverConfig ?? null)
-    : (primaryEnvironment?.serverConfig ?? null);
   const pullRequestsCapabilityKnown = serverConfig !== null;
   const supportsPullRequests = serverConfig?.environment.capabilities.pullRequests === true;
   const attachmentEnvironmentConfig = environmentById.get(environmentId)?.serverConfig ?? null;
@@ -4785,7 +4789,7 @@ function ChatViewContent(props: ChatViewProps) {
     [activeProject, activeProjectRepository, activeThreadRef, supportsPullRequests],
   );
   const togglePreviewPanel = useCallback(() => {
-    if (!activeThreadRef || !isPreviewSupportedInRuntime()) return;
+    if (!activeThreadRef || !browserAvailable) return;
     if (previewPanelOpen) {
       useRightPanelStore.getState().close(activeThreadRef);
       return;
@@ -4796,7 +4800,13 @@ function ChatViewContent(props: ChatViewProps) {
     } else {
       createBrowserSurface();
     }
-  }, [activePreviewState.activeTabId, activeThreadRef, createBrowserSurface, previewPanelOpen]);
+  }, [
+    activePreviewState.activeTabId,
+    activeThreadRef,
+    browserAvailable,
+    createBrowserSurface,
+    previewPanelOpen,
+  ]);
   const closePreviewPanel = useCallback(() => {
     if (activeThreadRef) {
       setMaximizedRightPanelThreadKey(null);
@@ -8678,6 +8688,7 @@ function ChatViewContent(props: ChatViewProps) {
           tabId={activeRightPanelSurface.resourceId}
           configuredUrls={configuredPreviewUrls}
           visible
+          browserAvailable={browserAvailable}
           onSendAnnotation={(annotation, image) => {
             void onSend(undefined, { directAnnotation: { annotation, image } });
           }}
@@ -9287,7 +9298,7 @@ function ChatViewContent(props: ChatViewProps) {
           onAddTests={openTestsPanel}
           onAddPullRequest={addPullRequestSurface}
           onAddAgents={addAgentsSurface}
-          browserAvailable={isPreviewSupportedInRuntime()}
+          browserAvailable={browserAvailable}
           terminalAvailable={activeProject !== null}
           diffAvailable={isServerThread && isGitRepo}
           filesAvailable={activeProject !== null}
@@ -9330,7 +9341,7 @@ function ChatViewContent(props: ChatViewProps) {
             onAddTests={openTestsPanel}
             onAddPullRequest={addPullRequestSurface}
             onAddAgents={addAgentsSurface}
-            browserAvailable={isPreviewSupportedInRuntime()}
+            browserAvailable={browserAvailable}
             terminalAvailable={activeProject !== null}
             diffAvailable={isServerThread && isGitRepo}
             filesAvailable={activeProject !== null}

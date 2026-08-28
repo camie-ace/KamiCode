@@ -4,6 +4,11 @@ import * as NodePath from "node:path";
 
 import {
   PREVIEW_AUTOMATION_OPERATIONS,
+  FILL_PREVIEW_VIEWPORT,
+  type HostedPreviewControlInput,
+  type HostedPreviewControlResult,
+  type HostedPreviewFrameInput,
+  type HostedPreviewFrameResult,
   PreviewAutomationClickInput,
   PreviewAutomationEvaluateInput,
   PreviewAutomationNavigateInput,
@@ -25,20 +30,24 @@ import {
   type PreviewAutomationSnapshot,
   type PreviewAutomationStatus,
   type PreviewRenderedViewportSize,
+  type PreviewCloseInput,
+  type PreviewSessionSnapshot,
   type PreviewViewportSetting,
-  type ThreadId,
+  ThreadId,
 } from "@t3tools/contracts";
 import { normalizePreviewUrl } from "@t3tools/shared/preview";
 import { resolvePreviewViewport } from "@t3tools/shared/previewViewport";
 import * as Duration from "effect/Duration";
+import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
-import type { BrowserContext, Locator, Page } from "playwright";
+import type { BrowserContext, CDPSession, Locator, Page } from "playwright";
 
 import * as ServerConfig from "../config.ts";
 import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
+import * as PreviewManager from "../preview/Manager.ts";
 import * as PreviewAutomationBroker from "./PreviewAutomationBroker.ts";
 
 const DEFAULT_VIEWPORT: PreviewRenderedViewportSize = { width: 1_280, height: 800 };
@@ -48,6 +57,7 @@ const MAX_INTERACTIVE_ELEMENTS = 200;
 const MAX_SCREENSHOT_BYTES = 5 * 1024 * 1024;
 const MIN_IDLE_TIMEOUT_MS = 30_000;
 const IDLE_SWEEP_INTERVAL_MS = 30_000;
+const HOSTED_FRAME_MAX_AGE_MS = 2_000;
 
 export const HOSTED_PREVIEW_AUTOMATION_OPERATIONS = PREVIEW_AUTOMATION_OPERATIONS.filter(
   (operation) => operation !== "recordingStart" && operation !== "recordingStop",
@@ -69,13 +79,48 @@ interface HostedTab {
   readonly tabId: PreviewTabId;
   readonly threadId: ThreadId;
   readonly page: Page;
+  cdp: CDPSession | null;
+  screencastActive: boolean;
+  screencastStopTimer: ReturnType<typeof setTimeout> | null;
   viewportSetting: PreviewViewportSetting;
   colorScheme: "system" | "light" | "dark";
   loading: boolean;
   lastUsedAt: number;
+  lastViewedAt: number | null;
+  frameSequence: number;
+  latestFrame: {
+    readonly data: string;
+    readonly width: number;
+    readonly height: number;
+  } | null;
   readonly consoleEntries: Array<PreviewAutomationConsoleEntry>;
   readonly networkEntries: Array<PreviewAutomationNetworkEntry>;
   readonly actionTimeline: Array<PreviewAutomationActionEvent>;
+}
+
+interface HostedPreviewLifecycle {
+  readonly open: (input: {
+    readonly threadId: ThreadId;
+    readonly url?: string;
+    readonly viewport?: PreviewViewportSetting;
+    readonly reveal?: true;
+  }) => Promise<PreviewSessionSnapshot>;
+  readonly reportStatus: (input: {
+    readonly threadId: ThreadId;
+    readonly tabId: PreviewTabId;
+    readonly navStatus: PreviewSessionSnapshot["navStatus"];
+    readonly canGoBack: boolean;
+    readonly canGoForward: boolean;
+  }) => Promise<void>;
+  readonly resize: (input: {
+    readonly threadId: ThreadId;
+    readonly tabId: PreviewTabId;
+    readonly viewport: PreviewViewportSetting;
+  }) => Promise<void>;
+  readonly close: (input: {
+    readonly threadId: ThreadId;
+    readonly tabId: PreviewTabId;
+  }) => Promise<void>;
 }
 
 export interface HostedPreviewAutomationControllerOptions {
@@ -83,6 +128,7 @@ export interface HostedPreviewAutomationControllerOptions {
   readonly maxTabs: number;
   readonly idleTimeoutMs: number;
   readonly now?: () => number;
+  readonly lifecycle?: HostedPreviewLifecycle;
 }
 
 const boundedPush = <A>(entries: Array<A>, value: A): void => {
@@ -293,13 +339,169 @@ export class HostedPreviewAutomationController {
     return this.exclusive(() => this.handleUnsafe(request));
   }
 
+  openSession(snapshot: PreviewSessionSnapshot): Promise<void> {
+    return this.exclusive(async () => {
+      const tab = await this.ensureTab(
+        ThreadId.make(snapshot.threadId),
+        snapshot.tabId,
+        snapshot.viewport ?? FILL_PREVIEW_VIEWPORT,
+      );
+      this.currentTabByThread.set(tab.threadId, tab.tabId);
+      if (snapshot.navStatus._tag !== "Idle") {
+        await this.navigatePage(tab, snapshot.navStatus.url, "load", 15_000);
+      }
+    });
+  }
+
+  resizeSession(input: {
+    readonly threadId: ThreadId;
+    readonly tabId: PreviewTabId;
+    readonly viewport: PreviewViewportSetting;
+  }): Promise<void> {
+    return this.exclusive(async () => {
+      const tab = this.requireSessionTab(input.threadId, input.tabId);
+      const viewport = input.viewport._tag === "fill" ? DEFAULT_VIEWPORT : input.viewport;
+      await tab.page.setViewportSize(viewport);
+      tab.viewportSetting = input.viewport;
+    });
+  }
+
+  refreshSession(input: {
+    readonly threadId: ThreadId;
+    readonly tabId: PreviewTabId;
+  }): Promise<void> {
+    return this.exclusive(async () => {
+      const tab = this.requireSessionTab(input.threadId, input.tabId);
+      tab.loading = true;
+      try {
+        await tab.page.reload({ waitUntil: "load", timeout: 15_000 });
+      } finally {
+        tab.loading = false;
+      }
+      await this.reportCurrentStatus(tab);
+    });
+  }
+
+  closeSession(input: PreviewCloseInput): Promise<void> {
+    return this.exclusive(async () => {
+      const targets = input.tabId
+        ? [this.tabs.get(input.tabId)].filter(
+            (tab): tab is HostedTab => tab?.threadId === input.threadId,
+          )
+        : Array.from(this.tabs.values()).filter((tab) => tab.threadId === input.threadId);
+      await Promise.all(targets.map((tab) => tab.page.close().catch(() => {})));
+      this.removeClosedTabs();
+    });
+  }
+
+  readFrame(input: HostedPreviewFrameInput): Promise<HostedPreviewFrameResult> {
+    return this.exclusive(async () => {
+      const tab = this.tabs.get(input.tabId);
+      if (!tab || tab.threadId !== input.threadId || tab.page.isClosed()) {
+        return {
+          state: "not-found",
+          sequence: 0,
+          frame: null,
+          url: null,
+          title: null,
+          loading: false,
+          canGoBack: false,
+          canGoForward: false,
+          message: "The VPS browser tab is no longer available.",
+        };
+      }
+      tab.lastUsedAt = this.now();
+      tab.lastViewedAt = this.now();
+      await this.startScreencast(tab);
+      this.scheduleScreencastStop(tab);
+      if (!tab.latestFrame) {
+        const screenshot = await tab.page
+          .screenshot({ type: "jpeg", quality: 72, animations: "disabled" })
+          .catch(() => null);
+        if (screenshot) {
+          const viewport = renderedViewport(tab.page);
+          tab.frameSequence += 1;
+          tab.latestFrame = {
+            data: screenshot.toString("base64"),
+            width: viewport.width,
+            height: viewport.height,
+          };
+        }
+      }
+      const navigation = await this.navigationState(tab);
+      const includeFrame =
+        tab.latestFrame !== null &&
+        (input.afterSequence === undefined || input.afterSequence !== tab.frameSequence);
+      return {
+        state: tab.latestFrame ? "ready" : "pending",
+        sequence: tab.frameSequence,
+        frame:
+          includeFrame && tab.latestFrame ? { mimeType: "image/jpeg", ...tab.latestFrame } : null,
+        url: tab.page.url(),
+        title: await tab.page.title().catch(() => null),
+        loading: tab.loading,
+        ...navigation,
+      };
+    });
+  }
+
+  control(input: HostedPreviewControlInput): Promise<HostedPreviewControlResult> {
+    return this.exclusive(async () => {
+      const tab = this.requireSessionTab(input.threadId, input.tabId);
+      const action = input.action;
+      tab.lastUsedAt = this.now();
+      switch (action._tag) {
+        case "pointerMove":
+          await tab.page.mouse.move(action.x, action.y);
+          break;
+        case "pointerDown":
+          await tab.page.mouse.move(action.x, action.y);
+          await tab.page.mouse.down({ button: action.button });
+          break;
+        case "pointerUp":
+          await tab.page.mouse.move(action.x, action.y);
+          await tab.page.mouse.up({ button: action.button });
+          break;
+        case "pointerClick":
+          await tab.page.mouse.click(action.x, action.y, {
+            button: action.button,
+            clickCount: action.clickCount ?? 1,
+          });
+          break;
+        case "wheel":
+          await tab.page.mouse.move(action.x, action.y);
+          await tab.page.mouse.wheel(action.deltaX, action.deltaY);
+          break;
+        case "key":
+          await tab.page.keyboard.press([...action.modifiers, action.key].join("+"));
+          break;
+        case "insertText":
+          await tab.page.keyboard.insertText(action.text);
+          break;
+        case "history":
+          tab.loading = true;
+          try {
+            if (action.direction === "back") {
+              await tab.page.goBack({ waitUntil: "load", timeout: 15_000 });
+            } else {
+              await tab.page.goForward({ waitUntil: "load", timeout: 15_000 });
+            }
+          } finally {
+            tab.loading = false;
+          }
+          await this.reportCurrentStatus(tab);
+          break;
+      }
+      return { ok: true };
+    });
+  }
+
   sweepIdle(): Promise<void> {
     return this.exclusive(async () => {
       const cutoff = this.now() - this.idleTimeoutMs;
       const stale = Array.from(this.tabs.values()).filter((tab) => tab.lastUsedAt <= cutoff);
       await Promise.all(stale.map((tab) => tab.page.close().catch(() => {})));
       this.removeClosedTabs();
-      await this.closeEmptyContext();
     });
   }
 
@@ -307,6 +509,25 @@ export class HostedPreviewAutomationController {
     return this.exclusive(async () => {
       const context = this.context;
       this.context = null;
+      const tabs = Array.from(this.tabs.values());
+      for (const tab of tabs) {
+        if (tab.screencastStopTimer) clearTimeout(tab.screencastStopTimer);
+      }
+      // Explicitly stop and detach active CDP sessions before closing the
+      // persistent context. Chromium can otherwise keep its profile log
+      // handle alive briefly after context.close(), preventing an immediate
+      // service restart from reopening the same profile on Windows.
+      await Promise.all(
+        tabs.map(async (tab) => {
+          if (!tab.cdp) return;
+          if (tab.screencastActive) {
+            await tab.cdp.send("Page.stopScreencast").catch(() => {});
+          }
+          await tab.cdp.detach().catch(() => {});
+          tab.cdp = null;
+          tab.screencastActive = false;
+        }),
+      );
       this.tabs.clear();
       this.currentTabByThread.clear();
       if (context) await context.close().catch(() => {});
@@ -347,6 +568,9 @@ export class HostedPreviewAutomationController {
     for (const page of context.pages()) await page.close().catch(() => {});
     context.on("close", () => {
       if (this.context === context) this.context = null;
+      for (const tab of this.tabs.values()) {
+        if (tab.screencastStopTimer) clearTimeout(tab.screencastStopTimer);
+      }
       this.tabs.clear();
       this.currentTabByThread.clear();
     });
@@ -354,7 +578,66 @@ export class HostedPreviewAutomationController {
     return context;
   }
 
-  private attachPage(tab: HostedTab): void {
+  private async ensureTab(
+    threadId: ThreadId,
+    tabId: PreviewTabId,
+    viewportSetting: PreviewViewportSetting,
+  ): Promise<HostedTab> {
+    const existing = this.tabs.get(tabId);
+    if (existing) {
+      if (existing.threadId !== threadId) {
+        throw new HostedPreviewAutomationError(
+          "PreviewAutomationTabNotFoundError",
+          `Hosted browser tab ${tabId} belongs to another thread.`,
+        );
+      }
+      existing.lastUsedAt = this.now();
+      return existing;
+    }
+    if (this.tabs.size >= this.maxTabs) {
+      throw new HostedPreviewAutomationError(
+        "PreviewAutomationUnavailableError",
+        `The VPS-hosted browser tab limit (${this.maxTabs}) has been reached. Reuse an existing tab or wait for idle cleanup.`,
+      );
+    }
+    let page: Page;
+    try {
+      const context = await this.ensureContext();
+      page = await context.newPage();
+      const viewport = viewportSetting._tag === "fill" ? DEFAULT_VIEWPORT : viewportSetting;
+      await page.setViewportSize(viewport);
+    } catch (cause) {
+      if (cause instanceof HostedPreviewAutomationError) throw cause;
+      throw new HostedPreviewAutomationError(
+        "PreviewAutomationUnavailableError",
+        "The VPS-hosted Chromium runtime could not create a tab.",
+        runtimeFailureDetail(cause),
+      );
+    }
+    const tab: HostedTab = {
+      tabId,
+      threadId,
+      page,
+      cdp: null,
+      screencastActive: false,
+      screencastStopTimer: null,
+      viewportSetting,
+      colorScheme: "system",
+      loading: false,
+      lastUsedAt: this.now(),
+      lastViewedAt: null,
+      frameSequence: 0,
+      latestFrame: null,
+      consoleEntries: [],
+      networkEntries: [],
+      actionTimeline: [],
+    };
+    this.tabs.set(tabId, tab);
+    await this.attachPage(tab);
+    return tab;
+  }
+
+  private async attachPage(tab: HostedTab): Promise<void> {
     const { page } = tab;
     page.on("console", (entry) => {
       const location = entry.location();
@@ -366,7 +649,9 @@ export class HostedPreviewAutomationController {
       });
     });
     page.on("request", (request) => {
-      if (request.isNavigationRequest() && request.frame() === page.mainFrame()) tab.loading = true;
+      if (request.isNavigationRequest() && request.frame() === page.mainFrame()) {
+        tab.loading = true;
+      }
     });
     page.on("response", (response) => {
       const request = response.request();
@@ -390,8 +675,30 @@ export class HostedPreviewAutomationController {
     });
     page.on("load", () => {
       tab.loading = false;
+      if (page.url() !== "about:blank") void this.reportCurrentStatus(tab).catch(() => {});
     });
     page.on("close", () => this.removeTab(tab.tabId));
+    try {
+      const cdp = await page.context().newCDPSession(page);
+      tab.cdp = cdp;
+      cdp.on(
+        "Page.screencastFrame",
+        (event: { readonly data: string; readonly sessionId: number }) => {
+          if (!this.tabs.has(tab.tabId)) return;
+          const viewport = renderedViewport(tab.page);
+          tab.frameSequence += 1;
+          tab.latestFrame = {
+            data: event.data,
+            width: viewport.width,
+            height: viewport.height,
+          };
+          void cdp.send("Page.screencastFrameAck", { sessionId: event.sessionId }).catch(() => {});
+        },
+      );
+    } catch {
+      tab.cdp = null;
+      // readFrame falls back to a direct screenshot when screencast is absent.
+    }
   }
 
   private removeTab(tabId: PreviewTabId): void {
@@ -401,6 +708,11 @@ export class HostedPreviewAutomationController {
     if (this.currentTabByThread.get(tab.threadId) === tabId) {
       this.currentTabByThread.delete(tab.threadId);
     }
+    if (tab.screencastStopTimer) clearTimeout(tab.screencastStopTimer);
+    void tab.cdp?.detach().catch(() => {});
+    void this.options.lifecycle
+      ?.close({ threadId: tab.threadId, tabId: tab.tabId })
+      .catch(() => {});
   }
 
   private removeClosedTabs(): void {
@@ -409,11 +721,38 @@ export class HostedPreviewAutomationController {
     }
   }
 
-  private async closeEmptyContext(): Promise<void> {
-    if (this.tabs.size > 0 || !this.context) return;
-    const context = this.context;
-    this.context = null;
-    await context.close().catch(() => {});
+  private async startScreencast(tab: HostedTab): Promise<void> {
+    if (!tab.cdp || tab.screencastActive) return;
+    try {
+      await tab.cdp.send("Page.startScreencast", {
+        format: "jpeg",
+        quality: 72,
+        everyNthFrame: 1,
+      });
+      tab.screencastActive = true;
+    } catch {
+      tab.cdp = null;
+      tab.screencastActive = false;
+    }
+  }
+
+  private scheduleScreencastStop(tab: HostedTab): void {
+    if (tab.screencastStopTimer) clearTimeout(tab.screencastStopTimer);
+    tab.screencastStopTimer = setTimeout(() => {
+      void this.exclusive(async () => {
+        tab.screencastStopTimer = null;
+        if (this.tabs.get(tab.tabId) !== tab || !tab.cdp || !tab.screencastActive) return;
+        if (tab.lastViewedAt !== null && this.now() - tab.lastViewedAt < HOSTED_FRAME_MAX_AGE_MS) {
+          this.scheduleScreencastStop(tab);
+          return;
+        }
+        await tab.cdp.send("Page.stopScreencast").catch(() => {});
+        tab.screencastActive = false;
+        // Force one fresh screenshot when a viewer returns in case Chromium
+        // does not emit an immediate frame after screencast resumes.
+        tab.latestFrame = null;
+      });
+    }, HOSTED_FRAME_MAX_AGE_MS);
   }
 
   private resolveTab(request: PreviewAutomationRequest): HostedTab | null {
@@ -436,6 +775,54 @@ export class HostedPreviewAutomationController {
     );
   }
 
+  private requireSessionTab(threadId: ThreadId, tabId: PreviewTabId): HostedTab {
+    const tab = this.tabs.get(tabId);
+    if (tab && tab.threadId === threadId && !tab.page.isClosed()) {
+      tab.lastUsedAt = this.now();
+      this.currentTabByThread.set(threadId, tabId);
+      return tab;
+    }
+    throw new HostedPreviewAutomationError(
+      "PreviewAutomationTabNotFoundError",
+      `Hosted browser tab ${tabId} was not found.`,
+    );
+  }
+
+  private async navigationState(
+    tab: HostedTab,
+  ): Promise<{ readonly canGoBack: boolean; readonly canGoForward: boolean }> {
+    if (!tab.cdp) return { canGoBack: false, canGoForward: false };
+    try {
+      const raw = await tab.cdp.send("Page.getNavigationHistory");
+      const history = raw as { readonly currentIndex?: unknown; readonly entries?: unknown };
+      const currentIndex =
+        typeof history.currentIndex === "number" && Number.isInteger(history.currentIndex)
+          ? history.currentIndex
+          : 0;
+      const entryCount = Array.isArray(history.entries) ? history.entries.length : 0;
+      return {
+        canGoBack: currentIndex > 0,
+        canGoForward: currentIndex >= 0 && currentIndex < entryCount - 1,
+      };
+    } catch {
+      return { canGoBack: false, canGoForward: false };
+    }
+  }
+
+  private async reportCurrentStatus(tab: HostedTab): Promise<void> {
+    const lifecycle = this.options.lifecycle;
+    if (!lifecycle || tab.page.isClosed()) return;
+    const url = tab.page.url();
+    const title = await tab.page.title().catch(() => "");
+    const navigation = await this.navigationState(tab);
+    await lifecycle.reportStatus({
+      threadId: tab.threadId,
+      tabId: tab.tabId,
+      navStatus: { _tag: "Success", url, title },
+      ...navigation,
+    });
+  }
+
   private async status(tab: HostedTab | null): Promise<PreviewAutomationStatus> {
     if (!tab) {
       return {
@@ -449,7 +836,8 @@ export class HostedPreviewAutomationController {
     }
     return {
       available: true,
-      visible: false,
+      visible:
+        tab.lastViewedAt !== null && this.now() - tab.lastViewedAt <= HOSTED_FRAME_MAX_AGE_MS,
       tabId: tab.tabId,
       url: tab.page.url(),
       title: await tab.page.title().catch(() => null),
@@ -470,39 +858,31 @@ export class HostedPreviewAutomationController {
           `Hosted browser tab ${request.tabId} was not found.`,
         );
       }
-      if (this.tabs.size >= this.maxTabs) {
-        throw new HostedPreviewAutomationError(
-          "PreviewAutomationUnavailableError",
-          `The VPS-hosted browser tab limit (${this.maxTabs}) has been reached. Reuse an existing tab or wait for idle cleanup.`,
-        );
-      }
-      let page: Page;
+      const visible = input.open ?? input.show ?? true;
+      const lifecycleSnapshot = this.options.lifecycle
+        ? await this.options.lifecycle.open({
+            threadId: request.threadId,
+            ...(input.url === undefined ? {} : { url: normalizePreviewUrl(input.url) }),
+            viewport: FILL_PREVIEW_VIEWPORT,
+            ...(visible ? { reveal: true as const } : {}),
+          })
+        : null;
+      const tabId =
+        lifecycleSnapshot?.tabId ?? PreviewTabId.make(`hosted-${NodeCrypto.randomUUID()}`);
       try {
-        const context = await this.ensureContext();
-        page = await context.newPage();
-      } catch (cause) {
-        if (cause instanceof HostedPreviewAutomationError) throw cause;
-        throw new HostedPreviewAutomationError(
-          "PreviewAutomationUnavailableError",
-          "The VPS-hosted Chromium runtime could not create a tab.",
-          runtimeFailureDetail(cause),
+        tab = await this.ensureTab(
+          request.threadId,
+          tabId,
+          lifecycleSnapshot?.viewport ?? { _tag: "freeform", ...DEFAULT_VIEWPORT },
         );
+      } catch (cause) {
+        if (lifecycleSnapshot) {
+          await this.options.lifecycle
+            ?.close({ threadId: request.threadId, tabId: lifecycleSnapshot.tabId })
+            .catch(() => {});
+        }
+        throw cause;
       }
-      const tabId = PreviewTabId.make(`hosted-${NodeCrypto.randomUUID()}`);
-      tab = {
-        tabId,
-        threadId: request.threadId,
-        page,
-        viewportSetting: { _tag: "freeform", ...DEFAULT_VIEWPORT },
-        colorScheme: "system",
-        loading: false,
-        lastUsedAt: this.now(),
-        consoleEntries: [],
-        networkEntries: [],
-        actionTimeline: [],
-      };
-      this.tabs.set(tabId, tab);
-      this.attachPage(tab);
     }
     this.currentTabByThread.set(request.threadId, tab.tabId);
     if (input.url !== undefined) {
@@ -524,8 +904,40 @@ export class HostedPreviewAutomationController {
         : readiness === "domContentLoaded"
           ? "domcontentloaded"
           : "load";
+    const lifecycle = this.options.lifecycle;
+    if (lifecycle) {
+      const navigation = await this.navigationState(tab);
+      await lifecycle
+        .reportStatus({
+          threadId: tab.threadId,
+          tabId: tab.tabId,
+          navStatus: { _tag: "Loading", url, title: await tab.page.title().catch(() => "") },
+          ...navigation,
+        })
+        .catch(() => {});
+    }
     try {
       await tab.page.goto(url, { waitUntil, timeout: timeoutMs });
+      if (readiness !== "none") await this.reportCurrentStatus(tab).catch(() => {});
+    } catch (cause) {
+      if (lifecycle) {
+        const navigation = await this.navigationState(tab);
+        await lifecycle
+          .reportStatus({
+            threadId: tab.threadId,
+            tabId: tab.tabId,
+            navStatus: {
+              _tag: "LoadFailed",
+              url,
+              title: await tab.page.title().catch(() => ""),
+              code: -1,
+              description: "The VPS-hosted browser could not load this page.",
+            },
+            ...navigation,
+          })
+          .catch(() => {});
+      }
+      throw cause;
     } finally {
       if (readiness !== "none") tab.loading = false;
     }
@@ -638,6 +1050,9 @@ export class HostedPreviewAutomationController {
           const viewport = setting._tag === "fill" ? DEFAULT_VIEWPORT : setting;
           await this.withAction(tab, "resize", () => tab.page.setViewportSize(viewport));
           tab.viewportSetting = setting;
+          await this.options.lifecycle
+            ?.resize({ threadId: tab.threadId, tabId: tab.tabId, viewport: setting })
+            .catch(() => {});
           return { tabId: tab.tabId, setting, viewport };
         }
         case "setColorScheme": {
@@ -782,24 +1197,53 @@ export class HostedPreviewAutomationController {
   }
 }
 
+export class HostedPreviewBrowser extends Context.Service<
+  HostedPreviewBrowser,
+  {
+    readonly enabled: boolean;
+    readonly controller: HostedPreviewAutomationController | null;
+  }
+>()("t3/mcp/HostedPreviewAutomationHost/HostedPreviewBrowser") {}
+
+export const runtimeLayer = Layer.effect(
+  HostedPreviewBrowser,
+  Effect.gen(function* HostedPreviewBrowserRuntimeLayer() {
+    const config = yield* ServerConfig.ServerConfig;
+    if (config.mode !== "web" || !config.hostedBrowserEnabled) {
+      return HostedPreviewBrowser.of({ enabled: false, controller: null });
+    }
+    const previewManager = yield* PreviewManager.PreviewManager;
+    const runtimeContext = yield* Effect.context<never>();
+    const runPromise = Effect.runPromiseWith(runtimeContext);
+    const controller = new HostedPreviewAutomationController({
+      profileDir: NodePath.join(config.stateDir, "hosted-browser-profile"),
+      maxTabs: config.hostedBrowserMaxTabs ?? 2,
+      idleTimeoutMs: config.hostedBrowserIdleTimeoutMs ?? 10 * 60 * 1_000,
+      lifecycle: {
+        open: (input) => runPromise(previewManager.open(input)),
+        reportStatus: (input) => runPromise(previewManager.reportStatus(input)),
+        resize: (input) => runPromise(previewManager.resize(input).pipe(Effect.asVoid)),
+        close: (input) => runPromise(previewManager.close(input)),
+      },
+    });
+    yield* Effect.addFinalizer(() =>
+      Effect.promise(() => controller.close()).pipe(Effect.ignoreCause({ log: true })),
+    );
+    return HostedPreviewBrowser.of({ enabled: true, controller });
+  }),
+);
+
 export const layer = Layer.effectDiscard(
   Effect.gen(function* HostedPreviewAutomationHostLayer() {
     const config = yield* ServerConfig.ServerConfig;
-    if (config.mode !== "web" || !config.hostedBrowserEnabled) return;
+    const hostedBrowser = yield* HostedPreviewBrowser;
+    const controller = hostedBrowser.controller;
+    if (!hostedBrowser.enabled || !controller) return;
 
     const broker = yield* PreviewAutomationBroker.PreviewAutomationBroker;
     const environment = yield* ServerEnvironment.ServerEnvironment;
     const environmentId = yield* environment.getEnvironmentId;
     const clientId = `server-headless:${environmentId}`;
-    const controller = new HostedPreviewAutomationController({
-      profileDir: NodePath.join(config.stateDir, "hosted-browser-profile"),
-      maxTabs: config.hostedBrowserMaxTabs ?? 2,
-      idleTimeoutMs: config.hostedBrowserIdleTimeoutMs ?? 10 * 60 * 1_000,
-    });
-    yield* Effect.addFinalizer(() =>
-      Effect.promise(() => controller.close()).pipe(Effect.ignoreCause({ log: true })),
-    );
-
     const host: PreviewAutomationHost = {
       clientId,
       environmentId,

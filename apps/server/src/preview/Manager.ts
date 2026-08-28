@@ -249,6 +249,7 @@ export const make = Effect.gen(function* PreviewManagerMake() {
             serverEpoch,
             revision,
             snapshot,
+            ...(input.reveal === true ? { reveal: true as const } : {}),
           });
           return [snapshot, { sessions, revision }] as const;
         }),

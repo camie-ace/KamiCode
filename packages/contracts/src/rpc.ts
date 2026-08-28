@@ -164,6 +164,10 @@ import {
 import {
   DiscoveredLocalServerList,
   ConfiguredLocalServerUrls,
+  HostedPreviewControlInput,
+  HostedPreviewControlResult,
+  HostedPreviewFrameInput,
+  HostedPreviewFrameResult,
   PreviewCloseInput,
   PreviewError,
   PreviewEvent,
@@ -294,6 +298,8 @@ export const WS_METHODS = {
   previewClose: "preview.close",
   previewList: "preview.list",
   previewReportStatus: "preview.reportStatus",
+  hostedPreviewFrame: "preview.hostedFrame",
+  hostedPreviewControl: "preview.hostedControl",
   previewAutomationConnect: "previewAutomation.connect",
   previewAutomationRespond: "previewAutomation.respond",
   previewAutomationFocusHost: "previewAutomation.focusHost",
@@ -947,6 +953,18 @@ export const WsPreviewReportStatusRpc = Rpc.make(WS_METHODS.previewReportStatus,
   error: Schema.Union([PreviewError, EnvironmentAuthorizationError]),
 });
 
+export const WsHostedPreviewFrameRpc = Rpc.make(WS_METHODS.hostedPreviewFrame, {
+  payload: HostedPreviewFrameInput,
+  success: HostedPreviewFrameResult,
+  error: EnvironmentAuthorizationError,
+});
+
+export const WsHostedPreviewControlRpc = Rpc.make(WS_METHODS.hostedPreviewControl, {
+  payload: HostedPreviewControlInput,
+  success: HostedPreviewControlResult,
+  error: EnvironmentAuthorizationError,
+});
+
 export const WsPreviewAutomationConnectRpc = Rpc.make(WS_METHODS.previewAutomationConnect, {
   payload: PreviewAutomationHost,
   success: PreviewAutomationStreamEvent,
@@ -1190,6 +1208,8 @@ export const WsRpcGroup = RpcGroup.make(
   WsPreviewCloseRpc,
   WsPreviewListRpc,
   WsPreviewReportStatusRpc,
+  WsHostedPreviewFrameRpc,
+  WsHostedPreviewControlRpc,
   WsPreviewAutomationConnectRpc,
   WsPreviewAutomationRespondRpc,
   WsPreviewAutomationFocusHostRpc,

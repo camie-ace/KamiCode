@@ -5,6 +5,8 @@ import {
   ConfiguredLocalServerUrls,
   CONFIGURED_LOCAL_SERVER_URLS_MAX_ITEMS,
   DiscoveredLocalServer,
+  HostedPreviewControlInput,
+  HostedPreviewFrameResult,
   PREVIEW_URL_MAX_LENGTH,
   PreviewEvent,
   PreviewNavStatus,
@@ -32,6 +34,8 @@ const decodeResizeResult = Schema.decodeUnknownSync(PreviewAutomationResizeResul
 const decodeAutomationHost = Schema.decodeUnknownSync(PreviewAutomationHost);
 const decodeAutomationError = Schema.decodeUnknownSync(PreviewAutomationError);
 const decodeAutomationStatus = Schema.decodeUnknownSync(PreviewAutomationStatus);
+const decodeHostedFrame = Schema.decodeUnknownSync(HostedPreviewFrameResult);
+const decodeHostedControl = Schema.decodeUnknownSync(HostedPreviewControlInput);
 
 describe("PreviewAutomationOpenInput", () => {
   it("accepts the inline preview visibility flag", () => {
@@ -40,6 +44,35 @@ describe("PreviewAutomationOpenInput", () => {
 
   it("retains the legacy show visibility alias", () => {
     expect(decodeOpenInput({ show: false })).toEqual({ show: false });
+  });
+});
+
+describe("hosted preview transport", () => {
+  it("decodes compressed frames and interactive input", () => {
+    expect(
+      decodeHostedFrame({
+        state: "ready",
+        sequence: 3,
+        frame: {
+          mimeType: "image/jpeg",
+          data: "encoded-frame",
+          width: 1_280,
+          height: 800,
+        },
+        url: "https://example.com/",
+        title: "Example",
+        loading: false,
+        canGoBack: false,
+        canGoForward: true,
+      }).sequence,
+    ).toBe(3);
+    expect(
+      decodeHostedControl({
+        threadId: "thread-1",
+        tabId: "tab-1",
+        action: { _tag: "pointerDown", x: 640, y: 400, button: "left" },
+      }).action,
+    ).toMatchObject({ _tag: "pointerDown", x: 640, y: 400 });
   });
 });
 
@@ -232,6 +265,7 @@ describe("PreviewEvent", () => {
       createdAt: "2026-01-01T00:00:00.000Z",
       serverEpoch: "server-a",
       revision: 1,
+      reveal: true,
       snapshot: {
         threadId: "t",
         tabId: "preview-t",
@@ -242,6 +276,7 @@ describe("PreviewEvent", () => {
       },
     });
     expect(event.type).toBe("opened");
+    if (event.type === "opened") expect(event.reveal).toBe(true);
   });
 
   it("decodes failed with code/description", () => {

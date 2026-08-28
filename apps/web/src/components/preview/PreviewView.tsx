@@ -49,8 +49,8 @@ import { PreviewUnreachable } from "./PreviewUnreachable";
 import { revealInFileExplorerLabel } from "./fileExplorerLabel";
 import { shouldShowPreviewEmptyState } from "./previewEmptyStateLogic";
 import { BrowserSurfaceSlot } from "~/browser/BrowserSurfaceSlot";
+import { HostedBrowserRemoteView } from "~/browser/HostedBrowserRemoteView";
 import { useBrowserSurfaceStore } from "~/browser/browserSurfaceStore";
-import { usePreviewSession } from "./usePreviewSession";
 import { ZoomIndicator } from "./ZoomIndicator";
 import { AgentBrowserCursor } from "./AgentBrowserCursor";
 import {
@@ -66,6 +66,7 @@ interface Props {
   tabId?: string | null;
   configuredUrls?: ReadonlyArray<string> | undefined;
   visible: boolean;
+  hostedBrowser?: boolean;
   onSendAnnotation?: (
     annotation: PreviewAnnotationPayload,
     image: ComposerImageAttachment | null,
@@ -83,6 +84,7 @@ export function PreviewView({
   tabId: requestedTabId,
   configuredUrls,
   visible,
+  hostedBrowser = false,
   onSendAnnotation,
 }: Props) {
   const [focusUrlNonce, setFocusUrlNonce] = useState<number | undefined>(undefined);
@@ -109,9 +111,12 @@ export function PreviewView({
     ? new URL(environmentHttpBaseUrl).hostname
     : null;
   const open = useAtomCommand(previewEnvironment.open);
+  const navigate = useAtomCommand(previewEnvironment.navigate, "preview navigation");
   const resize = useAtomCommand(previewEnvironment.resize, "preview viewport resize");
-
-  usePreviewSession(threadRef);
+  const refresh = useAtomCommand(previewEnvironment.refresh, "preview refresh");
+  const hostedControl = useAtomCommand(previewEnvironment.hostedControl, {
+    reportFailure: false,
+  });
 
   useEffect(() => {
     isMountedRef.current = true;
@@ -166,10 +171,22 @@ export function PreviewView({
         rememberPreviewUrl(threadRef, resolvedUrl);
         return true;
       }
+      if (tabId) {
+        const result = await navigate({
+          environmentId: threadRef.environmentId,
+          input: { threadId: threadRef.threadId, tabId, url: resolvedUrl },
+        });
+        if (result._tag === "Success") {
+          updatePreviewServerSnapshot(threadRef, result.value);
+          rememberPreviewUrl(threadRef, resolvedUrl);
+          return true;
+        }
+        return false;
+      }
       const result = await openPreviewSession({ openPreview: open, threadRef, url: resolvedUrl });
       return result._tag === "Success";
     },
-    [open, runtimeTabId, threadRef],
+    [navigate, open, runtimeTabId, tabId, threadRef],
   );
 
   const handleSubmitUrl = useCallback(
@@ -201,8 +218,17 @@ export function PreviewView({
   );
 
   const handleRefresh = useCallback(() => {
-    if (previewBridge && runtimeTabId) void previewBridge.refresh(runtimeTabId);
-  }, [runtimeTabId]);
+    if (previewBridge && runtimeTabId) {
+      void previewBridge.refresh(runtimeTabId);
+      return;
+    }
+    if (hostedBrowser && tabId) {
+      void refresh({
+        environmentId: threadRef.environmentId,
+        input: { threadId: threadRef.threadId, tabId },
+      });
+    }
+  }, [hostedBrowser, refresh, runtimeTabId, tabId, threadRef]);
 
   const handleZoomIn = useCallback(() => {
     if (previewBridge && runtimeTabId) void previewBridge.zoomIn(runtimeTabId);
@@ -264,16 +290,46 @@ export function PreviewView({
   }, [handleViewportChange, runtimeTabId]);
 
   const handleBack = useCallback(() => {
-    if (previewBridge && runtimeTabId) void previewBridge.goBack(runtimeTabId);
-  }, [runtimeTabId]);
+    if (previewBridge && runtimeTabId) {
+      void previewBridge.goBack(runtimeTabId);
+      return;
+    }
+    if (hostedBrowser && tabId) {
+      void hostedControl({
+        environmentId: threadRef.environmentId,
+        input: {
+          threadId: threadRef.threadId,
+          tabId,
+          action: { _tag: "history", direction: "back" },
+        },
+      });
+    }
+  }, [hostedBrowser, hostedControl, runtimeTabId, tabId, threadRef]);
 
   const handleForward = useCallback(() => {
-    if (previewBridge && runtimeTabId) void previewBridge.goForward(runtimeTabId);
-  }, [runtimeTabId]);
+    if (previewBridge && runtimeTabId) {
+      void previewBridge.goForward(runtimeTabId);
+      return;
+    }
+    if (hostedBrowser && tabId) {
+      void hostedControl({
+        environmentId: threadRef.environmentId,
+        input: {
+          threadId: threadRef.threadId,
+          tabId,
+          action: { _tag: "history", direction: "forward" },
+        },
+      });
+    }
+  }, [hostedBrowser, hostedControl, runtimeTabId, tabId, threadRef]);
 
   const handleOpenInBrowser = useCallback(() => {
-    if (!localApi || !url) return;
-    void localApi.shell.openExternal(url).catch(() => undefined);
+    if (!url) return;
+    if (localApi) {
+      void localApi.shell.openExternal(url).catch(() => undefined);
+      return;
+    }
+    window.open(url, "_blank", "noopener,noreferrer");
   }, [url]);
 
   const handlePictureInPicture = useCallback(() => {
@@ -700,10 +756,19 @@ export function PreviewView({
       />
 
       <div className="relative min-h-0 flex-1 overflow-hidden">
-        {runtimeTabId && snapshot && !showEmptyState ? (
+        {runtimeTabId && snapshot && !showEmptyState && !hostedBrowser ? (
           <BrowserSurfaceSlot
             key={runtimeTabId}
             tabId={runtimeTabId}
+            visible={visible && !isUnreachable}
+            className="absolute inset-0 h-full w-full"
+          />
+        ) : null}
+        {runtimeTabId && snapshot && !showEmptyState && hostedBrowser ? (
+          <HostedBrowserRemoteView
+            key={runtimeTabId}
+            threadRef={threadRef}
+            tabId={tabId!}
             visible={visible && !isUnreachable}
             className="absolute inset-0 h-full w-full"
           />

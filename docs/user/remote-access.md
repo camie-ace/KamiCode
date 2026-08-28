@@ -186,6 +186,18 @@ see [Keeping T3 Code in Sync](./updating.md).
 On a Linux host, you can keep the server running after logout and manage it independently of the
 connection method. See [Running T3 Code in the Background](./background-service.md).
 
+## Browser Control on a Headless Server
+
+A web-mode server can host the conversation's Browser panel itself. Start the server with
+`T3CODE_HOSTED_BROWSER=true` and install its Playwright Chromium dependency. The Browser card then
+becomes available in the web client without a desktop app.
+
+The agent and the person using the web client share the same server-side tab. An agent opening or
+navigating the browser updates the visible Browser panel, while pointer, scrolling, and keyboard
+input in that panel control the same page. The server bounds concurrent tabs with
+`T3CODE_HOSTED_BROWSER_MAX_TABS` and reclaims pages after
+`T3CODE_HOSTED_BROWSER_IDLE_TIMEOUT_MS` of inactivity.
+
 ## How Pairing Works
 
 The remote device does not need a long-lived secret up front.

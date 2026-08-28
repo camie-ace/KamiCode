@@ -13,6 +13,7 @@ import {
   type PreviewEvent,
   type PreviewListResult,
   type PreviewSessionSnapshot,
+  type ServerConfig,
   type ScopedThreadRef,
 } from "@t3tools/contracts";
 import { Atom } from "effect/unstable/reactivity";
@@ -452,9 +453,14 @@ export function removePreviewThread(ref: ScopedThreadRef): void {
   changedPreviewThreadKeys.delete(threadKey);
 }
 
-export function isPreviewSupportedInRuntime(): boolean {
+export function isPreviewSupportedInRuntime(
+  serverConfig?: Pick<ServerConfig, "environment"> | null,
+): boolean {
   if (typeof window === "undefined") return false;
-  return Boolean(window.desktopBridge?.preview);
+  return (
+    Boolean(window.desktopBridge?.preview) ||
+    serverConfig?.environment.capabilities.hostedBrowserPreview === true
+  );
 }
 
 export function resetPreviewStateForTests(): void {

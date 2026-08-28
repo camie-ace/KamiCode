@@ -33,6 +33,7 @@ const mocks = vi.hoisted(() => ({
   showEmptyState: false,
   loading: false,
   recordVisitForThread: vi.fn(),
+  hostedRemoteRenderCount: 0,
 }));
 
 const EMPTY_HISTORY: never[] = [];
@@ -246,7 +247,12 @@ vi.mock("./PreviewUnreachable", () => ({ PreviewUnreachable: () => null }));
 vi.mock("./ZoomIndicator", () => ({ ZoomIndicator: () => null }));
 vi.mock("./AgentBrowserCursor", () => ({ AgentBrowserCursor: () => null }));
 vi.mock("~/browser/BrowserSurfaceSlot", () => ({ BrowserSurfaceSlot: () => null }));
-vi.mock("./usePreviewSession", () => ({ usePreviewSession: vi.fn() }));
+vi.mock("~/browser/HostedBrowserRemoteView", () => ({
+  HostedBrowserRemoteView: () => {
+    mocks.hostedRemoteRenderCount += 1;
+    return <div data-testid="hosted-browser-remote" />;
+  },
+}));
 
 import { PreviewView } from "./PreviewView";
 import { previewRuntimeTabId } from "~/browser/previewRuntimeTabId";
@@ -344,6 +350,16 @@ describe("PreviewView navigation", () => {
     mocks.showEmptyState = false;
     mocks.loading = false;
     mocks.recordVisitForThread.mockClear();
+    mocks.hostedRemoteRenderCount = 0;
+  });
+
+  it("renders the server-hosted browser surface for web clients", () => {
+    const markup = renderToStaticMarkup(
+      <PreviewView threadRef={TEST_THREAD_REF} tabId="tab-1" visible hostedBrowser />,
+    );
+
+    expect(markup).toContain('data-testid="hosted-browser-remote"');
+    expect(mocks.hostedRemoteRenderCount).toBe(1);
   });
 
   it("does not rerender while loading time passes", async () => {

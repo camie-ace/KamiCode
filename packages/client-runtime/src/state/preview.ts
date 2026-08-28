@@ -23,6 +23,7 @@ export function createPreviewEnvironmentAtoms<R, E>(
   const lifecycleScheduler = createAtomCommandScheduler();
   const statusScheduler = createAtomCommandScheduler();
   const automationScheduler = createAtomCommandScheduler();
+  const hostedBrowserScheduler = createAtomCommandScheduler();
   const lifecycleConcurrency = {
     mode: "serial" as const,
     key: ({ environmentId, input }: { environmentId: string; input: { threadId: string } }) =>
@@ -91,6 +92,26 @@ export function createPreviewEnvironmentAtoms<R, E>(
         mode: "latest",
         key: ({ environmentId, input }) =>
           JSON.stringify([environmentId, input.threadId, input.tabId]),
+      },
+    }),
+    hostedFrame: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:preview:hosted-frame",
+      tag: WS_METHODS.hostedPreviewFrame,
+      scheduler: hostedBrowserScheduler,
+      concurrency: {
+        mode: "latest",
+        key: ({ environmentId, input }) =>
+          JSON.stringify([environmentId, input.threadId, input.tabId, "frame"]),
+      },
+    }),
+    hostedControl: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:preview:hosted-control",
+      tag: WS_METHODS.hostedPreviewControl,
+      scheduler: hostedBrowserScheduler,
+      concurrency: {
+        mode: "serial",
+        key: ({ environmentId, input }) =>
+          JSON.stringify([environmentId, input.threadId, input.tabId, "control"]),
       },
     }),
     respondToAutomation: createEnvironmentRpcCommand(runtime, {

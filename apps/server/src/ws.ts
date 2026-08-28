@@ -102,6 +102,7 @@ import * as ServerLifecycleEvents from "./serverLifecycleEvents.ts";
 import * as ServerSettings from "./serverSettings.ts";
 import * as TerminalManager from "./terminal/Manager.ts";
 import * as PreviewAutomationBroker from "./mcp/PreviewAutomationBroker.ts";
+import * as HostedPreviewAutomationHost from "./mcp/HostedPreviewAutomationHost.ts";
 import * as PreviewManager from "./preview/Manager.ts";
 import { issueAssetUrl } from "./assets/AssetAccess.ts";
 import { assistantMessageReferencesAssetPath } from "./media/MediaArtifacts.ts";
@@ -426,6 +427,7 @@ const makeWsRpcLayer = (
   currentSession: EnvironmentAuth.AuthenticatedSession,
   clientOrigin: OrchestrationClientOrigin,
   previewAutomationBroker: PreviewAutomationBroker.PreviewAutomationBroker["Service"],
+  hostedPreviewBrowser: HostedPreviewAutomationHost.HostedPreviewBrowser["Service"],
 ) =>
   WsRpcGroup.toLayer(
     Effect.gen(function* () {
@@ -2519,25 +2521,98 @@ const makeWsRpcLayer = (
             { "rpc.aggregate": "terminal" },
           ),
         [WS_METHODS.previewOpen]: (input) =>
-          observeRpcEffect(WS_METHODS.previewOpen, previewManager.open(input), {
-            "rpc.aggregate": "preview",
-          }),
+          observeRpcEffect(
+            WS_METHODS.previewOpen,
+            Effect.gen(function* () {
+              const snapshot = yield* previewManager.open(input);
+              if (hostedPreviewBrowser.controller) {
+                yield* Effect.tryPromise(() =>
+                  hostedPreviewBrowser.controller!.openSession(snapshot),
+                ).pipe(
+                  Effect.catch((cause) =>
+                    Effect.logWarning("VPS browser tab creation failed.", {
+                      cause: cause instanceof Error ? cause.message : String(cause),
+                    }),
+                  ),
+                );
+              }
+              const latest = yield* previewManager.list({ threadId: input.threadId });
+              return (
+                latest.sessions.find((session) => session.tabId === snapshot.tabId) ?? snapshot
+              );
+            }),
+            { "rpc.aggregate": "preview" },
+          ),
         [WS_METHODS.previewNavigate]: (input) =>
-          observeRpcEffect(WS_METHODS.previewNavigate, previewManager.navigate(input), {
-            "rpc.aggregate": "preview",
-          }),
+          observeRpcEffect(
+            WS_METHODS.previewNavigate,
+            Effect.gen(function* () {
+              const snapshot = yield* previewManager.navigate(input);
+              const navStatus = snapshot.navStatus;
+              if (hostedPreviewBrowser.controller && navStatus._tag !== "Idle") {
+                yield* Effect.tryPromise(() =>
+                  // openSession is idempotent for a live tab and recreates a
+                  // page reclaimed by idle cleanup before navigating it.
+                  hostedPreviewBrowser.controller!.openSession(snapshot),
+                ).pipe(
+                  Effect.catch((cause) =>
+                    Effect.logWarning("VPS browser navigation failed.", {
+                      cause: cause instanceof Error ? cause.message : String(cause),
+                    }),
+                  ),
+                );
+              }
+              const latest = yield* previewManager.list({ threadId: input.threadId });
+              return latest.sessions.find((session) => session.tabId === input.tabId) ?? snapshot;
+            }),
+            { "rpc.aggregate": "preview" },
+          ),
         [WS_METHODS.previewResize]: (input) =>
-          observeRpcEffect(WS_METHODS.previewResize, previewManager.resize(input), {
-            "rpc.aggregate": "preview",
-          }),
+          observeRpcEffect(
+            WS_METHODS.previewResize,
+            Effect.gen(function* () {
+              const snapshot = yield* previewManager.resize(input);
+              if (hostedPreviewBrowser.controller) {
+                yield* Effect.tryPromise(() =>
+                  hostedPreviewBrowser.controller!.resizeSession(input),
+                ).pipe(Effect.ignoreCause({ log: true }));
+              }
+              return snapshot;
+            }),
+            { "rpc.aggregate": "preview" },
+          ),
         [WS_METHODS.previewRefresh]: (input) =>
-          observeRpcEffect(WS_METHODS.previewRefresh, previewManager.refresh(input), {
-            "rpc.aggregate": "preview",
-          }),
+          observeRpcEffect(
+            WS_METHODS.previewRefresh,
+            previewManager
+              .refresh(input)
+              .pipe(
+                Effect.andThen(
+                  hostedPreviewBrowser.controller
+                    ? Effect.tryPromise(() =>
+                        hostedPreviewBrowser.controller!.refreshSession(input),
+                      ).pipe(Effect.ignoreCause({ log: true }))
+                    : Effect.void,
+                ),
+              ),
+            { "rpc.aggregate": "preview" },
+          ),
         [WS_METHODS.previewClose]: (input) =>
-          observeRpcEffect(WS_METHODS.previewClose, previewManager.close(input), {
-            "rpc.aggregate": "preview",
-          }),
+          observeRpcEffect(
+            WS_METHODS.previewClose,
+            previewManager
+              .close(input)
+              .pipe(
+                Effect.andThen(
+                  hostedPreviewBrowser.controller
+                    ? Effect.tryPromise(() =>
+                        hostedPreviewBrowser.controller!.closeSession(input),
+                      ).pipe(Effect.ignoreCause({ log: true }))
+                    : Effect.void,
+                ),
+              ),
+            { "rpc.aggregate": "preview" },
+          ),
         [WS_METHODS.previewList]: (input) =>
           observeRpcEffect(WS_METHODS.previewList, previewManager.list(input), {
             "rpc.aggregate": "preview",
@@ -2551,6 +2626,56 @@ const makeWsRpcLayer = (
             WS_METHODS.previewAutomationConnect,
             previewAutomationBroker.connect(input),
             { "rpc.aggregate": "preview-automation" },
+          ),
+        [WS_METHODS.hostedPreviewFrame]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.hostedPreviewFrame,
+            hostedPreviewBrowser.controller
+              ? Effect.tryPromise(() => hostedPreviewBrowser.controller!.readFrame(input)).pipe(
+                  Effect.catch(() =>
+                    Effect.succeed({
+                      state: "unavailable" as const,
+                      sequence: 0,
+                      frame: null,
+                      url: null,
+                      title: null,
+                      loading: false,
+                      canGoBack: false,
+                      canGoForward: false,
+                      message: "The VPS-hosted browser is temporarily unavailable.",
+                    }),
+                  ),
+                )
+              : Effect.succeed({
+                  state: "unavailable" as const,
+                  sequence: 0,
+                  frame: null,
+                  url: null,
+                  title: null,
+                  loading: false,
+                  canGoBack: false,
+                  canGoForward: false,
+                  message: "This server does not provide a hosted browser.",
+                }),
+            { "rpc.aggregate": "preview" },
+          ),
+        [WS_METHODS.hostedPreviewControl]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.hostedPreviewControl,
+            hostedPreviewBrowser.controller
+              ? Effect.tryPromise(() => hostedPreviewBrowser.controller!.control(input)).pipe(
+                  Effect.catch(() =>
+                    Effect.succeed({
+                      ok: false,
+                      message: "The VPS-hosted browser could not apply that input.",
+                    }),
+                  ),
+                )
+              : Effect.succeed({
+                  ok: false,
+                  message: "This server does not provide a hosted browser.",
+                }),
+            { "rpc.aggregate": "preview" },
           ),
         [WS_METHODS.previewAutomationRespond]: (input) =>
           observeRpcEffect(
@@ -2723,6 +2848,7 @@ const makeWsRpcLayer = (
 export const websocketRpcRouteLayer = Layer.unwrap(
   Effect.gen(function* () {
     const previewAutomationBroker = yield* PreviewAutomationBroker.PreviewAutomationBroker;
+    const hostedPreviewBrowser = yield* HostedPreviewAutomationHost.HostedPreviewBrowser;
     const serverSelfUpdate = yield* ServerSelfUpdate.ServerSelfUpdate;
     const pullRequests = yield* PullRequestService.PullRequestService;
     return HttpRouter.add(
@@ -2751,7 +2877,12 @@ export const websocketRpcRouteLayer = Layer.unwrap(
           disableTracing: true,
         }).pipe(
           Effect.provide(
-            makeWsRpcLayer(session, clientOrigin, previewAutomationBroker).pipe(
+            makeWsRpcLayer(
+              session,
+              clientOrigin,
+              previewAutomationBroker,
+              hostedPreviewBrowser,
+            ).pipe(
               Layer.provideMerge(RpcSerialization.layerJson),
               Layer.provide(ProviderMaintenanceRunner.layer),
               Layer.provide(Layer.succeed(ServerSelfUpdate.ServerSelfUpdate, serverSelfUpdate)),

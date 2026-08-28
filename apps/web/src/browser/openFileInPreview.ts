@@ -4,6 +4,7 @@ import type {
   EnvironmentId,
   PreviewOpenInput,
   PreviewSessionSnapshot,
+  ServerConfig,
   ScopedThreadRef,
 } from "@t3tools/contracts";
 import {
@@ -56,13 +57,14 @@ export async function openFileInPreview<AssetError, PreviewError>(input: {
   readonly threadRef: ScopedThreadRef;
   readonly filePath: string;
   readonly httpBaseUrl: string;
+  readonly serverConfig: Pick<ServerConfig, "environment"> | null;
   readonly createAssetUrl: (input: {
     readonly environmentId: EnvironmentId;
     readonly input: { readonly resource: AssetResource };
   }) => Promise<AtomCommandResult<AssetCreateUrlResult, AssetError>>;
   readonly openPreview: OpenPreviewMutation<PreviewError>;
 }): Promise<AtomCommandResult<void, AssetError | PreviewError | BrowserPreviewUnavailableError>> {
-  if (!isPreviewSupportedInRuntime()) {
+  if (!isPreviewSupportedInRuntime(input.serverConfig)) {
     return AsyncResult.failure(
       Cause.fail(
         new BrowserPreviewUnavailableError({

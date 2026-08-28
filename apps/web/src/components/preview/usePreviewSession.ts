@@ -11,6 +11,7 @@ import {
   readThreadPreviewState,
   reconcilePreviewServerSessions,
 } from "~/previewStateStore";
+import { useRightPanelStore } from "~/rightPanelStore";
 import { previewEnvironment } from "~/state/preview";
 
 class PreviewSessionThreadKeyParseError extends Schema.TaggedErrorClass<PreviewSessionThreadKeyParseError>()(
@@ -54,6 +55,9 @@ const previewSessionSyncAtom = Atom.family((threadKey: string) => {
         return;
       }
       applyPreviewServerEvent(threadRef, result.value);
+      if (result.value.type === "opened" && result.value.reveal === true) {
+        useRightPanelStore.getState().openBrowser(threadRef, result.value.tabId);
+      }
     };
 
     get.addFinalizer(() => {
@@ -78,6 +82,12 @@ const previewSessionSyncAtom = Atom.family((threadKey: string) => {
   }).pipe(Atom.setIdleTTL(1_000), Atom.withLabel(`preview:session-sync:${threadKey}`));
 });
 
-export function usePreviewSession(threadRef: ScopedThreadRef): void {
-  useAtomValue(previewSessionSyncAtom(scopedThreadKey(threadRef)));
+const inactivePreviewSessionSyncAtom = Atom.make(null).pipe(
+  Atom.withLabel("preview:session-sync:inactive"),
+);
+
+export function usePreviewSession(threadRef: ScopedThreadRef | null | undefined): void {
+  useAtomValue(
+    threadRef ? previewSessionSyncAtom(scopedThreadKey(threadRef)) : inactivePreviewSessionSyncAtom,
+  );
 }
