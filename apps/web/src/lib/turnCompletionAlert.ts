@@ -6,9 +6,8 @@ import type {
   TurnId,
 } from "@t3tools/contracts";
 
-export const TURN_COMPLETION_ALERT_DURATION_MS = 10_000;
-export const TURN_COMPLETION_ALERT_INITIAL_VOLUME = 0.35;
-export const TURN_COMPLETION_ALERT_MAX_VOLUME = 0.85;
+export const TURN_COMPLETION_ALERT_DURATION_MS = 1_500;
+export const TURN_COMPLETION_ALERT_VOLUME = 0.2;
 
 export interface CompletedTurnAlert {
   readonly environmentId: EnvironmentId;
@@ -133,19 +132,4 @@ export function isApplicationInFocus(
   input: Pick<Document, "visibilityState" | "hasFocus">,
 ): boolean {
   return input.visibilityState === "visible" && input.hasFocus();
-}
-
-export function getTurnCompletionAlertVolume(elapsedMs: number): number {
-  if (elapsedMs <= 0) {
-    return TURN_COMPLETION_ALERT_INITIAL_VOLUME;
-  }
-  if (elapsedMs >= TURN_COMPLETION_ALERT_DURATION_MS) {
-    return TURN_COMPLETION_ALERT_MAX_VOLUME;
-  }
-
-  const progress = elapsedMs / TURN_COMPLETION_ALERT_DURATION_MS;
-  return (
-    TURN_COMPLETION_ALERT_INITIAL_VOLUME +
-    (TURN_COMPLETION_ALERT_MAX_VOLUME - TURN_COMPLETION_ALERT_INITIAL_VOLUME) * progress
-  );
 }

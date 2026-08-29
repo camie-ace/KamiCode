@@ -3,11 +3,9 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   collectSettledCompletedTurns,
   type CompletionAlertThread,
-  getTurnCompletionAlertVolume,
   isApplicationInFocus,
   TURN_COMPLETION_ALERT_DURATION_MS,
-  TURN_COMPLETION_ALERT_INITIAL_VOLUME,
-  TURN_COMPLETION_ALERT_MAX_VOLUME,
+  TURN_COMPLETION_ALERT_VOLUME,
   turnCompletionAlertKey,
 } from "./turnCompletionAlert";
 
@@ -167,14 +165,8 @@ describe("turn completion alert helpers", () => {
     ).toBe(false);
   });
 
-  it("ramps the volume from the initial value to the max value across the alert window", () => {
-    expect(getTurnCompletionAlertVolume(0)).toBe(TURN_COMPLETION_ALERT_INITIAL_VOLUME);
-    expect(getTurnCompletionAlertVolume(TURN_COMPLETION_ALERT_DURATION_MS)).toBe(
-      TURN_COMPLETION_ALERT_MAX_VOLUME,
-    );
-    expect(getTurnCompletionAlertVolume(TURN_COMPLETION_ALERT_DURATION_MS / 2)).toBeCloseTo(
-      (TURN_COMPLETION_ALERT_INITIAL_VOLUME + TURN_COMPLETION_ALERT_MAX_VOLUME) / 2,
-      5,
-    );
+  it("uses a short, restrained completion chime", () => {
+    expect(TURN_COMPLETION_ALERT_DURATION_MS).toBe(1_500);
+    expect(TURN_COMPLETION_ALERT_VOLUME).toBeLessThanOrEqual(0.2);
   });
 });
