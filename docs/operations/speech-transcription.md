@@ -7,14 +7,14 @@ endpoint. The model stays warm in memory, and model work is serialized so concur
 not saturate the host.
 
 This setup is intended for a Linux web server. An 8-vCPU, 24-GB host has ample memory for
-`small.en` (about 852 MB at runtime). Benchmark the actual CPU before promising a latency target.
-For short prompts, use a warm-response target of five seconds or less; switch to `base.en` if
-`small.en` misses it consistently.
+`tiny.en` (about 273 MB at runtime). CPU speed, not memory, is normally the constraint. Benchmark
+the actual host before enabling the capability; for the bundled 11-second sample, a warm response
+under ten seconds is a reasonable CPU-only target.
 
 ## Install whisper.cpp
 
 The following pins the runtime to `v1.9.1`, enables OpenBLAS on CPU, and downloads the English
-`small` model. Run it as an administrator on Debian or Ubuntu:
+`tiny` model. Run it as an administrator on Debian or Ubuntu:
 
 ```sh
 sudo apt-get update
@@ -30,15 +30,15 @@ sudo cmake -S /opt/kamicode-whisper -B /opt/kamicode-whisper/build \
   -DGGML_BLAS_VENDOR=OpenBLAS \
   -DWHISPER_BUILD_TESTS=OFF
 sudo cmake --build /opt/kamicode-whisper/build --config Release --parallel 8
-sudo sh /opt/kamicode-whisper/models/download-ggml-model.sh small.en
+sudo sh /opt/kamicode-whisper/models/download-ggml-model.sh tiny.en
 ```
 
 Verify the downloaded model before starting it:
 
 ```sh
 printf '%s  %s\n' \
-  db8a495a91d927739e50b3fc1cc4c6b8f6c2d022 \
-  /opt/kamicode-whisper/models/ggml-small.en.bin | sha1sum --check
+  c78c86eb1a8faa21b369bcd33207cc90d64ae9df \
+  /opt/kamicode-whisper/models/ggml-tiny.en.bin | sha1sum --check
 ```
 
 ## Run the sandboxed service
@@ -54,7 +54,7 @@ curl --fail --silent http://127.0.0.1:8087/ >/dev/null
 ```
 
 The unit binds only to `127.0.0.1`, runs under a dynamic unprivileged identity, limits inference to
-seven CPU cores and 3 GB of memory, and gives ffmpeg only a private runtime directory. Do not expose
+seven CPU cores and 1 GB of memory, and gives ffmpeg only a private runtime directory. Do not expose
 the whisper server on a public or Tailnet interface. Its upload endpoint is deliberately behind
 KamiCode's authenticated, size-limited route.
 
@@ -105,10 +105,12 @@ curl --silent --show-error --output /tmp/kamicode-whisper-result.json \
   --form response_format=json
 ```
 
-If warm latency is consistently above five seconds, download `base.en`, change the unit's model
-path, and restart it. `base.en` needs about 388 MB and is faster, with a modest accuracy tradeoff.
-If latency is already comfortable, keep `small.en`; it handles accents and code-adjacent dictation
-more reliably.
+If accuracy is insufficient and a slower response is acceptable, download `base.en`, verify its
+published checksum, change the unit's model path, raise `MemoryMax` if needed, and restart it.
+`base.en` needs about 388 MB and is more accurate but materially slower on CPU-only hosts. Integer
+quantization can reduce disk and memory use, but benchmark it: it does not improve latency on every
+CPU. If `tiny.en` itself misses the target, use a CPU accelerator/GPU or leave the capability
+disabled instead of making the composer feel unresponsive.
 
 Useful diagnostics:
 

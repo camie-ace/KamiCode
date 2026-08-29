@@ -8,7 +8,7 @@ DynamicUser=yes
 WorkingDirectory=/opt/kamicode-whisper
 RuntimeDirectory=kamicode-whisper
 RuntimeDirectoryMode=0700
-ExecStart=/opt/kamicode-whisper/build/bin/whisper-server -m /opt/kamicode-whisper/models/ggml-small.en.bin -t 7 -p 1 -l en -d 60000 -nt -nc -ng -sns --host 127.0.0.1 --port 8087 --convert --tmp-dir /run/kamicode-whisper
+ExecStart=/opt/kamicode-whisper/build/bin/whisper-server -m /opt/kamicode-whisper/models/ggml-tiny.en.bin -t 7 -p 1 -bo 1 -l en -d 60000 -nt -ng -sns --host 127.0.0.1 --port 8087 --convert --tmp-dir /run/kamicode-whisper
 Restart=on-failure
 RestartSec=2
 TimeoutStopSec=15
@@ -16,10 +16,11 @@ KillMode=mixed
 Nice=5
 OOMScoreAdjust=500
 CPUQuota=700%
-MemoryMax=3G
-TasksMax=32
+MemoryMax=1G
+TasksMax=128
 Environment="OMP_NUM_THREADS=7"
 Environment="OPENBLAS_NUM_THREADS=7"
+Environment="LD_LIBRARY_PATH=/opt/kamicode-whisper/build/bin"
 
 NoNewPrivileges=yes
 CapabilityBoundingSet=
