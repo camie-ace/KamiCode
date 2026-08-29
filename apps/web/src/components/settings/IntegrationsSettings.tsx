@@ -21,13 +21,16 @@ import {
   type PreviewViewportSetting,
 } from "@t3tools/contracts";
 import { PREVIEW_VIEWPORT_PRESETS } from "@t3tools/shared/previewViewport";
+import { isHostedBrowserProxyUrl } from "@t3tools/shared/hostedBrowserProxy";
+import { useAtomValue } from "@effect/atom-react";
 import { InfoIcon } from "lucide-react";
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 
 import { ScreenRotationIcon } from "~/browser/ScreenRotationIcon";
 import { isElectron } from "../../env";
 
 import { Button } from "../ui/button";
+import { Input } from "../ui/input";
 import { NumberField, NumberFieldGroup, NumberFieldInput } from "../ui/number-field";
 import {
   Select,
@@ -45,6 +48,7 @@ import {
   usePrimarySettings,
   useUpdatePrimarySettings,
 } from "~/hooks/useSettings";
+import { primaryServerConfigAtom } from "~/state/server";
 
 import {
   SettingResetButton,
@@ -393,6 +397,125 @@ function AgentBrowserAccessSetting() {
   );
 }
 
+function HostedBrowserProxySetting() {
+  const settings = usePrimarySettings();
+  const updateSettings = useUpdatePrimarySettings();
+  const serverConfig = useAtomValue(primaryServerConfigAtom);
+  const [proxyUrl, setProxyUrl] = useState("");
+  const proxy = settings.hostedBrowserProxy;
+  const hostedBrowserAvailable =
+    serverConfig?.environment.capabilities.hostedBrowserPreview === true;
+  const hasStoredProxy = proxy.urlRedacted || proxy.url.length > 0;
+  const trimmedProxyUrl = proxyUrl.trim();
+  const validReplacement = isHostedBrowserProxyUrl(trimmedProxyUrl);
+
+  const saveProxy = () => {
+    if (!validReplacement) return;
+    updateSettings({
+      hostedBrowserProxy: {
+        url: trimmedProxyUrl,
+        urlRedacted: false,
+      },
+    });
+    setProxyUrl("");
+  };
+
+  const clearProxy = () => {
+    setProxyUrl("");
+    updateSettings({
+      hostedBrowserProxy: {
+        enabled: false,
+        url: "",
+        urlRedacted: false,
+      },
+    });
+  };
+
+  return (
+    <>
+      <SettingsRow
+        {...searchableSetting("hosted-browser-proxy")}
+        description="Route outbound page traffic from the VPS-hosted shared Chromium through the configured proxy. KamiCode, SSH, mail, and other VPS services keep their normal connection."
+        status={
+          !hostedBrowserAvailable
+            ? "This environment does not provide a server-hosted browser."
+            : proxy.enabled && hasStoredProxy
+              ? "Enabled. Changing this setting recycles the hosted Chromium context and reloads its open tabs."
+              : hasStoredProxy
+                ? "Configured and disabled."
+                : "Add a proxy URL before enabling."
+        }
+        resetAction={
+          proxy.enabled ? (
+            <SettingResetButton
+              label="hosted browser proxy"
+              onClick={() => updateSettings({ hostedBrowserProxy: { enabled: false } })}
+            />
+          ) : null
+        }
+        control={
+          <Switch
+            disabled={!hostedBrowserAvailable || !hasStoredProxy}
+            checked={proxy.enabled}
+            onCheckedChange={(checked) =>
+              updateSettings({ hostedBrowserProxy: { enabled: Boolean(checked) } })
+            }
+            aria-label="Use hosted browser proxy"
+          />
+        }
+      />
+      <SettingsRow
+        title="Proxy URL"
+        description="Paste an HTTP, HTTPS, SOCKS4, or SOCKS5 URL. Credentials are kept in the server's permission-protected secret store and are never returned to the app after saving."
+        status={
+          trimmedProxyUrl.length > 0 && !validReplacement
+            ? "Use a proxy endpoint with no path, query, or fragment."
+            : hasStoredProxy
+              ? "A proxy credential is stored. Leave this blank to keep it, or paste a replacement."
+              : undefined
+        }
+        control={
+          <div className="flex items-center gap-2">
+            <Button
+              size="xs"
+              disabled={!hostedBrowserAvailable || !validReplacement}
+              onClick={saveProxy}
+            >
+              Save
+            </Button>
+            <Button
+              size="xs"
+              variant="destructive-outline"
+              disabled={!hostedBrowserAvailable || (!hasStoredProxy && proxyUrl.length === 0)}
+              onClick={clearProxy}
+            >
+              Clear
+            </Button>
+          </div>
+        }
+      >
+        <div className="mt-3 border-t border-border/50 py-3">
+          <Input
+            className="h-8 min-w-0 text-xs"
+            type="password"
+            value={proxyUrl}
+            disabled={!hostedBrowserAvailable}
+            autoComplete="off"
+            spellCheck={false}
+            placeholder={
+              hasStoredProxy
+                ? "Stored proxy - paste a new URL to replace"
+                : "http://username:password@proxy.example:12321"
+            }
+            aria-label="Hosted browser proxy URL"
+            onChange={(event) => setProxyUrl(event.currentTarget.value)}
+          />
+        </div>
+      </SettingsRow>
+    </>
+  );
+}
+
 function BrowserAutoShowFloatingPreviewSetting({ disabled }: { readonly disabled: boolean }) {
   const autoShow = useClientSettings((settings) => settings.browserAutoShowFloatingPreview);
   const updateSettings = useUpdatePrimarySettings();
@@ -471,6 +594,7 @@ export function IntegrationsSettingsPanel() {
         {/* Server-authoritative, so it stays editable on every client and sits
             outside the block covering the desktop-only defaults. */}
         <AgentBrowserAccessSetting />
+        <HostedBrowserProxySetting />
         {previewDefaultsDisabled ? (
           <DesktopOnlyBrowserDefaults>{previewDefaults}</DesktopOnlyBrowserDefaults>
         ) : (

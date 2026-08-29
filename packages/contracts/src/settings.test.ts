@@ -20,6 +20,32 @@ const decodeServerSettingsPatch = Schema.decodeUnknownSync(ServerSettingsPatch);
 const encodeServerSettings = Schema.encodeSync(ServerSettings);
 const decodeClaudeSettings = Schema.decodeUnknownSync(ClaudeSettings);
 
+describe("hosted browser proxy settings", () => {
+  it("defaults to disabled with no stored URL", () => {
+    expect(DEFAULT_SERVER_SETTINGS.hostedBrowserProxy).toEqual({
+      enabled: false,
+      url: "",
+      urlRedacted: false,
+    });
+  });
+
+  it("decodes a partial opt-in patch and trims a replacement URL", () => {
+    expect(
+      decodeServerSettingsPatch({
+        hostedBrowserProxy: {
+          enabled: true,
+          url: "  http://user:password@proxy.example:12321  ",
+          urlRedacted: false,
+        },
+      }).hostedBrowserProxy,
+    ).toEqual({
+      enabled: true,
+      url: "http://user:password@proxy.example:12321",
+      urlRedacted: false,
+    });
+  });
+});
+
 describe("ClaudeSettings auto-compaction", () => {
   it("uses Claude's default threshold when no override is configured", () => {
     expect(decodeClaudeSettings({}).autoCompactWindow).toBe("");

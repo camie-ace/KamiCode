@@ -14,6 +14,7 @@ import * as Duration from "effect/Duration";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Path from "effect/Path";
 import * as PlatformError from "effect/PlatformError";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
@@ -73,6 +74,89 @@ const recordProviderUsage = (provider: string, instanceId: string | null = provi
   });
 
 it.layer(NodeServices.layer)("server settings", (it) => {
+  it.effect("stores hosted browser proxy credentials separately and redacts clients", () =>
+    Effect.gen(function* () {
+      const serverConfig = yield* ServerConfig.ServerConfig;
+      const fileSystem = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const serverSettings = yield* ServerSettingsModule.ServerSettingsService;
+      const proxyUrl = "http://pool-user:pool-pass@proxy.example:12321";
+      const secretPath = path.join(serverConfig.secretsDir, "hosted-browser-proxy-url.bin");
+
+      const saved = yield* serverSettings.updateSettings({
+        hostedBrowserProxy: {
+          enabled: true,
+          url: proxyUrl,
+          urlRedacted: false,
+        },
+      });
+
+      assert.deepEqual(saved.hostedBrowserProxy, {
+        enabled: true,
+        url: proxyUrl,
+        urlRedacted: true,
+      });
+      assert.deepEqual(
+        ServerSettingsModule.redactServerSettingsForClient(saved).hostedBrowserProxy,
+        {
+          enabled: true,
+          url: "",
+          urlRedacted: true,
+        },
+      );
+      const persisted = yield* fileSystem.readFileString(serverConfig.settingsPath);
+      assert.notInclude(persisted, "pool-user");
+      assert.notInclude(persisted, "pool-pass");
+      assert.equal(new TextDecoder().decode(yield* fileSystem.readFile(secretPath)), proxyUrl);
+
+      const disabled = yield* serverSettings.updateSettings({
+        hostedBrowserProxy: { enabled: false },
+      });
+      assert.isFalse(disabled.hostedBrowserProxy.enabled);
+      assert.equal(disabled.hostedBrowserProxy.url, proxyUrl);
+
+      const cleared = yield* serverSettings.updateSettings({
+        hostedBrowserProxy: {
+          enabled: false,
+          url: "",
+          urlRedacted: false,
+        },
+      });
+      assert.deepEqual(cleared.hostedBrowserProxy, {
+        enabled: false,
+        url: "",
+        urlRedacted: false,
+      });
+      assert.isFalse(yield* fileSystem.exists(secretPath));
+    }).pipe(Effect.provide(makeServerSettingsLayer())),
+  );
+
+  it.effect("rejects an invalid hosted browser proxy before persisting it", () =>
+    Effect.gen(function* () {
+      const serverConfig = yield* ServerConfig.ServerConfig;
+      const fileSystem = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const serverSettings = yield* ServerSettingsModule.ServerSettingsService;
+
+      const error = yield* Effect.flip(
+        serverSettings.updateSettings({
+          hostedBrowserProxy: {
+            enabled: true,
+            url: "https://proxy.example/path",
+            urlRedacted: false,
+          },
+        }),
+      );
+
+      assert.equal(error.operation, "normalize");
+      assert.isFalse(
+        yield* fileSystem.exists(
+          path.join(serverConfig.secretsDir, "hosted-browser-proxy-url.bin"),
+        ),
+      );
+    }).pipe(Effect.provide(makeServerSettingsLayer())),
+  );
+
   it.effect("preserves context when reading a provider environment secret fails", () => {
     const platformCause = PlatformError.systemError({
       _tag: "PermissionDenied",

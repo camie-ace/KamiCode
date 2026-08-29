@@ -132,6 +132,16 @@ it("hosts a lazy, bounded Chromium session and returns agent-ready snapshots", a
       height: 800,
     });
 
+    await controller.restart();
+    expect(controller.browserRunning).toBe(true);
+    expect(controller.tabCount).toBe(1);
+    expect(lifecycleClosedTabIds).not.toContain(tabId);
+    await expect(
+      controller.handle(
+        makeRequest(threadId, "evaluate", { expression: "document.location.href" }, tabId),
+      ),
+    ).resolves.toBe("about:blank");
+
     await expect(
       controller.handle(
         makeRequest(ThreadId.make("second-thread"), "open", {

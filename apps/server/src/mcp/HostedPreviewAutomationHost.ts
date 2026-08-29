@@ -37,6 +37,7 @@ import {
 } from "@t3tools/contracts";
 import { normalizePreviewUrl } from "@t3tools/shared/preview";
 import { resolvePreviewViewport } from "@t3tools/shared/previewViewport";
+import { parseHostedBrowserProxyUrl } from "@t3tools/shared/hostedBrowserProxy";
 import * as Duration from "effect/Duration";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -48,6 +49,7 @@ import type { BrowserContext, CDPSession, Locator, Page } from "playwright";
 import * as ServerConfig from "../config.ts";
 import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
 import * as PreviewManager from "../preview/Manager.ts";
+import * as ServerSettings from "../serverSettings.ts";
 import * as PreviewAutomationBroker from "./PreviewAutomationBroker.ts";
 
 const DEFAULT_VIEWPORT: PreviewRenderedViewportSize = { width: 1_280, height: 800 };
@@ -58,6 +60,7 @@ const MAX_SCREENSHOT_BYTES = 5 * 1024 * 1024;
 const MIN_IDLE_TIMEOUT_MS = 30_000;
 const IDLE_SWEEP_INTERVAL_MS = 30_000;
 const HOSTED_FRAME_MAX_AGE_MS = 2_000;
+const HOSTED_BROWSER_PROXY_BYPASS = "localhost,127.0.0.1,[::1]";
 
 export const HOSTED_PREVIEW_AUTOMATION_OPERATIONS = PREVIEW_AUTOMATION_OPERATIONS.filter(
   (operation) => operation !== "recordingStart" && operation !== "recordingStop",
@@ -127,6 +130,7 @@ export interface HostedPreviewAutomationControllerOptions {
   readonly profileDir: string;
   readonly maxTabs: number;
   readonly idleTimeoutMs: number;
+  readonly proxyUrl?: (() => string | null) | undefined;
   readonly now?: () => number;
   readonly lifecycle?: HostedPreviewLifecycle;
 }
@@ -506,32 +510,60 @@ export class HostedPreviewAutomationController {
   }
 
   close(): Promise<void> {
+    return this.exclusive(() => this.closeUnsafe());
+  }
+
+  restart(): Promise<void> {
     return this.exclusive(async () => {
-      const context = this.context;
-      this.context = null;
-      const tabs = Array.from(this.tabs.values());
-      for (const tab of tabs) {
-        if (tab.screencastStopTimer) clearTimeout(tab.screencastStopTimer);
+      const sessions = Array.from(this.tabs.values()).map((tab) => ({
+        threadId: tab.threadId,
+        tabId: tab.tabId,
+        viewportSetting: tab.viewportSetting,
+        colorScheme: tab.colorScheme,
+        url: tab.page.url(),
+      }));
+      await this.closeUnsafe();
+      for (const session of sessions) {
+        const tab = await this.ensureTab(session.threadId, session.tabId, session.viewportSetting);
+        this.currentTabByThread.set(tab.threadId, tab.tabId);
+        await tab.page.emulateMedia({
+          colorScheme: session.colorScheme === "system" ? null : session.colorScheme,
+        });
+        tab.colorScheme = session.colorScheme;
+        if (session.url !== "about:blank") {
+          await this.navigatePage(tab, session.url, "load", 15_000).catch(() => {});
+        }
       }
-      // Explicitly stop and detach active CDP sessions before closing the
-      // persistent context. Chromium can otherwise keep its profile log
-      // handle alive briefly after context.close(), preventing an immediate
-      // service restart from reopening the same profile on Windows.
-      await Promise.all(
-        tabs.map(async (tab) => {
-          if (!tab.cdp) return;
-          if (tab.screencastActive) {
-            await tab.cdp.send("Page.stopScreencast").catch(() => {});
-          }
-          await tab.cdp.detach().catch(() => {});
-          tab.cdp = null;
-          tab.screencastActive = false;
-        }),
-      );
-      this.tabs.clear();
-      this.currentTabByThread.clear();
-      if (context) await context.close().catch(() => {});
     });
+  }
+
+  private async closeUnsafe(): Promise<void> {
+    const context = this.context;
+    this.context = null;
+    const tabs = Array.from(this.tabs.values());
+    for (const tab of tabs) {
+      if (tab.screencastStopTimer) clearTimeout(tab.screencastStopTimer);
+    }
+    // Explicitly stop and detach active CDP sessions before closing the
+    // persistent context. Chromium can otherwise keep its profile log
+    // handle alive briefly after context.close(), preventing an immediate
+    // service restart from reopening the same profile on Windows.
+    await Promise.all(
+      tabs.map(async (tab) => {
+        if (!tab.cdp) return;
+        if (tab.screencastActive) {
+          await tab.cdp.send("Page.stopScreencast").catch(() => {});
+        }
+        await tab.cdp.detach().catch(() => {});
+        tab.cdp = null;
+        tab.screencastActive = false;
+      }),
+    );
+    // Clear ownership before Chromium emits page close events so a context
+    // recycle does not remove the durable preview sessions it is reopening.
+    this.tabs.clear();
+    this.currentTabByThread.clear();
+    if (context) await context.close().catch(() => {});
   }
 
   private exclusive<A>(run: () => Promise<A>): Promise<A> {
@@ -549,12 +581,28 @@ export class HostedPreviewAutomationController {
     try {
       const playwrightPackage = "playwright";
       const playwright = await import(playwrightPackage);
+      const proxy = parseHostedBrowserProxyUrl(this.options.proxyUrl?.() ?? "");
       context = await playwright.chromium.launchPersistentContext(this.options.profileDir, {
         headless: true,
         viewport: DEFAULT_VIEWPORT,
         acceptDownloads: true,
         userAgent: "KamiCode-HostedBrowser/1.0",
-        args: ["--disable-dev-shm-usage"],
+        args: [
+          "--disable-dev-shm-usage",
+          ...(proxy === null
+            ? []
+            : ["--disable-quic", "--force-webrtc-ip-handling-policy=disable_non_proxied_udp"]),
+        ],
+        ...(proxy === null
+          ? {}
+          : {
+              proxy: {
+                ...proxy,
+                // Keep environment-port previews reachable on the VPS itself;
+                // every public page request still leaves through the proxy.
+                bypass: HOSTED_BROWSER_PROXY_BYPASS,
+              },
+            }),
       });
     } catch (cause) {
       throw new HostedPreviewAutomationError(
@@ -1213,12 +1261,19 @@ export const runtimeLayer = Layer.effect(
       return HostedPreviewBrowser.of({ enabled: false, controller: null });
     }
     const previewManager = yield* PreviewManager.PreviewManager;
+    const serverSettings = yield* ServerSettings.ServerSettingsService;
+    const settingsChanges = yield* serverSettings.subscribeChanges;
+    const initialSettings = yield* serverSettings.getSettings;
+    let activeProxyUrl = initialSettings.hostedBrowserProxy.enabled
+      ? initialSettings.hostedBrowserProxy.url || null
+      : null;
     const runtimeContext = yield* Effect.context<never>();
     const runPromise = Effect.runPromiseWith(runtimeContext);
     const controller = new HostedPreviewAutomationController({
       profileDir: NodePath.join(config.stateDir, "hosted-browser-profile"),
       maxTabs: config.hostedBrowserMaxTabs ?? 2,
       idleTimeoutMs: config.hostedBrowserIdleTimeoutMs ?? 10 * 60 * 1_000,
+      proxyUrl: () => activeProxyUrl,
       lifecycle: {
         open: (input) => runPromise(previewManager.open(input)),
         reportStatus: (input) => runPromise(previewManager.reportStatus(input)),
@@ -1229,6 +1284,28 @@ export const runtimeLayer = Layer.effect(
     yield* Effect.addFinalizer(() =>
       Effect.promise(() => controller.close()).pipe(Effect.ignoreCause({ log: true })),
     );
+    yield* Stream.runForEach(settingsChanges, (settings) => {
+      const nextProxyUrl = settings.hostedBrowserProxy.enabled
+        ? settings.hostedBrowserProxy.url || null
+        : null;
+      if (nextProxyUrl === activeProxyUrl) return Effect.void;
+      activeProxyUrl = nextProxyUrl;
+      return Effect.tryPromise({
+        try: () => controller.restart(),
+        catch: (cause) => classifyFailure(cause, "open"),
+      }).pipe(
+        Effect.tap(() =>
+          Effect.logInfo("VPS-hosted browser proxy setting applied.", {
+            enabled: nextProxyUrl !== null,
+          }),
+        ),
+        Effect.catch((error) =>
+          Effect.logWarning("VPS-hosted browser proxy setting could not be applied.", {
+            errorTag: error._tag,
+          }),
+        ),
+      );
+    }).pipe(Effect.forkScoped);
     return HostedPreviewBrowser.of({ enabled: true, controller });
   }),
 );

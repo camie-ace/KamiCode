@@ -219,6 +219,12 @@ export const SETTINGS_SEARCH_ITEMS = [
     targetId: "browser",
   },
   {
+    id: "hosted-browser-proxy",
+    title: "Hosted browser proxy",
+    to: "/settings/integrations",
+    targetId: "browser",
+  },
+  {
     id: "browser-default-viewport",
     title: "Default browser viewport",
     to: "/settings/integrations",

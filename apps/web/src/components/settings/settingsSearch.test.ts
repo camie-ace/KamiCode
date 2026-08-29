@@ -73,6 +73,11 @@ describe("searchSettings", () => {
   it("serves anchor props to panels from the catalog", () => {
     expect(searchableSetting("word-wrap")).toEqual({ id: "word-wrap", title: "Word wrap" });
     expect(searchableSetting("archive")).toEqual({ id: "archive", title: "Archived threads" });
+    expect(searchSettings("hosted browser proxy")[0]).toMatchObject({
+      id: "hosted-browser-proxy",
+      to: "/settings/integrations",
+      targetId: "browser",
+    });
   });
 
   it("routes appearance settings to their current section", () => {

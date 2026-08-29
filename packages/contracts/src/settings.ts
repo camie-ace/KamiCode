@@ -613,6 +613,18 @@ export const HostedCollaborationSettings = Schema.Struct({
 });
 export type HostedCollaborationSettings = typeof HostedCollaborationSettings.Type;
 
+/**
+ * Optional outbound proxy for the server-hosted preview browser. The URL may
+ * contain credentials, so live servers persist it through the secret store
+ * and only expose the `urlRedacted` marker to clients after saving.
+ */
+export const HostedBrowserProxySettings = Schema.Struct({
+  enabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  url: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
+  urlRedacted: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+});
+export type HostedBrowserProxySettings = typeof HostedBrowserProxySettings.Type;
+
 export const SourceControlWritingStyleMode = Schema.Literals([
   "repo_conventions",
   "conventional_commits",
@@ -760,6 +772,9 @@ export const ServerSettings = Schema.Struct({
   ),
   observability: ObservabilitySettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
   hostedCollaboration: HostedCollaborationSettings.pipe(
+    Schema.withDecodingDefault(Effect.succeed({})),
+  ),
+  hostedBrowserProxy: HostedBrowserProxySettings.pipe(
     Schema.withDecodingDefault(Effect.succeed({})),
   ),
   sharedCollaborationProfiles: Schema.Array(SharedCollaborationProfile).pipe(
@@ -951,6 +966,13 @@ export const ServerSettingsPatch = Schema.Struct({
       token: Schema.optionalKey(TrimmedString),
       tokenRedacted: Schema.optionalKey(Schema.Boolean),
       deploymentTargetKey: Schema.optionalKey(TrimmedString),
+    }),
+  ),
+  hostedBrowserProxy: Schema.optionalKey(
+    Schema.Struct({
+      enabled: Schema.optionalKey(Schema.Boolean),
+      url: Schema.optionalKey(TrimmedString),
+      urlRedacted: Schema.optionalKey(Schema.Boolean),
     }),
   ),
   sharedCollaborationProfiles: Schema.optionalKey(Schema.Array(SharedCollaborationProfile)),

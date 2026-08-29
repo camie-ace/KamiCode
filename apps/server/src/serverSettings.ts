@@ -48,6 +48,7 @@ import { writeFileStringAtomically } from "./atomicWrite.ts";
 import * as ServerConfig from "./config.ts";
 import { type DeepPartial, deepMerge } from "@t3tools/shared/Struct";
 import { fromJsonStringPretty, fromLenientJson } from "@t3tools/shared/schemaJson";
+import { parseHostedBrowserProxyUrl } from "@t3tools/shared/hostedBrowserProxy";
 import {
   applyServerSettingsPatch,
   isModelSelectionProviderEnabled,
@@ -55,6 +56,7 @@ import {
 import * as ServerSecretStore from "./auth/ServerSecretStore.ts";
 
 const HOSTED_COLLABORATION_TOKEN_SECRET_NAME = "hosted-collaboration-token";
+const HOSTED_BROWSER_PROXY_URL_SECRET_NAME = "hosted-browser-proxy-url";
 
 function sharedCollaborationProfileTokenSecretName(profileId: string): string {
   return `shared-collaboration-profile-token-${Buffer.from(profileId, "utf8").toString("base64url")}`;
@@ -170,6 +172,10 @@ export function redactServerSettingsForClient(settings: ServerSettings): ServerS
     settings.hostedCollaboration.token.length > 0 || settings.hostedCollaboration.tokenRedacted
       ? { ...settings.hostedCollaboration, token: "", tokenRedacted: true }
       : settings.hostedCollaboration;
+  const hostedBrowserProxy =
+    settings.hostedBrowserProxy.url.length > 0 || settings.hostedBrowserProxy.urlRedacted
+      ? { ...settings.hostedBrowserProxy, url: "", urlRedacted: true }
+      : settings.hostedBrowserProxy;
   const sharedCollaborationProfiles = settings.sharedCollaborationProfiles.map((profile) =>
     profile.token.length > 0 || profile.tokenRedacted
       ? { ...profile, token: "", tokenRedacted: true }
@@ -179,6 +185,7 @@ export function redactServerSettingsForClient(settings: ServerSettings): ServerS
     ...settings,
     providerInstances,
     hostedCollaboration,
+    hostedBrowserProxy,
     sharedCollaborationProfiles,
   };
 }
@@ -566,6 +573,26 @@ const make = Effect.gen(function* () {
       };
     });
 
+  const materializeHostedBrowserProxyUrl = (
+    settings: ServerSettings,
+  ): Effect.Effect<ServerSettings, ServerSettingsError> =>
+    Effect.gen(function* () {
+      if (!settings.hostedBrowserProxy.urlRedacted) {
+        return settings;
+      }
+      const secret = yield* secretStore
+        .get(HOSTED_BROWSER_PROXY_URL_SECRET_NAME)
+        .pipe(Effect.mapError((cause) => toSecretSettingsError("read-secret", cause)));
+      return {
+        ...settings,
+        hostedBrowserProxy: {
+          ...settings.hostedBrowserProxy,
+          url: Option.isSome(secret) ? textDecoder.decode(secret.value) : "",
+          urlRedacted: Option.isSome(secret),
+        },
+      };
+    });
+
   const materializeSharedCollaborationProfileTokens = (
     settings: ServerSettings,
   ): Effect.Effect<ServerSettings, ServerSettingsError> =>
@@ -596,6 +623,7 @@ const make = Effect.gen(function* () {
       Stream.mapEffect((settings) =>
         materializeProviderEnvironmentSecrets(settings).pipe(
           Effect.flatMap(materializeHostedCollaborationToken),
+          Effect.flatMap(materializeHostedBrowserProxyUrl),
           Effect.flatMap(materializeSharedCollaborationProfileTokens),
           Effect.catch((error: ServerSettingsError) =>
             Effect.logWarning("failed to materialize server settings secrets", {
@@ -750,6 +778,48 @@ const make = Effect.gen(function* () {
       };
     });
 
+  const persistHostedBrowserProxyUrl = (
+    next: ServerSettings,
+  ): Effect.Effect<ServerSettings, ServerSettingsError> =>
+    Effect.gen(function* () {
+      const url = next.hostedBrowserProxy.url.trim();
+      if (next.hostedBrowserProxy.urlRedacted) {
+        return {
+          ...next,
+          hostedBrowserProxy: {
+            ...next.hostedBrowserProxy,
+            url: "",
+            urlRedacted: true,
+          },
+        };
+      }
+      if (url.length === 0) {
+        yield* secretStore
+          .remove(HOSTED_BROWSER_PROXY_URL_SECRET_NAME)
+          .pipe(Effect.mapError((cause) => toSecretSettingsError("remove-secret", cause)));
+        return {
+          ...next,
+          hostedBrowserProxy: {
+            ...next.hostedBrowserProxy,
+            enabled: false,
+            url: "",
+            urlRedacted: false,
+          },
+        };
+      }
+      yield* secretStore
+        .set(HOSTED_BROWSER_PROXY_URL_SECRET_NAME, textEncoder.encode(url))
+        .pipe(Effect.mapError((cause) => toSecretSettingsError("write-secret", cause)));
+      return {
+        ...next,
+        hostedBrowserProxy: {
+          ...next.hostedBrowserProxy,
+          url: "",
+          urlRedacted: true,
+        },
+      };
+    });
+
   const persistSharedCollaborationProfileTokens = (
     current: ServerSettings,
     next: ServerSettings,
@@ -896,6 +966,7 @@ const make = Effect.gen(function* () {
     getSettings: getSettingsFromCache.pipe(
       Effect.flatMap(materializeProviderEnvironmentSecrets),
       Effect.flatMap(materializeHostedCollaborationToken),
+      Effect.flatMap(materializeHostedBrowserProxyUrl),
       Effect.flatMap(materializeSharedCollaborationProfileTokens),
       Effect.map(resolveTextGenerationProvider),
     ),
@@ -903,11 +974,19 @@ const make = Effect.gen(function* () {
       writeSemaphore.withPermits(1)(
         Effect.gen(function* () {
           const current = yield* getSettingsFromCache;
-          const nextPersisted = yield* persistProviderEnvironmentSecrets(
-            current,
-            applyServerSettingsPatch(current, patch),
-          ).pipe(
+          const patched = applyServerSettingsPatch(current, patch);
+          if (
+            !patched.hostedBrowserProxy.urlRedacted &&
+            patched.hostedBrowserProxy.url.length > 0
+          ) {
+            yield* Effect.try({
+              try: () => parseHostedBrowserProxyUrl(patched.hostedBrowserProxy.url),
+              catch: (cause) => toSecretSettingsError("normalize", cause),
+            });
+          }
+          const nextPersisted = yield* persistProviderEnvironmentSecrets(current, patched).pipe(
             Effect.flatMap(persistHostedCollaborationToken),
+            Effect.flatMap(persistHostedBrowserProxyUrl),
             Effect.flatMap((settings) =>
               persistSharedCollaborationProfileTokens(current, settings),
             ),
@@ -918,6 +997,7 @@ const make = Effect.gen(function* () {
           yield* emitChange(next);
           const materialized = yield* materializeProviderEnvironmentSecrets(next).pipe(
             Effect.flatMap(materializeHostedCollaborationToken),
+            Effect.flatMap(materializeHostedBrowserProxyUrl),
             Effect.flatMap(materializeSharedCollaborationProfileTokens),
           );
           return resolveTextGenerationProvider(materialized);
