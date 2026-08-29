@@ -80,6 +80,8 @@ import * as WorkspaceEntries from "./workspace/WorkspaceEntries.ts";
 import * as WorkspaceFileSystem from "./workspace/WorkspaceFileSystem.ts";
 import * as WorkspacePaths from "./workspace/WorkspacePaths.ts";
 import { workspaceHttpApiLayer } from "./workspace/http.ts";
+import { speechHttpApiLayer } from "./speech/http.ts";
+import * as SpeechTranscription from "./speech/SpeechTranscription.ts";
 import * as GitVcsDriver from "./vcs/GitVcsDriver.ts";
 import * as VcsDriverRegistry from "./vcs/VcsDriverRegistry.ts";
 import * as VcsProjectConfig from "./vcs/VcsProjectConfig.ts";
@@ -555,6 +557,7 @@ export const makeRoutesLayer = Layer.mergeAll(
     Layer.provide(orchestrationHttpApiLayer),
     Layer.provide(pullRequestHttpApiLayer),
     Layer.provide(workspaceHttpApiLayer),
+    Layer.provide(speechHttpApiLayer),
     Layer.provide(serverEnvironmentHttpApiLayer),
     Layer.provide(environmentAuthenticatedAuthLayer),
   ),
@@ -602,6 +605,7 @@ export const makeRoutesLayer = Layer.mergeAll(
   McpHttpServer.layer.pipe(Layer.provide(McpSessionRegistry.layer)),
   HostedPreviewAutomationHost.layer,
 ).pipe(
+  Layer.provide(SpeechTranscription.layer),
   // Both transports consume the same service instance, so caches single-flight across clients
   // and mutations observed on WebSocket invalidate patches subsequently read over HTTP.
   Layer.provide(PullRequestServiceLive),

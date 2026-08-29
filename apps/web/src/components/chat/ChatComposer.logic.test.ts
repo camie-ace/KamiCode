@@ -4,6 +4,7 @@ import {
   createComposerAttachment,
   inferComposerFileMimeType,
   shouldDisableComposerPromptEditor,
+  voiceTranscriptInsertion,
 } from "./ChatComposer.logic";
 
 describe("shouldDisableComposerPromptEditor", () => {
@@ -38,6 +39,30 @@ describe("shouldDisableComposerPromptEditor", () => {
         hasActivePendingProgress: false,
       }),
     ).toBe(true);
+  });
+});
+
+describe("voiceTranscriptInsertion", () => {
+  it("inserts cleanly into an empty prompt", () => {
+    expect(
+      voiceTranscriptInsertion({ value: "", cursor: 0, transcript: "  add voice input  " }),
+    ).toBe("add voice input");
+  });
+
+  it("adds word boundaries when dictating in the middle of existing text", () => {
+    expect(
+      voiceTranscriptInsertion({
+        value: "Pleasetests",
+        cursor: 6,
+        transcript: "write the regression",
+      }),
+    ).toBe(" write the regression ");
+  });
+
+  it("does not add a space before punctuation or after an opening bracket", () => {
+    expect(voiceTranscriptInsertion({ value: "Run ()", cursor: 5, transcript: "npm test" })).toBe(
+      "npm test",
+    );
   });
 });
 

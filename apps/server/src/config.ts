@@ -83,6 +83,8 @@ export class ServerConfig extends Context.Service<
     readonly hostedBrowserEnabled?: boolean;
     readonly hostedBrowserMaxTabs?: number;
     readonly hostedBrowserIdleTimeoutMs?: number;
+    /** Loopback whisper.cpp-compatible `/inference` endpoint. */
+    readonly speechTranscriptionUrl?: URL | undefined;
     readonly startupPresentation: StartupPresentation;
     readonly desktopBootstrapToken: string | undefined;
     readonly githubOAuthClientId?: string | undefined;
@@ -222,6 +224,7 @@ const makeTest = Effect.fn("ServerConfig.makeTest")(function* (
     hostedBrowserEnabled: false,
     hostedBrowserMaxTabs: 2,
     hostedBrowserIdleTimeoutMs: 10 * 60 * 1_000,
+    speechTranscriptionUrl: undefined,
     startupPresentation: "browser",
   });
 });

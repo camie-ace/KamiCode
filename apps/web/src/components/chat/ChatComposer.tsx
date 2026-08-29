@@ -119,6 +119,7 @@ import {
   createComposerAttachment,
   inferComposerFileMimeType,
   shouldDisableComposerPromptEditor,
+  voiceTranscriptInsertion,
 } from "./ChatComposer.logic";
 import { ComposerControl, ComposerControlIcon, ComposerSelectControl } from "./ComposerControl";
 import { resolveComposerMenuActiveItemId } from "./composerMenuHighlight";
@@ -141,6 +142,7 @@ import {
   submitComposerDraft,
 } from "./composerSubmission";
 import { ComposerPromptLengthValidation } from "./ComposerPromptLengthValidation";
+import { VoiceDictationControl } from "./VoiceDictationControl";
 
 type ComposerCommandMenuPosition = {
   bottom: number;
@@ -652,6 +654,7 @@ export interface ChatComposerProps {
   environmentId: EnvironmentId;
   attachmentUploadsCapabilityKnown: boolean;
   supportsAttachmentUploads: boolean;
+  supportsSpeechTranscription: boolean;
   routeKind: "server" | "draft";
   routeThreadRef: ScopedThreadRef;
   draftId: DraftId | null;
@@ -781,6 +784,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     environmentId,
     attachmentUploadsCapabilityKnown,
     supportsAttachmentUploads,
+    supportsSpeechTranscription,
     routeKind,
     routeThreadRef,
     draftId,
@@ -1918,6 +1922,30 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       terminalContextIds: composerTerminalContexts.map((context) => context.id),
     };
   }, [composerCursor, composerTerminalContexts, promptRef]);
+
+  const insertVoiceTranscript = useCallback(
+    (transcript: string) => {
+      const snapshot = readComposerSnapshot();
+      const replacement = voiceTranscriptInsertion({
+        value: snapshot.value,
+        cursor: snapshot.expandedCursor,
+        transcript,
+      });
+      if (
+        replacement.length === 0 ||
+        !applyPromptReplacement(snapshot.expandedCursor, snapshot.expandedCursor, replacement, {
+          expectedText: "",
+        })
+      ) {
+        toastManager.add({
+          type: "error",
+          title: "Could not insert transcript",
+          description: "The composer changed before the transcript was ready. Try again.",
+        });
+      }
+    },
+    [applyPromptReplacement, readComposerSnapshot],
+  );
 
   const resolveActiveComposerTrigger = useCallback((): {
     snapshot: { value: string; cursor: number; expandedCursor: number };
@@ -3666,6 +3694,20 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                       Attach files to this message (up to {PROVIDER_SEND_TURN_MAX_ATTACHMENTS})
                     </TooltipPopup>
                   </Tooltip>
+
+                  {supportsSpeechTranscription && pendingUserInputs.length === 0 ? (
+                    <VoiceDictationControl
+                      disabled={
+                        composerPromptEditorDisabled ||
+                        isConnecting ||
+                        environmentUnavailable !== null ||
+                        noProviderAvailable ||
+                        projectSelectionRequired
+                      }
+                      environmentId={environmentId}
+                      onTranscript={insertVoiceTranscript}
+                    />
+                  ) : null}
 
                   {noProviderAvailable ? (
                     <Button

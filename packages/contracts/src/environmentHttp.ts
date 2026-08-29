@@ -339,6 +339,12 @@ const EnvironmentWorkspaceUploadErrors = [
   EnvironmentInternalError,
 ] as const;
 
+const EnvironmentSpeechTranscriptionErrors = [
+  EnvironmentHttpBadRequestError,
+  EnvironmentScopeRequiredError,
+  EnvironmentInternalError,
+] as const;
+
 export interface EnvironmentSessionPrincipalShape {
   readonly sessionId: AuthSessionId;
   readonly subject: string;
@@ -584,6 +590,31 @@ export class EnvironmentWorkspaceHttpApi extends HttpApiGroup.make("workspace").
   }).middleware(EnvironmentAuthenticatedAuth),
 ) {}
 
+export const SPEECH_TRANSCRIPTION_MAX_FILE_BYTES = 12 * 1024 * 1024;
+
+export const SpeechTranscriptionResult = Schema.Struct({
+  text: Schema.String.check(Schema.isMaxLength(20_000)),
+});
+export type SpeechTranscriptionResult = typeof SpeechTranscriptionResult.Type;
+
+export const EnvironmentSpeechTranscriptionPayload = Schema.Struct({
+  files: Multipart.FilesSchema.check(Schema.isMinLength(1), Schema.isMaxLength(1)),
+}).pipe(
+  HttpApiSchema.asMultipart({
+    maxFileSize: SPEECH_TRANSCRIPTION_MAX_FILE_BYTES,
+    maxParts: 1,
+  }),
+);
+
+export class EnvironmentSpeechHttpApi extends HttpApiGroup.make("speech").add(
+  HttpApiEndpoint.post("transcribe", "/api/speech/transcribe", {
+    headers: OptionalBearerHeaders,
+    payload: EnvironmentSpeechTranscriptionPayload,
+    success: SpeechTranscriptionResult,
+    error: EnvironmentSpeechTranscriptionErrors,
+  }).middleware(EnvironmentAuthenticatedAuth),
+) {}
+
 /** Large, compressible pull-request payloads travel over HTTP rather than the RPC socket. */
 export class EnvironmentPullRequestsHttpApi extends HttpApiGroup.make("pullRequests").add(
   HttpApiEndpoint.post("diff", "/api/pull-requests/diff", {
@@ -666,5 +697,6 @@ export class EnvironmentHttpApi extends HttpApi.make("environment")
   .add(EnvironmentAuthHttpApi)
   .add(EnvironmentOrchestrationHttpApi)
   .add(EnvironmentWorkspaceHttpApi)
+  .add(EnvironmentSpeechHttpApi)
   .add(EnvironmentPullRequestsHttpApi)
   .add(EnvironmentConnectHttpApi) {}

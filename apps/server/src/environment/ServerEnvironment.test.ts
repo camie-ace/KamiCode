@@ -66,6 +66,7 @@ const makeServerConfig = Effect.fn(function* (baseDir: string) {
     devUrl: undefined,
     devAllowedOrigins: [],
     noBrowser: false,
+    speechTranscriptionUrl: undefined,
     startupPresentation: "browser",
   } satisfies ServerConfig.ServerConfig["Service"];
 });
@@ -94,7 +95,36 @@ it.layer(NodeServices.layer)("ServerEnvironmentLive", (it) => {
       expect(second.capabilities.pullRequests).toBe(true);
       expect(second.capabilities.threadTitleRegeneration).toBe(true);
       expect(second.capabilities.threadPullRequestLinking).toBe(true);
+      expect(second.capabilities.speechTranscription).toBeUndefined();
       expect(second.capabilities.agentActivityPublishing).toBe(false);
+    }),
+  );
+
+  it.effect("advertises speech transcription only when its endpoint is configured", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const baseDir = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "t3-server-environment-speech-test-",
+      });
+      const serverConfig = {
+        ...(yield* makeServerConfig(baseDir)),
+        speechTranscriptionUrl: new URL("http://127.0.0.1:8087/inference"),
+      } satisfies ServerConfig.ServerConfig["Service"];
+      yield* ServerConfig.ensureServerDirectories(serverConfig);
+
+      const descriptor = yield* Effect.gen(function* () {
+        const serverEnvironment = yield* ServerEnvironment.ServerEnvironment;
+        return yield* serverEnvironment.getDescriptor;
+      }).pipe(
+        Effect.provide(
+          ServerEnvironment.layer.pipe(
+            Layer.provide(emptySecretStoreLayer),
+            Layer.provide(ServerConfig.layer(serverConfig)),
+          ),
+        ),
+      );
+
+      expect(descriptor.capabilities.speechTranscription).toBe(true);
     }),
   );
 

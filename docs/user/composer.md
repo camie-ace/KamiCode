@@ -10,6 +10,21 @@ becomes available after every upload finishes. Failed uploads can be retried or 
 On web and desktop, HEIC and HEIF photos are automatically converted to JPEG when you drag them into
 the composer or paste them into a message.
 
+## Voice dictation
+
+When the connected environment has local speech transcription enabled, the composer shows a
+microphone beside the attachment button. Select it, speak for up to 60 seconds, then select the stop
+button. KamiCode inserts the transcript at the cursor so you can edit it before sending. It never
+sends a dictated prompt automatically.
+
+While recording, select the **Discard recording** control to cancel without uploading audio. The
+browser asks for microphone permission the first time. If the control is missing, the connected
+environment has not enabled transcription; if it is disabled, reconnect the environment first.
+
+Audio is sent over the existing authenticated environment connection and transcribed by that
+environment's loopback speech service. KamiCode does not send it to a third-party transcription API.
+The recording is temporary; the resulting text becomes part of the normal composer draft.
+
 ## Commands and skills
 
 Type `/` to open the command menu. Type `$` to find and add a skill. Skill rows show their source,

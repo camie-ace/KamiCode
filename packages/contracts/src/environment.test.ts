@@ -52,4 +52,17 @@ describe("ExecutionEnvironmentDescriptor", () => {
       }).capabilities.hostedBrowserPreview,
     ).toBe(true);
   });
+
+  it("treats a missing speech-transcription capability as unsupported", () => {
+    expect(decodeDescriptor(descriptor).capabilities.speechTranscription).toBeUndefined();
+  });
+
+  it("preserves an advertised speech-transcription capability", () => {
+    expect(
+      decodeDescriptor({
+        ...descriptor,
+        capabilities: { ...descriptor.capabilities, speechTranscription: true },
+      }).capabilities.speechTranscription,
+    ).toBe(true);
+  });
 });

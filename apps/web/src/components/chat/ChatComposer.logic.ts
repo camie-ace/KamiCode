@@ -20,6 +20,21 @@ export function shouldDisableComposerPromptEditor({
   return isComposerApprovalState;
 }
 
+export function voiceTranscriptInsertion(input: {
+  readonly value: string;
+  readonly cursor: number;
+  readonly transcript: string;
+}): string {
+  const transcript = input.transcript.trim();
+  if (transcript.length === 0) return "";
+  const cursor = Math.max(0, Math.min(input.value.length, input.cursor));
+  const previous = cursor > 0 ? input.value[cursor - 1]! : "";
+  const next = cursor < input.value.length ? input.value[cursor]! : "";
+  const leadingBoundary = previous !== "" && !/[\s([{]/u.test(previous) ? " " : "";
+  const trailingBoundary = next !== "" && !/[\s,.;:!?)}\]]/u.test(next) ? " " : "";
+  return `${leadingBoundary}${transcript}${trailingBoundary}`;
+}
+
 const MIME_TYPE_BY_FILE_EXTENSION: Readonly<Record<string, string>> = {
   gif: "image/gif",
   jpeg: "image/jpeg",

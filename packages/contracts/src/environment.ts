@@ -81,6 +81,9 @@ export const ExecutionEnvironmentCapabilities = Schema.Struct({
   /** Server owns an interactive browser runtime that web clients can view
       and control without Electron's <webview>. */
   hostedBrowserPreview: Schema.optionalKey(Schema.Boolean),
+  /** Server can transcribe short microphone recordings into composer text.
+      Absent on older or unconfigured servers, so clients hide the control. */
+  speechTranscription: Schema.optionalKey(Schema.Boolean),
   /** Agent-activity publishes (push notifications and Live Activities)
       currently leave this environment: the publish opt-in is enabled and the
       relay link credentials exist. Clients skip seeding a Live Activity when
