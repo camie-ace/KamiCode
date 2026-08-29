@@ -64,6 +64,8 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
   } as const;
   const defaultSpeechTranscriptionConfig = {
     speechTranscriptionUrl: undefined,
+    speechTranscriptionModel: undefined,
+    speechTranscriptionPrompt: undefined,
   } as const;
   const defaultDesktopTelemetryConfig = {
     desktopTelemetryFd: undefined,
@@ -132,6 +134,9 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
                   T3CODE_HOSTED_BROWSER_MAX_TABS: "3",
                   T3CODE_HOSTED_BROWSER_IDLE_TIMEOUT_MS: "45000",
                   T3CODE_SPEECH_TRANSCRIPTION_URL: "http://127.0.0.1:8087/inference",
+                  T3CODE_SPEECH_TRANSCRIPTION_MODEL: "Systran/faster-whisper-small.en",
+                  T3CODE_SPEECH_TRANSCRIPTION_PROMPT:
+                    "Nigerian English. KamiCode, TypeScript, GitHub, Playwright.",
                   T3CODE_AUTO_BOOTSTRAP_PROJECT_FROM_CWD: "false",
                   T3CODE_LOG_WS_EVENTS: "true",
                 },
@@ -160,6 +165,8 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
         hostedBrowserMaxTabs: 3,
         hostedBrowserIdleTimeoutMs: 45_000,
         speechTranscriptionUrl: new URL("http://127.0.0.1:8087/inference"),
+        speechTranscriptionModel: "Systran/faster-whisper-small.en",
+        speechTranscriptionPrompt: "Nigerian English. KamiCode, TypeScript, GitHub, Playwright.",
         startupPresentation: "browser",
         desktopBootstrapToken: undefined,
         ...defaultDesktopTelemetryConfig,

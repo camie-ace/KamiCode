@@ -140,6 +140,14 @@ const EnvServerConfig = Config.all({
     Config.option,
     Config.map(Option.getOrUndefined),
   ),
+  speechTranscriptionModel: Config.string("T3CODE_SPEECH_TRANSCRIPTION_MODEL").pipe(
+    Config.option,
+    Config.map(Option.getOrUndefined),
+  ),
+  speechTranscriptionPrompt: Config.string("T3CODE_SPEECH_TRANSCRIPTION_PROMPT").pipe(
+    Config.option,
+    Config.map(Option.getOrUndefined),
+  ),
   bootstrapFd: Config.int("T3CODE_BOOTSTRAP_FD").pipe(
     Config.option,
     Config.map(Option.getOrUndefined),
@@ -420,6 +428,8 @@ export const resolveServerConfig = (
       hostedBrowserMaxTabs: env.hostedBrowserMaxTabs,
       hostedBrowserIdleTimeoutMs: env.hostedBrowserIdleTimeoutMs,
       speechTranscriptionUrl: env.speechTranscriptionUrl,
+      speechTranscriptionModel: env.speechTranscriptionModel,
+      speechTranscriptionPrompt: env.speechTranscriptionPrompt,
       startupPresentation,
       desktopBootstrapToken,
       desktopTelemetryFd,

@@ -14,6 +14,7 @@ import {
 } from "./SpeechTranscription.ts";
 
 const endpoint = new URL("http://127.0.0.1:8087/inference");
+const openAiCompatibleEndpoint = new URL("http://127.0.0.1:8088/v1/audio/transcriptions");
 const isInputError = Schema.is(SpeechTranscriptionInputError);
 const isServiceError = Schema.is(SpeechTranscriptionServiceError);
 
@@ -35,11 +36,15 @@ const withRecording = <A, E, R>(
   }).pipe(Effect.scoped);
 
 describe("SpeechTranscription", () => {
-  it.effect("forwards a bounded browser recording to whisper.cpp and trims its text", () => {
+  it.effect("forwards configured Whisper fields and trims the resulting text", () => {
     let observedRequest = false;
     return withRecording("audio/webm;codecs=opus", (path) =>
       Effect.gen(function* () {
-        const service = yield* makeWithEndpoint(endpoint);
+        const service = yield* makeWithEndpoint(
+          endpoint,
+          "  Nigerian English.  KamiCode, TypeScript, GitHub, Playwright.  ",
+          "  Systran/faster-whisper-small.en  ",
+        );
         const text = yield* service.transcribe({ path, contentType: "audio/webm;codecs=opus" });
         assert.strictEqual(text, "write the regression test");
         assert.isTrue(observedRequest);
@@ -60,6 +65,15 @@ describe("SpeechTranscription", () => {
               assert.strictEqual(file.size, 4);
               assert.strictEqual(request.body.formData.get("response_format"), "json");
               assert.strictEqual(request.body.formData.get("temperature"), "0.0");
+              assert.strictEqual(
+                request.body.formData.get("model"),
+                "Systran/faster-whisper-small.en",
+              );
+              assert.strictEqual(
+                request.body.formData.get("prompt"),
+                "Nigerian English. KamiCode, TypeScript, GitHub, Playwright.",
+              );
+              assert.strictEqual(request.body.formData.get("carry_initial_prompt"), "true");
               observedRequest = true;
               return HttpClientResponse.fromWeb(
                 request,
@@ -71,6 +85,38 @@ describe("SpeechTranscription", () => {
       ),
     ).pipe(Effect.provide(NodeServices.layer));
   });
+
+  it.effect("omits whisper.cpp-only fields for an OpenAI-compatible endpoint", () =>
+    withRecording("audio/webm", (path) =>
+      Effect.gen(function* () {
+        const service = yield* makeWithEndpoint(
+          openAiCompatibleEndpoint,
+          "Nigerian English.",
+          "Systran/faster-whisper-small.en",
+        );
+        yield* service.transcribe({ path, contentType: "audio/webm" });
+      }).pipe(
+        Effect.provide(
+          httpClientLayer((request) => {
+            assert.strictEqual(request.url, openAiCompatibleEndpoint.toString());
+            assert.strictEqual(request.body._tag, "FormData");
+            if (request.body._tag !== "FormData") {
+              throw new Error("Expected multipart form data");
+            }
+            assert.strictEqual(request.body.formData.get("prompt"), "Nigerian English.");
+            assert.strictEqual(
+              request.body.formData.get("model"),
+              "Systran/faster-whisper-small.en",
+            );
+            assert.isNull(request.body.formData.get("carry_initial_prompt"));
+            return Effect.succeed(
+              HttpClientResponse.fromWeb(request, Response.json({ text: "ship it" })),
+            );
+          }),
+        ),
+      ),
+    ).pipe(Effect.provide(NodeServices.layer)),
+  );
 
   it.effect("rejects unsupported media before contacting the model server", () => {
     let requests = 0;

@@ -83,8 +83,12 @@ export class ServerConfig extends Context.Service<
     readonly hostedBrowserEnabled?: boolean;
     readonly hostedBrowserMaxTabs?: number;
     readonly hostedBrowserIdleTimeoutMs?: number;
-    /** Loopback whisper.cpp-compatible `/inference` endpoint. */
+    /** Loopback Whisper-compatible multipart transcription endpoint. */
     readonly speechTranscriptionUrl?: URL | undefined;
+    /** Optional model identifier for runtimes that serve more than one model. */
+    readonly speechTranscriptionModel?: string | undefined;
+    /** Optional locale and technical vocabulary supplied as Whisper's initial prompt. */
+    readonly speechTranscriptionPrompt?: string | undefined;
     readonly startupPresentation: StartupPresentation;
     readonly desktopBootstrapToken: string | undefined;
     readonly githubOAuthClientId?: string | undefined;
@@ -225,6 +229,8 @@ const makeTest = Effect.fn("ServerConfig.makeTest")(function* (
     hostedBrowserMaxTabs: 2,
     hostedBrowserIdleTimeoutMs: 10 * 60 * 1_000,
     speechTranscriptionUrl: undefined,
+    speechTranscriptionModel: undefined,
+    speechTranscriptionPrompt: undefined,
     startupPresentation: "browser",
   });
 });

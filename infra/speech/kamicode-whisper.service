@@ -8,7 +8,10 @@ DynamicUser=yes
 WorkingDirectory=/opt/kamicode-whisper
 RuntimeDirectory=kamicode-whisper
 RuntimeDirectoryMode=0700
-ExecStart=/opt/kamicode-whisper/build/bin/whisper-server -m /opt/kamicode-whisper/models/ggml-tiny.en.bin -t 7 -p 1 -bo 1 -l en -d 60000 -nt -ng -sns --host 127.0.0.1 --port 8087 --convert --tmp-dir /run/kamicode-whisper
+Environment="KAMICODE_WHISPER_MODEL=/opt/kamicode-whisper/models/ggml-tiny.en.bin"
+Environment="KAMICODE_WHISPER_THREADS=7"
+EnvironmentFile=-/etc/kamicode/whisper.env
+ExecStart=/opt/kamicode-whisper/build/bin/whisper-server -m ${KAMICODE_WHISPER_MODEL} -t ${KAMICODE_WHISPER_THREADS} -p 1 -bo 1 -l en -d 60000 -nt -ng -sns --host 127.0.0.1 --port 8087 --convert --tmp-dir /run/kamicode-whisper
 Restart=on-failure
 RestartSec=2
 TimeoutStopSec=15

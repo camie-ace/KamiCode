@@ -67,6 +67,8 @@ const makeServerConfig = Effect.fn(function* (baseDir: string) {
     devAllowedOrigins: [],
     noBrowser: false,
     speechTranscriptionUrl: undefined,
+    speechTranscriptionModel: undefined,
+    speechTranscriptionPrompt: undefined,
     startupPresentation: "browser",
   } satisfies ServerConfig.ServerConfig["Service"];
 });

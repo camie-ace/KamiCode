@@ -11,6 +11,8 @@ import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse";
 import * as ServerConfig from "../config.ts";
 
 const TRANSCRIPTION_TIMEOUT = "60 seconds";
+const TRANSCRIPTION_MODEL_MAX_LENGTH = 300;
+const TRANSCRIPTION_PROMPT_MAX_LENGTH = 1_000;
 
 const WhisperCppResponse = Schema.Struct({
   text: Schema.String,
@@ -31,6 +33,22 @@ const supportedAudioTypes = new Map<string, string>([
 
 function baseContentType(contentType: string): string {
   return contentType.split(";", 1)[0]!.trim().toLowerCase();
+}
+
+function normalizeInitialPrompt(prompt: string | undefined): string | undefined {
+  const normalized = prompt?.trim().replace(/\s+/gu, " ");
+  if (normalized === undefined || normalized.length === 0) return undefined;
+  return normalized.slice(0, TRANSCRIPTION_PROMPT_MAX_LENGTH);
+}
+
+function normalizeModel(model: string | undefined): string | undefined {
+  const normalized = model?.trim();
+  if (normalized === undefined || normalized.length === 0) return undefined;
+  return normalized.slice(0, TRANSCRIPTION_MODEL_MAX_LENGTH);
+}
+
+function supportsCarryInitialPrompt(endpoint: URL): boolean {
+  return endpoint.pathname.endsWith("/inference");
 }
 
 function bytesEqual(bytes: Uint8Array, offset: number, expected: ReadonlyArray<number>): boolean {
@@ -109,11 +127,17 @@ export class SpeechTranscription extends Context.Service<
   }
 >()("t3/speech/SpeechTranscription") {}
 
-export const makeWithEndpoint = (endpoint: URL | undefined) =>
+export const makeWithEndpoint = (
+  endpoint: URL | undefined,
+  configuredPrompt?: string,
+  configuredModel?: string,
+) =>
   Effect.gen(function* () {
     const fileSystem = yield* FileSystem.FileSystem;
     const httpClient = yield* HttpClient.HttpClient;
     const semaphore = yield* Semaphore.make(1);
+    const initialPrompt = normalizeInitialPrompt(configuredPrompt);
+    const model = normalizeModel(configuredModel);
 
     const transcribeRequest = Effect.fn("SpeechTranscription.transcribeRequest")(function* (
       recording: SpeechRecording,
@@ -155,6 +179,13 @@ export const makeWithEndpoint = (endpoint: URL | undefined) =>
       payload.append("file", new Blob([bytes], { type: contentType }), `recording.${extension}`);
       payload.append("response_format", "json");
       payload.append("temperature", "0.0");
+      if (model !== undefined) payload.append("model", model);
+      if (initialPrompt !== undefined) {
+        payload.append("prompt", initialPrompt);
+        if (supportsCarryInitialPrompt(endpoint)) {
+          payload.append("carry_initial_prompt", "true");
+        }
+      }
 
       const response = yield* HttpClientRequest.post(endpoint.toString()).pipe(
         HttpClientRequest.bodyFormData(payload),
@@ -176,7 +207,11 @@ export const makeWithEndpoint = (endpoint: URL | undefined) =>
 
 export const make = Effect.gen(function* () {
   const config = yield* ServerConfig.ServerConfig;
-  return yield* makeWithEndpoint(config.speechTranscriptionUrl);
+  return yield* makeWithEndpoint(
+    config.speechTranscriptionUrl,
+    config.speechTranscriptionPrompt,
+    config.speechTranscriptionModel,
+  );
 });
 
 export const layer = Layer.effect(SpeechTranscription, make);

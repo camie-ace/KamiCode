@@ -13,17 +13,21 @@ the composer or paste them into a message.
 ## Voice dictation
 
 When the connected environment has local speech transcription enabled, the composer shows a
-microphone beside the attachment button. Select it, speak for up to 60 seconds, then select the stop
-button. KamiCode inserts the transcript at the cursor so you can edit it before sending. It never
-sends a dictated prompt automatically.
+microphone beside the attachment button. Select it, speak for up to five minutes, then select the
+stop button. KamiCode processes the recording in short parts while you continue speaking, then
+inserts the complete transcript at the cursor so you can edit it before sending. It never sends a
+dictated prompt automatically.
 
-While recording, select the **Discard recording** control to cancel without uploading audio. The
-browser asks for microphone permission the first time. If the control is missing, the connected
-environment has not enabled transcription; if it is disabled, reconnect the environment first.
+While recording, select **Discard recording** to cancel without uploading more audio. You can also
+cancel while KamiCode is finishing a longer transcript. The browser asks for microphone permission
+the first time. If the control is missing, the connected environment has not enabled transcription;
+if it is disabled, reconnect the environment first.
 
 Audio is sent over the existing authenticated environment connection and transcribed by that
 environment's loopback speech service. KamiCode does not send it to a third-party transcription API.
-The recording is temporary; the resulting text becomes part of the normal composer draft.
+The recording is temporary; the resulting text becomes part of the normal composer draft. If any
+part cannot be transcribed after a brief retry, KamiCode reports the failure instead of inserting an
+incomplete transcript.
 
 ## Commands and skills
 
