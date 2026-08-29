@@ -349,6 +349,7 @@ export class HostedPreviewAutomationController {
         ThreadId.make(snapshot.threadId),
         snapshot.tabId,
         snapshot.viewport ?? FILL_PREVIEW_VIEWPORT,
+        true,
       );
       this.currentTabByThread.set(tab.threadId, tab.tabId);
       if (snapshot.navStatus._tag !== "Idle") {
@@ -630,6 +631,7 @@ export class HostedPreviewAutomationController {
     threadId: ThreadId,
     tabId: PreviewTabId,
     viewportSetting: PreviewViewportSetting,
+    reclaimInactiveTab = false,
   ): Promise<HostedTab> {
     const existing = this.tabs.get(tabId);
     if (existing) {
@@ -641,6 +643,9 @@ export class HostedPreviewAutomationController {
       }
       existing.lastUsedAt = this.now();
       return existing;
+    }
+    if (this.tabs.size >= this.maxTabs && reclaimInactiveTab) {
+      await this.reclaimLeastRecentlyUsedInactiveTab();
     }
     if (this.tabs.size >= this.maxTabs) {
       throw new HostedPreviewAutomationError(
@@ -683,6 +688,28 @@ export class HostedPreviewAutomationController {
     this.tabs.set(tabId, tab);
     await this.attachPage(tab);
     return tab;
+  }
+
+  private async reclaimLeastRecentlyUsedInactiveTab(): Promise<boolean> {
+    const cutoff = this.now() - HOSTED_FRAME_MAX_AGE_MS;
+    const candidate = Array.from(this.tabs.values())
+      .filter(
+        (tab) =>
+          tab.lastUsedAt <= cutoff && (tab.lastViewedAt === null || tab.lastViewedAt <= cutoff),
+      )
+      .toSorted(
+        (left, right) =>
+          Math.max(left.lastUsedAt, left.lastViewedAt ?? 0) -
+          Math.max(right.lastUsedAt, right.lastViewedAt ?? 0),
+      )[0];
+    if (!candidate) return false;
+
+    await candidate.page.close().catch(() => {});
+    if (!candidate.page.isClosed()) return false;
+    // The page close event normally removes the tab. Keep this idempotent
+    // fallback so a host that omits that event cannot retain a phantom slot.
+    this.removeTab(candidate.tabId);
+    return true;
   }
 
   private async attachPage(tab: HostedTab): Promise<void> {
@@ -922,6 +949,7 @@ export class HostedPreviewAutomationController {
           request.threadId,
           tabId,
           lifecycleSnapshot?.viewport ?? { _tag: "freeform", ...DEFAULT_VIEWPORT },
+          shouldReuse,
         );
       } catch (cause) {
         if (lifecycleSnapshot) {

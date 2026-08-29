@@ -171,3 +171,71 @@ it("hosts a lazy, bounded Chromium session and returns agent-ready snapshots", a
     await NodeFSP.rm(profileDir, { recursive: true, force: true });
   }
 }, 60_000);
+
+it("reclaims an inactive tab at capacity only when reuse is requested", async () => {
+  const profileDir = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "t3-hosted-reclaim-"));
+  let now = 1_000_000;
+  let lifecycleSequence = 0;
+  const lifecycleClosedTabIds: Array<PreviewTabId> = [];
+  const controller = new HostedPreviewAutomationController({
+    profileDir,
+    maxTabs: 1,
+    idleTimeoutMs: 30_000,
+    now: () => now,
+    lifecycle: {
+      open: async (input): Promise<PreviewSessionSnapshot> => ({
+        threadId: input.threadId,
+        tabId: PreviewTabId.make(`reclaim-tab-${++lifecycleSequence}`),
+        navStatus: { _tag: "Idle" },
+        canGoBack: false,
+        canGoForward: false,
+        viewport: input.viewport ?? FILL_PREVIEW_VIEWPORT,
+        updatedAt: new Date(now).toISOString(),
+      }),
+      reportStatus: async () => {},
+      resize: async () => {},
+      close: async (input) => {
+        lifecycleClosedTabIds.push(input.tabId);
+      },
+    },
+  });
+  const firstThreadId = ThreadId.make("first-reclaim-thread");
+  const secondThreadId = ThreadId.make("second-reclaim-thread");
+
+  try {
+    const first = (await controller.handle(
+      makeRequest(firstThreadId, "open", { open: false }),
+    )) as PreviewAutomationStatus;
+    const firstTabId = PreviewTabId.make(first.tabId!);
+    await controller.readFrame({ threadId: firstThreadId, tabId: firstTabId });
+
+    await expect(
+      controller.handle(makeRequest(secondThreadId, "open", { open: false })),
+    ).rejects.toMatchObject({ _tag: "PreviewAutomationUnavailableError" });
+    expect(controller.tabCount).toBe(1);
+
+    now += 2_001;
+    const reclaimed = (await controller.handle(
+      makeRequest(secondThreadId, "open", { open: false }),
+    )) as PreviewAutomationStatus;
+    expect(reclaimed.tabId).toBe("reclaim-tab-3");
+    expect(controller.tabCount).toBe(1);
+    expect(lifecycleClosedTabIds).toEqual(
+      expect.arrayContaining([firstTabId, PreviewTabId.make("reclaim-tab-2")]),
+    );
+
+    await expect(
+      controller.handle(
+        makeRequest(ThreadId.make("third-reclaim-thread"), "open", {
+          open: false,
+          reuseExistingTab: false,
+        }),
+      ),
+    ).rejects.toMatchObject({ _tag: "PreviewAutomationUnavailableError" });
+    expect(controller.tabCount).toBe(1);
+    expect(lifecycleClosedTabIds).toContain(PreviewTabId.make("reclaim-tab-4"));
+  } finally {
+    await controller.close();
+    await NodeFSP.rm(profileDir, { recursive: true, force: true });
+  }
+}, 60_000);
