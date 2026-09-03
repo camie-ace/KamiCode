@@ -99,7 +99,7 @@ export interface ThreadMediaArtifact extends MediaArtifact {
 }
 
 interface ThreadMediaAttachmentInput {
-  readonly type: "image" | "gif" | "video" | "file";
+  readonly type: string;
   readonly id: string;
   readonly name: string;
   readonly mimeType: string;

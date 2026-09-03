@@ -1,14 +1,10 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
-import { ClerkProvider } from "@clerk/react";
-import { passkeys } from "@clerk/electron/passkeys";
-import { ClerkProvider as ElectronClerkProvider } from "@clerk/electron/react";
 import { createHashHistory, createBrowserHistory } from "@tanstack/react-router";
 
 import "./index.css";
 
 import { isElectron } from "./env";
-import { ManagedRelayAuthProvider } from "./cloud/managedAuth";
 import { hasCloudPublicConfig } from "./cloud/publicConfig";
 import { getRouter } from "./router";
 import {
@@ -17,7 +13,7 @@ import {
 } from "./lib/windowControlsOverlay";
 import { AppRoot } from "./AppRoot";
 import { installBrowserSessionSync } from "./browserSessionSync";
-import { clerkAppearance } from "./components/clerk/clerkAppearance";
+import { clearChunkReloadGuard, reloadOnceForChunkLoadError } from "./lib/chunkReloadGuard";
 
 // Electron loads the app from a file-backed shell, so hash history avoids path resolution issues.
 const history = isElectron ? createHashHistory() : createBrowserHistory();
@@ -33,34 +29,46 @@ if (isElectron) {
 
 const clerkPublishableKey = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY as string | undefined;
 
+// A failed split-chunk fetch usually means the hashed assets went stale under
+// a deploy; one guarded reload picks up the fresh index.html.
+let chunkLoadFailed = false;
+let reloadScheduled = false;
+window.addEventListener("vite:preloadError", (event) => {
+  chunkLoadFailed = true;
+  if (reloadOnceForChunkLoadError()) {
+    reloadScheduled = true;
+    event.preventDefault();
+  }
+});
+
 const app = <AppRoot router={router} />;
 
-// @clerk/electron forwards provider options at runtime, but 0.0.24's Omit-based
-// declaration loses the React provider's appearance property.
-const StyledElectronClerkProvider = ElectronClerkProvider as React.ComponentType<
-  React.ComponentProps<typeof ElectronClerkProvider> & {
-    appearance?: React.ComponentProps<typeof ClerkProvider>["appearance"];
-  }
->;
+// Managed auth is cloud-only. Load only the selected runtime as a split chunk
+// so local-mode users do not pay for either Clerk implementation at startup.
+const managedAuthShellModule =
+  clerkPublishableKey && hasCloudPublicConfig()
+    ? isElectron
+      ? import("./components/clerk/ElectronManagedAuthShell")
+      : import("./components/clerk/BrowserManagedAuthShell")
+    : null;
 
-ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
-  <React.StrictMode>
-    {clerkPublishableKey && hasCloudPublicConfig() ? (
-      isElectron ? (
-        <StyledElectronClerkProvider
-          appearance={clerkAppearance}
-          publishableKey={clerkPublishableKey}
-          passkeys={passkeys}
-        >
-          <ManagedRelayAuthProvider>{app}</ManagedRelayAuthProvider>
-        </StyledElectronClerkProvider>
-      ) : (
-        <ClerkProvider appearance={clerkAppearance} publishableKey={clerkPublishableKey}>
-          <ManagedRelayAuthProvider>{app}</ManagedRelayAuthProvider>
-        </ClerkProvider>
-      )
-    ) : (
-      app
-    )}
-  </React.StrictMode>,
-);
+void Promise.all([managedAuthShellModule?.then((module) => module.default) ?? null, router.load()])
+  .then(([ManagedAuthShell]) => {
+    if (reloadScheduled) return;
+    if (!chunkLoadFailed) clearChunkReloadGuard();
+    ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
+      <React.StrictMode>
+        {ManagedAuthShell && clerkPublishableKey ? (
+          <ManagedAuthShell publishableKey={clerkPublishableKey}>{app}</ManagedAuthShell>
+        ) : (
+          app
+        )}
+      </React.StrictMode>,
+    );
+  })
+  .catch((error: unknown) => {
+    if (reloadScheduled) return;
+    console.error("KamiCode failed to load its startup chunks.", error);
+    const bootShell = document.getElementById("boot-shell");
+    if (bootShell) bootShell.textContent = "KamiCode could not load. Reload to try again.";
+  });

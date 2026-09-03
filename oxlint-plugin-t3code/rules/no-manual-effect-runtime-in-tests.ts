@@ -60,6 +60,16 @@ const baselineFor = (filename: string): number => {
   return 0;
 };
 
+const readMaxOccurrences = (options: ReadonlyArray<unknown>): number => {
+  const [first] = options;
+  return typeof first === "object" &&
+    first !== null &&
+    "maxOccurrences" in first &&
+    typeof first.maxOccurrences === "number"
+    ? first.maxOccurrences
+    : 0;
+};
+
 const manualRunnerName = (callee: unknown): Option.Option<string> => {
   const expression = unwrapExpression(callee);
   if (Option.isNone(expression) || expression.value.type !== "MemberExpression") {
@@ -88,11 +98,29 @@ export default defineRule({
       description:
         "Disallow manually creating or running Effect runtimes in tests; use @effect/vitest.",
     },
+    schema: [
+      {
+        type: "object",
+        properties: {
+          maxOccurrences: {
+            type: "integer",
+            minimum: 0,
+            description:
+              "Legacy debt ceiling for this file: occurrences beyond this count are reported.",
+          },
+        },
+        additionalProperties: false,
+      },
+    ],
+    defaultOptions: [{ maxOccurrences: 0 }],
   },
   create(context) {
     if (!TEST_FILE_PATTERN.test(context.filename)) return {};
 
-    const allowedCount = baselineFor(context.filename);
+    const allowedCount = Math.max(
+      baselineFor(context.filename),
+      readMaxOccurrences(context.options),
+    );
     let occurrenceCount = 0;
 
     return {

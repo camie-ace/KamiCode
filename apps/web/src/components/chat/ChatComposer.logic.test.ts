@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vite-plus/test";
+import { PROVIDER_SEND_TURN_MAX_FILE_BYTES } from "@t3tools/contracts";
 
 import {
   createComposerAttachment,
@@ -102,13 +103,13 @@ describe("composer attachments", () => {
     const file = {
       name: "huge.tex",
       type: "application/x-tex",
-      size: 10 * 1024 * 1024 + 1,
+      size: PROVIDER_SEND_TURN_MAX_FILE_BYTES + 1,
     } as File;
 
     expect(createComposerAttachment(file, dependencies)).toMatchObject({
       type: "file",
       status: "unsupported",
-      unsupportedReason: "File exceeds the 10MB send limit.",
+      unsupportedReason: "File exceeds the 50MB send limit.",
     });
   });
 });

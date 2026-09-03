@@ -77,10 +77,14 @@ const baseUpdateState: DesktopUpdateState = {
   errorContext: null,
   canRetry: false,
   releaseNotes: [],
+  omittedReleaseCount: 0,
 };
 
 const desktopUpdatesShape = {
   getState: Effect.die("unexpected getState"),
+  isActionActive: Effect.succeed(false),
+  isInstallActive: Effect.succeed(false),
+  subscribe: Effect.die("unexpected subscribe"),
   emitState: Effect.void,
   disabledReason: Effect.succeed(Option.none()),
   configure: Effect.void,
@@ -88,6 +92,7 @@ const desktopUpdatesShape = {
   check: () => Effect.die("unexpected check"),
   download: Effect.die("unexpected download"),
   install: Effect.die("unexpected install"),
+  installPrepared: () => Effect.die("unexpected installPrepared"),
 } satisfies DesktopUpdates.DesktopUpdates["Service"];
 
 const desktopUpdatesLayer = Layer.succeed(DesktopUpdates.DesktopUpdates, desktopUpdatesShape);
@@ -282,11 +287,8 @@ describe("DesktopApplicationMenu", () => {
             Layer.provideMerge(makeDesktopWindowLayer(selectedAction)),
             Layer.provideMerge(
               Layer.succeed(DesktopUpdates.DesktopUpdates, {
+                ...desktopUpdatesShape,
                 getState: Effect.succeed(downloadedState),
-                emitState: Effect.void,
-                disabledReason: Effect.succeed(Option.none()),
-                configure: Effect.void,
-                setChannel: () => Effect.die("unexpected setChannel"),
                 check: () => Effect.succeed({ checked: true, state: downloadedState }),
                 download: Effect.die("unexpected download"),
                 install: Deferred.succeed(installRequested, undefined).pipe(

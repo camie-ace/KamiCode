@@ -20,6 +20,7 @@ import {
   type ServerOrchestrationDispatcherShape,
   type ServerOrchestrationDispatchOptions,
 } from "../Services/ServerOrchestrationDispatcher.ts";
+import { ThreadDeletionReactor } from "../Services/ThreadDeletionReactor.ts";
 
 const isOrchestrationDispatchCommandError = Schema.is(OrchestrationDispatchCommandError);
 const isProjectSetupScriptOperationError = Schema.is(
@@ -74,6 +75,7 @@ const makeServerOrchestrationDispatcher = Effect.gen(function* () {
   const gitWorkflow = yield* GitWorkflowService;
   const projectSetupScriptRunner = yield* ProjectSetupScriptRunner.ProjectSetupScriptRunner;
   const startup = yield* ServerRuntimeStartup;
+  const threadDeletionReactor = yield* ThreadDeletionReactor;
   const vcsStatusBroadcaster = yield* VcsStatusBroadcaster;
 
   const refreshGitStatus = (cwd: string) =>
@@ -95,6 +97,11 @@ const makeServerOrchestrationDispatcher = Effect.gen(function* () {
     options?: ServerOrchestrationDispatchOptions,
   ) =>
     dispatchWithOrigin(command, options).pipe(
+      Effect.tap(({ sequence }) =>
+        command.type === "thread.create"
+          ? threadDeletionReactor.drainThrough(sequence)
+          : Effect.void,
+      ),
       Effect.mapError((cause) =>
         toDispatchCommandError(cause, "Failed to dispatch orchestration command."),
       ),
@@ -269,7 +276,7 @@ const makeServerOrchestrationDispatcher = Effect.gen(function* () {
 
       const bootstrapProgram = Effect.gen(function* () {
         if (bootstrap?.createThread) {
-          yield* dispatchWithOrigin(
+          const created = yield* dispatchWithOrigin(
             {
               type: "thread.create",
               commandId: childCommandId(command, "bootstrap-thread-create"),
@@ -297,6 +304,7 @@ const makeServerOrchestrationDispatcher = Effect.gen(function* () {
             },
             options,
           );
+          yield* threadDeletionReactor.drainThrough(created.sequence);
           createdThread = true;
         }
 
@@ -325,6 +333,17 @@ const makeServerOrchestrationDispatcher = Effect.gen(function* () {
               cwd: prepareWorktree.projectCwd,
               remoteName: "origin",
             });
+            const hasRemoteBase = yield* gitWorkflow.remoteBranchExists({
+              cwd: prepareWorktree.projectCwd,
+              remoteName: "origin",
+              refName: prepareWorktree.baseBranch,
+            });
+            if (!hasRemoteBase) {
+              return {
+                refName: prepareWorktree.baseBranch,
+                baseRefName: prepareWorktree.baseBranch,
+              };
+            }
             const resolvedBase = yield* gitWorkflow.resolveRemoteTrackingCommit({
               cwd: prepareWorktree.projectCwd,
               refName: prepareWorktree.baseBranch,
