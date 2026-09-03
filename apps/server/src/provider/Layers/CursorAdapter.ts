@@ -140,6 +140,7 @@ interface CursorSessionContext {
   readonly turns: Array<{ id: TurnId; items: Array<unknown> }>;
   lastPlanFingerprint: string | undefined;
   activeTurnId: TurnId | undefined;
+  cursorSkillNames: ReadonlySet<string> | undefined;
   readonly projectMemoryAtSessionStart: string;
   projectMemoryInjected: boolean;
   /** Number of sendTurn prompts currently in flight or being prepared.
@@ -788,6 +789,7 @@ export function makeCursorAdapter(
             turns: [],
             lastPlanFingerprint: undefined,
             activeTurnId: undefined,
+            cursorSkillNames: undefined,
             projectMemoryAtSessionStart: readProjectMemory(cwd) ?? "",
             projectMemoryInjected: false,
             promptsInFlight: 0,
@@ -979,9 +981,32 @@ export function makeCursorAdapter(
           }
 
           const promptParts: Array<EffectAcpSchema.ContentBlock> = [];
+          const rawPrompt = input.input?.trim() ?? "";
+          let rewrittenPrompt = rawPrompt;
+          if (rawPrompt) {
+            let cursorSkillNames = ctx.cursorSkillNames;
+            if (hasCursorSkillMention(rawPrompt) && cursorSkillNames === undefined) {
+              const skills = yield* discoverCursorSkills(
+                ctx.session.cwd,
+                options?.environment,
+              ).pipe(
+                Effect.provideService(FileSystem.FileSystem, fileSystem),
+                Effect.provideService(Path.Path, path),
+              );
+              cursorSkillNames = new Set(
+                skills
+                  .filter((skill) => skill.enabled && skill.userInvocable !== false)
+                  .map((skill) => skill.name),
+              );
+              ctx.cursorSkillNames = cursorSkillNames;
+            }
+            rewrittenPrompt = cursorSkillNames
+              ? rewriteCursorSkillMentions(rawPrompt, cursorSkillNames)
+              : rawPrompt;
+          }
           const prompt = applyTestModePromptPrefix({
             interactionMode: input.interactionMode,
-            prompt: input.input?.trim() ?? "",
+            prompt: rewrittenPrompt,
           });
           const injectProjectMemory = !ctx.projectMemoryInjected;
           const promptText = injectProjectMemory

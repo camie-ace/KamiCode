@@ -227,7 +227,13 @@ export const make = Effect.gen(function* () {
       threadPullRequestLinking: true,
       environmentIcon: true,
       ...(serverSelfUpdate === null ? {} : { serverSelfUpdate }),
-      ...(serverSelfUpdate === "boot-service" ? { serverSelfUpdateProgress: true } : {}),
+      ...(serverSelfUpdate === "boot-service" || desktopAppUpdate
+        ? {
+            serverSelfUpdateProgress: true,
+            serverUpdateThreadContinuation: true,
+          }
+        : {}),
+      ...(desktopAppUpdate ? { desktopAppUpdate: true } : {}),
       ...(serverConfig.mode === "web" && serverConfig.hostedBrowserEnabled
         ? { hostedBrowserPreview: true }
         : {}),

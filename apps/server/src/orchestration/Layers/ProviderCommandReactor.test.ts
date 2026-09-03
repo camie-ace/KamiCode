@@ -274,6 +274,7 @@ describe("ProviderCommandReactor", () => {
       instanceId: ProviderInstanceId.make("codex"),
       model: "gpt-5-codex",
     };
+    const startSessionEffect = input?.startSessionEffect;
     const startSession = vi.fn((_: unknown, input: unknown) => {
       const sessionIndex = nextSessionIndex++;
       const resumeCursor =
@@ -334,8 +335,13 @@ describe("ProviderCommandReactor", () => {
         createdAt: now,
         updatedAt: now,
       };
-      runtimeSessions.push(session);
-      return Effect.succeed(session);
+      return (startSessionEffect?.(session) ?? Effect.succeed(session)).pipe(
+        Effect.tap((startedSession) =>
+          Effect.sync(() => {
+            runtimeSessions.push(startedSession);
+          }),
+        ),
+      );
     });
     const sendTurn = vi.fn((_: unknown) =>
       Effect.succeed({
@@ -889,7 +895,7 @@ describe("ProviderCommandReactor", () => {
       });
       expect(harness.sendTurn).toHaveBeenCalledWith(
         expect.objectContaining({
-          input: text,
+          input: attachments.length > 0 ? expect.stringContaining(text) : text,
           ...(attachments.length > 0 ? { attachments } : {}),
         }),
       );
@@ -3203,7 +3209,12 @@ describe("ProviderCommandReactor", () => {
             const thread = (await harness.readModel()).threads.find(
               (entry) => entry.id === ThreadId.make("thread-1"),
             );
-            return thread?.session?.status === "stopped";
+            return (
+              thread?.session?.status === "stopped" &&
+              thread.activities.some(
+                (activity) => activity.kind === "provider.turn.interrupt.failed",
+              )
+            );
           }),
         );
 

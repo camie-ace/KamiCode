@@ -27,6 +27,7 @@ import {
 
 import { ServerConfig } from "../../config.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
+import { applyProjectMemoryPromptPrefix } from "../ProjectMemory.ts";
 import type { CursorAdapterShape } from "../Services/CursorAdapter.ts";
 import { makeCursorAdapter } from "./CursorAdapter.ts";
 const decodeCursorSettings = Schema.decodeSync(CursorSettings);
@@ -262,6 +263,11 @@ cursorAdapterTestLayer("CursorAdapterLive", (it) => {
       const argvLogPath = NodePath.join(workspace, "argv.txt");
       const skillDirectory = NodePath.join(workspace, ".cursor", "skills", "review");
       yield* Effect.promise(() => NodeFSP.mkdir(skillDirectory, { recursive: true }));
+      const memoryDirectory = NodePath.join(workspace, ".camie");
+      yield* Effect.promise(() => NodeFSP.mkdir(memoryDirectory, { recursive: true }));
+      yield* Effect.promise(() =>
+        NodeFSP.writeFile(NodePath.join(memoryDirectory, "project-memory.md"), "", "utf8"),
+      );
       yield* Effect.promise(() =>
         NodeFSP.writeFile(NodePath.join(skillDirectory, "SKILL.md"), "# Review\n", "utf8"),
       );
@@ -291,7 +297,17 @@ cursorAdapterTestLayer("CursorAdapterLive", (it) => {
         promptRequests.map(
           (request) => (request.params as Record<string, unknown> | undefined)?.prompt,
         ),
-        [[{ type: "text", text: "please /review this" }]],
+        [
+          [
+            {
+              type: "text",
+              text: applyProjectMemoryPromptPrefix({
+                projectMemory: undefined,
+                prompt: "please /review this",
+              }),
+            },
+          ],
+        ],
       );
     }),
   );
