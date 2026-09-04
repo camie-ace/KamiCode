@@ -345,9 +345,8 @@ import {
   threadChangeRequestSnapshotsAtom,
   useLinkedThreadPullRequest,
 } from "./ThreadStatusIndicators";
-import { ComposerBannerStack, type ComposerBannerStackItem } from "./chat/ComposerBannerStack";
+import type { ComposerBannerStackItem } from "./chat/ComposerBannerStack";
 import { ComposerSurface } from "./chat/ComposerSurface";
-import { ThreadSyncStatusPill } from "./chat/ThreadSyncStatusPill";
 import {
   hasAvailableClaudeCompactionProvider,
   hasDismissedResumeCompaction,
@@ -9800,17 +9799,12 @@ function ChatViewContent(props: ChatViewProps) {
                         />
                       </div>
                     </div>
-                  ) : (
-                    <ComposerBannerStack className="relative z-0" items={composerBannerItems} />
-                  )}
+                  ) : null}
                   <QueuedMessagesPanel
                     items={queuedMessageItems}
                     onDelete={deleteQueuedMessage}
                     onEdit={updateQueuedMessage}
                   />
-                  {threadSyncPhase && !activeEnvironmentUnavailable ? (
-                    <ThreadSyncStatusPill phase={threadSyncPhase} />
-                  ) : null}
                   <div
                     className="relative"
                     style={
