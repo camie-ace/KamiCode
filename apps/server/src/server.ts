@@ -183,6 +183,8 @@ import * as NetService from "@t3tools/shared/Net";
 import * as RelayClient from "@t3tools/shared/relayClient";
 import { disableTailscaleServe, ensureTailscaleServe } from "@t3tools/tailscale";
 import { forkParked, ServerActivation } from "./serverActivation.ts";
+import { ensureManagedStorageRoot, pruneManagedScratch } from "./storage/ManagedStorage.ts";
+import { pruneBrowserHarnessRuns } from "./testing/browserHarnessRetention.ts";
 
 // MCP handoff thread IDs include escaped provenance and can exceed find-my-way's
 // 100-character default for one path segment.
@@ -695,6 +697,70 @@ export const makeServerLayer = Layer.unwrap(
 
     yield* fixPath();
 
+    yield* Effect.tryPromise(() =>
+      Promise.all([
+        ensureManagedStorageRoot(
+          config.managedScratchDir ?? `${config.baseDir}/scratch`,
+          "scratch",
+        ),
+        ensureManagedStorageRoot(
+          config.managedPackageCacheDir ?? `${config.baseDir}/caches/packages`,
+          "package-cache",
+        ),
+      ]),
+    );
+
+    const managedStorageLifecycleLayer = Layer.effectDiscard(
+      forkParked(
+        Effect.andThen(
+          awaitActivation,
+          Effect.all(
+            [
+              Effect.tryPromise(() =>
+                pruneBrowserHarnessRuns({
+                  stateRoot: config.stateDir,
+                  maxRunsPerProject: config.testHarnessMaxRunsPerProject,
+                  maxAgeMs: (config.testHarnessMaxAgeDays ?? 14) * 24 * 60 * 60 * 1_000,
+                  maxTotalBytes: config.testHarnessMaxBytes,
+                }),
+              ).pipe(
+                Effect.tap((result) =>
+                  result.removedRuns > 0
+                    ? Effect.logInfo("Pruned retained browser test evidence.", result)
+                    : Effect.void,
+                ),
+                Effect.catchCause((cause) =>
+                  Effect.logWarning("Failed to prune retained browser test evidence.", { cause }),
+                ),
+              ),
+              Effect.tryPromise(() =>
+                pruneManagedScratch({
+                  root: config.managedScratchDir ?? `${config.baseDir}/scratch`,
+                  maxAgeMs: (config.managedScratchMaxAgeHours ?? 72) * 60 * 60 * 1_000,
+                  maxBytes: config.managedScratchMaxBytes ?? 10 * 1024 * 1024 * 1024,
+                }),
+              ).pipe(
+                Effect.tap((result) =>
+                  result.removedEntries > 0
+                    ? Effect.logInfo("Pruned expired provider scratch.", result)
+                    : Effect.void,
+                ),
+                Effect.catchCause((cause) =>
+                  Effect.logWarning("Failed to prune managed provider scratch.", { cause }),
+                ),
+              ),
+            ],
+            { concurrency: 2, discard: true },
+          ).pipe(
+            Effect.repeat(Schedule.spaced("24 hours")),
+            Effect.catchCause((cause) =>
+              Effect.logWarning("Managed storage lifecycle stopped unexpectedly.", { cause }),
+            ),
+          ),
+        ),
+      ),
+    );
+
     const httpListeningLayer = Layer.effectDiscard(
       Effect.gen(function* () {
         yield* HttpServer.HttpServer;
@@ -886,6 +952,7 @@ export const makeServerLayer = Layer.unwrap(
     const serverApplicationLayer = Layer.mergeAll(
       routesLayer,
       httpListeningLayer,
+      managedStorageLifecycleLayer,
       runtimeStateLayer,
       tailscaleServeLayer,
       cloudDesiredLinkReconcileLayer,

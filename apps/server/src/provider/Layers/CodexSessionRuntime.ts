@@ -603,9 +603,6 @@ function buildCodexCollaborationMode(input: {
   readonly projectMemory?: string;
   readonly browserToolsAvailable?: boolean;
 }): EffectCodexSchema.V2TurnStartParams__CollaborationMode | undefined {
-  if (input.interactionMode === undefined && input.projectMemory === undefined) {
-    return undefined;
-  }
   const model = normalizeCodexModelSlug(input.model) ?? DEFAULT_MODEL;
   const interactionMode = input.interactionMode ?? "default";
   const mode = interactionMode === "plan" ? "plan" : "default";

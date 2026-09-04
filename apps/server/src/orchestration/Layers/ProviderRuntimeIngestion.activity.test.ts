@@ -122,7 +122,7 @@ describe("runtimeEventToActivities tool streaming persistence", () => {
     expect(JSON.stringify(data).length).toBeLessThan(1_000);
   });
 
-  it("persists the full terminal payload on tool.completed", () => {
+  it("persists the bounded wire projection on tool.completed", () => {
     const event = {
       ...base,
       type: "item.completed",
@@ -139,6 +139,11 @@ describe("runtimeEventToActivities tool streaming persistence", () => {
 
     expect(activities).toHaveLength(1);
     const payload = activities[0]?.payload as Record<string, unknown>;
-    expect(payload.data).toEqual(streamingData);
+    const data = payload.data as Record<string, unknown>;
+    expect(data.toolCallId).toBe("tool-call-1");
+    expect(data.command).toBe("blender --render");
+    expect(data.rawOutput).toEqual({ content: "first line of output" });
+    expect(data.content).toBeUndefined();
+    expect(JSON.stringify(data).length).toBeLessThan(1_000);
   });
 });

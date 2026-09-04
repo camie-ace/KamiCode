@@ -1,0 +1,13 @@
+# Explicit roots are mandatory. The guardian refuses broad roots, aliases,
+# unknown directory names, active releases, .retain pins, and young entries.
+KAMICODE_BACKUP_ROOT=/var/backups/kamicode
+KAMICODE_BACKUP_KEEP=2
+KAMICODE_RELEASE_ROOT=/opt/kamicode/releases
+KAMICODE_RELEASE_KEEP=3
+KAMICODE_CURRENT_RELEASE_LINK=/opt/kamicode/current
+KAMICODE_RETENTION_MIN_AGE_MINUTES=1440
+
+KAMICODE_SERVICE_UNIT=kamicode.service
+KAMICODE_SERVICE_USER=kamicode
+KAMICODE_SERVICE_HOME=/home/kamicode
+KAMICODE_MANAGED_PACKAGE_CACHE_ROOT=/var/cache/kamicode/packages

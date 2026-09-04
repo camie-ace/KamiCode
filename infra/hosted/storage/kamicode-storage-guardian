@@ -1,0 +1,204 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Every destructive root is supplied by the host's EnvironmentFile. The
+# guardian has no implicit project, backup, release, or home-directory target.
+mode="${1:-online}"
+if [[ "$mode" != "online" && "$mode" != "offline" ]]; then
+  echo "usage: kamicode-storage-guardian [online|offline]" >&2
+  exit 64
+fi
+
+log() {
+  printf '%s %s\n' "$(date --iso-8601=seconds)" "$*"
+}
+
+require_safe_root() {
+  local configured="$1"
+  local label="$2"
+  [[ -n "$configured" ]] || {
+    log "skip $label: no root configured" >&2
+    return 1
+  }
+  [[ "$configured" = /* ]] || {
+    log "refuse $label: root is not absolute: $configured" >&2
+    return 1
+  }
+  local resolved
+  resolved="$(realpath -m -- "$configured")"
+  [[ "$resolved" != "/" && "$resolved" != "/home" && "$resolved" != "/var" && "$resolved" != "/opt" ]] || {
+    log "refuse $label: root is too broad: $resolved" >&2
+    return 1
+  }
+  printf '%s\n' "$resolved"
+}
+
+sweep_retirement_trash() {
+  local root="$1"
+  local label="$2"
+  local minimum_age_minutes="$3"
+  local candidate name owner_pid
+  while IFS= read -r -d '' candidate; do
+    name="$(basename -- "$candidate")"
+    [[ "$name" =~ ^\.storage-trash-([0-9]+)- ]] || continue
+    owner_pid="${BASH_REMATCH[1]}"
+    if kill -0 "$owner_pid" 2>/dev/null; then
+      log "preserve active $label retirement: $candidate"
+      continue
+    fi
+    if command -v mountpoint >/dev/null 2>&1 && mountpoint -q -- "$candidate"; then
+      log "preserve mounted $label retirement: $candidate"
+      continue
+    fi
+    if ! find "$candidate" -maxdepth 0 -mmin "+$minimum_age_minutes" -print -quit | grep -q .; then
+      log "preserve young $label retirement: $candidate"
+      continue
+    fi
+    rm -rf --one-file-system -- "$candidate"
+    log "removed interrupted $label retirement: $candidate"
+  done < <(find "$root" -mindepth 1 -maxdepth 1 -type d -name '.storage-trash-*' -print0)
+}
+
+retire_directory() {
+  local root="$1"
+  local target="$2"
+  local label="$3"
+  [[ "$(dirname -- "$target")" == "$root" ]] || {
+    log "refuse $label: target escaped configured root: $target"
+    return 1
+  }
+  if command -v mountpoint >/dev/null 2>&1 && mountpoint -q -- "$target"; then
+    log "preserve mounted $label: $target"
+    return 1
+  fi
+  local trash="$root/.storage-trash-$$-$(basename -- "$target")"
+  [[ ! -e "$trash" ]] || {
+    log "refuse $label: retirement target already exists: $trash"
+    return 1
+  }
+  mv -- "$target" "$trash"
+  rm -rf --one-file-system -- "$trash"
+  log "removed $label: $target"
+}
+
+prune_versioned_directories() {
+  local configured_root="$1"
+  local keep_count="$2"
+  local name_pattern="$3"
+  local label="$4"
+  local protected_target="${5:-}"
+  local root
+  root="$(require_safe_root "$configured_root" "$label")" || return 0
+  [[ -d "$root" ]] || {
+    log "skip $label: root does not exist: $root"
+    return 0
+  }
+  [[ "$keep_count" =~ ^[1-9][0-9]*$ ]] || {
+    log "refuse $label: keep count must preserve at least one entry: $keep_count"
+    return 1
+  }
+
+  local minimum_age_minutes="${KAMICODE_RETENTION_MIN_AGE_MINUTES:-1440}"
+  [[ "$minimum_age_minutes" =~ ^[0-9]+$ ]] || {
+    log "refuse $label: minimum age is invalid: $minimum_age_minutes"
+    return 1
+  }
+
+  sweep_retirement_trash "$root" "$label" "$minimum_age_minutes"
+
+  mapfile -t candidates < <(
+    find "$root" -mindepth 1 -maxdepth 1 -type d -printf '%T@\t%p\n' |
+      sort -rn |
+      cut -f2-
+  )
+  local kept=0
+  local candidate name resolved
+  for candidate in "${candidates[@]}"; do
+    name="$(basename -- "$candidate")"
+    [[ "$name" =~ $name_pattern ]] || continue
+    resolved="$(realpath -m -- "$candidate")"
+    [[ "$resolved" == "$candidate" ]] || {
+      log "preserve $label symlink/alias: $candidate"
+      continue
+    }
+    if [[ -n "$protected_target" && "$resolved" == "$protected_target" ]]; then
+      log "preserve active $label: $candidate"
+      continue
+    fi
+    if [[ -e "$candidate/.retain" ]]; then
+      log "preserve pinned $label: $candidate"
+      continue
+    fi
+    if (( kept < keep_count )); then
+      ((kept += 1))
+      continue
+    fi
+    if ! find "$candidate" -maxdepth 0 -mmin "+$minimum_age_minutes" -print -quit | grep -q .; then
+      log "preserve young $label: $candidate"
+      continue
+    fi
+    retire_directory "$root" "$candidate" "$label"
+  done
+}
+
+active_release=""
+if [[ -n "${KAMICODE_CURRENT_RELEASE_LINK:-}" && -e "${KAMICODE_CURRENT_RELEASE_LINK}" ]]; then
+  active_release="$(realpath -m -- "${KAMICODE_CURRENT_RELEASE_LINK}")"
+fi
+
+prune_versioned_directories \
+  "${KAMICODE_BACKUP_ROOT:-}" \
+  "${KAMICODE_BACKUP_KEEP:-2}" \
+  '^[0-9]{8}T[0-9]{6}Z-' \
+  "deployment backup"
+
+prune_versioned_directories \
+  "${KAMICODE_RELEASE_ROOT:-}" \
+  "${KAMICODE_RELEASE_KEEP:-3}" \
+  '^v[0-9][A-Za-z0-9._+-]*$' \
+  "release" \
+  "$active_release"
+
+if [[ "$mode" == "offline" ]]; then
+  service_unit="${KAMICODE_SERVICE_UNIT:-kamicode.service}"
+  if systemctl is-active --quiet "$service_unit"; then
+    log "refuse offline cache maintenance: $service_unit is active"
+    exit 1
+  fi
+  service_user="${KAMICODE_SERVICE_USER:-kamicode}"
+  service_home="${KAMICODE_SERVICE_HOME:-}"
+  if [[ -z "$service_home" || "$service_home" != /* || "$service_home" == "/" ]]; then
+    log "refuse offline cache maintenance: KAMICODE_SERVICE_HOME is unsafe"
+    exit 1
+  fi
+  if pgrep -u "$service_user" -f '(^|/)(npm|pnpm|node-gyp|playwright|puppeteer)( |$)' >/dev/null; then
+    log "refuse offline cache maintenance: package/browser process is still active"
+    exit 1
+  fi
+  if command -v npm >/dev/null 2>&1; then
+    runuser -u "$service_user" -- env HOME="$service_home" npm cache clean --force
+  fi
+  if command -v pnpm >/dev/null 2>&1; then
+    runuser -u "$service_user" -- env HOME="$service_home" pnpm store prune
+  fi
+  managed_package_cache_root="$(
+    require_safe_root "${KAMICODE_MANAGED_PACKAGE_CACHE_ROOT:-}" "managed package cache"
+  )" || managed_package_cache_root=""
+  if [[ -n "$managed_package_cache_root" && -d "$managed_package_cache_root" ]]; then
+    if command -v npm >/dev/null 2>&1; then
+      runuser -u "$service_user" -- env \
+        HOME="$service_home" \
+        npm_config_cache="$managed_package_cache_root/npm" \
+        npm cache clean --force
+    fi
+    if command -v pnpm >/dev/null 2>&1; then
+      runuser -u "$service_user" -- env \
+        HOME="$service_home" \
+        pnpm_config_store_dir="$managed_package_cache_root/pnpm-store" \
+        pnpm store prune
+    fi
+  fi
+  log "offline package-cache maintenance complete"
+fi
+
+df -h --output=source,size,used,avail,pcent,target / | tail -n 1

@@ -19,6 +19,14 @@ export interface VcsCaptureCheckpointInput {
   readonly checkpointRef: CheckpointRef;
 }
 
+export type VcsCheckpointCaptureReadiness =
+  | { readonly status: "ready" }
+  | {
+      readonly status: "suppressed";
+      readonly reason: "storage-pressure" | "workspace-container";
+      readonly detail: string;
+    };
+
 export interface VcsRestoreCheckpointInput {
   readonly cwd: string;
   readonly checkpointRef: CheckpointRef;
@@ -39,6 +47,9 @@ export interface VcsDeleteCheckpointRefsInput {
 }
 
 export interface VcsCheckpointOps {
+  readonly assessCapture?: (
+    input: VcsCaptureCheckpointInput,
+  ) => Effect.Effect<VcsCheckpointCaptureReadiness, VcsError>;
   readonly captureCheckpoint: (input: VcsCaptureCheckpointInput) => Effect.Effect<void, VcsError>;
   readonly hasCheckpointRef: (
     input: Omit<VcsRestoreCheckpointInput, "fallbackToHead">,

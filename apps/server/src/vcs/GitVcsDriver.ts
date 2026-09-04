@@ -1,12 +1,18 @@
+// @effect-diagnostics nodeBuiltinImport:off - Effect FileSystem has no free-space query or directory-entry API.
 import * as NodeCrypto from "node:crypto";
+import * as NodeFSP from "node:fs/promises";
+import * as NodePath from "node:path";
+import * as NodeURL from "node:url";
 
 import * as Context from "effect/Context";
+import * as Clock from "effect/Clock";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
+import * as Semaphore from "effect/Semaphore";
 import { ChildProcessSpawner } from "effect/unstable/process";
 
 import {
@@ -30,6 +36,7 @@ import {
   type VcsStatusInput,
   type VcsStatusResult,
 } from "@t3tools/contracts";
+import * as ServerConfig from "../config.ts";
 import { makeGitVcsDriverCore, splitNullSeparatedGitStdoutPaths } from "./GitVcsDriverCore.ts";
 import * as VcsDriver from "./VcsDriver.ts";
 import * as VcsProcess from "./VcsProcess.ts";
@@ -121,6 +128,123 @@ export interface GitPushResult {
   branch: string;
   upstreamBranch?: string | undefined;
   setUpstream?: boolean | undefined;
+}
+
+const DEFAULT_CHECKPOINT_MIN_FREE_BYTES = 10 * 1024 * 1024 * 1024;
+const DEFAULT_CHECKPOINT_MIN_FREE_PERCENT = 15;
+const NESTED_REPOSITORY_SCAN_LIMIT = 256;
+const CHECKPOINT_QUARANTINE_STALE_MS = 60 * 60 * 1_000;
+const CHECKPOINT_QUARANTINE_PATTERN = /^t3-checkpoint-quarantine-(\d+)-[0-9a-f-]+$/i;
+const NESTED_REPOSITORY_SCAN_EXCLUDES = new Set([
+  ".git",
+  ".next",
+  ".cache",
+  "build",
+  "dist",
+  "node_modules",
+  "target",
+  "vendor",
+]);
+
+export function assessCheckpointDiskSpace(input: {
+  readonly availableBytes: bigint;
+  readonly totalBytes: bigint;
+  readonly minFreeBytes: number;
+  readonly minFreePercent: number;
+}): VcsDriver.VcsCheckpointCaptureReadiness {
+  const minFreeBytes = BigInt(Math.max(0, Math.trunc(input.minFreeBytes)));
+  const boundedPercent = Math.min(100, Math.max(0, Math.trunc(input.minFreePercent)));
+  const percentReserve = (input.totalBytes * BigInt(boundedPercent)) / 100n;
+  const requiredBytes = minFreeBytes > percentReserve ? minFreeBytes : percentReserve;
+  if (input.availableBytes >= requiredBytes) {
+    return { status: "ready" };
+  }
+  return {
+    status: "suppressed",
+    reason: "storage-pressure",
+    detail: `Automatic checkpoints require ${requiredBytes.toString()} free bytes; ${input.availableBytes.toString()} are available.`,
+  };
+}
+
+async function findNestedGitMetadata(
+  workspaceRoot: string,
+  join: (...parts: ReadonlyArray<string>) => string,
+): Promise<string | null> {
+  const queue: Array<{ readonly directory: string; readonly depth: number }> = [];
+  const rootEntries = await NodeFSP.readdir(workspaceRoot, { withFileTypes: true });
+  for (const entry of rootEntries.toSorted((left, right) => left.name.localeCompare(right.name))) {
+    if (entry.isDirectory() && !NESTED_REPOSITORY_SCAN_EXCLUDES.has(entry.name)) {
+      queue.push({ directory: join(workspaceRoot, entry.name), depth: 1 });
+    }
+  }
+
+  let scanned = 0;
+  while (queue.length > 0 && scanned < NESTED_REPOSITORY_SCAN_LIMIT) {
+    const candidate = queue.shift();
+    if (!candidate) break;
+    scanned += 1;
+
+    try {
+      await NodeFSP.access(join(candidate.directory, ".git"));
+      return candidate.directory;
+    } catch {
+      // This directory is not a repository root. A bounded second level lets
+      // workspace containers such as `.tmp/<checkout>` be recognized without
+      // walking a large untracked tree.
+    }
+
+    if (candidate.depth >= 2) continue;
+    try {
+      const children = await NodeFSP.readdir(candidate.directory, { withFileTypes: true });
+      for (const child of children.toSorted((left, right) => left.name.localeCompare(right.name))) {
+        if (child.isDirectory() && !NESTED_REPOSITORY_SCAN_EXCLUDES.has(child.name)) {
+          queue.push({
+            directory: join(candidate.directory, child.name),
+            depth: candidate.depth + 1,
+          });
+        }
+      }
+    } catch {
+      // Permission and concurrent-removal failures are inconclusive, so they
+      // must not suppress checkpoints by themselves.
+    }
+  }
+  return null;
+}
+
+function processIsAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code !== "ESRCH";
+  }
+}
+
+async function sweepStaleCheckpointQuarantines(
+  gitCommonDir: string,
+  nowMs: number,
+): Promise<number> {
+  const entries = await NodeFSP.readdir(gitCommonDir, { withFileTypes: true });
+  let removed = 0;
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    const match = CHECKPOINT_QUARANTINE_PATTERN.exec(entry.name);
+    if (!match) continue;
+    const ownerPid = Number(match[1]);
+    if (!Number.isSafeInteger(ownerPid) || processIsAlive(ownerPid)) continue;
+    const candidate = NodePath.join(gitCommonDir, entry.name);
+    try {
+      const stat = await NodeFSP.stat(candidate);
+      if (nowMs - stat.mtimeMs < CHECKPOINT_QUARANTINE_STALE_MS) continue;
+      await NodeFSP.rm(candidate, { recursive: true, force: true });
+      removed += 1;
+    } catch {
+      // A concurrent capture cleanup or permission boundary preserves this
+      // candidate without preventing other proven-orphan sweeps.
+    }
+  }
+  return removed;
 }
 
 export interface GitRangeContext {
@@ -452,6 +576,11 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const vcsProcess = yield* VcsProcess.VcsProcess;
+  const serverConfig = Option.getOrUndefined(
+    yield* Effect.serviceOption(ServerConfig.ServerConfig),
+  );
+  const checkpointLocks = new Map<string, Semaphore.Semaphore>();
+  const checkpointLocksMutex = yield* Semaphore.make(1);
   const capabilities = {
     kind: "git" as const,
     supportsWorktrees: true,
@@ -704,86 +833,256 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
       return path.isAbsolute(gitCommonDir) ? gitCommonDir : path.resolve(cwd, gitCommonDir);
     });
 
+  const checkpointLockFor = (gitCommonDir: string) =>
+    checkpointLocksMutex.withPermits(1)(
+      Effect.gen(function* () {
+        const existing = checkpointLocks.get(gitCommonDir);
+        if (existing) {
+          return existing;
+        }
+        const created = yield* Semaphore.make(1);
+        checkpointLocks.set(gitCommonDir, created);
+        return created;
+      }),
+    );
+
   const checkpoints: VcsDriver.VcsCheckpointOps = {
+    assessCapture: Effect.fn("GitVcsDriver.checkpoints.assessCapture")(function* (input) {
+      // Sweep exact, dead-owner quarantine directories before consulting the
+      // disk watermark. Otherwise one interrupted large capture could consume
+      // the reserve and then prevent the cleanup path from running.
+      const gitCommonDir = yield* resolveGitCommonDir(input.cwd);
+      const sweepNowMs = yield* Clock.currentTimeMillis;
+      const sweptQuarantines = yield* Effect.tryPromise(() =>
+        sweepStaleCheckpointQuarantines(gitCommonDir, sweepNowMs),
+      ).pipe(Effect.orElseSucceed(() => 0));
+      if (sweptQuarantines > 0) {
+        yield* Effect.logInfo("Removed stale Git checkpoint quarantines.", {
+          cwd: input.cwd,
+          removed: sweptQuarantines,
+        });
+      }
+
+      const disk = yield* Effect.tryPromise(() => NodeFSP.statfs(input.cwd, { bigint: true })).pipe(
+        Effect.option,
+      );
+      if (Option.isSome(disk)) {
+        const diskReadiness = assessCheckpointDiskSpace({
+          availableBytes: disk.value.bavail * disk.value.bsize,
+          totalBytes: disk.value.blocks * disk.value.bsize,
+          minFreeBytes: serverConfig?.checkpointMinFreeBytes ?? DEFAULT_CHECKPOINT_MIN_FREE_BYTES,
+          minFreePercent:
+            serverConfig?.checkpointMinFreePercent ?? DEFAULT_CHECKPOINT_MIN_FREE_PERCENT,
+        });
+        if (diskReadiness.status === "suppressed") {
+          return diskReadiness;
+        }
+      }
+
+      // An unborn, empty outer repository containing another repository is a
+      // workspace container, not a useful checkpoint boundary. Staging the
+      // container recursively duplicates every nested checkout and dependency
+      // cache, which is exactly the failure mode this guard prevents.
+      if ((yield* resolveHeadCommit(input.cwd)) === null) {
+        const tracked = yield* execute({
+          operation: "GitVcsDriver.checkpoints.assessTrackedFiles",
+          cwd: input.cwd,
+          args: ["ls-files", "--cached", "-z"],
+          allowNonZeroExit: true,
+          maxOutputBytes: 1,
+          appendTruncationMarker: false,
+        });
+        if (tracked.exitCode === 0 && tracked.stdout.length === 0) {
+          const nestedRepository = yield* Effect.tryPromise(() =>
+            findNestedGitMetadata(input.cwd, path.join),
+          ).pipe(Effect.orElseSucceed(() => null));
+          if (nestedRepository !== null) {
+            return {
+              status: "suppressed" as const,
+              reason: "workspace-container" as const,
+              detail: `Automatic checkpoints are disabled for an unborn outer repository containing nested repository ${nestedRepository}.`,
+            };
+          }
+        }
+      }
+
+      return { status: "ready" as const };
+    }),
+
     captureCheckpoint: Effect.fn("GitVcsDriver.checkpoints.captureCheckpoint")(function* (input) {
       const operation = "GitVcsDriver.checkpoints.captureCheckpoint";
       const gitCommonDir = yield* resolveGitCommonDir(input.cwd);
-      const tempIndexPath = path.join(
-        gitCommonDir,
-        `t3-checkpoint-index-${NodeCrypto.randomUUID()}`,
+      const checkpointLock = yield* checkpointLockFor(gitCommonDir);
+
+      yield* checkpointLock.withPermits(1)(
+        Effect.gen(function* () {
+          const sweepNowMs = yield* Clock.currentTimeMillis;
+          const sweptQuarantines = yield* Effect.tryPromise(() =>
+            sweepStaleCheckpointQuarantines(gitCommonDir, sweepNowMs),
+          ).pipe(Effect.orElseSucceed(() => 0));
+          if (sweptQuarantines > 0) {
+            yield* Effect.logInfo("Removed stale Git checkpoint quarantines.", {
+              cwd: input.cwd,
+              removed: sweptQuarantines,
+            });
+          }
+
+          // Domain and provider-runtime turn-start events may both request the
+          // same baseline. Recheck under the repository lock so only the first
+          // request performs filesystem work.
+          if ((yield* resolveCheckpointCommit(input.cwd, input.checkpointRef)) !== null) {
+            return;
+          }
+
+          const quarantineDir = path.join(
+            gitCommonDir,
+            `t3-checkpoint-quarantine-${process.pid}-${NodeCrypto.randomUUID()}`,
+          );
+          const quarantineObjectDir = path.join(quarantineDir, "objects");
+          const primaryObjectDir = path.join(gitCommonDir, "objects");
+          const quarantineIndexPath = path.join(quarantineDir, "checkpoint.index");
+          const quarantineRef = "refs/t3/quarantine/checkpoint";
+          const cleanupQuarantine = fileSystem
+            .remove(quarantineDir, { recursive: true, force: true })
+            .pipe(Effect.ignore);
+
+          yield* Effect.gen(function* () {
+            yield* execute({
+              operation: `${operation}.initializeQuarantine`,
+              cwd: input.cwd,
+              args: ["init", "--bare", "--quiet", quarantineDir],
+            });
+            // The isolated index may reuse unchanged trees/blobs from the real
+            // repository. Persist the alternate for upload-pack as well as the
+            // staging commands' environment so publication can traverse those
+            // objects without copying them into the quarantine first.
+            yield* fileSystem
+              .writeFileString(
+                path.join(quarantineObjectDir, "info", "alternates"),
+                `${primaryObjectDir}\n`,
+              )
+              .pipe(
+                Effect.mapError(
+                  (error) =>
+                    new VcsProcessExitError({
+                      operation: `${operation}.configureAlternateObjects`,
+                      command: "write checkpoint quarantine metadata",
+                      cwd: input.cwd,
+                      exitCode: 1,
+                      detail: error.message,
+                    }),
+                ),
+              );
+
+            // Keep repository/worktree discovery on the real checkout so Git
+            // still applies its local config, attributes, and clean filters.
+            // Only the index and newly written objects are redirected.
+            const stagingEnv: NodeJS.ProcessEnv = {
+              ...process.env,
+              GIT_INDEX_FILE: quarantineIndexPath,
+              GIT_OBJECT_DIRECTORY: quarantineObjectDir,
+              GIT_ALTERNATE_OBJECT_DIRECTORIES: primaryObjectDir,
+              GIT_AUTHOR_NAME: "KamiCode",
+              GIT_AUTHOR_EMAIL: "t3code@users.noreply.github.com",
+              GIT_COMMITTER_NAME: "KamiCode",
+              GIT_COMMITTER_EMAIL: "t3code@users.noreply.github.com",
+            };
+
+            const headCommit = yield* resolveHeadCommit(input.cwd);
+            if (headCommit) {
+              yield* execute({
+                operation: `${operation}.seedIndex`,
+                cwd: input.cwd,
+                args: ["read-tree", headCommit],
+                env: stagingEnv,
+              });
+            }
+
+            yield* execute({
+              operation: `${operation}.stageWorkspace`,
+              cwd: input.cwd,
+              args: ["add", "-A", "--", "."],
+              env: stagingEnv,
+            });
+
+            const writeTreeResult = yield* execute({
+              operation: `${operation}.writeTree`,
+              cwd: input.cwd,
+              args: ["write-tree"],
+              env: stagingEnv,
+            });
+            const treeOid = writeTreeResult.stdout.trim();
+            if (treeOid.length === 0) {
+              return yield* new VcsProcessExitError({
+                operation,
+                command: "git write-tree",
+                cwd: input.cwd,
+                exitCode: 0,
+                detail: "git write-tree returned an empty tree oid.",
+              });
+            }
+
+            const message = `t3 checkpoint ref=${input.checkpointRef}`;
+            const commitTreeResult = yield* execute({
+              operation: `${operation}.commitTree`,
+              cwd: input.cwd,
+              args: ["commit-tree", treeOid, "-m", message],
+              env: stagingEnv,
+            });
+            const commitOid = commitTreeResult.stdout.trim();
+            if (commitOid.length === 0) {
+              return yield* new VcsProcessExitError({
+                operation,
+                command: "git commit-tree",
+                cwd: input.cwd,
+                exitCode: 0,
+                detail: "git commit-tree returned an empty commit oid.",
+              });
+            }
+
+            yield* execute({
+              operation: `${operation}.recordQuarantineRef`,
+              cwd: input.cwd,
+              args: ["update-ref", quarantineRef, commitOid],
+              env: {
+                ...stagingEnv,
+                GIT_DIR: quarantineDir,
+                GIT_WORK_TREE: input.cwd,
+              },
+            });
+
+            // A file:// remote forces Git's pack protocol instead of a local
+            // hard-link copy. Git receives and verifies the pack before the
+            // atomic ref update, so interrupted publication cannot expose a
+            // half-written checkpoint in the real object database.
+            const publishResult = yield* execute({
+              operation: `${operation}.publish`,
+              cwd: input.cwd,
+              args: [
+                "fetch",
+                "--quiet",
+                "--atomic",
+                "--no-tags",
+                "--no-write-fetch-head",
+                "--no-recurse-submodules",
+                NodeURL.pathToFileURL(quarantineDir).href,
+                `+${quarantineRef}:${input.checkpointRef}`,
+              ],
+              allowNonZeroExit: true,
+              maxOutputBytes: 64 * 1024,
+            });
+            if (publishResult.exitCode !== 0) {
+              return yield* new VcsProcessExitError({
+                operation: `${operation}.publish`,
+                command: "git fetch",
+                cwd: input.cwd,
+                exitCode: publishResult.exitCode,
+                detail: publishResult.stderr.trim() || "git fetch could not publish checkpoint.",
+              });
+            }
+          }).pipe(Effect.ensuring(cleanupQuarantine));
+        }),
       );
-      const commitEnv: NodeJS.ProcessEnv = {
-        ...process.env,
-        GIT_INDEX_FILE: tempIndexPath,
-        GIT_AUTHOR_NAME: "KamiCode",
-        GIT_AUTHOR_EMAIL: "t3code@users.noreply.github.com",
-        GIT_COMMITTER_NAME: "KamiCode",
-        GIT_COMMITTER_EMAIL: "t3code@users.noreply.github.com",
-      };
-
-      const cleanupTempIndex = fileSystem
-        .remove(tempIndexPath, { force: true })
-        .pipe(Effect.ignore);
-
-      yield* Effect.gen(function* () {
-        const headExists = yield* hasHeadCommit(input.cwd);
-        if (headExists) {
-          yield* execute({
-            operation,
-            cwd: input.cwd,
-            args: ["read-tree", "HEAD"],
-            env: commitEnv,
-          });
-        }
-
-        yield* execute({
-          operation,
-          cwd: input.cwd,
-          args: ["add", "-A", "--", "."],
-          env: commitEnv,
-        });
-
-        const writeTreeResult = yield* execute({
-          operation,
-          cwd: input.cwd,
-          args: ["write-tree"],
-          env: commitEnv,
-        });
-        const treeOid = writeTreeResult.stdout.trim();
-        if (treeOid.length === 0) {
-          return yield* new VcsProcessExitError({
-            operation,
-            command: "git write-tree",
-            cwd: input.cwd,
-            exitCode: 0,
-            detail: "git write-tree returned an empty tree oid.",
-          });
-        }
-
-        const message = `t3 checkpoint ref=${input.checkpointRef}`;
-        const commitTreeResult = yield* execute({
-          operation,
-          cwd: input.cwd,
-          args: ["commit-tree", treeOid, "-m", message],
-          env: commitEnv,
-        });
-        const commitOid = commitTreeResult.stdout.trim();
-        if (commitOid.length === 0) {
-          return yield* new VcsProcessExitError({
-            operation,
-            command: "git commit-tree",
-            cwd: input.cwd,
-            exitCode: 0,
-            detail: "git commit-tree returned an empty commit oid.",
-          });
-        }
-
-        yield* execute({
-          operation,
-          cwd: input.cwd,
-          args: ["update-ref", input.checkpointRef, commitOid],
-        });
-      }).pipe(Effect.ensuring(cleanupTempIndex));
     }),
 
     hasCheckpointRef: (input) =>

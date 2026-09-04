@@ -99,6 +99,22 @@ export class ServerConfig extends Context.Service<
     readonly desktopTelemetryFd?: number | undefined;
     readonly desktopTelemetryControlFd?: number | undefined;
     readonly resourceMonitorPath?: string | undefined;
+    /** Automatic checkpoints pause before consuming the host's recovery reserve. */
+    readonly checkpointMinFreeBytes?: number;
+    readonly checkpointMinFreePercent?: number;
+    /** Failed baseline captures back off instead of retrying on every duplicate event. */
+    readonly checkpointRetryBaseMs?: number;
+    readonly checkpointRetryMaxMs?: number;
+    /** Retention bounds for server-owned browser test evidence. */
+    readonly testHarnessMaxRunsPerProject?: number;
+    readonly testHarnessMaxAgeDays?: number;
+    readonly testHarnessMaxBytes?: number;
+    /** Disposable storage exported to every provider process. */
+    readonly managedScratchDir?: string;
+    readonly managedScratchMaxAgeHours?: number;
+    readonly managedScratchMaxBytes?: number;
+    /** Shared package cache exported to provider processes to avoid per-worktree copies. */
+    readonly managedPackageCacheDir?: string;
     readonly autoBootstrapProjectFromCwd: boolean;
     readonly logWebSocketEvents: boolean;
     readonly tailscaleServeEnabled: boolean;
@@ -189,6 +205,7 @@ const makeTest = Effect.fn("ServerConfig.makeTest")(function* (
 ) {
   const devUrl = undefined;
   const fs = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
   const baseDir =
     typeof baseDirOrPrefix === "string"
       ? baseDirOrPrefix
@@ -224,6 +241,17 @@ const makeTest = Effect.fn("ServerConfig.makeTest")(function* (
     desktopTelemetryFd: undefined,
     desktopTelemetryControlFd: undefined,
     resourceMonitorPath: undefined,
+    checkpointMinFreeBytes: 0,
+    checkpointMinFreePercent: 0,
+    checkpointRetryBaseMs: 5 * 60 * 1_000,
+    checkpointRetryMaxMs: 60 * 60 * 1_000,
+    testHarnessMaxRunsPerProject: 20,
+    testHarnessMaxAgeDays: 14,
+    testHarnessMaxBytes: 5 * 1024 * 1024 * 1024,
+    managedScratchDir: path.join(baseDir, "scratch"),
+    managedScratchMaxAgeHours: 72,
+    managedScratchMaxBytes: 10 * 1024 * 1024 * 1024,
+    managedPackageCacheDir: path.join(baseDir, "caches", "packages"),
     staticDir: undefined,
     devUrl,
     devAllowedOrigins: [],

@@ -29,6 +29,7 @@ import { ServerConfig } from "../../config.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { ProviderSessionDirectory } from "../Services/ProviderSessionDirectory.ts";
 import { applyProjectMemoryPromptPrefix, readProjectMemory } from "../ProjectMemory.ts";
+import { REPOSITORY_OPERATING_CONTRACT } from "../RepositoryOperatingContract.ts";
 import type { OpenCodeAdapterShape } from "../Services/OpenCodeAdapter.ts";
 import {
   OpenCodeRuntime,
@@ -4716,6 +4717,10 @@ it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
         parts: [
           {
             type: "text",
+            text: REPOSITORY_OPERATING_CONTRACT,
+          },
+          {
+            type: "text",
             text: applyProjectMemoryPromptPrefix({
               prompt: "Fix it",
               projectMemory: readProjectMemory(process.cwd()),
@@ -4735,7 +4740,10 @@ it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
             readonly parts?: ReadonlyArray<unknown>;
           }
         ).parts,
-        [{ type: "text", text: "Fix it again" }],
+        [
+          { type: "text", text: REPOSITORY_OPERATING_CONTRACT },
+          { type: "text", text: "Fix it again" },
+        ],
       );
     }).pipe(Effect.provide(adapterLayer));
   });
@@ -4783,6 +4791,10 @@ it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
           modelID: "claude-sonnet-4-5",
         },
         parts: [
+          {
+            type: "text",
+            text: REPOSITORY_OPERATING_CONTRACT,
+          },
           {
             type: "text",
             text: applyProjectMemoryPromptPrefix({

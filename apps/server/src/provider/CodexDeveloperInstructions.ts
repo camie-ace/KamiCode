@@ -1,5 +1,7 @@
 import type { ProviderInteractionMode } from "@t3tools/contracts";
 
+import { appendRepositoryOperatingContract } from "./RepositoryOperatingContract.ts";
+
 const T3_CODE_BROWSER_TOOL_INSTRUCTIONS = `
 
 ## T3 Code collaborative browser
@@ -298,7 +300,7 @@ export function buildCodexDeveloperInstructions(
                 browserToolsAvailable,
               )
             : codexDefaultModeDeveloperInstructions(browserToolsAvailable);
-  return `${base}
+  return `${appendRepositoryOperatingContract(base)}
 
 <runtime_info>In case you're asked: you are running in KamiCode through the Codex harness, as ${toSingleLine(runtime.model)} with ${toSingleLine(runtime.reasoningEffort)} reasoning effort. No need to mention this otherwise.</runtime_info>`;
 }

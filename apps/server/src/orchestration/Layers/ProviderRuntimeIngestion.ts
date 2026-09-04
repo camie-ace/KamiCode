@@ -799,8 +799,8 @@ export function runtimeEventToActivities(
       // per chunk, so persisting `data` verbatim writes O(N²) bytes per tool
       // call into both the event store and the projection table. No reader
       // needs it: ws.ts and http.ts apply `projectActivityPayload` before any
-      // payload reaches a client. Persist the projected form for non-terminal
-      // updates; `item.completed` below still persists the full payload.
+      // payload reaches a client. Persist the projected form at ingestion so
+      // the event store and projection table do not retain duplicate output.
       return [
         projectActivityPayload({
           id: event.eventId,
@@ -834,7 +834,7 @@ export function runtimeEventToActivities(
         return [];
       }
       return [
-        {
+        projectActivityPayload({
           id: event.eventId,
           createdAt: event.createdAt,
           tone: "tool",
@@ -857,7 +857,7 @@ export function runtimeEventToActivities(
           },
           turnId: toTurnId(event.turnId) ?? null,
           ...maybeSequence,
-        },
+        }),
       ];
     }
 

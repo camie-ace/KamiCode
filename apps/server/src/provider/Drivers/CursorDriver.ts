@@ -93,7 +93,11 @@ export const CursorDriver: ProviderDriver<CursorSettings, CursorDriverEnv> = {
       const httpClient = yield* HttpClient.HttpClient;
       const serverSettings = yield* ServerSettingsService;
       const eventLoggers = yield* ProviderEventLoggers;
-      const processEnv = mergeProviderInstanceEnvironment(environment);
+      const serverConfig = yield* ServerConfig;
+      const processEnv = mergeProviderInstanceEnvironment(environment, process.env, {
+        scratchDir: serverConfig.managedScratchDir,
+        packageCacheDir: serverConfig.managedPackageCacheDir,
+      });
       const continuationIdentity = defaultProviderContinuationIdentity({
         driverKind: DRIVER_KIND,
         instanceId,

@@ -1,0 +1,11 @@
+[Unit]
+Description=Run KamiCode bounded storage maintenance daily
+
+[Timer]
+OnBootSec=15min
+OnUnitActiveSec=24h
+RandomizedDelaySec=30min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

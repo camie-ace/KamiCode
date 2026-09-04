@@ -11,6 +11,7 @@ import {
   type VcsStatusLocalResult,
 } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
+import * as Clock from "effect/Clock";
 import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -38,6 +39,7 @@ import type { OrchestrationDispatchError } from "../Errors.ts";
 import { isGitRepository } from "../../git/Utils.ts";
 import { VcsStatusBroadcaster } from "../../vcs/VcsStatusBroadcaster.ts";
 import * as WorkspaceEntries from "../../workspace/WorkspaceEntries.ts";
+import * as ServerConfig from "../../config.ts";
 
 const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
 
@@ -88,6 +90,19 @@ const make = Effect.gen(function* () {
   const receiptBus = yield* RuntimeReceiptBus;
   const workspaceEntries = yield* WorkspaceEntries.WorkspaceEntries;
   const vcsStatusBroadcaster = yield* VcsStatusBroadcaster;
+  const serverConfig = Option.getOrUndefined(
+    yield* Effect.serviceOption(ServerConfig.ServerConfig),
+  );
+  const checkpointSuppressionByCwd = new Map<string, "storage-pressure" | "workspace-container">();
+  const baselineRetryByRef = new Map<
+    string,
+    { readonly failureCount: number; readonly retryAtMs: number }
+  >();
+  const checkpointRetryBaseMs = Math.max(1_000, serverConfig?.checkpointRetryBaseMs ?? 300_000);
+  const checkpointRetryMaxMs = Math.max(
+    checkpointRetryBaseMs,
+    serverConfig?.checkpointRetryMaxMs ?? 3_600_000,
+  );
 
   const appendRevertFailureActivity = (input: {
     readonly threadId: ThreadId;
@@ -215,6 +230,88 @@ const make = Effect.gen(function* () {
     return cwd;
   });
 
+  const checkpointCaptureReadiness = Effect.fn("checkpointCaptureReadiness")(function* (input: {
+    readonly cwd: string;
+    readonly checkpointRef: CheckpointRef;
+  }) {
+    const readiness = checkpointStore.assessCapture
+      ? yield* checkpointStore.assessCapture(input)
+      : ({ status: "ready" } as const);
+    if (readiness.status === "ready") {
+      const previous = checkpointSuppressionByCwd.get(input.cwd);
+      if (previous !== undefined) {
+        checkpointSuppressionByCwd.delete(input.cwd);
+        yield* Effect.logInfo("automatic Git checkpoints resumed", {
+          cwd: input.cwd,
+          previousReason: previous,
+        });
+      }
+      return readiness;
+    }
+
+    const previous = checkpointSuppressionByCwd.get(input.cwd);
+    if (previous !== readiness.reason) {
+      checkpointSuppressionByCwd.set(input.cwd, readiness.reason);
+      yield* Effect.logWarning("automatic Git checkpoints suppressed", {
+        cwd: input.cwd,
+        reason: readiness.reason,
+        detail: readiness.detail,
+      });
+    }
+    return readiness;
+  });
+
+  const captureBaselineIfReady = Effect.fn("captureBaselineIfReady")(function* (input: {
+    readonly cwd: string;
+    readonly checkpointRef: CheckpointRef;
+  }) {
+    if (
+      yield* checkpointStore.hasCheckpointRef({
+        cwd: input.cwd,
+        checkpointRef: input.checkpointRef,
+      })
+    ) {
+      baselineRetryByRef.delete(`${input.cwd}\0${input.checkpointRef}`);
+      return false;
+    }
+
+    const retryKey = `${input.cwd}\0${input.checkpointRef}`;
+    const nowMs = yield* Clock.currentTimeMillis;
+    const retry = baselineRetryByRef.get(retryKey);
+    if (retry !== undefined && nowMs < retry.retryAtMs) {
+      return false;
+    }
+    if ((yield* checkpointCaptureReadiness(input)).status === "suppressed") {
+      return false;
+    }
+
+    yield* checkpointStore.captureCheckpoint(input).pipe(
+      Effect.tap(() =>
+        Effect.sync(() => {
+          baselineRetryByRef.delete(retryKey);
+        }),
+      ),
+      Effect.tapError(() =>
+        Clock.currentTimeMillis.pipe(
+          Effect.tap((failedAtMs) =>
+            Effect.sync(() => {
+              const failureCount = (retry?.failureCount ?? 0) + 1;
+              const delayMs = Math.min(
+                checkpointRetryMaxMs,
+                checkpointRetryBaseMs * 2 ** Math.min(failureCount - 1, 20),
+              );
+              baselineRetryByRef.set(retryKey, {
+                failureCount,
+                retryAtMs: failedAtMs + delayMs,
+              });
+            }),
+          ),
+        ),
+      ),
+    );
+    return true;
+  });
+
   // Shared tail for both capture paths: creates the git checkpoint ref, diffs
   // it against the previous turn, then dispatches the domain events to update
   // the orchestration read model.
@@ -238,61 +335,80 @@ const make = Effect.gen(function* () {
     const fromCheckpointRef = checkpointRefForThreadTurn(input.threadId, fromTurnCount);
     const targetCheckpointRef = checkpointRefForThreadTurn(input.threadId, input.turnCount);
 
-    const fromCheckpointExists = yield* checkpointStore.hasCheckpointRef({
-      cwd: input.cwd,
-      checkpointRef: fromCheckpointRef,
-    });
-    if (!fromCheckpointExists) {
-      yield* Effect.logWarning("checkpoint capture missing pre-turn baseline", {
-        threadId: input.threadId,
-        turnId: input.turnId,
-        fromTurnCount,
-      });
-    }
-
-    yield* checkpointStore.captureCheckpoint({
+    const readiness = yield* checkpointCaptureReadiness({
       cwd: input.cwd,
       checkpointRef: targetCheckpointRef,
     });
+    const files =
+      readiness.status === "ready"
+        ? yield* Effect.gen(function* () {
+            const fromCheckpointExists = yield* checkpointStore.hasCheckpointRef({
+              cwd: input.cwd,
+              checkpointRef: fromCheckpointRef,
+            });
+            if (!fromCheckpointExists) {
+              yield* Effect.logWarning("checkpoint capture missing pre-turn baseline", {
+                threadId: input.threadId,
+                turnId: input.turnId,
+                fromTurnCount,
+              });
+            }
+
+            yield* checkpointStore.captureCheckpoint({
+              cwd: input.cwd,
+              checkpointRef: targetCheckpointRef,
+            });
+
+            return yield* checkpointStore
+              .diffCheckpoints({
+                cwd: input.cwd,
+                fromCheckpointRef,
+                toCheckpointRef: targetCheckpointRef,
+                fallbackFromToHead: false,
+                ignoreWhitespace: false,
+              })
+              .pipe(
+                Effect.map((diff) =>
+                  parseTurnDiffFilesFromUnifiedDiff(diff).map((file) => ({
+                    path: file.path,
+                    kind: "modified" as const,
+                    additions: file.additions,
+                    deletions: file.deletions,
+                  })),
+                ),
+                Effect.tapError((error) =>
+                  appendCaptureFailureActivity({
+                    threadId: input.threadId,
+                    turnId: input.turnId,
+                    detail: `Checkpoint captured, but turn diff summary is unavailable: ${error.message}`,
+                    createdAt: input.createdAt,
+                  }),
+                ),
+                Effect.catch((error) =>
+                  Effect.logWarning("failed to derive checkpoint file summary", {
+                    threadId: input.threadId,
+                    turnId: input.turnId,
+                    turnCount: input.turnCount,
+                    detail: error.message,
+                  }).pipe(Effect.as([])),
+                ),
+              );
+          })
+        : [];
+
+    if (readiness.status === "suppressed") {
+      yield* Effect.logInfo("checkpoint capture finalized without a Git snapshot", {
+        threadId: input.threadId,
+        turnId: input.turnId,
+        turnCount: input.turnCount,
+        reason: readiness.reason,
+      });
+    }
 
     // Refresh the workspace entry index so the @-mention file picker
     // reflects files created or deleted during this turn.
     yield* workspaceEntries.refresh(input.cwd);
-
-    const files = yield* checkpointStore
-      .diffCheckpoints({
-        cwd: input.cwd,
-        fromCheckpointRef,
-        toCheckpointRef: targetCheckpointRef,
-        fallbackFromToHead: false,
-        ignoreWhitespace: false,
-      })
-      .pipe(
-        Effect.map((diff) =>
-          parseTurnDiffFilesFromUnifiedDiff(diff).map((file) => ({
-            path: file.path,
-            kind: "modified" as const,
-            additions: file.additions,
-            deletions: file.deletions,
-          })),
-        ),
-        Effect.tapError((error) =>
-          appendCaptureFailureActivity({
-            threadId: input.threadId,
-            turnId: input.turnId,
-            detail: `Checkpoint captured, but turn diff summary is unavailable: ${error.message}`,
-            createdAt: input.createdAt,
-          }),
-        ),
-        Effect.catch((error) =>
-          Effect.logWarning("failed to derive checkpoint file summary", {
-            threadId: input.threadId,
-            turnId: input.turnId,
-            turnCount: input.turnCount,
-            detail: error.message,
-          }).pipe(Effect.as([])),
-        ),
-      );
+    const finalStatus = readiness.status === "ready" ? input.status : ("missing" as const);
 
     const assistantMessageId =
       input.assistantMessageId ??
@@ -308,7 +424,7 @@ const make = Effect.gen(function* () {
       turnId: input.turnId,
       completedAt: input.createdAt,
       checkpointRef: targetCheckpointRef,
-      status: input.status,
+      status: finalStatus,
       files,
       assistantMessageId,
       checkpointTurnCount: input.turnCount,
@@ -320,7 +436,7 @@ const make = Effect.gen(function* () {
       turnId: input.turnId,
       checkpointTurnCount: input.turnCount,
       checkpointRef: targetCheckpointRef,
-      status: input.status,
+      status: finalStatus,
       createdAt: input.createdAt,
     });
     yield* receiptBus.publish({
@@ -338,11 +454,14 @@ const make = Effect.gen(function* () {
       activity: {
         id: EventId.make(yield* randomUUID),
         tone: "info",
-        kind: "checkpoint.captured",
-        summary: "Checkpoint captured",
+        kind: readiness.status === "ready" ? "checkpoint.captured" : "checkpoint.skipped",
+        summary: readiness.status === "ready" ? "Checkpoint captured" : "Checkpoint safely skipped",
         payload: {
           turnCount: input.turnCount,
-          status: input.status,
+          status: finalStatus,
+          ...(readiness.status === "suppressed"
+            ? { reason: readiness.reason, detail: readiness.detail }
+            : {}),
         },
         turnId: input.turnId,
         createdAt: input.createdAt,
@@ -507,18 +626,13 @@ const make = Effect.gen(function* () {
         0,
       );
       const baselineCheckpointRef = checkpointRefForThreadTurn(thread.id, currentTurnCount);
-      const baselineExists = yield* checkpointStore.hasCheckpointRef({
+      const captured = yield* captureBaselineIfReady({
         cwd: checkpointCwd,
         checkpointRef: baselineCheckpointRef,
       });
-      if (baselineExists) {
+      if (!captured) {
         return;
       }
-
-      yield* checkpointStore.captureCheckpoint({
-        cwd: checkpointCwd,
-        checkpointRef: baselineCheckpointRef,
-      });
       yield* receiptBus.publish({
         type: "checkpoint.baseline.captured",
         threadId: thread.id,
@@ -666,18 +780,13 @@ const make = Effect.gen(function* () {
       0,
     );
     const baselineCheckpointRef = checkpointRefForThreadTurn(threadId, currentTurnCount);
-    const baselineExists = yield* checkpointStore.hasCheckpointRef({
+    const captured = yield* captureBaselineIfReady({
       cwd: checkpointCwd,
       checkpointRef: baselineCheckpointRef,
     });
-    if (baselineExists) {
+    if (!captured) {
       return;
     }
-
-    yield* checkpointStore.captureCheckpoint({
-      cwd: checkpointCwd,
-      checkpointRef: baselineCheckpointRef,
-    });
     yield* receiptBus.publish({
       type: "checkpoint.baseline.captured",
       threadId,

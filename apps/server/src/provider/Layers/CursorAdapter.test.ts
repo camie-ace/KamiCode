@@ -28,6 +28,7 @@ import {
 import { ServerConfig } from "../../config.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { applyProjectMemoryPromptPrefix } from "../ProjectMemory.ts";
+import { REPOSITORY_OPERATING_CONTRACT } from "../RepositoryOperatingContract.ts";
 import type { CursorAdapterShape } from "../Services/CursorAdapter.ts";
 import { makeCursorAdapter } from "./CursorAdapter.ts";
 const decodeCursorSettings = Schema.decodeSync(CursorSettings);
@@ -299,6 +300,10 @@ cursorAdapterTestLayer("CursorAdapterLive", (it) => {
         ),
         [
           [
+            {
+              type: "text",
+              text: REPOSITORY_OPERATING_CONTRACT,
+            },
             {
               type: "text",
               text: applyProjectMemoryPromptPrefix({

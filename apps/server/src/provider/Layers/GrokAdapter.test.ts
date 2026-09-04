@@ -26,6 +26,7 @@ import {
 } from "@t3tools/contracts";
 
 import { ServerConfig } from "../../config.ts";
+import { REPOSITORY_OPERATING_CONTRACT } from "../RepositoryOperatingContract.ts";
 import {
   grokPromptSettlementBelongsToContext,
   isGrokEnterPlanModeToolCall,
@@ -216,7 +217,13 @@ it.layer(grokAdapterTestLayer)("GrokAdapterLive", (it) => {
   it.effect("starts a session and maps mock ACP prompt flow to runtime events", () =>
     Effect.gen(function* () {
       const threadId = ThreadId.make("grok-mock-thread");
-      const wrapperPath = yield* Effect.promise(() => makeMockGrokWrapper());
+      const tempDir = yield* Effect.promise(() =>
+        NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "grok-contract-")),
+      );
+      const requestLogPath = NodePath.join(tempDir, "requests.ndjson");
+      const wrapperPath = yield* Effect.promise(() =>
+        makeMockGrokWrapper({ T3_ACP_REQUEST_LOG_PATH: requestLogPath }),
+      );
       const adapter = yield* makeTestAdapter(wrapperPath);
 
       const runtimeEvents: ProviderRuntimeEvent[] = [];
@@ -255,6 +262,15 @@ it.layer(grokAdapterTestLayer)("GrokAdapterLive", (it) => {
       });
 
       yield* Deferred.await(turnCompleted);
+      const requests = yield* Effect.promise(() => readJsonLines(requestLogPath));
+      const promptRequest = requests.find((request) => request.method === "session/prompt");
+      const prompt = (promptRequest?.params as { readonly prompt?: ReadonlyArray<unknown> })
+        ?.prompt;
+      assert.deepEqual(prompt?.[0], {
+        type: "text",
+        text: REPOSITORY_OPERATING_CONTRACT,
+      });
+      assert.deepEqual(prompt?.[1], { type: "text", text: "hello grok" });
       yield* Fiber.interrupt(runtimeEventsFiber);
       const types = runtimeEvents.map((e) => e.type);
 

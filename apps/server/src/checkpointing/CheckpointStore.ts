@@ -19,7 +19,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 
 import type { CheckpointStoreError } from "./Errors.ts";
-import type { VcsCheckpointOps } from "../vcs/VcsDriver.ts";
+import type { VcsCheckpointCaptureReadiness, VcsCheckpointOps } from "../vcs/VcsDriver.ts";
 import * as VcsDriverRegistry from "../vcs/VcsDriverRegistry.ts";
 
 export interface CaptureCheckpointInput {
@@ -52,6 +52,11 @@ export class CheckpointStore extends Context.Service<
   {
     /** Check whether cwd is inside a Git worktree. */
     readonly isGitRepository: (cwd: string) => Effect.Effect<boolean, CheckpointStoreError>;
+
+    /** Determine whether an automatic checkpoint is safe to start. */
+    readonly assessCapture?: (
+      input: CaptureCheckpointInput,
+    ) => Effect.Effect<VcsCheckpointCaptureReadiness, CheckpointStoreError>;
 
     /**
      * Capture a checkpoint commit and store it at the provided checkpoint ref.
@@ -126,6 +131,16 @@ export const make = Effect.gen(function* () {
     return yield* checkpoints.captureCheckpoint(input);
   });
 
+  const assessCapture: CheckpointStore["Service"]["assessCapture"] = Effect.fn("assessCapture")(
+    function* (input) {
+      const checkpoints = yield* resolveCheckpoints("CheckpointStore.assessCapture", input.cwd);
+      if (!checkpoints.assessCapture) {
+        return { status: "ready" as const };
+      }
+      return yield* checkpoints.assessCapture(input);
+    },
+  );
+
   const hasCheckpointRef: CheckpointStore["Service"]["hasCheckpointRef"] = Effect.fn(
     "hasCheckpointRef",
   )(function* (input) {
@@ -159,6 +174,7 @@ export const make = Effect.gen(function* () {
 
   return CheckpointStore.of({
     isGitRepository,
+    assessCapture,
     captureCheckpoint,
     hasCheckpointRef,
     restoreCheckpoint,

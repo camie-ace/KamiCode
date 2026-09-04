@@ -1,0 +1,14 @@
+[Unit]
+Description=KamiCode bounded storage maintenance
+After=local-fs.target
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/kamicode/storage-guardian.conf
+ExecStart=/usr/local/sbin/kamicode-storage-guardian online
+Nice=10
+IOSchedulingClass=idle
+PrivateTmp=true
+NoNewPrivileges=true
+ProtectSystem=full
+ProtectHome=read-only

@@ -136,6 +136,41 @@ const EnvServerConfig = Config.all({
   hostedBrowserIdleTimeoutMs: Config.int("T3CODE_HOSTED_BROWSER_IDLE_TIMEOUT_MS").pipe(
     Config.withDefault(10 * 60 * 1_000),
   ),
+  checkpointMinFreeBytes: Config.int("T3CODE_CHECKPOINT_MIN_FREE_BYTES").pipe(
+    Config.withDefault(10 * 1024 * 1024 * 1024),
+  ),
+  checkpointMinFreePercent: Config.int("T3CODE_CHECKPOINT_MIN_FREE_PERCENT").pipe(
+    Config.withDefault(15),
+  ),
+  checkpointRetryBaseMs: Config.int("T3CODE_CHECKPOINT_RETRY_BASE_MS").pipe(
+    Config.withDefault(5 * 60 * 1_000),
+  ),
+  checkpointRetryMaxMs: Config.int("T3CODE_CHECKPOINT_RETRY_MAX_MS").pipe(
+    Config.withDefault(60 * 60 * 1_000),
+  ),
+  testHarnessMaxRunsPerProject: Config.int("T3CODE_TEST_HARNESS_MAX_RUNS_PER_PROJECT").pipe(
+    Config.withDefault(20),
+  ),
+  testHarnessMaxAgeDays: Config.int("T3CODE_TEST_HARNESS_MAX_AGE_DAYS").pipe(
+    Config.withDefault(14),
+  ),
+  testHarnessMaxBytes: Config.int("T3CODE_TEST_HARNESS_MAX_BYTES").pipe(
+    Config.withDefault(5 * 1024 * 1024 * 1024),
+  ),
+  managedScratchDir: Config.string("T3CODE_MANAGED_SCRATCH_DIR").pipe(
+    Config.option,
+    Config.map(Option.getOrUndefined),
+  ),
+  managedScratchMaxAgeHours: Config.int("T3CODE_MANAGED_SCRATCH_MAX_AGE_HOURS").pipe(
+    Config.withDefault(72),
+  ),
+  managedScratchMaxBytes: Config.int("T3CODE_MANAGED_SCRATCH_MAX_BYTES").pipe(
+    Config.withDefault(10 * 1024 * 1024 * 1024),
+  ),
+  managedPackageCacheDir: Config.string("T3CODE_MANAGED_PACKAGE_CACHE_DIR").pipe(
+    Config.option,
+    Config.map(Option.getOrUndefined),
+  ),
   speechTranscriptionUrl: Config.url("T3CODE_SPEECH_TRANSCRIPTION_URL").pipe(
     Config.option,
     Config.map(Option.getOrUndefined),
@@ -313,6 +348,21 @@ export const resolveServerConfig = (
       baseDirIsExplicit: Option.isSome(explicitBaseDir),
     });
     yield* ServerConfig.ensureServerDirectories(derivedPaths);
+    const managedScratchDir = path.resolve(
+      yield* expandHomePath(env.managedScratchDir?.trim() || path.join(baseDir, "scratch")),
+    );
+    const managedPackageCacheDir = path.resolve(
+      yield* expandHomePath(
+        env.managedPackageCacheDir?.trim() || path.join(baseDir, "caches", "packages"),
+      ),
+    );
+    yield* Effect.all(
+      [
+        fs.makeDirectory(managedScratchDir, { recursive: true }),
+        fs.makeDirectory(managedPackageCacheDir, { recursive: true }),
+      ],
+      { concurrency: 2 },
+    );
     const persistedObservabilitySettings = yield* loadPersistedObservabilitySettings(
       derivedPaths.settingsPath,
     );
@@ -425,6 +475,17 @@ export const resolveServerConfig = (
       hostedBrowserEnabled: env.hostedBrowserEnabled,
       hostedBrowserMaxTabs: env.hostedBrowserMaxTabs,
       hostedBrowserIdleTimeoutMs: env.hostedBrowserIdleTimeoutMs,
+      checkpointMinFreeBytes: env.checkpointMinFreeBytes,
+      checkpointMinFreePercent: env.checkpointMinFreePercent,
+      checkpointRetryBaseMs: env.checkpointRetryBaseMs,
+      checkpointRetryMaxMs: env.checkpointRetryMaxMs,
+      testHarnessMaxRunsPerProject: env.testHarnessMaxRunsPerProject,
+      testHarnessMaxAgeDays: env.testHarnessMaxAgeDays,
+      testHarnessMaxBytes: env.testHarnessMaxBytes,
+      managedScratchDir,
+      managedScratchMaxAgeHours: env.managedScratchMaxAgeHours,
+      managedScratchMaxBytes: env.managedScratchMaxBytes,
+      managedPackageCacheDir,
       speechTranscriptionUrl: env.speechTranscriptionUrl,
       speechTranscriptionModel: env.speechTranscriptionModel,
       speechTranscriptionPrompt: env.speechTranscriptionPrompt,

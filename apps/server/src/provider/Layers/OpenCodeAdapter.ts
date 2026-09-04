@@ -43,6 +43,7 @@ import {
 } from "../Errors.ts";
 import { type OpenCodeAdapterShape } from "../Services/OpenCodeAdapter.ts";
 import { applyProjectMemoryPromptPrefix, readProjectMemory } from "../ProjectMemory.ts";
+import { REPOSITORY_OPERATING_CONTRACT } from "../RepositoryOperatingContract.ts";
 import {
   buildOpenCodePermissionRules,
   OpenCodeRuntime,
@@ -2798,7 +2799,11 @@ export function makeOpenCodeAdapter(
                 model: parsedModel,
                 ...(context.activeAgent ? { agent: context.activeAgent } : {}),
                 ...(context.activeVariant ? { variant: context.activeVariant } : {}),
-                parts: [...(text ? [{ type: "text" as const, text }] : []), ...fileParts],
+                parts: [
+                  { type: "text" as const, text: REPOSITORY_OPERATING_CONTRACT },
+                  ...(text ? [{ type: "text" as const, text }] : []),
+                  ...fileParts,
+                ],
               },
               { signal },
             ),

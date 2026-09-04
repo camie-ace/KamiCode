@@ -80,6 +80,7 @@ import {
 } from "../acp/XAiAcpExtension.ts";
 import { type GrokAdapterShape } from "../Services/GrokAdapter.ts";
 import { type EventNdjsonLogger, makeEventNdjsonLogger } from "./EventNdjsonLogger.ts";
+import { REPOSITORY_OPERATING_CONTRACT } from "../RepositoryOperatingContract.ts";
 
 const encodeUnknownJsonStringExit = Schema.encodeUnknownExit(Schema.fromJsonString(Schema.Unknown));
 
@@ -1559,11 +1560,12 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
                 (part): part is Exclude<(typeof imagePromptParts)[number], null> => part !== null,
               );
               const promptParts: Array<EffectAcpSchema.ContentBlock> = [
+                { type: "text", text: REPOSITORY_OPERATING_CONTRACT },
                 ...(text ? [{ type: "text" as const, text }] : []),
                 ...supportedImagePromptParts,
               ];
 
-              if (promptParts.length === 0) {
+              if (!text && supportedImagePromptParts.length === 0) {
                 return yield* new ProviderAdapterValidationError({
                   provider: PROVIDER,
                   operation: "sendTurn",

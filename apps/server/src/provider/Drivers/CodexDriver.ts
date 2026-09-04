@@ -108,7 +108,11 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv> = {
       const eventLoggers = yield* ProviderEventLoggers;
       const serverAuth = yield* Effect.serviceOption(EnvironmentAuth);
       const modelManifest = yield* ModelManifest.ModelManifest;
-      const processEnv = mergeProviderInstanceEnvironment(environment);
+      const serverConfig = yield* ServerConfig;
+      const processEnv = mergeProviderInstanceEnvironment(environment, process.env, {
+        scratchDir: serverConfig.managedScratchDir,
+        packageCacheDir: serverConfig.managedPackageCacheDir,
+      });
       const homeLayout = yield* resolveCodexHomeLayout(config);
       const continuationIdentity = codexContinuationIdentity(homeLayout);
       const stampIdentity = withInstanceIdentity({

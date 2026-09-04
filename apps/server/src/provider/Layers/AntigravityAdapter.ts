@@ -1,5 +1,4 @@
 import {
-  ANTIGRAVITY_DEFAULT_MODEL,
   ApprovalRequestId,
   EventId,
   ProviderDriverKind,
@@ -81,6 +80,7 @@ import {
 } from "../acp/AntigravityProtocol.ts";
 import type { ProviderAdapterShape } from "../Services/ProviderAdapter.ts";
 import type { EventNdjsonLogger } from "./EventNdjsonLogger.ts";
+import { REPOSITORY_OPERATING_CONTRACT } from "../RepositoryOperatingContract.ts";
 
 const PROVIDER = ProviderDriverKind.make("antigravity");
 const ResumeCursor = Schema.Struct({
@@ -844,7 +844,7 @@ export const makeAntigravityAdapter = Effect.fn("makeAntigravityAdapter")(functi
         issue: "The selected model belongs to another provider instance.",
       });
     }
-    const prompt = yield* buildAntigravityPrompt({
+    const userPrompt = yield* buildAntigravityPrompt({
       input: input.input,
       attachments: input.attachments,
       attachmentsDir: serverConfig.attachmentsDir,
@@ -853,6 +853,10 @@ export const makeAntigravityAdapter = Effect.fn("makeAntigravityAdapter")(functi
       Effect.provideService(Path.Path, path),
       Effect.mapError((cause) => mapAntigravityError(input.threadId, "session/prompt", cause)),
     );
+    const prompt: ReadonlyArray<EffectAcpSchema.ContentBlock> = [
+      { type: "text", text: REPOSITORY_OPERATING_CONTRACT },
+      ...userPrompt,
+    ];
     let intent: TurnIntent | undefined;
     // The caller holds promptLock while it changes or settles the active turn.
     const finishTurn = (turn: TurnIntent, payload: TurnCompletedPayload) =>

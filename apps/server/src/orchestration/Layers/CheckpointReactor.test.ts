@@ -59,7 +59,7 @@ import {
 } from "../../provider/Services/ProviderService.ts";
 import { checkpointRefForThreadTurn } from "../../checkpointing/Utils.ts";
 import { ProviderValidationError } from "../../provider/Errors.ts";
-import { ServerConfig } from "../../config.ts";
+import { make as makeServerConfig, ServerConfig } from "../../config.ts";
 import * as WorkspaceEntries from "../../workspace/WorkspaceEntries.ts";
 import * as WorkspacePaths from "../../workspace/WorkspacePaths.ts";
 
@@ -221,6 +221,7 @@ function createGitRepository() {
   runGit(cwd, ["init", "--initial-branch=main"]);
   runGit(cwd, ["config", "user.email", "test@example.com"]);
   runGit(cwd, ["config", "user.name", "Test User"]);
+  runGit(cwd, ["config", "core.autocrlf", "false"]);
   NodeFS.writeFileSync(NodePath.join(cwd, "README.md"), "v1\n", "utf8");
   runGit(cwd, ["add", "."]);
   runGit(cwd, ["commit", "-m", "Initial"]);
@@ -294,6 +295,8 @@ describe("CheckpointReactor", () => {
     readonly providerSessionCwd?: string;
     readonly providerName?: ProviderDriverKind;
     readonly gitStatusRefreshCalls?: Array<string>;
+    readonly checkpointMinFreeBytes?: number;
+    readonly checkpointMinFreePercent?: number;
   }) {
     const cwd = createGitRepository();
     tempDirs.push(cwd);
@@ -320,9 +323,27 @@ describe("CheckpointReactor", () => {
       Layer.provide(SqlitePersistenceMemory),
     );
 
-    const ServerConfigLayer = ServerConfig.layerTest(process.cwd(), {
+    const BaseServerConfigLayer = ServerConfig.layerTest(process.cwd(), {
       prefix: "t3-checkpoint-reactor-test-",
     });
+    const ServerConfigLayer =
+      options?.checkpointMinFreeBytes === undefined &&
+      options?.checkpointMinFreePercent === undefined
+        ? BaseServerConfigLayer
+        : Layer.effect(
+            ServerConfig,
+            Effect.map(ServerConfig, (config) =>
+              makeServerConfig({
+                ...config,
+                ...(options.checkpointMinFreeBytes === undefined
+                  ? {}
+                  : { checkpointMinFreeBytes: options.checkpointMinFreeBytes }),
+                ...(options.checkpointMinFreePercent === undefined
+                  ? {}
+                  : { checkpointMinFreePercent: options.checkpointMinFreePercent }),
+              }),
+            ),
+          ).pipe(Layer.provide(BaseServerConfigLayer));
     const vcsStatusBroadcasterLayer = Layer.succeed(VcsStatusBroadcaster, {
       getStatus: () => Effect.die("getStatus should not be called in this test"),
       refreshLocalStatus: (cwd: string) =>
@@ -536,6 +557,54 @@ describe("CheckpointReactor", () => {
         "README.md",
       ),
     ).toBe("v2\n");
+  });
+
+  it("settles the diff lifecycle with a missing checkpoint while storage pressure suppresses capture", async () => {
+    const harness = await createHarness({
+      seedFilesystemCheckpoints: false,
+      checkpointMinFreeBytes: Number.MAX_SAFE_INTEGER,
+      checkpointMinFreePercent: 100,
+    });
+
+    harness.provider.emit({
+      type: "turn.started",
+      eventId: EventId.make("evt-turn-started-storage-pressure"),
+      provider: ProviderDriverKind.make("codex"),
+      createdAt: "2026-01-01T00:00:00.000Z",
+      threadId: ThreadId.make("thread-1"),
+      turnId: asTurnId("turn-storage-pressure"),
+    });
+    harness.provider.emit({
+      type: "turn.completed",
+      eventId: EventId.make("evt-turn-completed-storage-pressure"),
+      provider: ProviderDriverKind.make("codex"),
+      createdAt: "2026-01-01T00:00:01.000Z",
+      threadId: ThreadId.make("thread-1"),
+      turnId: asTurnId("turn-storage-pressure"),
+      payload: { state: "completed" },
+    });
+
+    await waitForEvent(harness.engine, (event) => event.type === "thread.turn-diff-completed");
+    await waitForThread(harness.readModel, (entry) =>
+      entry.activities.some((activity) => activity.kind === "checkpoint.skipped"),
+    );
+    const snapshot = await harness.readModel();
+    const thread = snapshot.threads.find((entry) => entry.id === ThreadId.make("thread-1"));
+    expect(thread?.checkpoints).toEqual([
+      expect.objectContaining({
+        checkpointTurnCount: 1,
+        status: "missing",
+      }),
+    ]);
+    expect(thread?.activities).toEqual(
+      expect.arrayContaining([expect.objectContaining({ kind: "checkpoint.skipped" })]),
+    );
+    expect(
+      gitRefExists(harness.cwd, checkpointRefForThreadTurn(ThreadId.make("thread-1"), 0)),
+    ).toBe(false);
+    expect(
+      gitRefExists(harness.cwd, checkpointRefForThreadTurn(ThreadId.make("thread-1"), 1)),
+    ).toBe(false);
   });
 
   it("refreshes local git status state on turn completion using the session cwd", async () => {

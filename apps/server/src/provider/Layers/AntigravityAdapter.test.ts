@@ -24,6 +24,7 @@ import type * as AcpSchema from "effect-acp/schema";
 
 import { ServerConfig } from "../../config.ts";
 import { ANTIGRAVITY_SIGN_IN_REQUIRED_MESSAGE } from "../antigravityAuthSupport.ts";
+import { REPOSITORY_OPERATING_CONTRACT } from "../RepositoryOperatingContract.ts";
 import type { AcpSessionRuntimeEvent } from "../acp/AcpSessionRuntime.ts";
 import { makeAntigravityAcpRuntime } from "../acp/AntigravityAcpSupport.ts";
 import { makeAntigravityAdapter, type AntigravityAdapterOptions } from "./AntigravityAdapter.ts";
@@ -44,6 +45,7 @@ const decodeRequestLog = Schema.decodeEffect(
 
 interface NativePrompt {
   readonly index: number;
+  readonly payload: { readonly prompt: ReadonlyArray<AcpSchema.ContentBlock> };
   readonly result: Deferred.Deferred<AcpSchema.PromptResponse, AcpErrors.AcpError>;
 }
 
@@ -160,12 +162,13 @@ const makeHarness = Effect.fn("makeAntigravityAdapterHarness")(function* (option
       }),
     getEvents: () => Stream.fromQueue(runtimeEvents),
     drainEvents,
-    prompt: (_payload, promptOptions) =>
+    prompt: (payload, promptOptions) =>
       Effect.gen(function* () {
         yield* Deferred.succeed(dispatchStarted, undefined);
         if (options?.holdDispatch) yield* Deferred.await(dispatchRelease);
         const prompt: NativePrompt = {
           index: ++promptIndex,
+          payload,
           result: yield* Deferred.make<AcpSchema.PromptResponse, AcpErrors.AcpError>(),
         };
         active = prompt;
@@ -421,6 +424,11 @@ it.layer(layer)("AntigravityAdapter", (it) => {
         .sendTurn({ threadId, input: "Read the file" })
         .pipe(Effect.forkChild);
       const prompt = yield* h.nextPrompt;
+      expect(prompt.payload.prompt[0]).toEqual({
+        type: "text",
+        text: REPOSITORY_OPERATING_CONTRACT,
+      });
+      expect(prompt.payload.prompt[1]).toEqual({ type: "text", text: "Read the file" });
       yield* h.emitNative({ _tag: "ThoughtDelta", text: "I will read it.", rawPayload: {} });
       yield* h.emitNative({
         _tag: "ToolCallUpdated",

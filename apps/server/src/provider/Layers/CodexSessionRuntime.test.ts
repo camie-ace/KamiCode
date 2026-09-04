@@ -364,7 +364,7 @@ describe("buildTurnStartParams", () => {
     assert.notMatch(developerInstructions, /<project_memory path=/);
   });
 
-  it("omits collaboration mode when interaction mode is absent", () => {
+  it("injects the repository contract when interaction mode is absent", () => {
     const params = Effect.runSync(
       buildTurnStartParams({
         threadId: "provider-thread-1",
@@ -373,20 +373,11 @@ describe("buildTurnStartParams", () => {
       }),
     );
 
-    NodeAssert.deepStrictEqual(params, {
-      threadId: "provider-thread-1",
-      approvalPolicy: "untrusted",
-      approvalsReviewer: "user",
-      sandboxPolicy: {
-        type: "readOnly",
-      },
-      input: [
-        {
-          type: "text",
-          text: "Review",
-        },
-      ],
-    });
+    NodeAssert.equal(params.collaborationMode?.mode, "default");
+    NodeAssert.match(
+      params.collaborationMode?.settings?.developer_instructions ?? "",
+      /<repository_operating_contract version="1">/,
+    );
   });
 });
 

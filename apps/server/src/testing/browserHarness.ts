@@ -5,6 +5,12 @@ import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import * as NodeURL from "node:url";
 
+import {
+  markBrowserHarnessRunActive,
+  markBrowserHarnessRunComplete,
+  pruneBrowserHarnessRuns,
+} from "./browserHarnessRetention.ts";
+
 const crypto = NodeCrypto;
 const Fs = NodeFSP;
 const os = NodeOS;
@@ -955,6 +961,7 @@ export async function runBrowserHarness(
   let title: string | null = null;
 
   await Fs.mkdir(paths.artifactsDir, { recursive: true });
+  await markBrowserHarnessRunActive(paths.artifactsDir);
   await Fs.mkdir(paths.screenshotsDir, { recursive: true });
   if (shouldRecordVideo) {
     await Fs.mkdir(paths.videosDir, { recursive: true });
@@ -1306,6 +1313,13 @@ export async function runBrowserHarness(
   });
   await writeJson(paths.summaryPath, result);
   await Fs.writeFile(paths.markdownPath, formatBrowserHarnessMarkdown(result), "utf8");
+  await markBrowserHarnessRunComplete(paths.artifactsDir).catch(() => {});
+  if (!normalizeOptionalText(input.artifactsDir)) {
+    await pruneBrowserHarnessRuns({
+      stateRoot: paths.stateRoot,
+      keepRunDirectories: [paths.artifactsDir],
+    }).catch(() => {});
+  }
 
   return result;
 }

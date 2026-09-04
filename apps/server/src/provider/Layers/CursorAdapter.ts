@@ -76,6 +76,7 @@ import {
 } from "../acp/CursorAcpExtension.ts";
 import { type CursorAdapterShape } from "../Services/CursorAdapter.ts";
 import { applyProjectMemoryPromptPrefix, readProjectMemory } from "../ProjectMemory.ts";
+import { REPOSITORY_OPERATING_CONTRACT } from "../RepositoryOperatingContract.ts";
 import { applyTestModePromptPrefix } from "../TestModeInstructions.ts";
 import { resolveCursorAcpBaseModelId } from "./CursorProvider.ts";
 import { type EventNdjsonLogger, makeEventNdjsonLogger } from "./EventNdjsonLogger.ts";
@@ -1060,6 +1061,7 @@ export function makeCursorAdapter(
               issue: "Turn requires non-empty text or attachments.",
             });
           }
+          promptParts.unshift({ type: "text", text: REPOSITORY_OPERATING_CONTRACT });
 
           const result = yield* ctx.acp
             .prompt({

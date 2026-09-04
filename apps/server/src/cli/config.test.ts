@@ -1,6 +1,7 @@
 // @effect-diagnostics nodeBuiltinImport:off
 import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
+import * as NodePath from "node:path";
 
 import { assert, expect, it } from "@effect/vitest";
 import * as ConfigProvider from "effect/ConfigProvider";
@@ -62,6 +63,20 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
     hostedBrowserMaxTabs: 2,
     hostedBrowserIdleTimeoutMs: 10 * 60 * 1_000,
   } as const;
+  const defaultStorageLifecycleConfig = (baseDir: string) =>
+    ({
+      checkpointMinFreeBytes: 10 * 1024 * 1024 * 1024,
+      checkpointMinFreePercent: 15,
+      checkpointRetryBaseMs: 5 * 60 * 1_000,
+      checkpointRetryMaxMs: 60 * 60 * 1_000,
+      testHarnessMaxRunsPerProject: 20,
+      testHarnessMaxAgeDays: 14,
+      testHarnessMaxBytes: 5 * 1024 * 1024 * 1024,
+      managedScratchDir: NodePath.join(baseDir, "scratch"),
+      managedScratchMaxAgeHours: 72,
+      managedScratchMaxBytes: 10 * 1024 * 1024 * 1024,
+      managedPackageCacheDir: NodePath.join(baseDir, "caches", "packages"),
+    }) as const;
   const defaultSpeechTranscriptionConfig = {
     speechTranscriptionUrl: undefined,
     speechTranscriptionModel: undefined,
@@ -133,6 +148,17 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
                   T3CODE_HOSTED_BROWSER: "true",
                   T3CODE_HOSTED_BROWSER_MAX_TABS: "3",
                   T3CODE_HOSTED_BROWSER_IDLE_TIMEOUT_MS: "45000",
+                  T3CODE_CHECKPOINT_MIN_FREE_BYTES: "123456789",
+                  T3CODE_CHECKPOINT_MIN_FREE_PERCENT: "21",
+                  T3CODE_CHECKPOINT_RETRY_BASE_MS: "120000",
+                  T3CODE_CHECKPOINT_RETRY_MAX_MS: "900000",
+                  T3CODE_TEST_HARNESS_MAX_RUNS_PER_PROJECT: "7",
+                  T3CODE_TEST_HARNESS_MAX_AGE_DAYS: "5",
+                  T3CODE_TEST_HARNESS_MAX_BYTES: "987654321",
+                  T3CODE_MANAGED_SCRATCH_DIR: NodePath.join(baseDir, "managed", "scratch"),
+                  T3CODE_MANAGED_SCRATCH_MAX_AGE_HOURS: "36",
+                  T3CODE_MANAGED_SCRATCH_MAX_BYTES: "876543210",
+                  T3CODE_MANAGED_PACKAGE_CACHE_DIR: NodePath.join(baseDir, "managed", "packages"),
                   T3CODE_SPEECH_TRANSCRIPTION_URL: "http://127.0.0.1:8087/inference",
                   T3CODE_SPEECH_TRANSCRIPTION_MODEL: "Systran/faster-whisper-small.en",
                   T3CODE_SPEECH_TRANSCRIPTION_PROMPT:
@@ -164,6 +190,17 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
         hostedBrowserEnabled: true,
         hostedBrowserMaxTabs: 3,
         hostedBrowserIdleTimeoutMs: 45_000,
+        checkpointMinFreeBytes: 123_456_789,
+        checkpointMinFreePercent: 21,
+        checkpointRetryBaseMs: 120_000,
+        checkpointRetryMaxMs: 900_000,
+        testHarnessMaxRunsPerProject: 7,
+        testHarnessMaxAgeDays: 5,
+        testHarnessMaxBytes: 987_654_321,
+        managedScratchDir: NodePath.join(baseDir, "managed", "scratch"),
+        managedScratchMaxAgeHours: 36,
+        managedScratchMaxBytes: 876_543_210,
+        managedPackageCacheDir: NodePath.join(baseDir, "managed", "packages"),
         speechTranscriptionUrl: new URL("http://127.0.0.1:8087/inference"),
         speechTranscriptionModel: "Systran/faster-whisper-small.en",
         speechTranscriptionPrompt: "Nigerian English. KamiCode, TypeScript, GitHub, Playwright.",
@@ -239,6 +276,7 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
         ...defaultUserAuthConfig,
         noBrowser: true,
         ...defaultHostedBrowserConfig,
+        ...defaultStorageLifecycleConfig(baseDir),
         ...defaultSpeechTranscriptionConfig,
         startupPresentation: "browser",
         desktopBootstrapToken: undefined,
@@ -315,6 +353,7 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
         ...defaultUserAuthConfig,
         noBrowser: false,
         ...defaultHostedBrowserConfig,
+        ...defaultStorageLifecycleConfig(baseDir),
         ...defaultSpeechTranscriptionConfig,
         startupPresentation: "browser",
         desktopBootstrapToken: "desktop-bootstrap-token",
@@ -400,6 +439,7 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
         githubOAuthCallbackUrl: new URL("http://127.0.0.1:4888/api/user/auth/github/callback"),
         noBrowser: true,
         ...defaultHostedBrowserConfig,
+        ...defaultStorageLifecycleConfig(baseDir),
         ...defaultSpeechTranscriptionConfig,
         startupPresentation: "browser",
         desktopBootstrapToken: "desktop-token",
@@ -536,6 +576,7 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
         ...defaultUserAuthConfig,
         noBrowser: true,
         ...defaultHostedBrowserConfig,
+        ...defaultStorageLifecycleConfig(baseDir),
         ...defaultSpeechTranscriptionConfig,
         startupPresentation: "browser",
         desktopBootstrapToken: "desktop-token",
@@ -609,6 +650,7 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
         ...defaultUserAuthConfig,
         noBrowser: true,
         ...defaultHostedBrowserConfig,
+        ...defaultStorageLifecycleConfig(baseDir),
         ...defaultSpeechTranscriptionConfig,
         startupPresentation: "browser",
         desktopBootstrapToken: undefined,
@@ -676,6 +718,7 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
         ...defaultUserAuthConfig,
         noBrowser: true,
         ...defaultHostedBrowserConfig,
+        ...defaultStorageLifecycleConfig(baseDir),
         ...defaultSpeechTranscriptionConfig,
         startupPresentation: "headless",
         desktopBootstrapToken: undefined,
