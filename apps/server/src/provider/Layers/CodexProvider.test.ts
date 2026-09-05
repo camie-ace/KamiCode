@@ -67,19 +67,21 @@ it("maps current Codex model capability fields", () => {
 it("maps GPT-6 Astra reasoning controls from the Codex catalog", () => {
   const capabilities = mapCodexModelCapabilities({
     additionalSpeedTiers: [],
-    defaultReasoningEffort: "high",
+    defaultReasoningEffort: "medium",
     defaultServiceTier: null,
     description: "Frontier model for long-horizon agentic work.",
     displayName: "GPT-6 Astra",
     hidden: false,
     id: "gpt-6-astra",
-    isDefault: false,
+    isDefault: true,
     model: "gpt-6-astra",
     serviceTiers: [],
-    supportedReasoningEfforts: ["low", "medium", "high", "xhigh", "max"].map((reasoningEffort) => ({
-      reasoningEffort,
-      description: `${reasoningEffort} reasoning`,
-    })),
+    supportedReasoningEfforts: ["low", "medium", "high", "xhigh", "max", "ultra"].map(
+      (reasoningEffort) => ({
+        reasoningEffort,
+        description: `${reasoningEffort} reasoning`,
+      }),
+    ),
   });
 
   assert.deepStrictEqual(capabilities.optionDescriptors, [
@@ -89,12 +91,13 @@ it("maps GPT-6 Astra reasoning controls from the Codex catalog", () => {
       type: "select",
       options: [
         { id: "low", label: "Low" },
-        { id: "medium", label: "Medium" },
-        { id: "high", label: "High", isDefault: true },
+        { id: "medium", label: "Medium", isDefault: true },
+        { id: "high", label: "High" },
         { id: "xhigh", label: "Extra High" },
         { id: "max", label: "Max" },
+        { id: "ultra", label: "Ultra" },
       ],
-      currentValue: "high",
+      currentValue: "medium",
     },
   ]);
 });
