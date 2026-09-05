@@ -1,4 +1,5 @@
 import {
+  ANTIGRAVITY_DEFAULT_MODEL,
   CheckpointRef,
   EnvironmentId,
   MessageId,
@@ -43,6 +44,7 @@ import {
   resolveComposerInteractionMode,
   resolveComposerProviderSelection,
   resolveDraftPromotionNavigationTarget,
+  resolveProactiveTurnDiffAction,
   resolveThreadMetadataUpdateForNextTurn,
   resolveSendEnvMode,
   resolveDraftHeroState,
@@ -53,6 +55,7 @@ import {
   shouldReleaseTimelineAnchorForToolActivity,
   shouldOpenProactivePullRequest,
   shouldOpenProactiveTurnDiff,
+  shouldRenderPreviewMiniPlayer,
   shouldShowBranchMismatchBanner,
   shouldShowPlanFollowUpPrompt,
   shouldWriteThreadErrorToCurrentServerThread,
@@ -98,6 +101,27 @@ describe("agent browser close confirmation", () => {
   });
 });
 
+describe("floating browser preview", () => {
+  it("only hides the duplicate while the same browser is rendered in the panel", () => {
+    expect(shouldRenderPreviewMiniPlayer(null, null)).toBe(false);
+    expect(
+      shouldRenderPreviewMiniPlayer("tab-1", {
+        id: "browser:one",
+        kind: "preview",
+        resourceId: "tab-1",
+      }),
+    ).toBe(false);
+    expect(
+      shouldRenderPreviewMiniPlayer("tab-1", {
+        id: "browser:two",
+        kind: "preview",
+        resourceId: "tab-2",
+      }),
+    ).toBe(true);
+    expect(shouldRenderPreviewMiniPlayer("tab-1", { id: "diff", kind: "diff" })).toBe(true);
+  });
+});
+
 describe("proactive panels", () => {
   it("opens a pull request only after a newly observed link appears", () => {
     expect(shouldOpenProactivePullRequest(undefined, "project:repo:42")).toBe(false);
@@ -140,6 +164,80 @@ describe("proactive panels", () => {
         turnCompleted: false,
       }),
     ).toBe(false);
+  });
+
+  it("opens a completed turn diff only for changed files", () => {
+    const changedCheckpoint = {
+      status: "ready",
+      files: [{ path: "src/app.ts", kind: "modified", additions: 1, deletions: 0 }],
+    } satisfies Pick<TurnDiffSummary, "status" | "files">;
+    const unchangedCheckpoint = {
+      status: "ready",
+      files: [],
+    } satisfies Pick<TurnDiffSummary, "status" | "files">;
+
+    expect(
+      resolveProactiveTurnDiffAction({
+        checkpoint: changedCheckpoint,
+        isGitRepo: true,
+        activeSurfaceKind: null,
+      }),
+    ).toBe("open");
+    expect(
+      resolveProactiveTurnDiffAction({
+        checkpoint: unchangedCheckpoint,
+        isGitRepo: true,
+        activeSurfaceKind: null,
+      }),
+    ).toBe("ignore");
+  });
+
+  it("waits for definitive checkpoint and repository state", () => {
+    const missingCheckpoint = {
+      status: "missing",
+      files: [],
+    } satisfies Pick<TurnDiffSummary, "status" | "files">;
+    const changedCheckpoint = {
+      status: "ready",
+      files: [{ path: "src/app.ts", kind: "modified", additions: 1, deletions: 0 }],
+    } satisfies Pick<TurnDiffSummary, "status" | "files">;
+
+    expect(
+      resolveProactiveTurnDiffAction({
+        checkpoint: undefined,
+        isGitRepo: true,
+        activeSurfaceKind: null,
+      }),
+    ).toBe("defer");
+    expect(
+      resolveProactiveTurnDiffAction({
+        checkpoint: missingCheckpoint,
+        isGitRepo: true,
+        activeSurfaceKind: null,
+      }),
+    ).toBe("defer");
+    expect(
+      resolveProactiveTurnDiffAction({
+        checkpoint: changedCheckpoint,
+        isGitRepo: undefined,
+        activeSurfaceKind: null,
+      }),
+    ).toBe("defer");
+  });
+
+  it("keeps an active pull request above a completed turn diff", () => {
+    const changedCheckpoint = {
+      status: "ready",
+      files: [{ path: "src/app.ts", kind: "modified", additions: 1, deletions: 0 }],
+    } satisfies Pick<TurnDiffSummary, "status" | "files">;
+
+    expect(
+      resolveProactiveTurnDiffAction({
+        checkpoint: changedCheckpoint,
+        isGitRepo: true,
+        activeSurfaceKind: "pull-request",
+      }),
+    ).toBe("ignore");
   });
 });
 
@@ -776,14 +874,20 @@ describe("resolveComposerProviderSelection", () => {
     );
   });
 
-  it("blocks sends until Antigravity confirms authentication", () => {
+  it("lets Antigravity check saved credentials when resuming after a restart", () => {
     const provider = entry("antigravity", "google_work", {
+      status: "warning",
       auth: { status: "unknown" },
-      models: catalogModels,
+      models: [],
     }).snapshot;
 
-    expect(getAntigravitySendBlockReason(provider, "gemini-pro")).toBe(
-      "Sign in to Antigravity in provider settings before sending.",
+    expect(getAntigravitySendBlockReason(provider, "gemini-pro")).toBeNull();
+    expect(getAntigravitySendBlockReason(provider, ANTIGRAVITY_DEFAULT_MODEL)).toBeNull();
+    expect(
+      getAntigravitySendBlockReason({ ...provider, models: catalogModels }, "gemini-pro"),
+    ).toBeNull();
+    expect(getAntigravitySendBlockReason(provider, "")).toBe(
+      "Choose an Antigravity model before sending.",
     );
   });
 
@@ -989,6 +1093,56 @@ describe("buildRevertTurnCountByUserMessageId", () => {
         inferredCheckpointTurnCountByTurnId: {},
       }).size,
     ).toBe(0);
+  });
+
+  it.each([true, false])(
+    "returns the previous map when contents are unchanged (rollback supported: %s)",
+    (supportsConversationRollback) => {
+      const input = {
+        supportsConversationRollback,
+        timelineEntries,
+        turnDiffSummaryByAssistantMessageId,
+        inferredCheckpointTurnCountByTurnId: {},
+      };
+      const previous = buildRevertTurnCountByUserMessageId(input);
+      const streamed = timelineEntries.map((entry) =>
+        entry.message.role === "assistant"
+          ? { ...entry, message: { ...entry.message, text: "Updated the file again" } }
+          : entry,
+      );
+
+      expect(
+        buildRevertTurnCountByUserMessageId({ ...input, timelineEntries: streamed }, previous),
+      ).toBe(previous);
+    },
+  );
+
+  it("returns a new map when a revert target changes", () => {
+    const input = {
+      supportsConversationRollback: true,
+      timelineEntries,
+      turnDiffSummaryByAssistantMessageId,
+      inferredCheckpointTurnCountByTurnId: {},
+    };
+    const previous = buildRevertTurnCountByUserMessageId(input);
+    const next = buildRevertTurnCountByUserMessageId(
+      {
+        ...input,
+        turnDiffSummaryByAssistantMessageId: new Map([
+          [
+            assistantMessageId,
+            {
+              ...turnDiffSummaryByAssistantMessageId.get(assistantMessageId)!,
+              checkpointTurnCount: 3,
+            },
+          ],
+        ]),
+      },
+      previous,
+    );
+
+    expect(next).not.toBe(previous);
+    expect(next).toEqual(new Map([[userMessageId, 2]]));
   });
 });
 
@@ -1641,6 +1795,42 @@ describe("hasServerAcknowledgedLocalDispatch", () => {
 
     expect(hasServerAcknowledgedLocalDispatch({ ...common, hasPendingApproval: true })).toBe(true);
     expect(hasServerAcknowledgedLocalDispatch({ ...common, hasPendingUserInput: true })).toBe(true);
+    expect(
+      hasServerAcknowledgedLocalDispatch({
+        ...common,
+        latestTurnStartFailureId: "turn-start-failure-1",
+      }),
+    ).toBe(true);
     expect(hasServerAcknowledgedLocalDispatch({ ...common, threadError: "failed" })).toBe(true);
+  });
+
+  it("acknowledges only a new turn-start failure", () => {
+    const localDispatch = {
+      ...createLocalDispatchSnapshot(makeThread()),
+      latestTurnStartFailureId: "turn-start-failure-old",
+    };
+    const common = {
+      localDispatch,
+      phase: "ready" as const,
+      latestTurn: null,
+      latestUserMessageId: localDispatch.latestUserMessageId,
+      session: null,
+      hasPendingApproval: false,
+      hasPendingUserInput: false,
+      threadError: null,
+    };
+
+    expect(
+      hasServerAcknowledgedLocalDispatch({
+        ...common,
+        latestTurnStartFailureId: "turn-start-failure-old",
+      }),
+    ).toBe(false);
+    expect(
+      hasServerAcknowledgedLocalDispatch({
+        ...common,
+        latestTurnStartFailureId: "turn-start-failure-new",
+      }),
+    ).toBe(true);
   });
 });

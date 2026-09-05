@@ -3,26 +3,14 @@
 This guide is for people who want to use more than one Codex account in KamiCode.
 For Claude, see [Claude](./providers-claude.md).
 
-Common reasons:
+## Use multiple accounts
 
-- use a work account for work projects
-- use a personal account for personal projects
-- switch to another account when one account hits limits
-- keep one shared Codex history instead of maintaining two separate Codex setups
+A shared Codex home with a shadow home lets work and personal accounts continue
+the same threads. The accounts share Codex sessions and configuration while keeping
+their own login and available models.
 
-## I Only Use One Codex Account
-
-Use the default provider.
-
-In Settings, your Codex provider can stay like this:
-
-```text
-Display name: Codex
-CODEX_HOME path: ~/.codex
-Shadow home path: empty
-```
-
-Log in with Codex normally:
+Keep your first account in `~/.codex`. On the environment's machine, sign the
+second account into a fresh directory:
 
 ```bash
 codex login
@@ -113,38 +101,43 @@ Recommended setup:
 ~/.codex_p    second account auth
 ```
 
-The idea is:
+Then add a second Codex instance in **Settings > Providers**:
 
-- both accounts can see the same T3/Codex sessions
-- each account keeps its own login
-- existing threads can continue with either account
+| Instance       | CODEX_HOME path | Shadow home path    |
+| -------------- | --------------- | ------------------- |
+| Codex Work     | `~/.codex`      | Leave empty         |
+| Codex Personal | `~/.codex`      | `~/.codex_personal` |
 
-### Set Up The First Account
+Both instances must use the same **CODEX_HOME path**. T3 Code prepares the shared
+state in the shadow directory; do not populate it by copying your whole Codex
+home.
 
-Log in normally:
+The shadow account needs its own `auth.json` file. If Codex uses an OS credential
+store, configure file storage for this setup. See
+[OpenAI's credential storage guide](https://learn.chatgpt.com/docs/auth#credential-storage).
 
-```bash
-codex login
-```
+Use a completely separate **CODEX_HOME path**, with no shadow home, when you want
+separate Codex sessions and configuration. That instance cannot continue threads
+from the other home.
 
-This is the account used by `~/.codex`.
+## Switch accounts in an existing thread
 
 In KamiCode Settings, name it something obvious:
 
-```text
-Display name: Codex Work
-CODEX_HOME path: ~/.codex
-Shadow home path: empty
-```
+If the account is missing from the picker, compare the home paths in provider
+settings. If two instances show the same unexpected account or models, check their
+reported accounts, refresh provider status, and confirm the second instance has
+its own shadow path and login. A shadow-home conflict usually means the directory
+contains a copied Codex setup. Use a fresh shadow directory and sign in again.
 
-### Set Up The Second Account
+## Answer questions while Codex works
 
-Log in with a separate Codex home:
+Codex can ask a question and keep working. Answer it in the thread's question
+panel. The answer becomes a new message: it reaches the active turn, or starts
+another turn if Codex has finished. Unanswered questions survive reconnects.
+This requires a Codex version that supports async questions.
 
-```bash
-mkdir -p ~/.codex_p
-CODEX_HOME=~/.codex_p codex login
-```
+## Approve app access
 
 In KamiCode Settings, add another Codex provider:
 
@@ -211,5 +204,7 @@ find ~/.codex_p -mindepth 1 ! -name auth.json -exec rm -rf {} +
 
 Use a totally separate `CODEX_HOME path` only when you want a separate Codex workspace.
 
-That means separate sessions and less account switching inside old threads. Most dual-account users
-should use the shared-home plus shadow-home setup instead.
+In an existing Codex thread, send `/feedback` with an optional description, for
+example `/feedback The agent stopped before finishing the tests`. This uploads
+the conversation and Codex logs to OpenAI. The returned thread ID can be shared
+with OpenAI support.

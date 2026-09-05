@@ -28,6 +28,7 @@ function provideShell<A, E>(
       ElectronShell.ElectronShell.of({
         openExternal: () => Effect.succeed(false),
         revealLocalMediaFile: revealLocalMediaFileHandler,
+        openSystemSettings: () => Effect.succeed(false),
         copyText: () => Effect.void,
       }),
     ),

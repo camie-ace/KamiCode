@@ -37,6 +37,7 @@ import {
   MenuPopup,
   MenuRadioGroup,
   MenuRadioItem,
+  MenuRadioItemIndicator,
   MenuSeparator,
   MenuSub,
   MenuSubPopup,
@@ -78,7 +79,6 @@ export function PullRequestFilterOptionIcon<Value extends string>({
       projectName={option.label}
       faviconPath={option.favicon.faviconPath}
       projectIcon={option.favicon.projectIcon}
-      fallbackIcon={FolderGit2Icon}
       className="size-3.5"
     />
   ) : (
@@ -206,6 +206,7 @@ function PullRequestFilterRadioGroup<Value extends string>({
               <PullRequestFilterOptionIcon option={option} />
               <span className="min-w-0 flex-1 truncate">{option.label}</span>
               {option.unavailable ? <span className="shrink-0">· Unavailable</span> : null}
+              <MenuRadioItemIndicator />
             </span>
           </MenuRadioItem>
         );
@@ -456,8 +457,8 @@ export function PullRequestFiltersMenu({
     readonly environmentId: EnvironmentId;
     readonly title: string;
     readonly workspaceRoot: string;
-    readonly faviconPath?: string | null;
-    readonly projectIcon?: ProjectIconOverride | null;
+    readonly faviconPath?: string | null | undefined;
+    readonly projectIcon?: ProjectIconOverride | null | undefined;
   }>;
   projectId: ProjectId | undefined;
   /**

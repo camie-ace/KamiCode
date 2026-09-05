@@ -110,11 +110,10 @@ describe("ssh tunnel scripts", () => {
     assert.include(script, 'T3_CACHED_T3="$T3_RUNNER_CACHE/node_modules/.bin/t3"');
     assert.include(script, 'exec "$T3_CACHED_T3" "$@"');
     assert.include(script, 'npm install --prefix "$T3_RUNNER_CACHE"');
-    assert.include(script, 'exec npx --yes "$T3_PACKAGE_SPEC" "$@"');
-    assert.include(script, 'exec npm exec --yes "$T3_PACKAGE_SPEC" -- "$@"');
+    assert.include(script, 'exec "$T3_CLI_PATH" "$@"');
     assert.include(script, "could not install %s");
-    assert.include(script, 'require_installed_t3_cli npx --yes --package "$T3_PACKAGE_SPEC"');
-    assert.include(script, 'require_installed_t3_cli npm exec --yes --package "$T3_PACKAGE_SPEC"');
+    assert.include(script, "require_installed_t3_cli npx --yes --package 't3@latest'");
+    assert.include(script, "require_installed_t3_cli npm exec --yes --package 't3@latest'");
     assert.include(script, "npm produced no t3 executable");
     assert.include(script, 'prepend_path_if_dir "$HOME/.local/bin"');
     assert.include(script, `T3_NODE_ENGINE_RANGE='${TEST_NODE_ENGINE_RANGE}'`);
@@ -164,9 +163,10 @@ describe("ssh tunnel scripts", () => {
     });
 
     assert.include(script, "T3_PACKAGE_SPEC='t3@nightly; touch /tmp/t3-owned'");
-    assert.include(script, 'exec npx --yes "$T3_PACKAGE_SPEC" "$@"');
-    assert.include(script, 'exec npm exec --yes "$T3_PACKAGE_SPEC" -- "$@"');
-    assert.include(script, 'require_installed_t3_cli npx --yes --package "$T3_PACKAGE_SPEC"');
+    assert.include(
+      script,
+      "require_installed_t3_cli npx --yes --package 't3@nightly; touch /tmp/t3-owned'",
+    );
     assert.notInclude(script, "exec npx --yes t3@nightly; touch /tmp/t3-owned");
     assert.notInclude(script, 'npm install --prefix "$T3_RUNNER_CACHE" t3@nightly; touch');
   });

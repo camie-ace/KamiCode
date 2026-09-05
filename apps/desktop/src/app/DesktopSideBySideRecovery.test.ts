@@ -38,6 +38,7 @@ const makeShellLayer = (openedUrls: unknown[]) =>
         return true;
       }),
     revealLocalMediaFile: () => Effect.succeed(false),
+    openSystemSettings: () => Effect.succeed(false),
     copyText: () => Effect.void,
   } satisfies ElectronShell.ElectronShell["Service"]);
 

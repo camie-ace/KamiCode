@@ -303,6 +303,7 @@ function makeTestLayer(input: {
               return true;
             }),
           revealLocalMediaFile: () => Effect.succeed(false),
+          openSystemSettings: () => Effect.succeed(true),
           copyText: () => Effect.void,
         } satisfies ElectronShell.ElectronShell["Service"]),
         electronThemeLayer,
@@ -404,6 +405,7 @@ const makeSplashScenario = (createOutcomes: readonly (Electron.BrowserWindow | n
           Layer.succeed(ElectronShell.ElectronShell, {
             openExternal: () => Effect.succeed(true),
             revealLocalMediaFile: () => Effect.succeed(false),
+            openSystemSettings: () => Effect.succeed(true),
             copyText: () => Effect.void,
           } satisfies ElectronShell.ElectronShell["Service"]),
           electronThemeLayer,

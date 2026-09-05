@@ -26,6 +26,10 @@ function cloudflaredExecutableName(platform: NodeJS.Platform): string {
   return platform === "win32" ? "cloudflared.exe" : "cloudflared";
 }
 
+// The suite runs the linux code path against the real filesystem, checking
+// POSIX exec bits that NTFS never reports; the win32 branch skips that check.
+const windowsHost = HostProcessPlatform.defaultValue() === "win32";
+
 const hostRuntimeLayer = (env: Record<string, string> = {}) =>
   Layer.mergeAll(
     Layer.succeed(HostProcessArchitecture, testArch),
@@ -207,7 +211,7 @@ describe("RelayClient", () => {
     ),
   );
 
-  it.effect("serializes concurrent installs within one runtime", () => {
+  it.effect.skipIf(windowsHost)("serializes concurrent installs within one runtime", () => {
     const commands: Array<string> = [];
     const bytes = new TextEncoder().encode("test-cloudflared-binary");
     return Effect.gen(function* () {

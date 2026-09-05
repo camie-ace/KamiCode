@@ -310,52 +310,61 @@ describe("resolveInitialServerAuthGateState", () => {
     expect(testApi.calls.session).toBe(2);
   });
 
-  it("waits for a manually paired browser session to become observable", async () => {
+  it("keeps manual token submission pending until the session is authenticated", async () => {
     vi.useFakeTimers();
-    const nextSession = sequence(
-      unauthenticatedSession(LOOPBACK_AUTH),
-      unauthenticatedSession(LOOPBACK_AUTH),
-      authenticatedSession(LOOPBACK_AUTH),
-    );
-    const testApi = await installAuthApi({
-      session: nextSession,
-      browserSession: () => Effect.succeed(browserSession(["orchestration:read"])),
-    });
-    const { resolveInitialServerAuthGateState, submitServerAuthCredential } =
-      await import("./environments/primary");
+    let authenticated = false;
+    let settled = false;
+    try {
+      const testApi = await installAuthApi({
+        session: () =>
+          authenticated
+            ? authenticatedSession(LOOPBACK_AUTH)
+            : unauthenticatedSession(LOOPBACK_AUTH),
+        browserSession: () => Effect.succeed(browserSession(["orchestration:read"])),
+      });
+      const { submitServerAuthCredential } = await import("./environments/primary");
 
-    await expect(resolveInitialServerAuthGateState()).resolves.toMatchObject({
-      status: "requires-auth",
-    });
-    const submitPromise = submitServerAuthCredential("retry-token");
-    await vi.advanceTimersByTimeAsync(100);
+      const submission = submitServerAuthCredential("retry-token").finally(() => {
+        settled = true;
+      });
+      await vi.advanceTimersByTimeAsync(0);
 
-    await expect(submitPromise).resolves.toBeUndefined();
-    await expect(resolveInitialServerAuthGateState()).resolves.toEqual({
-      status: "authenticated",
-    });
-    expect(testApi.calls.session).toBe(3);
+      expect(testApi.calls.browserSession).toEqual([{ credential: "retry-token" }]);
+      expect(testApi.calls.session).toBe(1);
+      expect(settled).toBe(false);
+
+      authenticated = true;
+      await vi.advanceTimersByTimeAsync(100);
+      await expect(submission).resolves.toBeUndefined();
+      expect(testApi.calls.session).toBe(2);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
-  it("does not finish manual pairing when the browser session is not usable", async () => {
+  it("fails manual token submission when the session is not established", async () => {
     vi.useFakeTimers();
-    const testApi = await installAuthApi({
-      session: () => unauthenticatedSession(LOOPBACK_AUTH),
-      browserSession: () => Effect.succeed(browserSession(["orchestration:read"])),
-    });
-    const { submitServerAuthCredential } = await import("./environments/primary");
+    try {
+      const testApi = await installAuthApi({
+        session: () => unauthenticatedSession(LOOPBACK_AUTH),
+        browserSession: () => Effect.succeed(browserSession(["orchestration:read"])),
+      });
+      const { PrimaryEnvironmentAuthSessionTimeoutError, submitServerAuthCredential } =
+        await import("./environments/primary/auth");
 
-    const submitResult = submitServerAuthCredential("retry-token").then(
-      () => null,
-      (error: unknown) => error,
-    );
-    await vi.advanceTimersByTimeAsync(2_000);
+      const submission = submitServerAuthCredential("retry-token");
+      const failure = submission.then(
+        () => null,
+        (error: unknown) => error,
+      );
+      await vi.advanceTimersByTimeAsync(2_000);
 
-    await expect(submitResult).resolves.toMatchObject({
-      _tag: "PrimaryEnvironmentAuthSessionTimeoutError",
-      message: "Timed out waiting for authenticated session after bootstrap.",
-    });
-    expect(testApi.calls.browserSession).toEqual([{ credential: "retry-token" }]);
+      await expect(failure).resolves.toBeInstanceOf(PrimaryEnvironmentAuthSessionTimeoutError);
+      expect(testApi.calls.browserSession).toEqual([{ credential: "retry-token" }]);
+      expect(testApi.calls.session).toBeGreaterThan(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("rejects a blank pairing token with a structured validation error", async () => {

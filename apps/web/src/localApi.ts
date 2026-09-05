@@ -35,6 +35,17 @@ function createBrowserLocalApi(): LocalApi {
         }
         return window.desktopBridge.revealLocalMediaFile(input);
       },
+      // Only the desktop shell can reach the OS; the web build (and older
+      // desktop shells that predate this method) have nothing to open.
+      openSystemSettings: async (pane) => {
+        if (!window.desktopBridge?.openSystemSettings) {
+          throw new Error("Unable to open System Settings.");
+        }
+        const opened = await window.desktopBridge.openSystemSettings(pane);
+        if (!opened) {
+          throw new Error("Unable to open System Settings.");
+        }
+      },
     },
     contextMenu: {
       show: async <T extends string>(

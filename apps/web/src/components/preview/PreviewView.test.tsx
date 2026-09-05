@@ -257,7 +257,7 @@ vi.mock("~/browser/HostedBrowserRemoteView", () => ({
   },
 }));
 
-import { PreviewView, previewProfileName } from "./PreviewView";
+import { PreviewView } from "./PreviewView";
 import { toastManager } from "~/components/ui/toast";
 import { previewRuntimeTabId } from "~/browser/previewRuntimeTabId";
 
@@ -366,12 +366,6 @@ describe("PreviewView navigation", () => {
 
     expect(markup).toContain('data-testid="hosted-browser-remote"');
     expect(mocks.hostedRemoteRenderCount).toBe(1);
-  });
-
-  it("labels a tab whose saved profile was removed", () => {
-    expect(previewProfileName(BUILT_IN_BROWSER_PROFILES, "profile-removed")).toBe(
-      "Removed profile",
-    );
   });
 
   it("does not rerender while loading time passes", async () => {
