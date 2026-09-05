@@ -631,8 +631,7 @@ if [ -x "$T3_CACHED_T3" ] && [ "$(cat "$T3_RUNNER_SPEC_FILE" 2>/dev/null || true
   exec "$T3_CACHED_T3" "$@"
 fi
 
-if command -v npm >/dev/null 2>&1; then
-  mkdir -p "$T3_RUNNER_CACHE"
+if command -v npm >/dev/null 2>&1 && mkdir -p "$T3_RUNNER_CACHE" 2>/dev/null; then
   printf 'Installing %s for KamiCode SSH runtime under %s.\\n' "$T3_PACKAGE_SPEC" "$T3_RUNNER_CACHE" >&2
   if npm install --prefix "$T3_RUNNER_CACHE" --no-audit --no-fund --loglevel=error "$T3_PACKAGE_SPEC" >/dev/null; then
     printf '%s\\n' "$T3_PACKAGE_SPEC" >"$T3_RUNNER_SPEC_FILE"

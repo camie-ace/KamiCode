@@ -109,6 +109,10 @@ describe("ssh tunnel scripts", () => {
     assert.include(script, 'T3_RUNNER_CACHE="$HOME/.t3/runner/t3-cli"');
     assert.include(script, 'T3_CACHED_T3="$T3_RUNNER_CACHE/node_modules/.bin/t3"');
     assert.include(script, 'exec "$T3_CACHED_T3" "$@"');
+    assert.include(
+      script,
+      'command -v npm >/dev/null 2>&1 && mkdir -p "$T3_RUNNER_CACHE" 2>/dev/null',
+    );
     assert.include(script, 'npm install --prefix "$T3_RUNNER_CACHE"');
     assert.include(script, 'exec "$T3_CLI_PATH" "$@"');
     assert.include(script, "could not install %s");

@@ -81,6 +81,7 @@ if (args.includes("--package")) {
                 ChildProcess.make("/bin/sh", ["-s", "--", "serve", "a path with spaces"], {
                   cwd: fixture,
                   env: {
+                    HOME: fixture,
                     PATH: bin,
                     T3_TEST_CLI: cliPath,
                     T3_TEST_CALLS: callsPath,
@@ -233,6 +234,7 @@ if (mode === "etarget" || mode === "failed-with-path") {
             cwd: fixture,
             extendEnv: false,
             env: {
+              HOME: fixture,
               PATH: bin,
               T3_TEST_MODE: mode,
               T3_TEST_CLI: cliPath,
