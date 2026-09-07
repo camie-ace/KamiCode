@@ -116,6 +116,11 @@ afterEach(async () => {
   pool?.terminate();
   await Promise.all(terminationPromises);
   await disposeHighlighter();
+  // WorkerPoolManager batches subscriber cleanup through requestAnimationFrame.
+  // Let the setImmediate-backed frame run while both frame globals are still
+  // installed, otherwise the full parallel suite can observe a late callback
+  // after vi.unstubAllGlobals() and report an unhandled exception.
+  await new Promise<void>((resolve) => setImmediate(resolve));
   vi.unstubAllGlobals();
 });
 
