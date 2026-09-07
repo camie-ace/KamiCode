@@ -213,7 +213,7 @@ it("requires a settlement to match the live Grok turn", () => {
 });
 
 it.layer(grokAdapterTestLayer)("GrokAdapterLive", (it) => {
-  it.effect("sends runtime context with the current model without changing saved prompts", () =>
+  it.effect("sends the repository contract and runtime context with the current model", () =>
     Effect.gen(function* () {
       const threadId = ThreadId.make("grok-runtime-context");
       const tempDir = yield* Effect.promise(() =>
@@ -246,13 +246,19 @@ it.layer(grokAdapterTestLayer)("GrokAdapterLive", (it) => {
         [
           [
             {
-              prompt: [{ type: "text", text: "First prompt" }],
+              prompt: [
+                { type: "text", text: REPOSITORY_OPERATING_CONTRACT },
+                { type: "text", text: "First prompt" },
+              ],
               result: { stopReason: "end_turn" },
             },
           ],
           [
             {
-              prompt: [{ type: "text", text: "Second prompt" }],
+              prompt: [
+                { type: "text", text: REPOSITORY_OPERATING_CONTRACT },
+                { type: "text", text: "Second prompt" },
+              ],
               result: { stopReason: "end_turn" },
             },
           ],
@@ -266,12 +272,20 @@ it.layer(grokAdapterTestLayer)("GrokAdapterLive", (it) => {
           (request) => (request.params as { prompt: Array<{ type: string; text: string }> }).prompt,
         );
       assert.equal(prompts.length, 2);
-      assert.deepEqual(prompts[0]?.[0], { type: "text", text: "First prompt" });
-      assert.include(prompts[0]?.[1]?.text, "Grok harness, as grok-mock-alt");
-      assert.deepEqual(prompts[1]?.[0], { type: "text", text: "Second prompt" });
-      assert.include(prompts[1]?.[1]?.text, "Grok harness, as grok-4.6");
-      assert.include(prompts[1]?.[1]?.text, "with low reasoning effort");
-      assert.include(prompts[1]?.[1]?.text, "embed images and videos");
+      assert.deepEqual(prompts[0]?.[0], {
+        type: "text",
+        text: REPOSITORY_OPERATING_CONTRACT,
+      });
+      assert.deepEqual(prompts[0]?.[1], { type: "text", text: "First prompt" });
+      assert.include(prompts[0]?.[2]?.text, "Grok harness, as grok-mock-alt");
+      assert.deepEqual(prompts[1]?.[0], {
+        type: "text",
+        text: REPOSITORY_OPERATING_CONTRACT,
+      });
+      assert.deepEqual(prompts[1]?.[1], { type: "text", text: "Second prompt" });
+      assert.include(prompts[1]?.[2]?.text, "Grok harness, as grok-4.6");
+      assert.include(prompts[1]?.[2]?.text, "with low reasoning effort");
+      assert.include(prompts[1]?.[2]?.text, "embed images and videos");
     }),
   );
 

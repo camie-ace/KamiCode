@@ -247,11 +247,23 @@ it.effect("publishes checkpoints from a disposable object quarantine", () =>
       yield* runGit(cwd, ["init"]);
       yield* runGit(cwd, ["config", "user.email", "test@test.com"]);
       yield* runGit(cwd, ["config", "user.name", "Test"]);
-      yield* runGit(cwd, ["config", "core.autocrlf", "true"]);
+      // The test bootstrap pins core.autocrlf=false at command scope so the
+      // suite is host-independent. A repository attribute still proves that
+      // quarantined staging honors the checkout's own clean rules.
+      yield* fileSystem.writeFileString(
+        path.join(cwd, ".gitattributes"),
+        "line-endings.txt text eol=lf\n",
+      );
       yield* fileSystem.writeFileString(path.join(cwd, "tracked.txt"), "before\n");
       yield* fileSystem.writeFileString(path.join(cwd, "line-endings.txt"), "before\r\n");
-      yield* runGit(cwd, ["add", "tracked.txt", "line-endings.txt"]);
+      yield* runGit(cwd, ["add", ".gitattributes", "tracked.txt", "line-endings.txt"]);
       yield* runGit(cwd, ["commit", "-m", "initial"]);
+      const initialNormalizedFile = yield* driver.execute({
+        operation: "GitVcsDriver.test.initialRepositoryAttributes",
+        cwd,
+        args: ["show", "HEAD:line-endings.txt"],
+      });
+      assert.strictEqual(initialNormalizedFile.stdout, "before\n");
 
       const baselineRef = CheckpointRef.make("refs/t3/checkpoints/test/baseline");
       yield* driver.checkpoints!.captureCheckpoint({ cwd, checkpointRef: baselineRef });
@@ -275,7 +287,7 @@ it.effect("publishes checkpoints from a disposable object quarantine", () =>
       });
       assert.strictEqual(checkpointFile.stdout, "after\n");
       const normalizedFile = yield* driver.execute({
-        operation: "GitVcsDriver.test.checkpointRepositoryConfig",
+        operation: "GitVcsDriver.test.checkpointRepositoryAttributes",
         cwd,
         args: ["show", `${checkpointRef}:line-endings.txt`],
       });
