@@ -16,6 +16,7 @@ import {
   CommandId,
   DEFAULT_PROVIDER_INTERACTION_MODE,
   EventId,
+  KamiUserId,
   MessageId,
   type OrchestrationCommand,
   ProjectId,
@@ -36,6 +37,7 @@ import * as PubSub from "effect/PubSub";
 import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 import * as Tracer from "effect/Tracer";
+import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { it as effectIt } from "@effect/vitest";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
@@ -234,7 +236,10 @@ async function waitForThread(
 
 describe("ProviderRuntimeIngestion", () => {
   let runtime: ManagedRuntime.ManagedRuntime<
-    OrchestrationEngineService | ProviderRuntimeIngestionService | ProjectionSnapshotQuery,
+    | OrchestrationEngineService
+    | ProviderRuntimeIngestionService
+    | ProjectionSnapshotQuery
+    | SqlClient.SqlClient,
     unknown
   > | null = null;
   let scope: Scope.Closeable | null = null;
@@ -310,8 +315,10 @@ describe("ProviderRuntimeIngestion", () => {
     scope = await Effect.runPromise(Scope.make("sequential"));
     await testRuntime.runPromise(ingestion.start().pipe(Scope.provide(scope)));
     const drain = () => testRuntime.runPromise(ingestion.drain);
-    const dispatch = (command: OrchestrationCommand) =>
-      testRuntime.runPromise(engine.dispatch(command));
+    const dispatch = (
+      command: OrchestrationCommand,
+      options?: Parameters<typeof engine.dispatch>[1],
+    ) => testRuntime.runPromise(engine.dispatch(command, options));
     const emitAndDrain = (events: ReadonlyArray<LegacyProviderRuntimeEvent>) =>
       testRuntime.runPromise(
         provider.emitAndWaitForEnqueue(events).pipe(Effect.andThen(ingestion.drain)),
@@ -385,8 +392,125 @@ describe("ProviderRuntimeIngestion", () => {
       sqlCount: sqlCounter.count,
       setProviderSession: provider.setSession,
       drain,
+      readUserTurnAttribution: () =>
+        testRuntime.runPromise(
+          Effect.gen(function* () {
+            const sql = yield* SqlClient.SqlClient;
+            return yield* sql<{
+              readonly cachedInputTokens: number | null;
+              readonly githubLogin: string;
+              readonly inputTokens: number | null;
+              readonly outputTokens: number | null;
+              readonly projectId: string;
+              readonly reasoningTokens: number | null;
+              readonly terminalStatus: string | null;
+              readonly turnId: string | null;
+              readonly userId: string;
+            }>`
+              SELECT
+                cached_input_tokens AS "cachedInputTokens",
+                github_login AS "githubLogin",
+                input_tokens AS "inputTokens",
+                output_tokens AS "outputTokens",
+                project_id AS "projectId",
+                reasoning_tokens AS "reasoningTokens",
+                terminal_status AS "terminalStatus",
+                turn_id AS "turnId",
+                user_id AS "userId"
+              FROM user_turn_attribution
+              ORDER BY requested_at ASC
+            `;
+          }),
+        ),
     };
   }
+
+  it("persists per-user and per-project token attribution for completed turns", async () => {
+    const harness = await createHarness();
+    const threadId = asThreadId("thread-1");
+    const requestedAt = "2026-09-07T10:00:00.000Z";
+    await harness.dispatch(
+      {
+        type: "thread.turn.start",
+        commandId: CommandId.make("command-attributed-turn"),
+        threadId,
+        message: {
+          messageId: MessageId.make("message-attributed-turn"),
+          role: "user",
+          text: "Attribute this turn",
+          attachments: [],
+        },
+        modelSelection: {
+          instanceId: ProviderInstanceId.make("codex"),
+          model: "gpt-6-astra",
+        },
+        runtimeMode: "approval-required",
+        interactionMode: "default",
+        createdAt: requestedAt,
+      },
+      {
+        origin: {
+          surface: "web",
+          appVersion: "0.1.10",
+          user: {
+            userId: KamiUserId.make("user-attributed"),
+            githubId: "123",
+            githubLogin: "julius",
+            displayName: "Julius",
+            avatarUrl: null,
+          },
+        },
+      },
+    );
+
+    await harness.emitAndDrain([
+      {
+        type: "turn.started",
+        eventId: asEventId("event-attributed-turn-started"),
+        provider: ProviderDriverKind.make("codex"),
+        providerInstanceId: ProviderInstanceId.make("codex"),
+        threadId,
+        createdAt: "2026-09-07T10:00:01.000Z",
+        turnId: asTurnId("turn-attributed"),
+        payload: { model: "gpt-6-astra", effort: "high" },
+      },
+      {
+        type: "turn.completed",
+        eventId: asEventId("event-attributed-turn-completed"),
+        provider: ProviderDriverKind.make("codex"),
+        providerInstanceId: ProviderInstanceId.make("codex"),
+        threadId,
+        createdAt: "2026-09-07T10:01:00.000Z",
+        turnId: asTurnId("turn-attributed"),
+        payload: {
+          state: "completed",
+          tokenUsage: {
+            usageStatus: "complete",
+            usageScope: "main_agent",
+            hasSubagents: false,
+            inputTokens: 1500,
+            cachedInputTokens: 400,
+            outputTokens: 325,
+            reasoningTokens: 80,
+          },
+        },
+      },
+    ]);
+
+    expect(await harness.readUserTurnAttribution()).toEqual([
+      {
+        cachedInputTokens: 400,
+        githubLogin: "julius",
+        inputTokens: 1500,
+        outputTokens: 325,
+        projectId: "project-1",
+        reasoningTokens: 80,
+        terminalStatus: "completed",
+        turnId: "turn-attributed",
+        userId: "user-attributed",
+      },
+    ]);
+  });
 
   it("maps turn started/completed events into thread session updates", async () => {
     const harness = await createHarness();

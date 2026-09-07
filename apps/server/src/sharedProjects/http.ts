@@ -77,9 +77,12 @@ const respondToSharedProjectsError = (error: SharedProjectsError) =>
 
 const authenticateSharedProjectUser = (scope: AuthEnvironmentScope) =>
   Effect.gen(function* () {
-    const request = yield* authenticateEnvironmentRequestWithScope(scope);
+    const { request, session } = yield* authenticateEnvironmentRequestWithScope(scope);
     const userAuth = yield* UserAuth;
-    return yield* userAuth.authenticateRequest(request);
+    return yield* userAuth.authenticateEnvironmentSession({
+      request,
+      environmentSessionId: session.sessionId,
+    });
   });
 
 const projectIdFromQuery = Effect.gen(function* () {

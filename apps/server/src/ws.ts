@@ -156,6 +156,8 @@ import * as VcsProjectConfig from "./vcs/VcsProjectConfig.ts";
 import * as PairingGrantStore from "./auth/PairingGrantStore.ts";
 import * as SessionStore from "./auth/SessionStore.ts";
 import { failEnvironmentAuthInvalid, failEnvironmentInternal } from "./auth/http.ts";
+import { UserAuth } from "./userAuth/Services/UserAuth.ts";
+import { respondToUserAuthError } from "./userAuth/http.ts";
 import { makeProjectTriggerRunRow } from "./projectTriggers/commands.ts";
 import {
   ProjectTriggerId,
@@ -481,7 +483,9 @@ const makeWsRpcLayer = (
       // client's origin, including server-generated bootstrap sub-commands:
       // the client's request caused them.
       const hasClientOrigin =
-        clientOrigin.surface !== undefined || clientOrigin.appVersion !== undefined;
+        clientOrigin.surface !== undefined ||
+        clientOrigin.appVersion !== undefined ||
+        clientOrigin.user !== undefined;
       const dispatchFromClient = (command: OrchestrationCommand) =>
         orchestrationDispatcher.dispatch(
           command,
@@ -3227,6 +3231,7 @@ export const websocketRpcRouteLayer = Layer.unwrap(
       Effect.gen(function* () {
         const request = yield* HttpServerRequest.HttpServerRequest;
         const serverAuth = yield* EnvironmentAuth.EnvironmentAuth;
+        const userAuth = yield* UserAuth;
         const sessions = yield* SessionStore.SessionStore;
         const analytics = yield* AnalyticsService.AnalyticsService;
         const session = yield* serverAuth.authenticateWebSocketUpgrade(request).pipe(
@@ -3240,8 +3245,31 @@ export const websocketRpcRouteLayer = Layer.unwrap(
             failEnvironmentInternal("internal_error", error),
           ),
         );
-        const clientOrigin = readClientConnectionOrigin(request);
-        const clientAnalyticsProps = readClientAnalyticsProps(request);
+        const linkedUser = yield* userAuth.getEnvironmentSessionUser(session.sessionId);
+        const authenticatedUser =
+          linkedUser === null &&
+          userAuth.profileRequiredForBrowserSessions &&
+          session.method === "browser-session-cookie"
+            ? yield* userAuth.authenticateEnvironmentSession({
+                request,
+                environmentSessionId: session.sessionId,
+              })
+            : linkedUser;
+        const announcedOrigin = readClientConnectionOrigin(request);
+        const clientOrigin: OrchestrationClientOrigin = {
+          ...announcedOrigin,
+          ...(authenticatedUser === null ? {} : { user: authenticatedUser.user }),
+        };
+        const announcedAnalyticsProps = readClientAnalyticsProps(request);
+        const clientAnalyticsProps = {
+          ...announcedAnalyticsProps,
+          ...(authenticatedUser === null
+            ? {}
+            : {
+                userId: authenticatedUser.user.userId,
+                githubLogin: authenticatedUser.user.githubLogin,
+              }),
+        };
         yield* sessions.recordClientConnection(session.sessionId, clientOrigin);
         yield* analytics.record("client.connected", clientAnalyticsProps);
         const rpcWebSocketHttpEffect = yield* RpcServer.toHttpEffectWebsocket(WsRpcGroup, {
@@ -3294,6 +3322,7 @@ export const websocketRpcRouteLayer = Layer.unwrap(
         Effect.catchTags({
           EnvironmentAuthInvalidError: HttpServerRespondable.toResponse,
           EnvironmentInternalError: HttpServerRespondable.toResponse,
+          UserAuthError: respondToUserAuthError,
         }),
       ),
     );

@@ -55,6 +55,8 @@ import { ProjectionThreadSessionRepositoryLive } from "../../persistence/Layers/
 import { ProjectionTurnRepositoryLive } from "../../persistence/Layers/ProjectionTurns.ts";
 import { ProjectionTurnQueueRepositoryLive } from "../../persistence/Layers/ProjectionTurnQueue.ts";
 import { ProjectionThreadRepositoryLive } from "../../persistence/Layers/ProjectionThreads.ts";
+import { UserActivityAttributionRepositoryLive } from "../../persistence/Layers/UserActivityAttribution.ts";
+import { UserActivityAttributionRepository } from "../../persistence/Services/UserActivityAttribution.ts";
 import { ServerConfig } from "../../config.ts";
 import {
   OrchestrationProjectionPipeline,
@@ -521,6 +523,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
     const projectionTurnRepository = yield* ProjectionTurnRepository;
     const projectionTurnQueueRepository = yield* ProjectionTurnQueueRepository;
     const projectionPendingApprovalRepository = yield* ProjectionPendingApprovalRepository;
+    const userActivityAttributionRepository = yield* UserActivityAttributionRepository;
 
     const fileSystem = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
@@ -676,6 +679,14 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             hasActionableProposedPlan: 0,
             deletedAt: null,
           });
+          if (event.metadata.origin?.user !== undefined) {
+            yield* userActivityAttributionRepository.recordThreadCreated({
+              threadId: event.payload.threadId,
+              projectId: event.payload.projectId,
+              user: event.metadata.origin.user,
+              createdAt: event.payload.createdAt,
+            });
+          }
           return;
 
         case "thread.archived": {
@@ -1318,6 +1329,25 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
           return;
 
         case "thread.turn-start-requested": {
+          if (event.metadata.origin?.user !== undefined) {
+            const thread = yield* projectionThreadRepository.getById({
+              threadId: event.payload.threadId,
+            });
+            if (Option.isSome(thread)) {
+              const modelSelection = event.payload.modelSelection ?? thread.value.modelSelection;
+              yield* userActivityAttributionRepository.recordTurnRequested({
+                requestEventId: event.eventId,
+                commandId: event.commandId,
+                messageId: event.payload.messageId,
+                threadId: event.payload.threadId,
+                projectId: thread.value.projectId,
+                user: event.metadata.origin.user,
+                requestedAt: event.payload.createdAt,
+                providerInstanceId: modelSelection.instanceId,
+                model: modelSelection.model,
+              });
+            }
+          }
           if (event.payload.dispatchPolicy === "queue") {
             return;
           }
@@ -2224,4 +2254,5 @@ export const OrchestrationProjectionPipelineLive = Layer.effect(
   Layer.provideMerge(ProjectionTurnQueueRepositoryLive),
   Layer.provideMerge(ProjectionPendingApprovalRepositoryLive),
   Layer.provideMerge(ProjectionStateRepositoryLive),
+  Layer.provideMerge(UserActivityAttributionRepositoryLive),
 );

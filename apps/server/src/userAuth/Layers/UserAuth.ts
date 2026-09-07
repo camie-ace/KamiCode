@@ -88,6 +88,7 @@ type DesktopGitHubLoginHandoff =
       readonly sessionState: UserAuthSessionState;
       readonly sessionToken: string;
       readonly sessionExpiresAt: DateTime.DateTime;
+      readonly authenticatedUser: AuthenticatedUser;
       readonly expiresAt: DateTime.DateTime;
     };
 
@@ -193,8 +194,11 @@ export const makeUserAuth = Effect.gen(function* () {
   const stateCookieName = `${cookieName}_github_state`;
   const githubClientId = normalizeRequiredConfig(config.githubOAuthClientId);
   const githubClientSecret = normalizeRequiredConfig(config.githubOAuthClientSecret);
-  const enabled =
-    githubClientId !== null && (config.mode === "desktop" || githubClientSecret !== null);
+  // Device authorization needs only the public OAuth client id and is used by
+  // both desktop and KC Web. A client secret remains optional for the legacy
+  // redirect/callback flow.
+  const enabled = githubClientId !== null;
+  const profileRequiredForBrowserSessions = enabled && config.mode === "web";
 
   const toUserAuthError = (message: string, status?: UserAuthError["status"]) => (cause: unknown) =>
     new UserAuthError({
@@ -210,10 +214,7 @@ export const makeUserAuth = Effect.gen(function* () {
         })
       : Effect.fail(
           new UserAuthError({
-            message:
-              config.mode === "desktop"
-                ? "GitHub login is not configured. Set T3CODE_GITHUB_OAUTH_CLIENT_ID."
-                : "GitHub OAuth login is not configured. Set T3CODE_GITHUB_OAUTH_CLIENT_ID and T3CODE_GITHUB_OAUTH_CLIENT_SECRET.",
+            message: "GitHub login is not configured. Set T3CODE_GITHUB_OAUTH_CLIENT_ID.",
             status: 503,
           }),
         );
@@ -363,30 +364,57 @@ export const makeUserAuth = Effect.gen(function* () {
       ),
     );
 
-  const getSessionState: UserAuthShape["getSessionState"] = (request) => {
+  const bindEnvironmentSession: UserAuthShape["bindEnvironmentSession"] = Effect.fn(
+    "UserAuth.bindEnvironmentSession",
+  )(function* ({ environmentSessionId, authenticatedUser }) {
+    const linkedAt = yield* DateTime.now;
+    yield* userAuthRepository
+      .bindEnvironmentSession({
+        environmentSessionId,
+        userAuthSessionId: authenticatedUser.sessionId,
+        linkedAt,
+      })
+      .pipe(
+        Effect.mapError(
+          toUserAuthError("Failed to link the environment session to its GitHub profile.", 500),
+        ),
+      );
+  });
+
+  const unbindEnvironmentSession = (
+    environmentSessionId: Parameters<UserAuthShape["getEnvironmentSessionUser"]>[0],
+  ) =>
+    userAuthRepository
+      .unbindEnvironmentSession({ environmentSessionId })
+      .pipe(
+        Effect.mapError(
+          toUserAuthError("Failed to unlink the environment session from its GitHub profile.", 500),
+        ),
+      );
+
+  const getEnvironmentSessionUser: UserAuthShape["getEnvironmentSessionUser"] = Effect.fn(
+    "UserAuth.getEnvironmentSessionUser",
+  )(function* (environmentSessionId) {
     if (!enabled) {
-      return Effect.succeed(makeDisabledState());
+      return null;
     }
-
-    const token = request.cookies[cookieName];
-    if (!token) {
-      return Effect.succeed(makeUnauthenticatedState());
+    const now = yield* DateTime.now;
+    const record = yield* userAuthRepository
+      .getEnvironmentSessionUser({ environmentSessionId, now })
+      .pipe(
+        Effect.mapError(
+          toUserAuthError("Failed to load the GitHub profile for this environment session.", 500),
+        ),
+      );
+    if (Option.isNone(record)) {
+      return null;
     }
-
-    return verifyToken(token).pipe(
-      Effect.map(
-        (authenticated) =>
-          ({
-            enabled: true,
-            authenticated: true,
-            provider: "github",
-            user: authenticated.user,
-            expiresAt: DateTime.toUtc(authenticated.expiresAt),
-          }) satisfies UserAuthSessionState,
-      ),
-      Effect.catchTag("UserAuthError", () => Effect.succeed(makeUnauthenticatedState())),
-    );
-  };
+    return {
+      sessionId: record.value.sessionId,
+      user: toKamiUser(record.value.user),
+      expiresAt: record.value.expiresAt,
+    } satisfies AuthenticatedUser;
+  });
 
   const authenticateRequest: UserAuthShape["authenticateRequest"] = (request) =>
     Effect.gen(function* () {
@@ -400,6 +428,56 @@ export const makeUserAuth = Effect.gen(function* () {
       }
       return yield* verifyToken(token);
     });
+
+  const authenticateEnvironmentSession: UserAuthShape["authenticateEnvironmentSession"] = Effect.fn(
+    "UserAuth.authenticateEnvironmentSession",
+  )(function* ({ request, environmentSessionId }) {
+    const authenticatedUser = yield* authenticateRequest(request);
+    yield* bindEnvironmentSession({ environmentSessionId, authenticatedUser });
+    return authenticatedUser;
+  });
+
+  const getSessionState: UserAuthShape["getSessionState"] = (request, environmentSessionId) => {
+    if (!enabled) {
+      return Effect.succeed(makeDisabledState());
+    }
+
+    const token = request.cookies[cookieName];
+    if (!token) {
+      return environmentSessionId === undefined
+        ? Effect.succeed(makeUnauthenticatedState())
+        : unbindEnvironmentSession(environmentSessionId).pipe(
+            Effect.as(makeUnauthenticatedState()),
+          );
+    }
+
+    return verifyToken(token).pipe(
+      Effect.flatMap((authenticated) =>
+        (environmentSessionId === undefined
+          ? Effect.void
+          : bindEnvironmentSession({ environmentSessionId, authenticatedUser: authenticated })
+        ).pipe(
+          Effect.as({
+            enabled: true,
+            authenticated: true,
+            provider: "github",
+            user: authenticated.user,
+            expiresAt: DateTime.toUtc(authenticated.expiresAt),
+          } satisfies UserAuthSessionState),
+        ),
+      ),
+      Effect.catchTag("UserAuthError", (error) => {
+        if (error.status !== 401) {
+          return Effect.fail(error);
+        }
+        return environmentSessionId === undefined
+          ? Effect.succeed(makeUnauthenticatedState())
+          : unbindEnvironmentSession(environmentSessionId).pipe(
+              Effect.as(makeUnauthenticatedState()),
+            );
+      }),
+    );
+  };
 
   const createGitHubLogin: UserAuthShape["createGitHubLogin"] = (request) =>
     Effect.gen(function* () {
@@ -497,15 +575,21 @@ export const makeUserAuth = Effect.gen(function* () {
         })
         .pipe(Effect.mapError(toUserAuthError("Failed to save GitHub user.", 500)));
       const session = yield* issueSession(user);
+      const authenticatedUser = {
+        sessionId: session.sessionId,
+        user: toKamiUser(user),
+        expiresAt: session.expiresAt,
+      } satisfies AuthenticatedUser;
 
       return {
         sessionToken: session.token,
         sessionExpiresAt: session.expiresAt,
+        authenticatedUser,
         sessionState: {
           enabled: true,
           authenticated: true,
           provider: "github",
-          user: toKamiUser(user),
+          user: authenticatedUser.user,
           expiresAt: DateTime.toUtc(session.expiresAt),
         } satisfies UserAuthSessionState,
       };
@@ -718,6 +802,7 @@ export const makeUserAuth = Effect.gen(function* () {
           sessionState: completed.sessionState,
           sessionToken: completed.sessionToken,
           sessionExpiresAt: completed.sessionExpiresAt,
+          authenticatedUser: completed.authenticatedUser,
         } as const;
       }
 
@@ -743,19 +828,26 @@ export const makeUserAuth = Effect.gen(function* () {
         sessionState: handoff.sessionState,
         sessionToken: handoff.sessionToken,
         sessionExpiresAt: handoff.sessionExpiresAt,
+        authenticatedUser: handoff.authenticatedUser,
       } as const;
     });
 
-  const logout: UserAuthShape["logout"] = (request) =>
+  const logout: UserAuthShape["logout"] = (request, environmentSessionId) =>
     Effect.gen(function* () {
       const token = request.cookies[cookieName];
       if (!token) {
+        if (environmentSessionId !== undefined) {
+          yield* unbindEnvironmentSession(environmentSessionId);
+        }
         return;
       }
       const authenticated = yield* verifyToken(token).pipe(
         Effect.catchTag("UserAuthError", () => Effect.succeed(null)),
       );
       if (!authenticated) {
+        if (environmentSessionId !== undefined) {
+          yield* unbindEnvironmentSession(environmentSessionId);
+        }
         return;
       }
       const revokedAt = yield* DateTime.now;
@@ -765,14 +857,21 @@ export const makeUserAuth = Effect.gen(function* () {
           revokedAt,
         })
         .pipe(Effect.mapError(toUserAuthError("Failed to revoke user auth session.", 500)));
+      if (environmentSessionId !== undefined) {
+        yield* unbindEnvironmentSession(environmentSessionId);
+      }
     });
 
   return {
     cookieName,
     stateCookieName,
     stateCookiePath: STATE_COOKIE_PATH,
+    profileRequiredForBrowserSessions,
     getSessionState,
     authenticateRequest,
+    authenticateEnvironmentSession,
+    getEnvironmentSessionUser,
+    bindEnvironmentSession,
     createGitHubLogin,
     createDesktopGitHubLogin,
     completeGitHubLogin,

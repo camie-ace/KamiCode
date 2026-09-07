@@ -8,12 +8,11 @@ export type UserAuthGateState =
   | { status: "requires-login"; provider: "github"; errorMessage?: string }
   | { status: "authenticated"; provider: "github"; user: KamiUser };
 
-const DISABLED_USER_AUTH_GATE_STATE = { status: "disabled" } as const;
-const DESKTOP_GITHUB_LOGIN_POLL_INTERVAL_MS = 1_000;
-const DESKTOP_GITHUB_LOGIN_TIMEOUT_MS = 10 * 60_000;
+const GITHUB_DEVICE_LOGIN_POLL_INTERVAL_MS = 1_000;
+const GITHUB_DEVICE_LOGIN_TIMEOUT_MS = 10 * 60_000;
 
 export interface GitHubUserLoginOptions {
-  readonly onDesktopDeviceCode?: (input: {
+  readonly onDeviceCode?: (input: {
     readonly userCode: string;
     readonly verificationUri: string;
   }) => void;
@@ -110,7 +109,11 @@ export async function resolveInitialUserAuthGateState(): Promise<UserAuthGateSta
 
   const nextPromise = fetchUserAuthSessionState()
     .then(toUserAuthGateState)
-    .catch(() => DISABLED_USER_AUTH_GATE_STATE);
+    .catch(() => ({
+      status: "requires-login" as const,
+      provider: "github" as const,
+      errorMessage: "KamiCode could not verify your GitHub profile. Reload to try again.",
+    }));
   userAuthBootstrapPromise = nextPromise;
   return nextPromise
     .then((result) => {
@@ -126,16 +129,16 @@ export async function resolveInitialUserAuthGateState(): Promise<UserAuthGateSta
     });
 }
 
-function waitForDesktopGitHubLoginPoll(delayMs: number): Promise<void> {
+function waitForGitHubDeviceLoginPoll(delayMs: number): Promise<void> {
   return new Promise((resolve) => {
     setTimeout(resolve, delayMs);
   });
 }
 
-function normalizeDesktopPollIntervalMs(value: unknown): number {
+function normalizeDevicePollIntervalMs(value: unknown): number {
   return typeof value === "number" && Number.isFinite(value) && value > 0
-    ? Math.max(value, DESKTOP_GITHUB_LOGIN_POLL_INTERVAL_MS)
-    : DESKTOP_GITHUB_LOGIN_POLL_INTERVAL_MS;
+    ? Math.max(value, GITHUB_DEVICE_LOGIN_POLL_INTERVAL_MS)
+    : GITHUB_DEVICE_LOGIN_POLL_INTERVAL_MS;
 }
 
 async function readJsonErrorMessage(response: Response, fallback: string): Promise<string> {
@@ -156,16 +159,20 @@ async function readJsonErrorMessage(response: Response, fallback: string): Promi
   }
 }
 
-async function startDesktopGitHubUserLogin(options?: GitHubUserLoginOptions): Promise<boolean> {
+async function startDeviceGitHubUserLogin(options?: GitHubUserLoginOptions): Promise<boolean> {
   const bridge = window.desktopBridge;
-  if (!bridge) {
-    return false;
-  }
+  // Reserve a tab synchronously while the click still carries popup permission.
+  // If the browser blocks it, the on-screen code includes a manual GitHub link.
+  const browserLoginWindow = bridge ? null : (window.open?.("", "_blank") ?? null);
 
   const startResponse = await fetchPrimaryUserAuth("/api/user/auth/github/desktop/start", {
     method: "POST",
+  }).catch((error) => {
+    browserLoginWindow?.close();
+    throw error;
   });
   if (!startResponse.ok) {
+    browserLoginWindow?.close();
     throw new Error(
       await readJsonErrorMessage(
         startResponse,
@@ -181,25 +188,31 @@ async function startDesktopGitHubUserLogin(options?: GitHubUserLoginOptions): Pr
     readonly pollIntervalMs?: unknown;
   };
   if (typeof start.authorizationUrl !== "string" || typeof start.handoffId !== "string") {
+    browserLoginWindow?.close();
     throw new Error("GitHub login start response was invalid.");
   }
 
   if (typeof start.userCode === "string" && start.userCode.trim().length > 0) {
-    options?.onDesktopDeviceCode?.({
+    options?.onDeviceCode?.({
       userCode: start.userCode,
       verificationUri: start.authorizationUrl,
     });
   }
 
-  const opened = await bridge.openExternal(start.authorizationUrl);
-  if (!opened) {
-    return false;
+  if (bridge) {
+    const opened = await bridge.openExternal(start.authorizationUrl);
+    if (!opened) {
+      return false;
+    }
+  } else if (browserLoginWindow) {
+    browserLoginWindow.opener = null;
+    browserLoginWindow.location.href = start.authorizationUrl;
   }
 
   const startedAt = Date.now();
-  let pollIntervalMs = normalizeDesktopPollIntervalMs(start.pollIntervalMs);
-  while (Date.now() - startedAt < DESKTOP_GITHUB_LOGIN_TIMEOUT_MS) {
-    await waitForDesktopGitHubLoginPoll(pollIntervalMs);
+  let pollIntervalMs = normalizeDevicePollIntervalMs(start.pollIntervalMs);
+  while (Date.now() - startedAt < GITHUB_DEVICE_LOGIN_TIMEOUT_MS) {
+    await waitForGitHubDeviceLoginPoll(pollIntervalMs);
     const sessionResponse = await fetchPrimaryUserAuth("/api/user/auth/github/desktop/session", {
       searchParams: {
         handoffId: start.handoffId,
@@ -209,9 +222,9 @@ async function startDesktopGitHubUserLogin(options?: GitHubUserLoginOptions): Pr
     if (sessionResponse.status === 202) {
       try {
         const payload = (await sessionResponse.json()) as { readonly pollIntervalMs?: unknown };
-        pollIntervalMs = normalizeDesktopPollIntervalMs(payload.pollIntervalMs);
+        pollIntervalMs = normalizeDevicePollIntervalMs(payload.pollIntervalMs);
       } catch {
-        pollIntervalMs = DESKTOP_GITHUB_LOGIN_POLL_INTERVAL_MS;
+        pollIntervalMs = GITHUB_DEVICE_LOGIN_POLL_INTERVAL_MS;
       }
       continue;
     }
@@ -242,7 +255,7 @@ async function startDesktopGitHubUserLogin(options?: GitHubUserLoginOptions): Pr
 }
 
 export async function startGitHubUserLogin(options?: GitHubUserLoginOptions): Promise<void> {
-  if (await startDesktopGitHubUserLogin(options)) {
+  if (await startDeviceGitHubUserLogin(options)) {
     window.location.reload();
     return;
   }

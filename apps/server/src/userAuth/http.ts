@@ -61,7 +61,7 @@ export const authenticateEnvironmentRequestWithScope = (scope: AuthEnvironmentSc
     if (!session.scopes.includes(scope)) {
       return yield* failEnvironmentScopeRequired(scope);
     }
-    return request;
+    return { request, session };
   });
 
 function escapeHtml(input: string): string {
@@ -121,9 +121,11 @@ export const userAuthSessionRouteLayer = HttpRouter.add(
   "GET",
   "/api/user/session",
   Effect.gen(function* () {
-    const request = yield* authenticateEnvironmentRequestWithScope(AuthOrchestrationReadScope);
+    const { request, session: environmentSession } = yield* authenticateEnvironmentRequestWithScope(
+      AuthOrchestrationReadScope,
+    );
     const userAuth = yield* UserAuth;
-    const session = yield* userAuth.getSessionState(request);
+    const session = yield* userAuth.getSessionState(request, environmentSession.sessionId);
     return HttpServerResponse.jsonUnsafe(session, {
       status: 200,
       headers: browserApiCorsHeaders,
@@ -133,6 +135,7 @@ export const userAuthSessionRouteLayer = HttpRouter.add(
       EnvironmentAuthInvalidError: HttpServerRespondable.toResponse,
       EnvironmentInternalError: HttpServerRespondable.toResponse,
       EnvironmentScopeRequiredError: HttpServerRespondable.toResponse,
+      UserAuthError: respondToUserAuthError,
     }),
   ),
 );
@@ -141,7 +144,7 @@ export const userAuthGitHubStartRouteLayer = HttpRouter.add(
   "GET",
   "/api/user/auth/github/start",
   Effect.gen(function* () {
-    const request = yield* authenticateEnvironmentRequestWithScope(AuthOrchestrationReadScope);
+    const { request } = yield* authenticateEnvironmentRequestWithScope(AuthOrchestrationReadScope);
     const userAuth = yield* UserAuth;
     const login = yield* userAuth.createGitHubLogin(request);
     return yield* HttpServerResponse.redirect(login.authorizationUrl, { status: 302 }).pipe(
@@ -166,7 +169,9 @@ export const userAuthGitHubDesktopStartRouteLayer = HttpRouter.add(
   "POST",
   "/api/user/auth/github/desktop/start",
   Effect.gen(function* () {
-    const request = yield* authenticateEnvironmentRequestWithScope(AuthOrchestrationOperateScope);
+    const { request } = yield* authenticateEnvironmentRequestWithScope(
+      AuthOrchestrationOperateScope,
+    );
     const userAuth = yield* UserAuth;
     const login = yield* userAuth.createDesktopGitHubLogin(request);
     return HttpServerResponse.jsonUnsafe(
@@ -196,8 +201,9 @@ export const userAuthGitHubDesktopSessionRouteLayer = HttpRouter.add(
   "GET",
   "/api/user/auth/github/desktop/session",
   Effect.gen(function* () {
-    yield* authenticateEnvironmentRequestWithScope(AuthOrchestrationReadScope);
-    const request = yield* HttpServerRequest.HttpServerRequest;
+    const { request, session: environmentSession } = yield* authenticateEnvironmentRequestWithScope(
+      AuthOrchestrationReadScope,
+    );
     const url = HttpServerRequest.toURL(request);
     const handoffId = Option.isSome(url) ? url.value.searchParams.get("handoffId")?.trim() : null;
     if (!handoffId) {
@@ -233,6 +239,11 @@ export const userAuthGitHubDesktopSessionRouteLayer = HttpRouter.add(
         },
       );
     }
+
+    yield* userAuth.bindEnvironmentSession({
+      environmentSessionId: environmentSession.sessionId,
+      authenticatedUser: result.authenticatedUser,
+    });
 
     return yield* HttpServerResponse.jsonUnsafe(
       {
@@ -308,8 +319,14 @@ export const userAuthGitHubCallbackRouteLayer = HttpRouter.add(
       });
     }
 
-    yield* authenticateEnvironmentRequestWithScope(AuthOrchestrationReadScope);
+    const { session: environmentSession } = yield* authenticateEnvironmentRequestWithScope(
+      AuthOrchestrationReadScope,
+    );
     const completed = yield* userAuth.completeGitHubLogin({ request, code, state });
+    yield* userAuth.bindEnvironmentSession({
+      environmentSessionId: environmentSession.sessionId,
+      authenticatedUser: completed.authenticatedUser,
+    });
     const response = yield* HttpServerResponse.redirect("/", { status: 302 }).pipe(
       HttpServerResponse.setCookie(userAuth.cookieName, completed.sessionToken, {
         expires: DateTime.toDate(completed.sessionExpiresAt),
@@ -338,9 +355,11 @@ export const userAuthLogoutRouteLayer = HttpRouter.add(
   "POST",
   "/api/user/logout",
   Effect.gen(function* () {
-    const request = yield* authenticateEnvironmentRequestWithScope(AuthOrchestrationOperateScope);
+    const { request, session: environmentSession } = yield* authenticateEnvironmentRequestWithScope(
+      AuthOrchestrationOperateScope,
+    );
     const userAuth = yield* UserAuth;
-    yield* userAuth.logout(request);
+    yield* userAuth.logout(request, environmentSession.sessionId);
     return yield* HttpServerResponse.jsonUnsafe({ ok: true } satisfies UserAuthLogoutResult, {
       status: 200,
       headers: browserApiCorsHeaders,

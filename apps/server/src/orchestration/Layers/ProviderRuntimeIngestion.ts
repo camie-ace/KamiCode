@@ -38,6 +38,8 @@ import { ProjectionTurnRepository } from "../../persistence/Services/ProjectionT
 import { ProjectionTurnRepositoryLive } from "../../persistence/Layers/ProjectionTurns.ts";
 import { ProjectionThreadActivityRepository } from "../../persistence/Services/ProjectionThreadActivities.ts";
 import { ProjectionThreadActivityRepositoryLive } from "../../persistence/Layers/ProjectionThreadActivities.ts";
+import { UserActivityAttributionRepository } from "../../persistence/Services/UserActivityAttribution.ts";
+import { UserActivityAttributionRepositoryLive } from "../../persistence/Layers/UserActivityAttribution.ts";
 import * as CheckpointStore from "../../checkpointing/CheckpointStore.ts";
 import { OrchestrationEngineService } from "../Services/OrchestrationEngine.ts";
 import { ThreadBackgroundLivenessService } from "../ThreadBackgroundLiveness.ts";
@@ -958,6 +960,7 @@ const make = Effect.gen(function* () {
   const providerService = yield* ProviderService;
   const projectionTurnRepository = yield* ProjectionTurnRepository;
   const projectionThreadActivityRepository = yield* ProjectionThreadActivityRepository;
+  const userActivityAttributionRepository = yield* UserActivityAttributionRepository;
   const serverSettingsService = yield* ServerSettingsService;
   const checkpointStore = yield* CheckpointStore.CheckpointStore;
   const providerCommandId = (event: ProviderRuntimeEvent, tag: string) =>
@@ -1653,6 +1656,55 @@ const make = Effect.gen(function* () {
           : null;
 
       if (
+        event.type === "turn.started" &&
+        eventTurnId !== undefined &&
+        shouldApplyThreadLifecycle
+      ) {
+        yield* userActivityAttributionRepository.recordTurnStarted({
+          threadId: thread.id,
+          turnId: eventTurnId,
+          requestMessageId: Option.isSome(pendingTurnStart)
+            ? pendingTurnStart.value.messageId
+            : null,
+          startedAt: event.createdAt,
+          provider: event.provider,
+          providerInstanceId: event.providerInstanceId ?? null,
+          // Older normalized events and imported test fixtures may omit the
+          // otherwise canonical empty payload. Attribution must never make
+          // provider lifecycle ingestion less tolerant than it was before.
+          model: event.payload?.model ?? null,
+          effort: event.payload?.effort ?? null,
+        });
+      }
+
+      if (isTerminalTurn && eventTurnId !== undefined && shouldApplyThreadLifecycle) {
+        const tokenUsage = event.payload.tokenUsage;
+        yield* userActivityAttributionRepository.recordTurnCompleted({
+          threadId: thread.id,
+          turnId: eventTurnId,
+          completedAt: event.createdAt,
+          terminalStatus:
+            event.type === "turn.completed"
+              ? event.payload.state
+              : event.payload.reason.toLowerCase().includes("interrupt")
+                ? "interrupted"
+                : "cancelled",
+          provider: event.provider,
+          providerInstanceId: event.providerInstanceId ?? null,
+          usageStatus: tokenUsage?.usageStatus ?? "unavailable",
+          usageScope: tokenUsage?.usageScope ?? null,
+          hasSubagents: tokenUsage?.hasSubagents ?? null,
+          inputTokens: tokenUsage?.inputTokens ?? null,
+          cachedInputTokens: tokenUsage?.cachedInputTokens ?? null,
+          cacheCreationTokens: tokenUsage?.cacheCreationTokens ?? null,
+          outputTokens: tokenUsage?.outputTokens ?? null,
+          reasoningTokens: tokenUsage?.reasoningTokens ?? null,
+          totalCostUsd:
+            event.type === "turn.completed" ? (event.payload.totalCostUsd ?? null) : null,
+        });
+      }
+
+      if (
         event.type === "session.started" ||
         event.type === "session.state.changed" ||
         event.type === "session.exited" ||
@@ -2276,4 +2328,5 @@ export const ProviderRuntimeIngestionLive = Layer.effect(
 ).pipe(
   Layer.provide(ProjectionTurnRepositoryLive),
   Layer.provide(ProjectionThreadActivityRepositoryLive),
+  Layer.provide(UserActivityAttributionRepositoryLive),
 );

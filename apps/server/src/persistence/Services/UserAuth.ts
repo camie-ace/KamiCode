@@ -1,4 +1,4 @@
-import { KamiUserId, UserAuthSessionId } from "@t3tools/contracts";
+import { AuthSessionId, KamiUserId, UserAuthSessionId } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
@@ -57,6 +57,24 @@ export const RevokeUserAuthSessionInput = Schema.Struct({
 });
 export type RevokeUserAuthSessionInput = typeof RevokeUserAuthSessionInput.Type;
 
+export const BindEnvironmentSessionUserInput = Schema.Struct({
+  environmentSessionId: AuthSessionId,
+  userAuthSessionId: UserAuthSessionId,
+  linkedAt: Schema.DateTimeUtcFromString,
+});
+export type BindEnvironmentSessionUserInput = typeof BindEnvironmentSessionUserInput.Type;
+
+export const GetEnvironmentSessionUserInput = Schema.Struct({
+  environmentSessionId: AuthSessionId,
+  now: Schema.DateTimeUtcFromString,
+});
+export type GetEnvironmentSessionUserInput = typeof GetEnvironmentSessionUserInput.Type;
+
+export const UnbindEnvironmentSessionUserInput = Schema.Struct({
+  environmentSessionId: AuthSessionId,
+});
+export type UnbindEnvironmentSessionUserInput = typeof UnbindEnvironmentSessionUserInput.Type;
+
 export interface UserAuthRepositoryShape {
   readonly upsertGitHubUser: (
     input: UpsertGitHubUserInput,
@@ -70,6 +88,15 @@ export interface UserAuthRepositoryShape {
   readonly revokeSession: (
     input: RevokeUserAuthSessionInput,
   ) => Effect.Effect<boolean, UserAuthRepositoryError>;
+  readonly bindEnvironmentSession: (
+    input: BindEnvironmentSessionUserInput,
+  ) => Effect.Effect<void, UserAuthRepositoryError>;
+  readonly getEnvironmentSessionUser: (
+    input: GetEnvironmentSessionUserInput,
+  ) => Effect.Effect<Option.Option<UserAuthSessionRecord>, UserAuthRepositoryError>;
+  readonly unbindEnvironmentSession: (
+    input: UnbindEnvironmentSessionUserInput,
+  ) => Effect.Effect<void, UserAuthRepositoryError>;
 }
 
 export class UserAuthRepository extends Context.Service<

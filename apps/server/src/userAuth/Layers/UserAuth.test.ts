@@ -1,8 +1,10 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
+import { AuthSessionId } from "@t3tools/contracts";
 import { expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import type * as HttpServerRequest from "effect/unstable/http/HttpServerRequest";
+import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import { ServerConfig } from "../../config.ts";
 import * as ServerSecretStore from "../../auth/ServerSecretStore.ts";
@@ -81,13 +83,18 @@ const makeGitHubOAuthClientLayer = (overrides?: Partial<GitHubOAuthClientShape>)
 const makeUserAuthLayer = (
   overrides?: Partial<ServerConfigShape>,
   githubOAuthClient?: Partial<GitHubOAuthClientShape>,
-) =>
-  UserAuthLive.pipe(
-    Layer.provide(SqlitePersistenceMemory),
-    Layer.provide(ServerSecretStore.layer),
-    Layer.provide(makeGitHubOAuthClientLayer(githubOAuthClient)),
-    Layer.provide(makeServerConfigLayer(overrides)),
+) => {
+  const persistence = SqlitePersistenceMemory;
+  return Layer.merge(
+    UserAuthLive.pipe(
+      Layer.provide(persistence),
+      Layer.provide(ServerSecretStore.layer),
+      Layer.provide(makeGitHubOAuthClientLayer(githubOAuthClient)),
+      Layer.provide(makeServerConfigLayer(overrides)),
+    ),
+    persistence,
   );
+};
 
 it.layer(NodeServices.layer)("UserAuthLive", (it) => {
   it.effect("reports disabled state when GitHub OAuth credentials are absent", () =>
@@ -148,6 +155,63 @@ it.layer(NodeServices.layer)("UserAuthLive", (it) => {
       Effect.provide(
         makeUserAuthLayer({
           mode: "desktop",
+          githubOAuthClientId: "client-id",
+        }),
+      ),
+    ),
+  );
+
+  it.effect("requires and links a GitHub profile for a KC Web access session", () =>
+    Effect.gen(function* () {
+      const userAuth = yield* UserAuth;
+      const sql = yield* SqlClient.SqlClient;
+      const environmentSessionId = AuthSessionId.make("environment-session-1");
+      yield* sql`
+        INSERT INTO auth_sessions (
+          session_id,
+          subject,
+          scopes,
+          method,
+          client_device_type,
+          issued_at,
+          expires_at
+        ) VALUES (
+          ${environmentSessionId},
+          'access-code-user',
+          '["orchestration:read","orchestration:operate"]',
+          'browser-session-cookie',
+          'desktop',
+          '2026-09-07T00:00:00.000Z',
+          '2030-09-07T00:00:00.000Z'
+        )
+      `;
+
+      expect(userAuth.profileRequiredForBrowserSessions).toBe(true);
+      const login = yield* userAuth.createDesktopGitHubLogin(makeRequest());
+      const result = yield* userAuth.consumeDesktopGitHubLogin({ handoffId: login.handoffId });
+      expect(result.status).toBe("authenticated");
+      if (result.status !== "authenticated") {
+        return;
+      }
+
+      const request = makeRequest({ [userAuth.cookieName]: result.sessionToken });
+      const state = yield* userAuth.getSessionState(request, environmentSessionId);
+      expect(state).toMatchObject({
+        enabled: true,
+        authenticated: true,
+        user: { githubLogin: "julius" },
+      });
+      expect(yield* userAuth.getEnvironmentSessionUser(environmentSessionId)).toMatchObject({
+        sessionId: result.authenticatedUser.sessionId,
+        user: { githubLogin: "julius" },
+      });
+
+      yield* userAuth.logout(request, environmentSessionId);
+      expect(yield* userAuth.getEnvironmentSessionUser(environmentSessionId)).toBeNull();
+    }).pipe(
+      Effect.provide(
+        makeUserAuthLayer({
+          mode: "web",
           githubOAuthClientId: "client-id",
         }),
       ),

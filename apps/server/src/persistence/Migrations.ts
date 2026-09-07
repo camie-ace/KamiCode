@@ -71,6 +71,7 @@ import Migration0056 from "./Migrations/044_ClearAutomaticProjectModelDefaults.t
 import Migration0057 from "./Migrations/045_ProjectionProjectsAutoPull.ts";
 import Migration0058 from "./Migrations/046_RepairAutomaticSettlementTimestamps.ts";
 import Migration0059 from "./Migrations/047_ProjectionProjectIcon.ts";
+import Migration0060 from "./Migrations/060_KcWebUserProfiles.ts";
 
 /**
  * Migration loader with all migrations defined inline.
@@ -149,6 +150,7 @@ export const migrationEntries = [
   [57, "ProjectionProjectsAutoPull", Migration0057],
   [58, "RepairAutomaticSettlementTimestamps", Migration0058],
   [59, "ProjectionProjectIcon", Migration0059],
+  [60, "KcWebUserProfiles", Migration0060],
 ] as const;
 
 export const migrationManifest = migrationEntries.map(([id, name]) => [id, name] as const);

@@ -5,6 +5,7 @@ import {
   CorrelationId,
   DEFAULT_PROVIDER_INTERACTION_MODE,
   EventId,
+  KamiUserId,
   MessageId,
   ProjectId,
   ThreadId,
@@ -59,6 +60,122 @@ const exists = (filePath: string) =>
   });
 
 const BaseTestLayer = makeProjectionPipelinePrefixedTestLayer("t3-projection-pipeline-test-");
+
+it.layer(Layer.fresh(makeProjectionPipelinePrefixedTestLayer("t3-user-attribution-")))(
+  "user activity attribution projection",
+  (it) => {
+    it.effect("records the GitHub user who created a thread and requested its turn", () =>
+      Effect.gen(function* () {
+        const projectionPipeline = yield* OrchestrationProjectionPipeline;
+        const eventStore = yield* OrchestrationEventStore;
+        const sql = yield* SqlClient.SqlClient;
+        const threadId = ThreadId.make("thread-attributed");
+        const projectId = ProjectId.make("project-attributed");
+        const user = {
+          userId: KamiUserId.make("user-attributed"),
+          githubId: "123",
+          githubLogin: "julius",
+          displayName: "Julius",
+          avatarUrl: null,
+        };
+        const origin = { surface: "web" as const, appVersion: "0.1.10", user };
+        const createdAt = "2026-09-07T09:00:00.000Z";
+
+        const threadCreated = yield* eventStore.append({
+          type: "thread.created",
+          eventId: EventId.make("event-thread-attributed"),
+          aggregateKind: "thread",
+          aggregateId: threadId,
+          occurredAt: createdAt,
+          commandId: CommandId.make("command-thread-attributed"),
+          causationEventId: null,
+          correlationId: CommandId.make("command-thread-attributed"),
+          metadata: { origin },
+          payload: {
+            threadId,
+            projectId,
+            title: "Attributed thread",
+            modelSelection: {
+              instanceId: ProviderInstanceId.make("codex"),
+              model: "gpt-6-astra",
+            },
+            runtimeMode: "full-access",
+            interactionMode: "default",
+            branch: null,
+            worktreePath: null,
+            createdAt,
+            updatedAt: createdAt,
+          },
+        });
+        yield* projectionPipeline.projectEvent(threadCreated);
+
+        const turnRequested = yield* eventStore.append({
+          type: "thread.turn-start-requested",
+          eventId: EventId.make("event-turn-attributed"),
+          aggregateKind: "thread",
+          aggregateId: threadId,
+          occurredAt: "2026-09-07T09:01:00.000Z",
+          commandId: CommandId.make("command-turn-attributed"),
+          causationEventId: null,
+          correlationId: CommandId.make("command-turn-attributed"),
+          metadata: { origin },
+          payload: {
+            threadId,
+            messageId: MessageId.make("message-turn-attributed"),
+            modelSelection: {
+              instanceId: ProviderInstanceId.make("codex"),
+              model: "gpt-6-astra",
+            },
+            runtimeMode: "full-access",
+            interactionMode: "default",
+            dispatchPolicy: "immediate",
+            createdAt: "2026-09-07T09:01:00.000Z",
+          },
+        });
+        yield* projectionPipeline.projectEvent(turnRequested);
+
+        const threadRows = yield* sql<{
+          readonly githubLogin: string;
+          readonly projectId: string;
+          readonly userId: string;
+        }>`
+          SELECT
+            github_login AS "githubLogin",
+            project_id AS "projectId",
+            user_id AS "userId"
+          FROM user_thread_attribution
+          WHERE thread_id = ${threadId}
+        `;
+        const turnRows = yield* sql<{
+          readonly githubLogin: string;
+          readonly model: string;
+          readonly projectId: string;
+          readonly userId: string;
+        }>`
+          SELECT
+            github_login AS "githubLogin",
+            model,
+            project_id AS "projectId",
+            user_id AS "userId"
+          FROM user_turn_attribution
+          WHERE request_event_id = 'event-turn-attributed'
+        `;
+
+        assert.deepEqual(threadRows, [
+          { githubLogin: "julius", projectId: "project-attributed", userId: "user-attributed" },
+        ]);
+        assert.deepEqual(turnRows, [
+          {
+            githubLogin: "julius",
+            model: "gpt-6-astra",
+            projectId: "project-attributed",
+            userId: "user-attributed",
+          },
+        ]);
+      }),
+    );
+  },
+);
 
 it.layer(Layer.fresh(makeProjectionPipelinePrefixedTestLayer("t3-projection-cursor-batch-")))(
   "OrchestrationProjectionPipeline cursor batches",

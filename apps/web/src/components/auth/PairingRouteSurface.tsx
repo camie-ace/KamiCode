@@ -286,7 +286,7 @@ export function HostedPairingRouteSurface() {
 export function GitHubLoginSurface({ errorMessage }: { errorMessage?: string }) {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [loginError, setLoginError] = useState(errorMessage ?? "");
-  const [desktopDeviceCode, setDesktopDeviceCode] = useState<{
+  const [deviceCode, setDeviceCode] = useState<{
     readonly userCode: string;
     readonly verificationUri: string;
   } | null>(null);
@@ -294,11 +294,11 @@ export function GitHubLoginSurface({ errorMessage }: { errorMessage?: string }) 
   const handleLogin = useCallback(async () => {
     setIsSubmitting(true);
     setLoginError("");
-    setDesktopDeviceCode(null);
+    setDeviceCode(null);
 
     try {
       await startGitHubUserLogin({
-        onDesktopDeviceCode: (input) => setDesktopDeviceCode(input),
+        onDeviceCode: (input) => setDeviceCode(input),
       });
     } catch (error) {
       setLoginError(errorMessageFromUnknown(error));
@@ -325,11 +325,8 @@ export function GitHubLoginSurface({ errorMessage }: { errorMessage?: string }) 
           GitHub login is required before using shared KamiCode sessions on this server.
         </p>
 
-        {desktopDeviceCode ? (
-          <GitHubDeviceCode
-            {...desktopDeviceCode}
-            onCopyError={(error) => setLoginError(error.message)}
-          />
+        {deviceCode ? (
+          <GitHubDeviceCode {...deviceCode} onCopyError={(error) => setLoginError(error.message)} />
         ) : null}
 
         {loginError ? (
@@ -389,7 +386,14 @@ export function GitHubDeviceCode({
           )}
         </Button>
       </div>
-      <p className="mt-1 text-xs text-muted-foreground">{verificationUri}</p>
+      <a
+        className="mt-1 inline-block text-xs text-primary underline-offset-4 hover:underline"
+        href={verificationUri}
+        rel="noreferrer"
+        target="_blank"
+      >
+        Open GitHub device activation
+      </a>
     </div>
   );
 }

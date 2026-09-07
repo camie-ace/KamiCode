@@ -12,9 +12,12 @@ import {
   type UserAuthRepositoryError,
 } from "../Errors.ts";
 import {
+  BindEnvironmentSessionUserInput,
   CreateUserAuthSessionInput,
+  GetEnvironmentSessionUserInput,
   GetUserAuthSessionByIdInput,
   RevokeUserAuthSessionInput,
+  UnbindEnvironmentSessionUserInput,
   UpsertGitHubUserInput,
   UserAuthRepository,
   UserAuthSessionRecord,
@@ -168,6 +171,65 @@ const makeUserAuthRepository = Effect.gen(function* () {
       `,
   });
 
+  const bindEnvironmentSessionRow = SqlSchema.void({
+    Request: BindEnvironmentSessionUserInput,
+    execute: ({ environmentSessionId, userAuthSessionId, linkedAt }) =>
+      sql`
+        INSERT INTO auth_session_user_profiles (
+          environment_session_id,
+          user_auth_session_id,
+          linked_at
+        )
+        VALUES (
+          ${environmentSessionId},
+          ${userAuthSessionId},
+          ${linkedAt}
+        )
+        ON CONFLICT(environment_session_id) DO UPDATE SET
+          user_auth_session_id = excluded.user_auth_session_id,
+          linked_at = excluded.linked_at
+      `,
+  });
+
+  const getEnvironmentSessionUserRow = SqlSchema.findOneOption({
+    Request: GetEnvironmentSessionUserInput,
+    Result: UserAuthSessionDbRow,
+    execute: ({ environmentSessionId, now }) =>
+      sql`
+        SELECT
+          session.session_id AS "sessionId",
+          session.user_id AS "userId",
+          session.issued_at AS "issuedAt",
+          session.expires_at AS "expiresAt",
+          session.revoked_at AS "revokedAt",
+          auth_user.github_id AS "githubId",
+          auth_user.github_login AS "githubLogin",
+          auth_user.display_name AS "displayName",
+          auth_user.avatar_url AS "avatarUrl",
+          auth_user.created_at AS "userCreatedAt",
+          auth_user.updated_at AS "userUpdatedAt",
+          auth_user.last_login_at AS "userLastLoginAt"
+        FROM auth_session_user_profiles binding
+        INNER JOIN user_auth_sessions session
+          ON session.session_id = binding.user_auth_session_id
+        INNER JOIN user_auth_users auth_user
+          ON auth_user.user_id = session.user_id
+        WHERE binding.environment_session_id = ${environmentSessionId}
+          AND session.revoked_at IS NULL
+          AND session.expires_at > ${now}
+        LIMIT 1
+      `,
+  });
+
+  const unbindEnvironmentSessionRow = SqlSchema.void({
+    Request: UnbindEnvironmentSessionUserInput,
+    execute: ({ environmentSessionId }) =>
+      sql`
+        DELETE FROM auth_session_user_profiles
+        WHERE environment_session_id = ${environmentSessionId}
+      `,
+  });
+
   const upsertGitHubUser: UserAuthRepositoryShape["upsertGitHubUser"] = (input) =>
     upsertGitHubUserRow(input).pipe(
       Effect.mapError(
@@ -215,11 +277,45 @@ const makeUserAuthRepository = Effect.gen(function* () {
       Effect.map((rows) => rows.length > 0),
     );
 
+  const bindEnvironmentSession: UserAuthRepositoryShape["bindEnvironmentSession"] = (input) =>
+    bindEnvironmentSessionRow(input).pipe(
+      Effect.mapError(
+        toPersistenceSqlOrDecodeError(
+          "UserAuthRepository.bindEnvironmentSession:query",
+          "UserAuthRepository.bindEnvironmentSession:encodeRequest",
+        ),
+      ),
+    );
+
+  const getEnvironmentSessionUser: UserAuthRepositoryShape["getEnvironmentSessionUser"] = (input) =>
+    getEnvironmentSessionUserRow(input).pipe(
+      Effect.mapError(
+        toPersistenceSqlOrDecodeError(
+          "UserAuthRepository.getEnvironmentSessionUser:query",
+          "UserAuthRepository.getEnvironmentSessionUser:decodeRow",
+        ),
+      ),
+      Effect.map(Option.map(toSessionRecord)),
+    );
+
+  const unbindEnvironmentSession: UserAuthRepositoryShape["unbindEnvironmentSession"] = (input) =>
+    unbindEnvironmentSessionRow(input).pipe(
+      Effect.mapError(
+        toPersistenceSqlOrDecodeError(
+          "UserAuthRepository.unbindEnvironmentSession:query",
+          "UserAuthRepository.unbindEnvironmentSession:encodeRequest",
+        ),
+      ),
+    );
+
   return {
     upsertGitHubUser,
     createSession,
     getSessionById,
     revokeSession,
+    bindEnvironmentSession,
+    getEnvironmentSessionUser,
+    unbindEnvironmentSession,
   } satisfies UserAuthRepositoryShape;
 });
 

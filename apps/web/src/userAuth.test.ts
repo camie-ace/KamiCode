@@ -14,6 +14,7 @@ function jsonResponse(body: unknown, init?: ResponseInit) {
 type TestWindow = {
   location: URL;
   desktopBridge?: DesktopBridge;
+  open?: typeof window.open;
 };
 
 function installTestBrowser(url: string) {
@@ -76,7 +77,9 @@ describe("user auth bootstrap", () => {
     const { resolveInitialUserAuthGateState } = await import("./environments/primary/userAuth");
 
     await expect(resolveInitialUserAuthGateState()).resolves.toEqual({
-      status: "disabled",
+      status: "requires-login",
+      provider: "github",
+      errorMessage: "KamiCode could not verify your GitHub profile. Reload to try again.",
     });
   });
 
@@ -89,7 +92,9 @@ describe("user auth bootstrap", () => {
     const { resolveInitialUserAuthGateState } = await import("./environments/primary/userAuth");
 
     await expect(resolveInitialUserAuthGateState()).resolves.toEqual({
-      status: "disabled",
+      status: "requires-login",
+      provider: "github",
+      errorMessage: "KamiCode could not verify your GitHub profile. Reload to try again.",
     });
   });
 
@@ -145,20 +150,76 @@ describe("user auth bootstrap", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
-  it("starts GitHub login against the primary environment in a browser tab", async () => {
+  it("uses GitHub device login in a browser and reloads after the profile is linked", async () => {
     const testWindow = installTestBrowser("http://localhost/");
+    const popup = {
+      close: vi.fn(),
+      location: { href: "" },
+      opener: {} as Window | null,
+    } as unknown as Window;
+    testWindow.open = vi.fn().mockReturnValue(popup);
+    const reload = vi.fn();
+    Object.defineProperty(testWindow.location, "reload", {
+      configurable: true,
+      value: reload,
+    });
+    const user = {
+      userId: "user-web",
+      githubId: "456",
+      githubLogin: "web-user",
+      displayName: "Web User",
+      avatarUrl: null,
+    };
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        jsonResponse({
+          authorizationUrl: "https://github.com/login/device",
+          handoffId: "handoff-web",
+          userCode: "WXYZ-9876",
+        }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({
+          status: "authenticated",
+          sessionState: {
+            enabled: true,
+            authenticated: true,
+            provider: "github",
+            user,
+            expiresAt: "2026-04-05T00:00:00.000Z",
+          },
+        }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+    vi.useFakeTimers();
 
     const { startGitHubUserLogin } = await import("./environments/primary/userAuth");
+    const onDeviceCode = vi.fn();
+    const loginPromise = startGitHubUserLogin({ onDeviceCode });
+    await vi.advanceTimersByTimeAsync(1_000);
+    await loginPromise;
 
-    await startGitHubUserLogin();
-
-    expect(testWindow.location.href).toBe("http://localhost/api/user/auth/github/start");
+    expect(fetchRequestAt(fetchMock, 0).url).toBe(
+      "http://localhost/api/user/auth/github/desktop/start",
+    );
+    expect(fetchRequestAt(fetchMock, 0).method).toBe("POST");
+    expect(onDeviceCode).toHaveBeenCalledWith({
+      userCode: "WXYZ-9876",
+      verificationUri: "https://github.com/login/device",
+    });
+    expect(popup.opener).toBeNull();
+    expect(popup.location.href).toBe("https://github.com/login/device");
+    expect(fetchRequestAt(fetchMock, 1).url).toBe(
+      "http://localhost/api/user/auth/github/desktop/session?handoffId=handoff-web",
+    );
+    expect(reload).toHaveBeenCalledOnce();
   });
 
   it("opens desktop GitHub login in the system browser and reloads after handoff completes", async () => {
     const testWindow = installTestBrowser("t3code://app/");
     const openExternal = vi.fn<DesktopBridge["openExternal"]>().mockResolvedValue(true);
-    const onDesktopDeviceCode = vi.fn();
+    const onDeviceCode = vi.fn();
     const reload = vi.fn();
     Object.defineProperty(testWindow.location, "reload", {
       configurable: true,
@@ -227,7 +288,7 @@ describe("user auth bootstrap", () => {
       resolveInitialUserAuthGateState,
       startGitHubUserLogin,
     } = await import("./environments/primary/userAuth");
-    const loginPromise = startGitHubUserLogin({ onDesktopDeviceCode });
+    const loginPromise = startGitHubUserLogin({ onDeviceCode });
     await vi.advanceTimersByTimeAsync(1_000);
     await loginPromise;
 
@@ -244,7 +305,7 @@ describe("user auth bootstrap", () => {
     expect(fetchRequestAt(fetchMock, 0).headers.get("authorization")).toBe(
       "Bearer desktop-bearer-token",
     );
-    expect(onDesktopDeviceCode).toHaveBeenCalledWith({
+    expect(onDeviceCode).toHaveBeenCalledWith({
       userCode: "ABCD-1234",
       verificationUri: "https://github.com/login/device",
     });

@@ -24,6 +24,7 @@ import {
   TurnId,
 } from "./baseSchemas.ts";
 import { ProviderInstanceId } from "./providerInstance.ts";
+import { KamiUser } from "./userAuth.ts";
 
 export const ORCHESTRATION_WS_METHODS = {
   dispatchCommand: "orchestration.dispatchCommand",
@@ -2184,13 +2185,14 @@ export const ThreadActivityAppendedPayload = Schema.Struct({
 
 /**
  * Which client connection dispatched the command that produced an event.
- * Stamped by the orchestration engine on client-dispatched commands; absent on
- * provider/server-originated events and on commands from clients too old to
- * report it.
+ * Surface/version are client-announced; the optional user is resolved and
+ * stamped by the server from the environment session's GitHub profile link.
+ * The whole origin is absent on provider/server-originated events.
  */
 export const OrchestrationClientOrigin = Schema.Struct({
   surface: Schema.optional(ClientSurface),
   appVersion: Schema.optional(TrimmedNonEmptyString),
+  user: Schema.optional(KamiUser),
 });
 export type OrchestrationClientOrigin = typeof OrchestrationClientOrigin.Type;
 
