@@ -707,6 +707,28 @@ describe("T3 browser developer instructions", () => {
       /preview_open/,
     );
   });
+
+  it("advertises device tools independently from preview tools", () => {
+    for (const mode of ["default", "plan", "workflow", "trigger"] as const) {
+      const instructions = buildCodexDeveloperInstructions(mode, runtime, {
+        browser: false,
+        device: true,
+      });
+      NodeAssert.match(instructions, /T3 Code devices/);
+      NodeAssert.match(instructions, /device_list/);
+      NodeAssert.match(instructions, /agent-device/);
+      NodeAssert.doesNotMatch(instructions, /preview_open/);
+    }
+  });
+
+  it("keeps both native tool blocks when both capabilities are attached", () => {
+    const instructions = buildCodexDeveloperInstructions("workflow", runtime, {
+      browser: true,
+      device: true,
+    });
+    NodeAssert.match(instructions, /T3 Code collaborative browser/);
+    NodeAssert.match(instructions, /T3 Code devices/);
+  });
 });
 
 describe("hasConfiguredMcpServer", () => {
