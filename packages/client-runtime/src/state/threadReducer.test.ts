@@ -841,30 +841,48 @@ describe("applyThreadDetailEvent", () => {
 
   describe("queued turn lifecycle", () => {
     it("adds, marks dispatching, and removes a queued turn from live events", () => {
-      const queued = applyThreadDetailEvent(baseThread, {
-        ...baseEventFields,
-        sequence: 8,
-        occurredAt: "2026-04-01T06:00:00.000Z",
-        aggregateKind: "thread",
-        aggregateId: ThreadId.make("thread-1"),
-        type: "thread.turn-start-requested",
-        payload: {
-          threadId: ThreadId.make("thread-1"),
-          messageId: MessageId.make("msg-queued-live"),
-          runtimeMode: "approval-required",
-          interactionMode: "default",
-          dispatchPolicy: "queue",
-          scheduledFor: "2026-04-02T06:00:00.000Z",
-          createdAt: "2026-04-01T06:00:00.000Z",
+      const queuedMessageId = MessageId.make("msg-queued-live");
+      const queued = applyThreadDetailEvent(
+        {
+          ...baseThread,
+          messages: [
+            ...baseThread.messages,
+            {
+              id: queuedMessageId,
+              role: "user",
+              text: "Queued prompt",
+              turnId: null,
+              streaming: false,
+              createdAt: "2026-04-01T06:00:00.000Z",
+              updatedAt: "2026-04-01T06:00:00.000Z",
+            },
+          ],
         },
-      });
+        {
+          ...baseEventFields,
+          sequence: 8,
+          occurredAt: "2026-04-01T06:00:00.000Z",
+          aggregateKind: "thread",
+          aggregateId: ThreadId.make("thread-1"),
+          type: "thread.turn-start-requested",
+          payload: {
+            threadId: ThreadId.make("thread-1"),
+            messageId: queuedMessageId,
+            runtimeMode: "approval-required",
+            interactionMode: "default",
+            dispatchPolicy: "queue",
+            scheduledFor: "2026-04-02T06:00:00.000Z",
+            createdAt: "2026-04-01T06:00:00.000Z",
+          },
+        },
+      );
 
       expect(queued.kind).toBe("updated");
       if (queued.kind !== "updated") return;
       expect(queued.thread.queuedTurns).toEqual([
         expect.objectContaining({
           queueId: "queue:event-1",
-          messageId: MessageId.make("msg-queued-live"),
+          messageId: queuedMessageId,
           status: "queued",
           scheduledFor: "2026-04-02T06:00:00.000Z",
         }),
@@ -881,7 +899,7 @@ describe("applyThreadDetailEvent", () => {
         payload: {
           threadId: ThreadId.make("thread-1"),
           queueId: "queue:event-1",
-          messageId: MessageId.make("msg-queued-live"),
+          messageId: queuedMessageId,
           status: "dispatching",
           startedAt: "2026-04-01T06:00:01.000Z",
           completedAt: null,
@@ -919,6 +937,12 @@ describe("applyThreadDetailEvent", () => {
       expect(started.kind).toBe("updated");
       if (started.kind === "updated") {
         expect(started.thread.queuedTurns).toEqual([]);
+        expect(started.thread.messages.find((message) => message.id === queuedMessageId)).toEqual(
+          expect.objectContaining({
+            turnId: TurnId.make("turn-queued-live"),
+            createdAt: "2026-04-01T06:00:01.000Z",
+          }),
+        );
       }
     });
 
@@ -931,6 +955,7 @@ describe("applyThreadDetailEvent", () => {
             threadId: ThreadId.make("thread-1"),
             messageId: MessageId.make("msg-delete"),
             status: "queued",
+            position: 0,
             requestedAt: "2026-04-01T06:00:00.000Z",
             scheduledFor: null,
             startedAt: null,
@@ -972,6 +997,46 @@ describe("applyThreadDetailEvent", () => {
         expect(result.thread.messages).toEqual([]);
       }
     });
+
+    it("applies durable queued-turn priority from metadata events", () => {
+      const makeTurn = (queueId: string, position: number) => ({
+        queueId,
+        threadId: ThreadId.make("thread-1"),
+        messageId: MessageId.make(`message-${queueId}`),
+        status: "queued" as const,
+        position,
+        requestedAt: "2026-04-01T06:00:00.000Z",
+        scheduledFor: null,
+        startedAt: null,
+        completedAt: null,
+        turnId: null,
+        failureDetail: null,
+      });
+      const result = applyThreadDetailEvent(
+        { ...baseThread, queuedTurns: [makeTurn("queue:first", 0), makeTurn("queue:second", 1)] },
+        {
+          ...baseEventFields,
+          sequence: 9,
+          occurredAt: "2026-04-01T06:01:00.000Z",
+          aggregateKind: "thread",
+          aggregateId: ThreadId.make("thread-1"),
+          type: "thread.meta-updated",
+          payload: {
+            threadId: ThreadId.make("thread-1"),
+            queuedTurnOrder: ["queue:second", "queue:first"],
+            updatedAt: baseThread.updatedAt,
+          },
+        },
+      );
+
+      expect(result.kind).toBe("updated");
+      if (result.kind === "updated") {
+        expect(result.thread.queuedTurns?.map((turn) => [turn.queueId, turn.position])).toEqual([
+          ["queue:second", 0],
+          ["queue:first", 1],
+        ]);
+      }
+    });
   });
 
   describe("thread.message-updated", () => {
@@ -984,6 +1049,7 @@ describe("applyThreadDetailEvent", () => {
             threadId: ThreadId.make("thread-1"),
             messageId: MessageId.make("msg-queued"),
             status: "queued",
+            position: 0,
             requestedAt: "2026-04-01T06:00:00.000Z",
             scheduledFor: null,
             startedAt: null,

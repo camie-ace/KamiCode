@@ -1496,6 +1496,7 @@ describe("isPendingQueuedTurn", () => {
     threadId,
     messageId: MessageId.make(`message-${status}`),
     status,
+    position: 0,
     requestedAt: now,
     scheduledFor: null,
     startedAt: status === "queued" ? null : "2026-03-29T00:00:01.000Z",

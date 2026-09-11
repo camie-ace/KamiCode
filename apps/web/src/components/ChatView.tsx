@@ -84,6 +84,7 @@ import {
   lazy,
   memo,
   Suspense,
+  type ReactNode,
   useCallback,
   useEffect,
   useEffectEvent,
@@ -92,6 +93,24 @@ import {
   useRef,
   useState,
 } from "react";
+import {
+  closestCenter,
+  DndContext,
+  KeyboardSensor,
+  PointerSensor,
+  type DragEndEvent,
+  useSensor,
+  useSensors,
+} from "@dnd-kit/core";
+import {
+  arrayMove,
+  sortableKeyboardCoordinates,
+  SortableContext,
+  useSortable,
+  verticalListSortingStrategy,
+} from "@dnd-kit/sortable";
+import { restrictToVerticalAxis } from "@dnd-kit/modifiers";
+import { CSS } from "@dnd-kit/utilities";
 import { flushSync } from "react-dom";
 import { useLocation, useNavigate } from "@tanstack/react-router";
 import { assistantCitationsToPlainText } from "@t3tools/shared/assistantCitations";
@@ -228,6 +247,7 @@ import {
   CheckCircle2Icon,
   ChevronDownIcon,
   GitBranchIcon,
+  GripVerticalIcon,
   ListOrderedIcon,
   Minimize2Icon,
   PencilIcon,
@@ -1276,12 +1296,64 @@ function queuedMessageScheduleLabel(scheduledFor: string): string {
   }).format(date);
 }
 
+function queuedMessageSortableId(item: QueuedMessageItem): string {
+  return item.queueId ?? `pending:${item.id}`;
+}
+
+const QueuedMessageRowFrame = memo(function QueuedMessageRowFrame(props: {
+  item: QueuedMessageItem;
+  index: number;
+  reorderable: boolean;
+  children: ReactNode;
+}) {
+  const { item, index, reorderable, children } = props;
+  const { attributes, isDragging, listeners, setNodeRef, transform, transition } = useSortable({
+    id: queuedMessageSortableId(item),
+    disabled: !reorderable,
+  });
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={{
+        transform: CSS.Transform.toString(transform),
+        transition,
+        zIndex: isDragging ? 1 : undefined,
+      }}
+      className={cn(
+        "grid min-w-0 grid-cols-[auto_auto_minmax(0,1fr)_auto_auto_auto] items-center gap-2 rounded-md bg-muted/45 px-2 py-1.5 text-xs",
+        isDragging && "relative shadow-lg ring-1 ring-primary/40",
+      )}
+    >
+      <Tooltip>
+        <TooltipTrigger render={<span className="inline-flex" />}>
+          <button
+            type="button"
+            className="flex size-5 touch-none items-center justify-center rounded-full text-muted-foreground transition-colors enabled:cursor-grab enabled:hover:bg-background enabled:hover:text-foreground enabled:active:cursor-grabbing disabled:opacity-30"
+            disabled={!reorderable}
+            aria-label={`Change priority for queued message ${index + 1}`}
+            {...attributes}
+            {...listeners}
+          >
+            <GripVerticalIcon className="size-3.5" aria-hidden="true" />
+          </button>
+        </TooltipTrigger>
+        <TooltipPopup side="top">
+          {reorderable ? "Drag to change priority" : "This message cannot be reordered yet"}
+        </TooltipPopup>
+      </Tooltip>
+      {children}
+    </div>
+  );
+});
+
 const QueuedMessagesPanel = memo(function QueuedMessagesPanel(props: {
   items: ReadonlyArray<QueuedMessageItem>;
   onDelete: (item: QueuedMessageItem) => void;
   onEdit: (item: QueuedMessageItem, text: string) => Promise<boolean>;
+  onReorder: (queueIds: ReadonlyArray<string>) => Promise<boolean>;
 }) {
-  const { items, onDelete, onEdit } = props;
+  const { items, onDelete, onEdit, onReorder } = props;
   const [editingMessageId, setEditingMessageId] = useState<MessageId | null>(null);
   const [draftText, setDraftText] = useState("");
   const [savingMessageId, setSavingMessageId] = useState<MessageId | null>(null);
@@ -1290,6 +1362,63 @@ const QueuedMessagesPanel = memo(function QueuedMessagesPanel(props: {
     [editingMessageId, items],
   );
   const isSaving = savingMessageId !== null;
+  const serverQueueIds = useMemo(
+    () =>
+      items.flatMap((item) =>
+        item.status === "queued" && item.queueId !== null ? [item.queueId] : [],
+      ),
+    [items],
+  );
+  const serverQueueKey = serverQueueIds.join("\u0000");
+  const [optimisticOrder, setOptimisticOrder] = useState<{
+    sourceKey: string;
+    queueIds: ReadonlyArray<string>;
+  }>(() => ({ sourceKey: serverQueueKey, queueIds: serverQueueIds }));
+  const queueIds =
+    optimisticOrder.sourceKey === serverQueueKey ? optimisticOrder.queueIds : serverQueueIds;
+  const orderedItems = useMemo(() => {
+    const queuedById = new Map(
+      items.flatMap((item) =>
+        item.status === "queued" && item.queueId !== null ? [[item.queueId, item] as const] : [],
+      ),
+    );
+    const dispatchingItems = items.filter((item) => item.status === "dispatching");
+    const pendingPersistenceItems = items.filter(
+      (item) => item.status === "queued" && item.queueId === null,
+    );
+    const orderedQueuedItems = queueIds.flatMap((queueId) => {
+      const item = queuedById.get(queueId);
+      return item ? [item] : [];
+    });
+    return [...dispatchingItems, ...orderedQueuedItems, ...pendingPersistenceItems];
+  }, [items, queueIds]);
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
+
+  const handleDragEnd = useCallback(
+    (event: DragEndEvent) => {
+      if (event.over === null) return;
+      const activeId = String(event.active.id);
+      const overId = String(event.over.id);
+      const from = queueIds.indexOf(activeId);
+      const to = queueIds.indexOf(overId);
+      if (from === -1 || to === -1 || from === to) return;
+      const nextQueueIds = arrayMove([...queueIds], from, to);
+      setOptimisticOrder({ sourceKey: serverQueueKey, queueIds: nextQueueIds });
+      void onReorder(nextQueueIds)
+        .then((didSave) => {
+          if (!didSave) {
+            setOptimisticOrder({ sourceKey: serverQueueKey, queueIds: serverQueueIds });
+          }
+        })
+        .catch(() => {
+          setOptimisticOrder({ sourceKey: serverQueueKey, queueIds: serverQueueIds });
+        });
+    },
+    [onReorder, queueIds, serverQueueIds, serverQueueKey],
+  );
 
   useEffect(() => {
     if (editingMessageId !== null && !items.some((item) => item.id === editingMessageId)) {
@@ -1336,124 +1465,139 @@ const QueuedMessagesPanel = memo(function QueuedMessagesPanel(props: {
         <span className="font-medium text-foreground">Queued &amp; scheduled</span>
         <span>{items.length}</span>
       </div>
-      <div className="grid gap-1.5">
-        {items.map((item, index) => {
-          const isEditing = editingMessageId === item.id;
-          const isRowSaving = savingMessageId === item.id;
-          const canEdit = item.status === "queued" && item.queueId !== null && !isSaving;
-          const saveDisabled =
-            isRowSaving ||
-            draftText.trim().length === 0 ||
-            (editingItem !== null && draftText === editingItem.text);
-          return (
-            <div
-              key={item.id}
-              className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)_auto_auto_auto] items-center gap-2 rounded-md bg-muted/45 px-2 py-1.5 text-xs"
-            >
-              <span className="tabular-nums text-muted-foreground">{index + 1}</span>
-              {isEditing ? (
-                <div className="min-w-0 space-y-1.5">
-                  <Textarea
-                    autoFocus
-                    size="sm"
-                    value={draftText}
-                    onChange={(event) => setDraftText(event.target.value)}
-                    onKeyDown={(event) => {
-                      if (event.key === "Escape") {
-                        event.preventDefault();
-                        cancelEdit();
-                        return;
-                      }
-                      if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
-                        event.preventDefault();
-                        void saveEdit();
-                      }
-                    }}
-                    rows={2}
-                    disabled={isRowSaving}
-                    aria-label="Queued message text"
-                    className="min-h-14 text-xs"
-                  />
-                  <div className="flex justify-end gap-1.5">
-                    <button
-                      type="button"
-                      className="rounded-md px-2 py-1 text-muted-foreground transition-colors hover:bg-background hover:text-foreground disabled:opacity-40"
-                      disabled={isRowSaving}
-                      onClick={cancelEdit}
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      type="button"
-                      className="rounded-md bg-primary px-2 py-1 font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-40"
-                      disabled={saveDisabled}
-                      onClick={() => void saveEdit()}
-                    >
-                      {isRowSaving ? "Saving" : "Save"}
-                    </button>
-                  </div>
-                </div>
-              ) : (
-                <span className="min-w-0 truncate text-foreground/90">
-                  {queuedMessagePreview(item.text)}
-                </span>
-              )}
-              <span className="flex max-w-52 items-center gap-1 rounded-full border border-border/70 px-1.5 py-0.5 text-[10px] text-muted-foreground">
-                {item.scheduledFor !== null && item.status === "queued" ? (
-                  <>
-                    <AlarmClockIcon className="size-3 shrink-0" aria-hidden="true" />
-                    <span className="truncate">
-                      {queuedMessageScheduleLabel(item.scheduledFor)}
+      <DndContext
+        sensors={sensors}
+        collisionDetection={closestCenter}
+        modifiers={[restrictToVerticalAxis]}
+        onDragEnd={handleDragEnd}
+      >
+        <SortableContext
+          items={orderedItems.map(queuedMessageSortableId)}
+          strategy={verticalListSortingStrategy}
+        >
+          <div className="grid gap-1.5">
+            {orderedItems.map((item, index) => {
+              const isEditing = editingMessageId === item.id;
+              const isRowSaving = savingMessageId === item.id;
+              const canEdit = item.status === "queued" && item.queueId !== null && !isSaving;
+              const canReorder = canEdit && !isEditing && queueIds.length > 1;
+              const saveDisabled =
+                isRowSaving ||
+                draftText.trim().length === 0 ||
+                (editingItem !== null && draftText === editingItem.text);
+              return (
+                <QueuedMessageRowFrame
+                  key={item.id}
+                  item={item}
+                  index={index}
+                  reorderable={canReorder}
+                >
+                  <span className="tabular-nums text-muted-foreground">{index + 1}</span>
+                  {isEditing ? (
+                    <div className="min-w-0 space-y-1.5">
+                      <Textarea
+                        autoFocus
+                        size="sm"
+                        value={draftText}
+                        onChange={(event) => setDraftText(event.target.value)}
+                        onKeyDown={(event) => {
+                          if (event.key === "Escape") {
+                            event.preventDefault();
+                            cancelEdit();
+                            return;
+                          }
+                          if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
+                            event.preventDefault();
+                            void saveEdit();
+                          }
+                        }}
+                        rows={2}
+                        disabled={isRowSaving}
+                        aria-label="Queued message text"
+                        className="min-h-14 text-xs"
+                      />
+                      <div className="flex justify-end gap-1.5">
+                        <button
+                          type="button"
+                          className="rounded-md px-2 py-1 text-muted-foreground transition-colors hover:bg-background hover:text-foreground disabled:opacity-40"
+                          disabled={isRowSaving}
+                          onClick={cancelEdit}
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          type="button"
+                          className="rounded-md bg-primary px-2 py-1 font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-40"
+                          disabled={saveDisabled}
+                          onClick={() => void saveEdit()}
+                        >
+                          {isRowSaving ? "Saving" : "Save"}
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <span className="min-w-0 truncate text-foreground/90">
+                      {queuedMessagePreview(item.text)}
                     </span>
-                  </>
-                ) : (
-                  <span className="uppercase tracking-wide">
-                    {item.status === "dispatching" ? "Sending" : "Queued"}
+                  )}
+                  <span className="flex max-w-52 items-center gap-1 rounded-full border border-border/70 px-1.5 py-0.5 text-[10px] text-muted-foreground">
+                    {item.scheduledFor !== null && item.status === "queued" ? (
+                      <>
+                        <AlarmClockIcon className="size-3 shrink-0" aria-hidden="true" />
+                        <span className="truncate">
+                          {queuedMessageScheduleLabel(item.scheduledFor)}
+                        </span>
+                      </>
+                    ) : (
+                      <span className="uppercase tracking-wide">
+                        {item.status === "dispatching" ? "Sending" : "Queued"}
+                      </span>
+                    )}
                   </span>
-                )}
-              </span>
-              <Tooltip>
-                <TooltipTrigger render={<span className="inline-flex" />}>
-                  <button
-                    type="button"
-                    className="flex size-5 items-center justify-center rounded-full text-muted-foreground transition-colors enabled:hover:bg-background enabled:hover:text-foreground disabled:opacity-30"
-                    disabled={!canEdit}
-                    onClick={() => beginEdit(item)}
-                    aria-label="Edit queued message"
-                  >
-                    <PencilIcon className="size-3.5" aria-hidden="true" />
-                  </button>
-                </TooltipTrigger>
-                <TooltipPopup side="top">
-                  {item.queueId === null
-                    ? "This queued message is still being saved"
-                    : item.status === "queued"
-                      ? "Edit queued message"
-                      : "This message is already being sent"}
-                </TooltipPopup>
-              </Tooltip>
-              <Tooltip>
-                <TooltipTrigger render={<span className="inline-flex" />}>
-                  <button
-                    type="button"
-                    className="flex size-5 items-center justify-center rounded-full text-muted-foreground transition-colors enabled:hover:bg-background enabled:hover:text-foreground disabled:opacity-30"
-                    disabled={item.status !== "queued" || isRowSaving}
-                    onClick={() => onDelete(item)}
-                    aria-label="Delete queued message"
-                  >
-                    <XIcon className="size-3.5" aria-hidden="true" />
-                  </button>
-                </TooltipTrigger>
-                <TooltipPopup side="top">
-                  {item.status === "queued"
-                    ? "Delete queued message"
-                    : "This message is already being sent"}
-                </TooltipPopup>
-              </Tooltip>
-            </div>
-          );
-        })}
-      </div>
+                  <Tooltip>
+                    <TooltipTrigger render={<span className="inline-flex" />}>
+                      <button
+                        type="button"
+                        className="flex size-5 items-center justify-center rounded-full text-muted-foreground transition-colors enabled:hover:bg-background enabled:hover:text-foreground disabled:opacity-30"
+                        disabled={!canEdit}
+                        onClick={() => beginEdit(item)}
+                        aria-label="Edit queued message"
+                      >
+                        <PencilIcon className="size-3.5" aria-hidden="true" />
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipPopup side="top">
+                      {item.queueId === null
+                        ? "This queued message is still being saved"
+                        : item.status === "queued"
+                          ? "Edit queued message"
+                          : "This message is already being sent"}
+                    </TooltipPopup>
+                  </Tooltip>
+                  <Tooltip>
+                    <TooltipTrigger render={<span className="inline-flex" />}>
+                      <button
+                        type="button"
+                        className="flex size-5 items-center justify-center rounded-full text-muted-foreground transition-colors enabled:hover:bg-background enabled:hover:text-foreground disabled:opacity-30"
+                        disabled={item.status !== "queued" || isRowSaving}
+                        onClick={() => onDelete(item)}
+                        aria-label="Delete queued message"
+                      >
+                        <XIcon className="size-3.5" aria-hidden="true" />
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipPopup side="top">
+                      {item.status === "queued"
+                        ? "Delete queued message"
+                        : "This message is already being sent"}
+                    </TooltipPopup>
+                  </Tooltip>
+                </QueuedMessageRowFrame>
+              );
+            })}
+          </div>
+        </SortableContext>
+      </DndContext>
     </div>
   );
 });
@@ -2298,6 +2442,9 @@ export default function ChatView(props: ChatViewProps) {
     reportFailure: false,
   });
   const updateThreadQueuedTurn = useAtomCommand(threadEnvironment.updateQueuedTurn, {
+    reportFailure: false,
+  });
+  const reorderThreadQueuedTurns = useAtomCommand(threadEnvironment.reorderQueuedTurns, {
     reportFailure: false,
   });
   const startThreadTurn = useAtomCommand(threadEnvironment.startTurn, {
@@ -4739,6 +4886,41 @@ export default function ChatView(props: ChatViewProps) {
       }
     },
     [activeThread?.id, environmentId, setThreadError, updateThreadQueuedTurn],
+  );
+  const reorderQueuedMessages = useCallback(
+    async (queueIds: ReadonlyArray<string>): Promise<boolean> => {
+      const threadId = activeThread?.id;
+      if (!threadId || queueIds.length === 0) return false;
+      try {
+        const result = await reorderThreadQueuedTurns({
+          environmentId,
+          input: {
+            threadId,
+            queueIds: [...queueIds],
+            createdAt: new Date().toISOString(),
+          },
+        });
+        if (result._tag !== "Failure") {
+          setThreadError(threadId, null);
+          return true;
+        }
+        if (!isAtomCommandInterrupted(result)) {
+          const error = squashAtomCommandFailure(result);
+          setThreadError(
+            threadId,
+            error instanceof Error ? error.message : "Failed to reprioritize queued messages.",
+          );
+        }
+        return false;
+      } catch (err: unknown) {
+        setThreadError(
+          threadId,
+          err instanceof Error ? err.message : "Failed to reprioritize queued messages.",
+        );
+        return false;
+      }
+    },
+    [activeThread?.id, environmentId, reorderThreadQueuedTurns, setThreadError],
   );
   const dispatchQueuedMessageDelete = useCallback(
     (input: { queueId: string | null; messageId: MessageId }) => {
@@ -10561,6 +10743,7 @@ export default function ChatView(props: ChatViewProps) {
                     items={queuedMessageItems}
                     onDelete={deleteQueuedMessage}
                     onEdit={updateQueuedMessage}
+                    onReorder={reorderQueuedMessages}
                   />
                   <div
                     className="relative"

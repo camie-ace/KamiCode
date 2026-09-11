@@ -172,6 +172,7 @@ const ProjectionQueuedTurnDbRowSchema = Schema.Struct({
   threadId: ThreadId,
   messageId: MessageId,
   status: OrchestrationQueuedTurnStatus,
+  position: NonNegativeInt,
   requestedAt: IsoDateTime,
   scheduledFor: Schema.NullOr(IsoDateTime),
   startedAt: Schema.NullOr(IsoDateTime),
@@ -383,6 +384,7 @@ function mapQueuedTurn(
     threadId: row.threadId,
     messageId: row.messageId,
     status: row.status,
+    position: row.position,
     requestedAt: row.requestedAt,
     scheduledFor: row.scheduledFor,
     startedAt: row.startedAt,
@@ -983,6 +985,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           thread_id AS "threadId",
           message_id AS "messageId",
           status,
+          queue_position AS position,
           requested_at AS "requestedAt",
           scheduled_for AS "scheduledFor",
           started_at AS "startedAt",
@@ -991,7 +994,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           failure_detail AS "failureDetail"
         FROM projection_turn_queue queue
         WHERE status IN ('queued', 'dispatching')
-        ORDER BY thread_id ASC, COALESCE(
+        ORDER BY thread_id ASC, queue_position ASC, COALESCE(
           (SELECT sequence FROM orchestration_events WHERE event_id = queue.event_id),
           9223372036854775807
         ) ASC, queue_id ASC
@@ -1656,6 +1659,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           thread_id AS "threadId",
           message_id AS "messageId",
           status,
+          queue_position AS position,
           requested_at AS "requestedAt",
           scheduled_for AS "scheduledFor",
           started_at AS "startedAt",
@@ -1665,7 +1669,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
         FROM projection_turn_queue queue
         WHERE thread_id = ${threadId}
           AND status IN ('queued', 'dispatching')
-        ORDER BY COALESCE(
+        ORDER BY queue_position ASC, COALESCE(
           (SELECT sequence FROM orchestration_events WHERE event_id = queue.event_id),
           9223372036854775807
         ) ASC, queue_id ASC

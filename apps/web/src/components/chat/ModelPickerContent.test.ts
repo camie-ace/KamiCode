@@ -8,6 +8,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import { deriveProviderInstanceEntries } from "../../providerInstances";
 import {
+  matchesModelPickerProviderLock,
   resolveModelPickerSelectedModel,
   shouldIncludeModelPickerOption,
   shouldOfferModelPickerSetup,
@@ -30,6 +31,23 @@ function entry(status: ServerProvider["status"], driver = "opencode") {
     },
   ])[0]!;
 }
+
+describe("matchesModelPickerProviderLock", () => {
+  it("keeps every model from the active provider selectable", () => {
+    expect(
+      matchesModelPickerProviderLock(
+        { driverKind: ProviderDriverKind.make("codex") },
+        ProviderDriverKind.make("codex"),
+      ),
+    ).toBe(true);
+    expect(
+      matchesModelPickerProviderLock(
+        { driverKind: ProviderDriverKind.make("claude") },
+        ProviderDriverKind.make("codex"),
+      ),
+    ).toBe(false);
+  });
+});
 
 describe("shouldIncludeModelPickerOption", () => {
   it.each(["ready", "error"] as const)(

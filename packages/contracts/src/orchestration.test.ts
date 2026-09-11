@@ -2012,6 +2012,26 @@ it.effect("decodes internal queued-turn lifecycle commands and events", () =>
   }),
 );
 
+it.effect("decodes queued-turn priority commands and compatible metadata events", () =>
+  Effect.gen(function* () {
+    const command = yield* decodeClientOrchestrationCommand({
+      type: "thread.queued-turn.reorder",
+      commandId: "queue-reorder:1",
+      threadId: "thread-1",
+      queueIds: ["queue:event-2", "queue:event-1"],
+      createdAt: "2026-01-01T00:00:02.000Z",
+    });
+    assert.strictEqual(command.type, "thread.queued-turn.reorder");
+
+    const payload = yield* decodeThreadMetaUpdatedPayload({
+      threadId: "thread-1",
+      queuedTurnOrder: ["queue:event-2", "queue:event-1"],
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    });
+    assert.deepStrictEqual(payload.queuedTurnOrder, ["queue:event-2", "queue:event-1"]);
+  }),
+);
+
 it.effect("decodes latest turn source proposed plan metadata when present", () =>
   Effect.gen(function* () {
     const parsed = yield* decodeOrchestrationLatestTurn({

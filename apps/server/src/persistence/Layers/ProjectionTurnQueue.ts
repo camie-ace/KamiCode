@@ -20,6 +20,7 @@ import {
   ProjectionTurnQueueRepository,
   ProjectionTurnQueueRow,
   RecoverProjectionTurnQueueInput,
+  ReorderProjectionTurnQueueInput,
   ThreadQueueInput,
   UpsertProjectionTurnQueueInput,
   type ProjectionTurnQueueRepositoryShape,
@@ -55,6 +56,7 @@ const makeProjectionTurnQueueRepository = Effect.gen(function* () {
           command_id,
           message_id,
           status,
+          queue_position,
           requested_at,
           scheduled_for,
           started_at,
@@ -75,6 +77,7 @@ const makeProjectionTurnQueueRepository = Effect.gen(function* () {
           ${row.commandId},
           ${row.messageId},
           ${row.status},
+          ${row.position},
           ${row.requestedAt},
           ${row.scheduledFor},
           ${row.startedAt},
@@ -105,6 +108,7 @@ const makeProjectionTurnQueueRepository = Effect.gen(function* () {
           command_id AS "commandId",
           message_id AS "messageId",
           status,
+          queue_position AS position,
           requested_at AS "requestedAt",
           scheduled_for AS "scheduledFor",
           started_at AS "startedAt",
@@ -212,6 +216,7 @@ const makeProjectionTurnQueueRepository = Effect.gen(function* () {
           command_id AS "commandId",
           message_id AS "messageId",
           status,
+          queue_position AS position,
           requested_at AS "requestedAt",
           scheduled_for AS "scheduledFor",
           started_at AS "startedAt",
@@ -227,10 +232,26 @@ const makeProjectionTurnQueueRepository = Effect.gen(function* () {
         FROM projection_turn_queue queue
         WHERE thread_id = ${threadId}
           AND status IN ('queued', 'dispatching')
-        ORDER BY COALESCE(
+        ORDER BY queue_position ASC, COALESCE(
           (SELECT sequence FROM orchestration_events WHERE event_id = queue.event_id),
           9223372036854775807
         ) ASC, queue_id ASC
+      `,
+  });
+
+  const setPositionRow = SqlSchema.void({
+    Request: Schema.Struct({
+      threadId: ProjectionTurnQueueRow.fields.threadId,
+      queueId: ProjectionTurnQueueRow.fields.queueId,
+      position: ProjectionTurnQueueRow.fields.position,
+    }),
+    execute: ({ threadId, queueId, position }) =>
+      sql`
+        UPDATE projection_turn_queue
+        SET queue_position = ${position}
+        WHERE thread_id = ${threadId}
+          AND queue_id = ${queueId}
+          AND status = 'queued'
       `,
   });
 
@@ -415,6 +436,19 @@ const makeProjectionTurnQueueRepository = Effect.gen(function* () {
       Effect.map((row) => row.count),
     );
 
+  const reorder: ProjectionTurnQueueRepositoryShape["reorder"] = (
+    input: ReorderProjectionTurnQueueInput,
+  ) =>
+    sql
+      .withTransaction(
+        Effect.forEach(
+          input.queueIds,
+          (queueId, position) => setPositionRow({ threadId: input.threadId, queueId, position }),
+          { concurrency: 1 },
+        ).pipe(Effect.asVoid),
+      )
+      .pipe(Effect.mapError(toPersistenceSqlError("ProjectionTurnQueueRepository.reorder:query")));
+
   const listQueuedThreadIds: ProjectionTurnQueueRepositoryShape["listQueuedThreadIds"] =
     listQueuedThreadIdRows(undefined).pipe(
       Effect.mapError(
@@ -457,6 +491,7 @@ const makeProjectionTurnQueueRepository = Effect.gen(function* () {
     markCancelled,
     listActiveByThreadId,
     countQueuedByThreadId,
+    reorder,
     listQueuedThreadIds,
     completeStartedByThreadId,
     cancelActiveByThreadId,

@@ -603,6 +603,19 @@ export function projectEvent(
       return decodeForEvent(ThreadMetaUpdatedPayload, event.payload, event.type, "payload").pipe(
         Effect.map((payload) => {
           const thread = nextBase.threads.find((entry) => entry.id === payload.threadId);
+          const queuedTurns = (() => {
+            if (!thread || payload.queuedTurnOrder === undefined) return undefined;
+            const byId = new Map((thread.queuedTurns ?? []).map((turn) => [turn.queueId, turn]));
+            const orderedIds = new Set(payload.queuedTurnOrder);
+            const retained = (thread.queuedTurns ?? []).filter(
+              (turn) => turn.status !== "queued" || !orderedIds.has(turn.queueId),
+            );
+            const ordered = payload.queuedTurnOrder.flatMap((queueId, position) => {
+              const turn = byId.get(queueId);
+              return turn?.status === "queued" ? [{ ...turn, position }] : [];
+            });
+            return [...retained, ...ordered];
+          })();
           // Legacy single-link events replay into the link array so the
           // derived linkedPullRequest and pullRequests never disagree.
           const legacyLinkPatch =
@@ -633,6 +646,7 @@ export function projectEvent(
               ...(payload.activeOrderKey !== undefined
                 ? { activeOrderKey: payload.activeOrderKey }
                 : {}),
+              ...(queuedTurns !== undefined ? { queuedTurns } : {}),
               ...(payload.branchPullRequest !== undefined
                 ? { branchPullRequest: payload.branchPullRequest }
                 : {}),
@@ -881,6 +895,11 @@ export function projectEvent(
                 threadId: payload.threadId,
                 messageId: payload.messageId,
                 status: "queued",
+                position:
+                  (thread.queuedTurns ?? []).reduce(
+                    (highest, turn) => Math.max(highest, turn.position),
+                    -1,
+                  ) + 1,
                 requestedAt: payload.createdAt,
                 scheduledFor: payload.scheduledFor,
                 startedAt: null,
@@ -921,9 +940,26 @@ export function projectEvent(
                   : turn,
               )
             : (thread.queuedTurns ?? []).filter((turn) => turn.queueId !== payload.queueId);
+        const adoptedAt = payload.startedAt ?? payload.updatedAt;
+        const messages =
+          payload.status === "started" || payload.status === "failed"
+            ? thread.messages.map((message) =>
+                message.id === payload.messageId
+                  ? {
+                      ...message,
+                      ...(payload.status === "started" && payload.turnId !== null
+                        ? { turnId: payload.turnId }
+                        : {}),
+                      createdAt: adoptedAt,
+                      updatedAt: adoptedAt,
+                    }
+                  : message,
+              )
+            : thread.messages;
         return {
           ...nextBase,
           threads: updateThread(nextBase.threads, payload.threadId, {
+            messages,
             queuedTurns,
             updatedAt: payload.updatedAt,
           }),

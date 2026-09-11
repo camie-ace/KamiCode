@@ -1052,6 +1052,7 @@ export const OrchestrationQueuedTurn = Schema.Struct({
   threadId: ThreadId,
   messageId: MessageId,
   status: OrchestrationQueuedTurnStatus,
+  position: NonNegativeInt.pipe(Schema.withDecodingDefault(Effect.succeed(0))),
   requestedAt: IsoDateTime,
   scheduledFor: Schema.NullOr(IsoDateTime).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
   startedAt: Schema.NullOr(IsoDateTime),
@@ -1672,6 +1673,14 @@ const ThreadQueuedTurnUpdateCommand = Schema.Struct({
   createdAt: IsoDateTime,
 });
 
+const ThreadQueuedTurnReorderCommand = Schema.Struct({
+  type: Schema.Literal("thread.queued-turn.reorder"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  queueIds: Schema.Array(TrimmedNonEmptyString),
+  createdAt: IsoDateTime,
+});
+
 const ThreadTurnStartBootstrapCreateThread = Schema.Struct({
   projectId: ProjectId,
   title: TrimmedNonEmptyString,
@@ -1972,6 +1981,7 @@ const DispatchableClientOrchestrationCommand = Schema.Union([
   ThreadInteractionModeSetCommand,
   ThreadQueuedTurnDeleteCommand,
   ThreadQueuedTurnUpdateCommand,
+  ThreadQueuedTurnReorderCommand,
   ThreadTurnStartCommand,
   ThreadTurnInterruptCommand,
   ThreadApprovalRespondCommand,
@@ -2008,6 +2018,7 @@ export const ClientOrchestrationCommand = Schema.Union([
   ThreadInteractionModeSetCommand,
   ThreadQueuedTurnDeleteCommand,
   ThreadQueuedTurnUpdateCommand,
+  ThreadQueuedTurnReorderCommand,
   ClientThreadTurnStartCommand,
   ThreadTurnInterruptCommand,
   ThreadApprovalRespondCommand,
@@ -2343,6 +2354,9 @@ export const ThreadMetaUpdatedPayload = Schema.Struct({
   // Order updates use this existing event so older clients can ignore the
   // new field while continuing to decode the event stream.
   activeOrderKey: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+  /** Ordered queued-turn ids. Reuses the metadata event so older clients can
+      ignore queue-priority changes without rejecting the event stream. */
+  queuedTurnOrder: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
   title: Schema.optional(TrimmedNonEmptyString),
   /** Intent marker consumed by the title-generation reactor. Keeping this on
       the existing event lets older clients safely ignore the new field. */

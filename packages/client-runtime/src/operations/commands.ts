@@ -61,6 +61,7 @@ export type SetThreadRuntimeModeInput = CommandInput<"thread.runtime-mode.set">;
 export type SetThreadInteractionModeInput = CommandInput<"thread.interaction-mode.set">;
 export type DeleteThreadQueuedTurnInput = CommandInput<"thread.queued-turn.delete">;
 export type UpdateThreadQueuedTurnInput = CommandInput<"thread.queued-turn.update">;
+export type ReorderThreadQueuedTurnsInput = CommandInput<"thread.queued-turn.reorder">;
 export type StartThreadTurnInput = CommandInput<"thread.turn.start">;
 export type AppendThreadActivityInput = CommandInput<"thread.activity.append">;
 export type RecordThreadWorkflowInput = CommandInput<"thread.workflow.record">;
@@ -389,6 +390,17 @@ export const updateThreadQueuedTurn: (input: UpdateThreadQueuedTurnInput) => Com
     return yield* dispatch({
       ...input,
       type: "thread.queued-turn.update",
+      commandId: metadata.commandId,
+      createdAt: metadata.createdAt,
+    });
+  });
+
+export const reorderThreadQueuedTurns: (input: ReorderThreadQueuedTurnsInput) => CommandEffect =
+  Effect.fn("EnvironmentCommands.reorderThreadQueuedTurns")(function* (input) {
+    const metadata = yield* timestampedCommandMetadata(input);
+    return yield* dispatch({
+      ...input,
+      type: "thread.queued-turn.reorder",
       commandId: metadata.commandId,
       createdAt: metadata.createdAt,
     });

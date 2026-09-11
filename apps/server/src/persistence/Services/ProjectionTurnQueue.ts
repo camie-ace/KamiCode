@@ -4,6 +4,7 @@ import {
   IsoDateTime,
   MessageId,
   ModelSelection,
+  NonNegativeInt,
   OrchestrationProposedPlanId,
   ProviderInteractionMode,
   RuntimeMode,
@@ -35,6 +36,7 @@ export const ProjectionTurnQueueRow = Schema.Struct({
   commandId: Schema.NullOr(CommandId),
   messageId: MessageId,
   status: ProjectionTurnQueueStatus,
+  position: NonNegativeInt,
   requestedAt: IsoDateTime,
   scheduledFor: Schema.NullOr(IsoDateTime),
   startedAt: Schema.NullOr(IsoDateTime),
@@ -57,6 +59,12 @@ export const ThreadQueueInput = Schema.Struct({
   threadId: ThreadId,
 });
 export type ThreadQueueInput = typeof ThreadQueueInput.Type;
+
+export const ReorderProjectionTurnQueueInput = Schema.Struct({
+  threadId: ThreadId,
+  queueIds: Schema.Array(TrimmedNonEmptyString),
+});
+export type ReorderProjectionTurnQueueInput = typeof ReorderProjectionTurnQueueInput.Type;
 
 export const ProjectionTurnQueueIdentityInput = Schema.Struct({
   queueId: TrimmedNonEmptyString,
@@ -145,6 +153,9 @@ export interface ProjectionTurnQueueRepositoryShape {
   readonly countQueuedByThreadId: (
     input: ThreadQueueInput,
   ) => Effect.Effect<number, ProjectionRepositoryError>;
+  readonly reorder: (
+    input: ReorderProjectionTurnQueueInput,
+  ) => Effect.Effect<void, ProjectionRepositoryError>;
   readonly listQueuedThreadIds: Effect.Effect<ReadonlyArray<ThreadId>, ProjectionRepositoryError>;
   readonly completeStartedByThreadId: (
     input: CompleteProjectionTurnQueueForThreadInput,

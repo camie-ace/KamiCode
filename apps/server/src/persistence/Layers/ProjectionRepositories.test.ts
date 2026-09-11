@@ -418,6 +418,7 @@ projectionRepositoriesLayer("Projection repositories", (it) => {
         commandId: null,
         messageId: MessageId.make("message-cancel-dispatching"),
         status: "queued",
+        position: 0,
         requestedAt: "2026-03-24T00:00:00.000Z",
         scheduledFor: null,
         startedAt: null,
@@ -517,6 +518,7 @@ projectionRepositoriesLayer("Projection repositories", (it) => {
           commandId: null,
           messageId: MessageId.make(`message:${queueId}`),
           status,
+          position: 0,
           requestedAt,
           scheduledFor,
           startedAt: status === "queued" ? null : now,
@@ -614,6 +616,51 @@ projectionRepositoriesLayer("Projection repositories", (it) => {
           turnId: "turn-recover-started",
         },
       ]);
+    }),
+  );
+
+  it.effect("persists queued-turn priority order", () =>
+    Effect.gen(function* () {
+      const queue = yield* ProjectionTurnQueueRepository;
+      const threadId = ThreadId.make("thread-queue-priority");
+      const upsert = (queueId: string, position: number) =>
+        queue.upsert({
+          queueId,
+          threadId,
+          eventId: EventId.make(`event:${queueId}`),
+          commandId: null,
+          messageId: MessageId.make(`message:${queueId}`),
+          status: "queued",
+          position,
+          requestedAt: "2026-03-24T00:00:00.000Z",
+          scheduledFor: null,
+          startedAt: null,
+          completedAt: null,
+          turnId: null,
+          modelSelection: null,
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          titleSeed: null,
+          sourceProposedPlanThreadId: null,
+          sourceProposedPlanId: null,
+          failureDetail: null,
+        });
+      yield* upsert("queue:first", 0);
+      yield* upsert("queue:second", 1);
+
+      yield* queue.reorder({
+        threadId,
+        queueIds: ["queue:second", "queue:first"],
+      });
+
+      const rows = yield* queue.listActiveByThreadId({ threadId });
+      assert.deepEqual(
+        rows.map((row) => [row.queueId, row.position]),
+        [
+          ["queue:second", 0],
+          ["queue:first", 1],
+        ],
+      );
     }),
   );
 

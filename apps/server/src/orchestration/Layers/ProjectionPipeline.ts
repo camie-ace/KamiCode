@@ -1229,6 +1229,29 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
           return;
         }
 
+        case "thread.queued-turn-status-set": {
+          if (event.payload.status !== "started" && event.payload.status !== "failed") {
+            return;
+          }
+          const existingMessage = yield* projectionThreadMessageRepository.getByMessageId({
+            messageId: event.payload.messageId,
+          });
+          if (Option.isNone(existingMessage)) {
+            return;
+          }
+          const adoptedAt = event.payload.startedAt ?? event.payload.updatedAt;
+          yield* projectionThreadMessageRepository.upsert({
+            ...existingMessage.value,
+            turnId:
+              event.payload.status === "started" && event.payload.turnId !== null
+                ? event.payload.turnId
+                : existingMessage.value.turnId,
+            createdAt: adoptedAt,
+            updatedAt: adoptedAt,
+          });
+          return;
+        }
+
         case "thread.reverted": {
           const existingRows = yield* projectionThreadMessageRepository.listByThreadId({
             threadId: event.payload.threadId,
@@ -1829,6 +1852,9 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
           if (event.payload.dispatchPolicy !== "queue") {
             return;
           }
+          const existingQueuedTurns = yield* projectionTurnQueueRepository.listActiveByThreadId({
+            threadId: event.payload.threadId,
+          });
           yield* projectionTurnQueueRepository.upsert({
             queueId: `queue:${event.eventId}` as ProjectionTurnQueueRow["queueId"],
             threadId: event.payload.threadId,
@@ -1836,6 +1862,9 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             commandId: event.commandId,
             messageId: event.payload.messageId,
             status: "queued",
+            position:
+              existingQueuedTurns.reduce((highest, turn) => Math.max(highest, turn.position), -1) +
+              1,
             requestedAt: event.payload.createdAt,
             scheduledFor: event.payload.scheduledFor,
             startedAt: null,
@@ -1848,6 +1877,17 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             sourceProposedPlanThreadId: event.payload.sourceProposedPlan?.threadId ?? null,
             sourceProposedPlanId: event.payload.sourceProposedPlan?.planId ?? null,
             failureDetail: null,
+          });
+          return;
+        }
+
+        case "thread.meta-updated": {
+          if (event.payload.queuedTurnOrder === undefined) {
+            return;
+          }
+          yield* projectionTurnQueueRepository.reorder({
+            threadId: event.payload.threadId,
+            queueIds: event.payload.queuedTurnOrder,
           });
           return;
         }

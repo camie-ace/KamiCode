@@ -1665,6 +1665,43 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       };
     }
 
+    case "thread.queued-turn.reorder": {
+      const thread = yield* requireThread({
+        readModel,
+        command,
+        threadId: command.threadId,
+      });
+      const queuedTurns = (thread.queuedTurns ?? []).filter((turn) => turn.status === "queued");
+      const queuedIds = new Set(queuedTurns.map((turn) => turn.queueId));
+      const requestedIds = new Set(command.queueIds);
+      if (
+        command.queueIds.length === 0 ||
+        requestedIds.size !== command.queueIds.length ||
+        command.queueIds.length !== queuedTurns.length ||
+        command.queueIds.some((queueId) => !queuedIds.has(queueId))
+      ) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Queued-turn priority must include each currently queued turn exactly once.",
+        });
+      }
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "thread.meta-updated",
+        payload: {
+          threadId: command.threadId,
+          queuedTurnOrder: [...command.queueIds],
+          // Reprioritizing work is not conversation activity.
+          updatedAt: thread.updatedAt,
+        },
+      };
+    }
+
     case "thread.queued-turn.update": {
       const thread = yield* requireThread({
         readModel,

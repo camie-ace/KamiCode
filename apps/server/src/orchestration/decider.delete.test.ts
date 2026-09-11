@@ -5,6 +5,7 @@ import {
   MessageId,
   ProjectId,
   ThreadId,
+  TurnId,
   type OrchestrationCommand,
   type OrchestrationEvent,
   ProviderInstanceId,
@@ -320,6 +321,32 @@ it.layer(NodeServices.layer)("decider deletion flows", (it) => {
       );
       expect(updateExit._tag).toBe("Failure");
       expect(deleteExit._tag).toBe("Failure");
+
+      const startedResult = yield* decideOrchestrationCommand({
+        command: {
+          type: "thread.queued-turn.status.set",
+          commandId: asCommandId("server:start-dispatching"),
+          threadId,
+          queueId,
+          messageId,
+          status: "started",
+          turnId: TurnId.make("turn-from-queue"),
+          failureDetail: null,
+          createdAt: "2026-01-01T00:00:03.000Z",
+        },
+        readModel: dispatching,
+      });
+      const startedEvent = Array.isArray(startedResult) ? startedResult[0] : startedResult;
+      if (!startedEvent) return;
+      const started = yield* projectEvent(dispatching, { ...startedEvent, sequence: 7 });
+      expect(
+        started.threads
+          .find((thread) => thread.id === threadId)
+          ?.messages.find((message) => message.id === messageId),
+      ).toMatchObject({
+        turnId: TurnId.make("turn-from-queue"),
+        createdAt: "2026-01-01T00:00:01.000Z",
+      });
     }),
   );
 
@@ -369,6 +396,91 @@ it.layer(NodeServices.layer)("decider deletion flows", (it) => {
         queueId: "queue:evt-queued-turn-start-requested",
         messageId: asMessageId("message-delete-queued"),
       });
+    }),
+  );
+
+  it.effect("reorders every queued turn atomically and rejects incomplete priority lists", () =>
+    Effect.gen(function* () {
+      const threadId = asThreadId("thread-delete-1");
+      const now = "2026-01-01T00:00:00.000Z";
+      const first = yield* projectEvent(yield* seedReadModel, {
+        sequence: 4,
+        eventId: asEventId("evt-priority-first"),
+        aggregateKind: "thread",
+        aggregateId: threadId,
+        type: "thread.turn-start-requested",
+        occurredAt: now,
+        commandId: asCommandId("cmd-priority-first"),
+        causationEventId: null,
+        correlationId: asCommandId("cmd-priority-first"),
+        metadata: {},
+        payload: {
+          threadId,
+          messageId: asMessageId("message-priority-first"),
+          runtimeMode: "approval-required",
+          interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+          dispatchPolicy: "queue",
+          scheduledFor: null,
+          createdAt: now,
+        },
+      });
+      const queued = yield* projectEvent(first, {
+        sequence: 5,
+        eventId: asEventId("evt-priority-second"),
+        aggregateKind: "thread",
+        aggregateId: threadId,
+        type: "thread.turn-start-requested",
+        occurredAt: now,
+        commandId: asCommandId("cmd-priority-second"),
+        causationEventId: null,
+        correlationId: asCommandId("cmd-priority-second"),
+        metadata: {},
+        payload: {
+          threadId,
+          messageId: asMessageId("message-priority-second"),
+          runtimeMode: "approval-required",
+          interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+          dispatchPolicy: "queue",
+          scheduledFor: null,
+          createdAt: now,
+        },
+      });
+      const queueIds = ["queue:evt-priority-second", "queue:evt-priority-first"];
+      const result = yield* decideOrchestrationCommand({
+        command: {
+          type: "thread.queued-turn.reorder",
+          commandId: asCommandId("cmd-priority-reorder"),
+          threadId,
+          queueIds,
+          createdAt: "2026-01-01T00:00:01.000Z",
+        },
+        readModel: queued,
+      });
+      const event = Array.isArray(result) ? result[0] : result;
+      expect(event?.type).toBe("thread.meta-updated");
+      if (event?.type !== "thread.meta-updated") return;
+      expect(event.payload.queuedTurnOrder).toEqual(queueIds);
+
+      const projected = yield* projectEvent(queued, { ...event, sequence: 6 });
+      expect(
+        projected.threads
+          .find((thread) => thread.id === threadId)
+          ?.queuedTurns?.map((turn) => turn.queueId),
+      ).toEqual(queueIds);
+
+      const invalid = yield* Effect.exit(
+        decideOrchestrationCommand({
+          command: {
+            type: "thread.queued-turn.reorder",
+            commandId: asCommandId("cmd-priority-invalid"),
+            threadId,
+            queueIds: [queueIds[0]!],
+            createdAt: "2026-01-01T00:00:02.000Z",
+          },
+          readModel: queued,
+        }),
+      );
+      expect(invalid._tag).toBe("Failure");
     }),
   );
 

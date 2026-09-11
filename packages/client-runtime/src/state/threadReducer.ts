@@ -254,11 +254,25 @@ export function applyThreadDetailEvent(
       };
 
     // ── Thread metadata ─────────────────────────────────────────────
-    case "thread.meta-updated":
+    case "thread.meta-updated": {
+      const queuedTurns = (() => {
+        if (event.payload.queuedTurnOrder === undefined) return thread.queuedTurns;
+        const byId = new Map((thread.queuedTurns ?? []).map((turn) => [turn.queueId, turn]));
+        const orderedIds = new Set(event.payload.queuedTurnOrder);
+        const retained = (thread.queuedTurns ?? []).filter(
+          (turn) => turn.status !== "queued" || !orderedIds.has(turn.queueId),
+        );
+        const ordered = event.payload.queuedTurnOrder.flatMap((queueId, position) => {
+          const turn = byId.get(queueId);
+          return turn?.status === "queued" ? [{ ...turn, position }] : [];
+        });
+        return [...retained, ...ordered];
+      })();
       return {
         kind: "updated",
         thread: {
           ...thread,
+          ...(queuedTurns !== undefined ? { queuedTurns } : {}),
           ...(event.payload.title !== undefined ? { title: event.payload.title } : {}),
           ...(event.payload.titleRegeneration !== undefined
             ? { titleRegeneration: event.payload.titleRegeneration }
@@ -282,6 +296,7 @@ export function applyThreadDetailEvent(
           updatedAt: event.payload.updatedAt,
         },
       };
+    }
 
     case "thread.pull-request-linked": {
       const link = event.payload.link;
@@ -350,6 +365,11 @@ export function applyThreadDetailEvent(
                 threadId: event.payload.threadId,
                 messageId: event.payload.messageId,
                 status: "queued" as const,
+                position:
+                  (thread.queuedTurns ?? []).reduce(
+                    (highest, turn) => Math.max(highest, turn.position),
+                    -1,
+                  ) + 1,
                 requestedAt: event.payload.createdAt,
                 scheduledFor: event.payload.scheduledFor,
                 startedAt: null,
@@ -375,6 +395,22 @@ export function applyThreadDetailEvent(
     }
 
     case "thread.queued-turn-status-set": {
+      const adoptedAt = event.payload.startedAt ?? event.payload.updatedAt;
+      const messages =
+        event.payload.status === "started" || event.payload.status === "failed"
+          ? thread.messages.map((message) =>
+              message.id === event.payload.messageId
+                ? {
+                    ...message,
+                    ...(event.payload.status === "started" && event.payload.turnId !== null
+                      ? { turnId: event.payload.turnId }
+                      : {}),
+                    createdAt: adoptedAt,
+                    updatedAt: adoptedAt,
+                  }
+                : message,
+            )
+          : thread.messages;
       const queuedTurns =
         event.payload.status === "queued" || event.payload.status === "dispatching"
           ? (thread.queuedTurns ?? []).map((turn) =>
@@ -394,6 +430,7 @@ export function applyThreadDetailEvent(
         kind: "updated",
         thread: {
           ...thread,
+          messages,
           queuedTurns,
           updatedAt: event.payload.updatedAt,
         },

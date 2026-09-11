@@ -57,7 +57,6 @@ type ModelPickerItem = {
   driverKind: ProviderDriverKind;
   instanceDisplayName: string;
   instanceAccentColor?: string | undefined;
-  continuationGroupKey?: string | undefined;
   isLegacy?: boolean | undefined;
   isUnavailable?: boolean | undefined;
 };
@@ -111,6 +110,13 @@ export function shouldOfferModelPickerSetup(
       entry.snapshot.auth.status === "unauthenticated" ||
       !options.some((option) => !option.isUnavailable))
   );
+}
+
+export function matchesModelPickerProviderLock(
+  entry: Pick<ProviderInstanceEntry, "driverKind">,
+  lockedProvider: ProviderDriverKind | null,
+): boolean {
+  return lockedProvider === null || entry.driverKind === lockedProvider;
 }
 
 const EMPTY_MODEL_JUMP_LABELS = new Map<string, string>();
@@ -273,13 +279,9 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
     [instanceEntries],
   );
   const matchesLockedProvider = useCallback(
-    (entry: Pick<ProviderInstanceEntry, "driverKind" | "continuationGroupKey">): boolean => {
-      if (props.lockedProvider === null) return true;
-      if (entry.driverKind !== props.lockedProvider) return false;
-      if (!props.lockedContinuationGroupKey) return true;
-      return entry.continuationGroupKey === props.lockedContinuationGroupKey;
-    },
-    [props.lockedContinuationGroupKey, props.lockedProvider],
+    (entry: Pick<ProviderInstanceEntry, "driverKind">): boolean =>
+      matchesModelPickerProviderLock(entry, props.lockedProvider),
+    [props.lockedProvider],
   );
 
   const selectableUnavailableInstanceIds = useMemo(() => {
