@@ -181,6 +181,7 @@ import { ComposerPendingApprovalActions } from "./ComposerPendingApprovalActions
 import { CompactComposerControlsMenu } from "./CompactComposerControlsMenu";
 import { ComposerPrimaryActions } from "./ComposerPrimaryActions";
 import { ScheduleMessageDialog } from "./ScheduleMessageDialog";
+import type { RecurringMessageSchedule, ScheduledMessageSubmission } from "./scheduleMessage";
 import { ComposerPendingApprovalPanel } from "./ComposerPendingApprovalPanel";
 import { ComposerPendingUserInputPanel } from "./ComposerPendingUserInputPanel";
 import { ComposerPlanFollowUpBanner } from "./ComposerPlanFollowUpBanner";
@@ -1341,6 +1342,7 @@ export interface ChatComposerProps {
   supportsQuestionAttachments: boolean;
   maxFileAttachmentBytes: number | null;
   supportsSpeechTranscription: boolean;
+  supportsThreadRecurringSchedules: boolean;
   routeKind: "server" | "draft";
   routeThreadRef: ScopedThreadRef;
   draftId: DraftId | null;
@@ -1460,6 +1462,7 @@ export interface ChatComposerProps {
     options?: {
       dispatchPolicy?: "immediate" | "queue";
       scheduledFor?: string;
+      recurrence?: RecurringMessageSchedule;
       submissionIntent?: ComposerSubmissionIntent;
     },
   ) => void;
@@ -1509,6 +1512,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     supportsQuestionAttachments,
     maxFileAttachmentBytes,
     supportsSpeechTranscription,
+    supportsThreadRecurringSchedules,
     routeKind,
     routeThreadRef,
     draftId,
@@ -3225,6 +3229,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       options?: {
         dispatchPolicy?: "immediate" | "queue";
         scheduledFor?: string;
+        recurrence?: RecurringMessageSchedule;
         submissionIntent?: ComposerSubmissionIntent;
       },
     ) => {
@@ -3295,8 +3300,12 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     setScheduleDialogOpen(true);
   }, [activePendingProgress, composerSendState.hasSendableContent, setScheduleDialogOpen]);
   const submitScheduledComposer = useCallback(
-    (scheduledFor: string) => {
-      submitComposer(undefined, { dispatchPolicy: "queue", scheduledFor });
+    (submission: ScheduledMessageSubmission) => {
+      submitComposer(undefined, {
+        dispatchPolicy: "queue",
+        scheduledFor: submission.scheduledFor,
+        ...(submission.recurrence ? { recurrence: submission.recurrence } : {}),
+      });
     },
     [submitComposer],
   );
@@ -6180,6 +6189,14 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       <ScheduleMessageDialog
         open={scheduleDialogOpen}
         shortcutLabel={scheduleShortcutLabel}
+        allowRecurring={_isServerThread && supportsThreadRecurringSchedules}
+        recurringUnavailableReason={
+          !_isServerThread
+            ? "Start this thread once before adding a recurring schedule."
+            : !supportsThreadRecurringSchedules
+              ? "Update this environment before adding a recurring schedule."
+              : null
+        }
         onOpenChange={setScheduleDialogOpen}
         onSchedule={submitScheduledComposer}
       />

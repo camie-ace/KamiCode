@@ -25,6 +25,9 @@ const makeProjectTriggerService = Effect.gen(function* () {
         scheduleOnceAt: input.scheduleOnceAt,
         timezone: input.timezone ?? "UTC",
         runtimeTarget: input.runtimeTarget ?? "local",
+        targetThreadId: input.targetThreadId ?? null,
+        createdBy: input.createdBy ?? null,
+        disabledReason: input.disabledReason ?? null,
         nextFireAt: null,
         lastFireAt: null,
         prompt: input.prompt,
@@ -43,7 +46,8 @@ const makeProjectTriggerService = Effect.gen(function* () {
         failureDetail: null,
       };
       const nextFireAt = baseRow.enabled
-        ? yield* computeProjectTriggerNextFireAt(baseRow, input.updatedAt, "initialize")
+        ? (input.firstRunAt ??
+          (yield* computeProjectTriggerNextFireAt(baseRow, input.updatedAt, "initialize")))
         : null;
       const row = {
         ...baseRow,

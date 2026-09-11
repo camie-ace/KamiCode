@@ -17,12 +17,13 @@ export interface ProjectTriggerRunIds {
 export function makeProjectTriggerRunIds(
   triggerId: ProjectTriggerRow["triggerId"],
   fireAt: string,
+  targetThreadId: ProjectTriggerRow["targetThreadId"] = null,
 ): ProjectTriggerRunIds {
   const key = `${triggerId}:${fireAt}`;
   return {
     runId: ProjectTriggerRunId.make(`project-trigger-run:${key}`),
     commandId: CommandId.make(`project-trigger:${key}:thread-turn-start`),
-    threadId: ThreadId.make(`project-trigger:${key}:thread`),
+    threadId: targetThreadId ?? ThreadId.make(`project-trigger:${key}:thread`),
     messageId: MessageId.make(`project-trigger:${key}:message`),
   };
 }
@@ -33,31 +34,34 @@ export function makeProjectTriggerRunCommand(input: {
   readonly ids: ProjectTriggerRunIds;
 }): ProjectTriggerTurnStartCommand {
   const createThreadTemplate = input.trigger.bootstrap?.createThread;
-  const bootstrap = {
-    createThread: {
-      projectId: createThreadTemplate?.projectId ?? input.trigger.projectId,
-      title: createThreadTemplate?.title ?? input.trigger.name,
-      modelSelection: createThreadTemplate?.modelSelection ?? input.trigger.modelSelection,
-      runtimeMode: createThreadTemplate?.runtimeMode ?? input.trigger.runtimeMode,
-      interactionMode: createThreadTemplate?.interactionMode ?? input.trigger.interactionMode,
-      branch: createThreadTemplate?.branch ?? null,
-      worktreePath: createThreadTemplate?.worktreePath ?? null,
-      startedBy: {
-        kind: "trigger",
-        triggerId: input.trigger.triggerId,
-        triggerName: input.trigger.name,
-        eventKind: "cron",
-        firedAt: input.fireAt,
-      } as const,
-      createdAt: input.fireAt,
-    },
-    ...(input.trigger.bootstrap?.prepareWorktree !== undefined
-      ? { prepareWorktree: input.trigger.bootstrap.prepareWorktree }
-      : {}),
-    ...(input.trigger.bootstrap?.runSetupScript !== undefined
-      ? { runSetupScript: input.trigger.bootstrap.runSetupScript }
-      : {}),
-  };
+  const bootstrap =
+    input.trigger.targetThreadId === null
+      ? {
+          createThread: {
+            projectId: createThreadTemplate?.projectId ?? input.trigger.projectId,
+            title: createThreadTemplate?.title ?? input.trigger.name,
+            modelSelection: createThreadTemplate?.modelSelection ?? input.trigger.modelSelection,
+            runtimeMode: createThreadTemplate?.runtimeMode ?? input.trigger.runtimeMode,
+            interactionMode: createThreadTemplate?.interactionMode ?? input.trigger.interactionMode,
+            branch: createThreadTemplate?.branch ?? null,
+            worktreePath: createThreadTemplate?.worktreePath ?? null,
+            startedBy: {
+              kind: "trigger",
+              triggerId: input.trigger.triggerId,
+              triggerName: input.trigger.name,
+              eventKind: "cron",
+              firedAt: input.fireAt,
+            } as const,
+            createdAt: input.fireAt,
+          },
+          ...(input.trigger.bootstrap?.prepareWorktree !== undefined
+            ? { prepareWorktree: input.trigger.bootstrap.prepareWorktree }
+            : {}),
+          ...(input.trigger.bootstrap?.runSetupScript !== undefined
+            ? { runSetupScript: input.trigger.bootstrap.runSetupScript }
+            : {}),
+        }
+      : null;
 
   return {
     type: "thread.turn.start",
@@ -76,7 +80,7 @@ export function makeProjectTriggerRunCommand(input: {
       ? { dispatchPolicy: input.trigger.dispatchPolicy }
       : {}),
     ...(input.trigger.titleSeed !== null ? { titleSeed: input.trigger.titleSeed } : {}),
-    bootstrap,
+    ...(bootstrap !== null ? { bootstrap } : {}),
     createdAt: input.fireAt,
   };
 }
@@ -86,7 +90,11 @@ export function makeProjectTriggerRunRow(input: {
   readonly fireAt: string;
   readonly queuedAt: string;
 }): ProjectTriggerRunRow {
-  const ids = makeProjectTriggerRunIds(input.trigger.triggerId, input.fireAt);
+  const ids = makeProjectTriggerRunIds(
+    input.trigger.triggerId,
+    input.fireAt,
+    input.trigger.targetThreadId,
+  );
   const command = makeProjectTriggerRunCommand({
     trigger: input.trigger,
     fireAt: input.fireAt,

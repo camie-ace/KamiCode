@@ -14,27 +14,40 @@ import {
 import { Input } from "../ui/input";
 import {
   defaultScheduledMessageInputValue,
+  resolveRecurringMessageSchedule,
   resolveScheduledMessageInstant,
+  type ScheduledMessageRepeat,
+  type ScheduledMessageSubmission,
   toLocalDateTimeInputValue,
 } from "./scheduleMessage";
 
 export function ScheduleMessageDialog(props: {
   readonly open: boolean;
   readonly shortcutLabel?: string | null;
+  readonly allowRecurring?: boolean;
+  readonly recurringUnavailableReason?: string | null;
   readonly onOpenChange: (open: boolean) => void;
-  readonly onSchedule: (scheduledFor: string) => void;
+  readonly onSchedule: (submission: ScheduledMessageSubmission) => void;
 }) {
-  const { open, shortcutLabel, onOpenChange, onSchedule } = props;
+  const {
+    open,
+    shortcutLabel,
+    allowRecurring = true,
+    recurringUnavailableReason = null,
+    onOpenChange,
+    onSchedule,
+  } = props;
   const [localDateTime, setLocalDateTime] = useState(() => defaultScheduledMessageInputValue());
+  const [repeat, setRepeat] = useState<ScheduledMessageRepeat>("never");
+  const [customExpression, setCustomExpression] = useState("");
   const [error, setError] = useState<string | null>(null);
-  const timeZone = useMemo(
-    () => Intl.DateTimeFormat().resolvedOptions().timeZone || "Local time",
-    [],
-  );
+  const timeZone = useMemo(() => Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC", []);
 
   useEffect(() => {
     if (!open) return;
     setLocalDateTime(defaultScheduledMessageInputValue());
+    setRepeat("never");
+    setCustomExpression("");
     setError(null);
   }, [open]);
 
@@ -44,7 +57,17 @@ export function ScheduleMessageDialog(props: {
       setError(result.error ?? "Choose a valid date and time.");
       return;
     }
-    onSchedule(result.scheduledFor);
+    const recurrence = resolveRecurringMessageSchedule({
+      localDateTime,
+      repeat: allowRecurring ? repeat : "never",
+      customExpression,
+      timezone: timeZone,
+    });
+    if (recurrence.error !== null) {
+      setError(recurrence.error);
+      return;
+    }
+    onSchedule({ scheduledFor: result.scheduledFor, recurrence: recurrence.schedule });
     onOpenChange(false);
   };
 
@@ -57,8 +80,9 @@ export function ScheduleMessageDialog(props: {
           </div>
           <DialogTitle>Schedule message</DialogTitle>
           <DialogDescription>
-            The message will become ready at the selected time. If this thread is busy then, it will
-            wait in the queue.
+            {allowRecurring && repeat !== "never"
+              ? "Each occurrence enters this thread's normal queue. If the thread is busy, drag it into the priority order you want."
+              : "The message becomes ready at the selected time. If this thread is busy then, it waits in the queue."}
           </DialogDescription>
         </DialogHeader>
         <DialogPanel scrollFade={false}>
@@ -83,6 +107,47 @@ export function ScheduleMessageDialog(props: {
               aria-invalid={error !== null}
             />
           </label>
+          <label className="mt-4 grid gap-2 text-sm font-medium" htmlFor="scheduled-message-repeat">
+            Repeat
+            <select
+              id="scheduled-message-repeat"
+              className="h-9 rounded-md border border-input bg-background px-3 text-sm text-foreground outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/24 disabled:opacity-50"
+              value={allowRecurring ? repeat : "never"}
+              disabled={!allowRecurring}
+              onChange={(event) => {
+                setRepeat(event.currentTarget.value as ScheduledMessageRepeat);
+                setError(null);
+              }}
+            >
+              <option value="never">Never</option>
+              <option value="daily">Daily</option>
+              <option value="weekdays">Weekdays</option>
+              <option value="weekly">Weekly</option>
+              <option value="monthly">Monthly</option>
+              <option value="custom">Custom cron</option>
+            </select>
+          </label>
+          {!allowRecurring ? (
+            <p className="mt-2 text-xs text-muted-foreground">
+              {recurringUnavailableReason ??
+                "Start this thread once before adding a recurring schedule."}
+            </p>
+          ) : null}
+          {allowRecurring && repeat === "custom" ? (
+            <label className="mt-4 grid gap-2 text-sm font-medium" htmlFor="scheduled-message-cron">
+              Cron expression
+              <Input
+                id="scheduled-message-cron"
+                nativeInput
+                value={customExpression}
+                placeholder="0 9 * * 1-5"
+                onChange={(event) => {
+                  setCustomExpression(event.currentTarget.value);
+                  setError(null);
+                }}
+              />
+            </label>
+          ) : null}
           <div className="mt-2 flex items-center justify-between gap-3 text-xs text-muted-foreground">
             <span>{timeZone}</span>
             {shortcutLabel ? <span>Open with {shortcutLabel}</span> : null}

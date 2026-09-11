@@ -361,7 +361,10 @@ import {
   useThreadShell,
 } from "../state/entities";
 import { environmentShell } from "../state/shell";
+import { projectTriggerEnvironment } from "../state/projectTriggers";
 import { ChatComposer, type ChatComposerHandle } from "./chat/ChatComposer";
+import type { RecurringMessageSchedule } from "./chat/scheduleMessage";
+import { ThreadRecurringSchedulesPanel } from "./chat/ThreadRecurringSchedulesPanel";
 import { createPageScrollController, type PageScrollKey } from "./chat/pageScrollController";
 import { DraftHeroHeadline } from "./chat/DraftHeroHeadline";
 import { ExpandedImageDialog } from "./chat/ExpandedImageDialog";
@@ -2423,6 +2426,10 @@ export default function ChatView(props: ChatViewProps) {
   const updateProject = useAtomCommand(projectEnvironment.update, {
     reportFailure: false,
   });
+  const createProjectTrigger = useAtomCommand(projectTriggerEnvironment.create, {
+    reportFailure: false,
+  });
+  const [recurringScheduleRefreshVersion, setRecurringScheduleRefreshVersion] = useState(0);
   const updateProjectScriptSettings = useAtomCommand(serverEnvironment.updateSettings, {
     reportFailure: false,
   });
@@ -3109,17 +3116,17 @@ export default function ChatView(props: ChatViewProps) {
     startNewThreadForProject(activeProjectRef, handleNewThread);
   }, [activeProjectRef, handleNewThread]);
   const projectGroupingSettings = useClientSettings(selectProjectGroupingSettings);
-  const activeDraftLogicalProjectKey =
-    !isServerThread && activeProject
-      ? deriveLogicalProjectKeyFromSettings(activeProject, projectGroupingSettings)
-      : undefined;
-  const handleOpenDraftProjectSettings = useCallback(() => {
-    if (!activeDraftLogicalProjectKey) return;
+  const activeLogicalProjectKey = activeProject
+    ? deriveLogicalProjectKeyFromSettings(activeProject, projectGroupingSettings)
+    : undefined;
+  const handleOpenProjectAutomations = useCallback(() => {
+    if (!activeLogicalProjectKey) return;
     void navigate({
-      to: "/projects/$projectKey",
-      params: { projectKey: activeDraftLogicalProjectKey },
+      to: "/settings/projects",
+      search: { project: activeLogicalProjectKey, machine: undefined },
+      hash: "project-triggers",
     });
-  }, [activeDraftLogicalProjectKey, navigate]);
+  }, [activeLogicalProjectKey, navigate]);
   const activeEnvironmentShell = useEnvironmentQuery(
     activeThread ? environmentShell.stateAtom(activeThread.environmentId) : null,
   );
@@ -3419,6 +3426,8 @@ export default function ChatView(props: ChatViewProps) {
       : clampFileAttachmentUploadBytes(advertisedFileAttachmentBytes);
   const supportsSpeechTranscription =
     attachmentEnvironmentConfig?.environment.capabilities.speechTranscription === true;
+  const supportsThreadRecurringSchedules =
+    attachmentEnvironmentConfig?.environment.capabilities.threadRecurringSchedules === true;
   const envLocked = Boolean(
     activeThread &&
     (activeThread.messages.length > 0 ||
@@ -8476,6 +8485,7 @@ export default function ChatView(props: ChatViewProps) {
     options?: {
       dispatchPolicy?: "immediate" | "queue";
       scheduledFor?: string;
+      recurrence?: RecurringMessageSchedule;
       submissionIntent?: ComposerSubmissionIntent;
       directAnnotation?: {
         annotation: PreviewAnnotationPayload;
@@ -8776,6 +8786,19 @@ export default function ChatView(props: ChatViewProps) {
     const dispatchPolicy = options?.dispatchPolicy ?? "immediate";
     const isQueuedDispatch = dispatchPolicy === "queue";
     const scheduledFor = options?.scheduledFor;
+    const recurringSchedule = options?.recurrence;
+    if (
+      recurringSchedule &&
+      (!isServerThread || scheduledFor === undefined || !supportsThreadRecurringSchedules)
+    ) {
+      setThreadError(
+        threadIdForSend,
+        supportsThreadRecurringSchedules
+          ? "Start this thread and choose a first run time before adding a recurring schedule."
+          : "Update this environment before adding a recurring schedule.",
+      );
+      return;
+    }
     const isFirstMessage = !isServerThread || activeThread.messages.length === 0;
     const baseBranchForWorktree =
       isFirstMessage && sendEnvMode === "worktree" && !activeThread.worktreePath
@@ -8978,7 +9001,10 @@ export default function ChatView(props: ChatViewProps) {
       updatedAt: messageCreatedAt,
       streaming: false,
     };
-    if (isQueuedDispatch) {
+    if (recurringSchedule !== undefined) {
+      // Creating the schedule does not send this prompt yet. Its first real
+      // user message appears only when the scheduler enqueues the occurrence.
+    } else if (isQueuedDispatch) {
       if (scheduledFor !== undefined) {
         optimisticQueuedSchedulesRef.current.set(messageIdForSend, scheduledFor);
       }
@@ -9052,7 +9078,7 @@ export default function ChatView(props: ChatViewProps) {
 
     let failure: AtomCommandResult<unknown, unknown> | null = null;
     // Auto-title from first message
-    if (isFirstMessage && isServerThread) {
+    if (isFirstMessage && isServerThread && recurringSchedule === undefined) {
       const titleResult = await updateThreadMetadata({
         environmentId,
         input: {
@@ -9065,7 +9091,7 @@ export default function ChatView(props: ChatViewProps) {
       }
     }
 
-    if (failure === null && isServerThread) {
+    if (failure === null && isServerThread && recurringSchedule === undefined) {
       const settingsResult = await persistThreadSettingsForNextTurn({
         threadId: threadIdForSend,
         createdAt: messageCreatedAt,
@@ -9094,7 +9120,60 @@ export default function ChatView(props: ChatViewProps) {
     }
 
     let turnStartSucceeded = false;
-    if (failure === null && turnAttachmentsResult._tag === "Success") {
+    if (
+      failure === null &&
+      turnAttachmentsResult._tag === "Success" &&
+      recurringSchedule !== undefined &&
+      scheduledFor !== undefined
+    ) {
+      const scheduleTitleSeed = assistantCitationsToPlainText(trimmed) || "Recurring message";
+      const scheduleResult = await createProjectTrigger({
+        environmentId,
+        input: {
+          projectId: activeProject.id,
+          name: `Recurring: ${truncate(scheduleTitleSeed)}`.slice(0, 160),
+          description: "Recurring message in an existing thread",
+          enabled: true,
+          target: { kind: "thread", threadId: threadIdForSend },
+          firstRunAt: scheduledFor,
+          schedule: {
+            kind: "cron",
+            expression: recurringSchedule.expression,
+            timezone: recurringSchedule.timezone,
+            runtime:
+              primaryEnvironmentId !== null && environmentId !== primaryEnvironmentId
+                ? "remote"
+                : "local",
+          },
+          threadTemplate: {
+            prompt: outgoingMessageText,
+            attachments: turnAttachmentsResult.value,
+            modelSelection: ctxSelectedModelSelection,
+            runtimeMode,
+            interactionMode: sendInteractionMode,
+          },
+        },
+      });
+      if (scheduleResult._tag === "Failure") {
+        failure = scheduleResult;
+      } else {
+        turnStartSucceeded = true;
+        if (turnUsesAttachmentUploads) {
+          releaseDraftAttachments(composerUploadAttachmentsSnapshot);
+        }
+        setRecurringScheduleRefreshVersion((version) => version + 1);
+        toastManager.add({
+          type: "success",
+          title: "Recurring schedule created",
+          description: `First run: ${new Date(scheduledFor).toLocaleString()}`,
+        });
+      }
+    }
+    if (
+      failure === null &&
+      turnAttachmentsResult._tag === "Success" &&
+      recurringSchedule === undefined
+    ) {
       const bootstrap =
         isLocalDraftThread || baseBranchForWorktree
           ? {
@@ -10700,8 +10779,8 @@ export default function ChatView(props: ChatViewProps) {
               activeProject ? (activeProject.testEnvironments ?? []) : undefined
             }
             onNewThreadInProject={handleNewThreadInActiveProject}
-            {...(activeDraftLogicalProjectKey
-              ? { onOpenProjectSettings: handleOpenDraftProjectSettings }
+            {...(activeLogicalProjectKey
+              ? { onOpenProjectSettings: handleOpenProjectAutomations }
               : {})}
             onRunProjectScript={runProjectScript}
             onAddProjectScript={saveProjectScript}
@@ -10888,6 +10967,14 @@ export default function ChatView(props: ChatViewProps) {
                       </div>
                     </div>
                   ) : null}
+                  {isServerThread && activeProject ? (
+                    <ThreadRecurringSchedulesPanel
+                      key={`${activeThread.id}:${recurringScheduleRefreshVersion}`}
+                      environmentId={environmentId}
+                      projectId={activeProject.id}
+                      threadId={activeThread.id}
+                    />
+                  ) : null}
                   <QueuedMessagesPanel
                     items={queuedMessageItems}
                     onDelete={deleteQueuedMessage}
@@ -10914,6 +11001,7 @@ export default function ChatView(props: ChatViewProps) {
                             supportsQuestionAttachments={supportsQuestionAttachments}
                             maxFileAttachmentBytes={maxFileAttachmentBytes}
                             supportsSpeechTranscription={supportsSpeechTranscription}
+                            supportsThreadRecurringSchedules={supportsThreadRecurringSchedules}
                             routeKind={routeKind}
                             routeThreadRef={routeThreadRef}
                             draftId={draftId}

@@ -457,6 +457,7 @@ export const ChatHeader = memo(function ChatHeader({
             environmentId={activeThreadEnvironmentId}
             projectId={activeProjectId}
             projectName={activeProjectName}
+            onOpenProjectSettings={onOpenProjectSettings}
           />
         )}
         {activeProjectTestEnvironments && (

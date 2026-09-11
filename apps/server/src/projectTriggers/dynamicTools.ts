@@ -134,6 +134,12 @@ function triggerSummary(row: ProjectTriggerRow): unknown {
     name: row.name,
     description: row.description,
     enabled: row.enabled,
+    target:
+      row.targetThreadId === null
+        ? { kind: "new-thread" }
+        : { kind: "thread", threadId: row.targetThreadId },
+    createdBy: row.createdBy,
+    disabledReason: row.disabledReason,
     schedule: {
       kind: row.scheduleKind,
       expression: row.scheduleCron,
@@ -284,20 +290,22 @@ function saveFromTool(input: {
     defaultProviderInstanceId: input.defaultProviderInstanceId,
   });
   const bootstrap =
-    template.branch !== null || template.worktreePath !== null
-      ? {
-          createThread: {
-            projectId: input.projectId,
-            title: template.titleSeed ?? input.name,
-            modelSelection: template.modelSelection,
-            runtimeMode: template.runtimeMode,
-            interactionMode: template.interactionMode,
-            branch: template.branch,
-            worktreePath: template.worktreePath,
-            createdAt: input.createdAt,
-          },
-        }
-      : null;
+    input.existing?.targetThreadId !== null && input.existing?.targetThreadId !== undefined
+      ? null
+      : template.branch !== null || template.worktreePath !== null
+        ? {
+            createThread: {
+              projectId: input.projectId,
+              title: template.titleSeed ?? input.name,
+              modelSelection: template.modelSelection,
+              runtimeMode: template.runtimeMode,
+              interactionMode: template.interactionMode,
+              branch: template.branch,
+              worktreePath: template.worktreePath,
+              createdAt: input.createdAt,
+            },
+          }
+        : null;
   return input.service.saveTrigger({
     triggerId: input.triggerId,
     projectId: input.projectId,
@@ -309,10 +317,15 @@ function saveFromTool(input: {
     scheduleOnceAt: null,
     timezone: input.schedule.timezone ?? input.existing?.timezone ?? "UTC",
     runtimeTarget: input.schedule.runtime ?? input.existing?.runtimeTarget ?? "local",
+    targetThreadId: input.existing?.targetThreadId ?? null,
+    createdBy: input.existing?.createdBy ?? null,
+    disabledReason: input.enabled ? null : (input.existing?.disabledReason ?? null),
     prompt: template.prompt,
+    attachments: input.existing?.attachments ?? [],
     modelSelection: template.modelSelection,
     runtimeMode: template.runtimeMode,
     interactionMode: template.interactionMode,
+    dispatchPolicy: input.existing?.dispatchPolicy ?? null,
     titleSeed: template.titleSeed,
     bootstrap,
     createdAt: input.createdAt,

@@ -1,9 +1,16 @@
-import type { EnvironmentId } from "@t3tools/contracts";
-import { ClockIcon, PencilIcon, PlayIcon, PlusIcon, RefreshCwIcon, Trash2Icon } from "lucide-react";
+import type { EnvironmentId, ProjectId, ProjectTriggerRunRecord } from "@t3tools/contracts";
+import {
+  ClockIcon,
+  HistoryIcon,
+  PencilIcon,
+  PlayIcon,
+  PlusIcon,
+  RefreshCwIcon,
+  Trash2Icon,
+} from "lucide-react";
 import React, { type FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 
 import { usePrimaryEnvironmentId } from "../../state/environments";
-import type { Project } from "../../types";
 import {
   clearProjectTriggersSettingsFocus,
   formatProjectTriggerFireTime,
@@ -61,8 +68,15 @@ interface TriggerFormState {
 }
 
 interface ProjectTriggersSectionProps {
-  readonly projects: readonly Project[];
+  readonly projects: readonly ProjectTriggerProject[];
   readonly preferredProjectId?: string | null;
+}
+
+interface ProjectTriggerProject {
+  readonly environmentId: EnvironmentId;
+  readonly id: ProjectId;
+  readonly title: string;
+  readonly workspaceRoot: string;
 }
 
 function defaultTimezone(): string {
@@ -128,7 +142,7 @@ function mutationFromTrigger(
   };
 }
 
-function projectOptionKey(project: Pick<Project, "environmentId" | "id">): string {
+function projectOptionKey(project: Pick<ProjectTriggerProject, "environmentId" | "id">): string {
   return projectTriggersProjectKey({
     environmentId: project.environmentId,
     projectId: project.id,
@@ -154,6 +168,21 @@ function triggerStatusText(trigger: ProjectTrigger, executionLocationLabel: stri
     .join(". ");
 }
 
+function triggerDisabledReasonText(trigger: ProjectTrigger): string | null {
+  switch (trigger.disabledReason) {
+    case "thread-settled":
+      return "Disabled when its thread was settled";
+    case "thread-archived":
+      return "Disabled when its thread was archived";
+    case "thread-deleted":
+      return "Disabled when its thread was deleted";
+    case "thread-missing":
+      return "Disabled because its thread is unavailable";
+    case null:
+      return null;
+  }
+}
+
 function toastTriggerError(title: string, error: unknown): void {
   toastManager.add(
     stackedThreadToast({
@@ -176,6 +205,7 @@ export default function ProjectTriggersSection({
     updateProjectTrigger,
     deleteProjectTrigger,
     runProjectTriggerNow,
+    listProjectTriggerRuns,
   } = useProjectTriggerActions();
   const [settingsFocus] = useState(readProjectTriggersSettingsFocus);
   const [settingsFocusApplied, setSettingsFocusApplied] = useState(false);
@@ -186,6 +216,9 @@ export default function ProjectTriggersSection({
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingTrigger, setEditingTrigger] = useState<ProjectTrigger | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<ProjectTrigger | null>(null);
+  const [historyTarget, setHistoryTarget] = useState<ProjectTrigger | null>(null);
+  const [historyRuns, setHistoryRuns] = useState<readonly ProjectTriggerRunRecord[]>([]);
+  const [historyState, setHistoryState] = useState<LoadState>({ status: "idle" });
   const [form, setForm] = useState<TriggerFormState>(() => defaultTriggerForm("this-runtime"));
   const [validationError, setValidationError] = useState<string | null>(null);
 
@@ -420,11 +453,43 @@ export default function ProjectTriggersSection({
     }
   }, [deleteProjectTrigger, deleteTarget, pendingAction, reloadTriggers, selectedProject]);
 
+  const loadHistory = useCallback(
+    async (trigger: ProjectTrigger) => {
+      if (!selectedProject) return;
+      setHistoryState({ status: "loading" });
+      try {
+        const runs = await listProjectTriggerRuns({
+          environmentId: selectedProject.environmentId,
+          triggerId: trigger.id,
+          limit: 25,
+        });
+        setHistoryRuns(runs);
+        setHistoryState({ status: "loaded" });
+      } catch (error) {
+        setHistoryRuns([]);
+        setHistoryState({
+          status: "error",
+          message: error instanceof Error ? error.message : "Failed to load automation history.",
+        });
+      }
+    },
+    [listProjectTriggerRuns, selectedProject],
+  );
+
+  const openHistory = useCallback(
+    (trigger: ProjectTrigger) => {
+      setHistoryTarget(trigger);
+      setHistoryRuns([]);
+      void loadHistory(trigger);
+    },
+    [loadHistory],
+  );
+
   return (
     <>
       <SettingsSection
         id="project-triggers"
-        title="Project triggers"
+        title="Automations"
         icon={<ClockIcon className="size-3.5" />}
         headerAction={
           <Button
@@ -470,7 +535,7 @@ export default function ProjectTriggersSection({
 
         {loadState.status === "loading" ? (
           <SettingsRow
-            title="Loading triggers"
+            title="Loading automations"
             description="Reading schedules from the selected runtime."
             control={<RefreshCwIcon className="size-3.5 animate-spin text-muted-foreground" />}
           />
@@ -478,7 +543,7 @@ export default function ProjectTriggersSection({
 
         {loadState.status === "error" ? (
           <SettingsRow
-            title="Triggers unavailable"
+            title="Automations unavailable"
             description={loadState.message}
             control={
               <Button size="xs" variant="outline" onClick={() => void reloadTriggers()}>
@@ -491,12 +556,12 @@ export default function ProjectTriggersSection({
 
         {loadState.status === "loaded" && triggers.length === 0 ? (
           <SettingsRow
-            title="No triggers"
-            description={`No schedules are configured for ${selectedProject?.title ?? "this project"}.`}
+            title="No automations"
+            description={`No project triggers or recurring thread schedules are configured for ${selectedProject?.title ?? "this project"}.`}
             control={
               <Button size="xs" onClick={openCreateDialog} disabled={!selectedProject}>
                 <PlusIcon className="size-3.5" />
-                Add trigger
+                Add project trigger
               </Button>
             }
           />
@@ -506,6 +571,7 @@ export default function ProjectTriggersSection({
           ? triggers.map((trigger) => {
               const runPending = pendingAction === `run:${trigger.id}`;
               const anyPending = pendingAction !== null;
+              const lifecycleDisabledReason = triggerDisabledReasonText(trigger);
               return (
                 <SettingsRow
                   key={trigger.id}
@@ -515,9 +581,12 @@ export default function ProjectTriggersSection({
                       <Badge variant={trigger.enabled ? "success" : "outline"} size="sm">
                         {trigger.enabled ? "Enabled" : "Disabled"}
                       </Badge>
+                      <Badge variant="outline" size="sm">
+                        {trigger.targetThreadId === null ? "New thread" : "Thread schedule"}
+                      </Badge>
                     </span>
                   }
-                  description={trigger.schedule}
+                  description={`${trigger.schedule}${trigger.createdBy ? ` · @${trigger.createdBy.githubLogin}` : ""}`}
                   status={triggerStatusText(
                     trigger,
                     projectTriggerExecutionLocationLabel(
@@ -550,6 +619,15 @@ export default function ProjectTriggersSection({
                       <Button
                         size="icon-xs"
                         variant="outline"
+                        aria-label={`View history for ${trigger.name}`}
+                        disabled={anyPending}
+                        onClick={() => openHistory(trigger)}
+                      >
+                        <HistoryIcon className="size-3.5" />
+                      </Button>
+                      <Button
+                        size="icon-xs"
+                        variant="outline"
                         aria-label={`Edit ${trigger.name}`}
                         disabled={anyPending}
                         onClick={() => openEditDialog(trigger)}
@@ -568,6 +646,11 @@ export default function ProjectTriggersSection({
                     </div>
                   }
                 >
+                  {lifecycleDisabledReason ? (
+                    <p className="mt-3 text-xs text-muted-foreground">
+                      {lifecycleDisabledReason}. It will not resume automatically.
+                    </p>
+                  ) : null}
                   {trigger.prompt ? (
                     <div className="mt-3 border-t border-border/50 py-3 text-xs text-muted-foreground">
                       <p className="line-clamp-3 whitespace-pre-wrap">{trigger.prompt}</p>
@@ -685,6 +768,11 @@ export default function ProjectTriggersSection({
                   }
                 />
               </label>
+              {editingTrigger?.disabledReason != null ? (
+                <p className="text-xs text-muted-foreground">
+                  Reopen the target thread before explicitly resuming this schedule.
+                </p>
+              ) : null}
               {validationError ? (
                 <p className="text-sm text-destructive">{validationError}</p>
               ) : null}
@@ -699,6 +787,77 @@ export default function ProjectTriggersSection({
                 <RefreshCwIcon className="size-3.5 animate-spin" />
               ) : null}
               {editingTrigger ? "Save changes" : "Save trigger"}
+            </Button>
+          </DialogFooter>
+        </DialogPopup>
+      </Dialog>
+
+      <Dialog
+        open={historyTarget !== null}
+        onOpenChange={(open) => {
+          if (!open) setHistoryTarget(null);
+        }}
+        onOpenChangeComplete={(open) => {
+          if (open) return;
+          setHistoryRuns([]);
+          setHistoryState({ status: "idle" });
+        }}
+      >
+        <DialogPopup>
+          <DialogHeader>
+            <DialogTitle>{historyTarget?.name ?? "Automation"} history</DialogTitle>
+            <DialogDescription>The 25 most recent scheduled and manual runs.</DialogDescription>
+          </DialogHeader>
+          <DialogPanel>
+            {historyState.status === "loading" ? (
+              <div className="flex items-center gap-2 py-6 text-sm text-muted-foreground">
+                <RefreshCwIcon className="size-4 animate-spin" />
+                Loading history
+              </div>
+            ) : null}
+            {historyState.status === "error" ? (
+              <div className="space-y-3 py-3 text-sm">
+                <p className="text-destructive">{historyState.message}</p>
+                <Button
+                  size="xs"
+                  variant="outline"
+                  disabled={!historyTarget}
+                  onClick={() => historyTarget && void loadHistory(historyTarget)}
+                >
+                  <RefreshCwIcon className="size-3.5" />
+                  Retry
+                </Button>
+              </div>
+            ) : null}
+            {historyState.status === "loaded" && historyRuns.length === 0 ? (
+              <p className="py-6 text-sm text-muted-foreground">No runs yet.</p>
+            ) : null}
+            {historyState.status === "loaded" && historyRuns.length > 0 ? (
+              <div className="divide-y divide-border/60">
+                {historyRuns.map((run) => (
+                  <div key={run.id} className="flex items-start gap-3 py-3 text-sm">
+                    <Badge variant={run.status === "succeeded" ? "success" : "outline"} size="sm">
+                      {run.status}
+                    </Badge>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-foreground">
+                        {formatProjectTriggerFireTime(
+                          run.scheduledFor ?? run.startedAt ?? run.createdAt,
+                        )}
+                      </p>
+                      <p className="mt-0.5 text-xs text-muted-foreground">
+                        {run.initiator === "manual" ? "Run manually" : "Scheduled occurrence"}
+                        {run.error ? ` · ${run.error.message}` : ""}
+                      </p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : null}
+          </DialogPanel>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setHistoryTarget(null)}>
+              Close
             </Button>
           </DialogFooter>
         </DialogPopup>

@@ -1,4 +1,9 @@
-import { ChatAttachment, ModelSelection, ThreadTurnStartCommand } from "@t3tools/contracts";
+import {
+  ChatAttachment,
+  KamiUser,
+  ModelSelection,
+  ThreadTurnStartCommand,
+} from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
@@ -12,6 +17,7 @@ import {
   ClaimDueProjectTriggerRunsInput,
   ClaimDueProjectTriggersInput,
   DeleteProjectTriggerInput,
+  DisableInactiveThreadTargetTriggersInput,
   ListProjectTriggerRunsByTriggerInput,
   ListProjectTriggersByProjectInput,
   MarkProjectTriggerRunDispatchedInput,
@@ -36,6 +42,7 @@ const ProjectTriggerDbRow = ProjectTriggerRow.mapFields(
     attachments: Schema.fromJsonString(Schema.Array(ChatAttachment)),
     modelSelection: Schema.fromJsonString(ModelSelection),
     bootstrap: Schema.NullOr(Schema.fromJsonString(ProjectTriggerBootstrap)),
+    createdBy: Schema.NullOr(Schema.fromJsonString(KamiUser)),
   }),
 );
 
@@ -86,6 +93,9 @@ const makeProjectTriggerRepository = Effect.gen(function* () {
           schedule_once_at,
           timezone,
           runtime_target,
+          target_thread_id,
+          created_by_json,
+          disabled_reason,
           next_fire_at,
           last_fire_at,
           prompt,
@@ -114,6 +124,9 @@ const makeProjectTriggerRepository = Effect.gen(function* () {
           ${row.scheduleOnceAt},
           ${row.timezone},
           ${row.runtimeTarget},
+          ${row.targetThreadId},
+          ${row.createdBy === null ? null : JSON.stringify(row.createdBy)},
+          ${row.disabledReason},
           ${row.nextFireAt},
           ${row.lastFireAt},
           ${row.prompt},
@@ -142,6 +155,9 @@ const makeProjectTriggerRepository = Effect.gen(function* () {
           schedule_once_at = excluded.schedule_once_at,
           timezone = excluded.timezone,
           runtime_target = excluded.runtime_target,
+          target_thread_id = excluded.target_thread_id,
+          created_by_json = excluded.created_by_json,
+          disabled_reason = excluded.disabled_reason,
           next_fire_at = excluded.next_fire_at,
           last_fire_at = excluded.last_fire_at,
           prompt = excluded.prompt,
@@ -176,6 +192,9 @@ const makeProjectTriggerRepository = Effect.gen(function* () {
           schedule_once_at AS "scheduleOnceAt",
           timezone,
           runtime_target AS "runtimeTarget",
+          target_thread_id AS "targetThreadId",
+          created_by_json AS "createdBy",
+          disabled_reason AS "disabledReason",
           next_fire_at AS "nextFireAt",
           last_fire_at AS "lastFireAt",
           prompt,
@@ -214,6 +233,9 @@ const makeProjectTriggerRepository = Effect.gen(function* () {
           schedule_once_at AS "scheduleOnceAt",
           timezone,
           runtime_target AS "runtimeTarget",
+          target_thread_id AS "targetThreadId",
+          created_by_json AS "createdBy",
+          disabled_reason AS "disabledReason",
           next_fire_at AS "nextFireAt",
           last_fire_at AS "lastFireAt",
           prompt,
@@ -269,6 +291,59 @@ const makeProjectTriggerRepository = Effect.gen(function* () {
       `,
   });
 
+  const disableInactiveThreadTargetTriggerRows = SqlSchema.findAll({
+    Request: DisableInactiveThreadTargetTriggersInput,
+    Result: TriggerIdRow,
+    execute: ({ now }) =>
+      sql`
+        UPDATE project_triggers
+        SET enabled = 0,
+            next_fire_at = NULL,
+            schedule_claimed_at = NULL,
+            schedule_claim_expires_at = NULL,
+            disabled_reason = CASE
+              WHEN NOT EXISTS (
+                SELECT 1 FROM projection_threads thread
+                WHERE thread.thread_id = project_triggers.target_thread_id
+              ) THEN 'thread-missing'
+              WHEN EXISTS (
+                SELECT 1 FROM projection_threads thread
+                WHERE thread.thread_id = project_triggers.target_thread_id
+                  AND thread.deleted_at IS NOT NULL
+              ) THEN 'thread-deleted'
+              WHEN EXISTS (
+                SELECT 1 FROM projection_threads thread
+                WHERE thread.thread_id = project_triggers.target_thread_id
+                  AND thread.archived_at IS NOT NULL
+              ) THEN 'thread-archived'
+              ELSE 'thread-settled'
+            END,
+            updated_at = ${now}
+        WHERE target_thread_id IS NOT NULL
+          AND deleted_at IS NULL
+          -- A manually paused recurrence must cross the same hard lifecycle
+          -- boundary. Stamping the reason prevents it being resumed later.
+          AND (enabled = 1 OR disabled_reason IS NULL)
+          AND (
+            NOT EXISTS (
+              SELECT 1 FROM projection_threads thread
+              WHERE thread.thread_id = project_triggers.target_thread_id
+            )
+            OR EXISTS (
+              SELECT 1 FROM projection_threads thread
+              WHERE thread.thread_id = project_triggers.target_thread_id
+                AND (
+                  thread.deleted_at IS NOT NULL
+                  OR thread.archived_at IS NOT NULL
+                  OR thread.settled_override = 'settled'
+                  OR thread.settled_at IS NOT NULL
+                )
+            )
+          )
+        RETURNING trigger_id AS "triggerId"
+      `,
+  });
+
   const claimDueTriggerRows = SqlSchema.findAll({
     Request: ClaimDueProjectTriggersInput,
     Result: ProjectTriggerDbRow,
@@ -302,6 +377,9 @@ const makeProjectTriggerRepository = Effect.gen(function* () {
           schedule_once_at AS "scheduleOnceAt",
           timezone,
           runtime_target AS "runtimeTarget",
+          target_thread_id AS "targetThreadId",
+          created_by_json AS "createdBy",
+          disabled_reason AS "disabledReason",
           next_fire_at AS "nextFireAt",
           last_fire_at AS "lastFireAt",
           prompt,
@@ -598,6 +676,17 @@ const makeProjectTriggerRepository = Effect.gen(function* () {
         Effect.map((rows) => rows.length),
       );
 
+  const disableInactiveThreadTargetTriggers: ProjectTriggerRepositoryShape["disableInactiveThreadTargetTriggers"] =
+    (input) =>
+      disableInactiveThreadTargetTriggerRows(input).pipe(
+        Effect.mapError(
+          toPersistenceSqlError(
+            "ProjectTriggerRepository.disableInactiveThreadTargetTriggers:query",
+          ),
+        ),
+        Effect.map((rows) => rows.length),
+      );
+
   const claimDueTriggers: ProjectTriggerRepositoryShape["claimDueTriggers"] = (input) =>
     claimDueTriggerRows(input).pipe(
       Effect.mapError(toPersistenceSqlError("ProjectTriggerRepository.claimDueTriggers:query")),
@@ -693,6 +782,7 @@ const makeProjectTriggerRepository = Effect.gen(function* () {
     listTriggersByProjectId,
     deleteTrigger,
     recoverExpiredTriggerClaims,
+    disableInactiveThreadTargetTriggers,
     claimDueTriggers,
     scheduleRunForClaimedTrigger,
     insertRun,

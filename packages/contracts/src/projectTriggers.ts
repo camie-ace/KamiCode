@@ -10,7 +10,15 @@ import {
   ThreadId,
   TrimmedNonEmptyString,
 } from "./baseSchemas.ts";
-import { ModelSelection, ProviderInteractionMode, RuntimeMode } from "./orchestration.ts";
+import {
+  ChatAttachment,
+  ModelSelection,
+  PROVIDER_SEND_TURN_MAX_ATTACHMENTS,
+  ProviderInteractionMode,
+  RuntimeMode,
+  UploadChatAttachment,
+} from "./orchestration.ts";
+import { KamiUser } from "./userAuth.ts";
 
 const PROJECT_TRIGGER_NAME_MAX_LENGTH = 160;
 const PROJECT_TRIGGER_DESCRIPTION_MAX_LENGTH = 2_000;
@@ -42,11 +50,29 @@ export type ProjectTriggerCronSchedule = typeof ProjectTriggerCronSchedule.Type;
 export const ProjectTriggerSchedule = Schema.Union([ProjectTriggerCronSchedule]);
 export type ProjectTriggerSchedule = typeof ProjectTriggerSchedule.Type;
 
-/**
- * Template used by the runtime to create a fresh thread for every trigger fire.
- */
+/** Whether an automation opens a fresh thread or queues each run in an existing one. */
+export const ProjectTriggerTarget = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal("new-thread") }),
+  Schema.Struct({ kind: Schema.Literal("thread"), threadId: ThreadId }),
+]);
+export type ProjectTriggerTarget = typeof ProjectTriggerTarget.Type;
+
+export const ProjectTriggerDisabledReason = Schema.Literals([
+  "thread-settled",
+  "thread-archived",
+  "thread-deleted",
+  "thread-missing",
+]);
+export type ProjectTriggerDisabledReason = typeof ProjectTriggerDisabledReason.Type;
+
+/** Message and runtime settings used for every automation occurrence. */
 export const ProjectTriggerThreadTemplate = Schema.Struct({
   prompt: TrimmedNonEmptyString.check(Schema.isMaxLength(PROJECT_TRIGGER_PROMPT_MAX_LENGTH)),
+  attachments: Schema.optionalKey(
+    Schema.Array(Schema.Union([ChatAttachment, UploadChatAttachment])).check(
+      Schema.isMaxLength(PROVIDER_SEND_TURN_MAX_ATTACHMENTS),
+    ),
+  ),
   titleSeed: Schema.optionalKey(
     TrimmedNonEmptyString.check(Schema.isMaxLength(PROJECT_TRIGGER_NAME_MAX_LENGTH)),
   ),
@@ -76,8 +102,11 @@ export const ProjectTriggerRecord = Schema.Struct({
     TrimmedNonEmptyString.check(Schema.isMaxLength(PROJECT_TRIGGER_DESCRIPTION_MAX_LENGTH)),
   ),
   enabled: Schema.Boolean,
+  target: Schema.optionalKey(ProjectTriggerTarget),
   schedule: ProjectTriggerSchedule,
   threadTemplate: ProjectTriggerThreadTemplate,
+  createdBy: Schema.optionalKey(Schema.NullOr(KamiUser)),
+  disabledReason: Schema.optionalKey(Schema.NullOr(ProjectTriggerDisabledReason)),
   lastRunId: Schema.NullOr(ProjectTriggerRunId),
   lastRunAt: Schema.NullOr(IsoDateTime),
   lastRunStatus: Schema.NullOr(ProjectTriggerRunStatus),
@@ -141,6 +170,8 @@ export const ProjectTriggerCreateInput = Schema.Struct({
     ),
   ),
   enabled: Schema.optionalKey(Schema.Boolean),
+  target: Schema.optionalKey(ProjectTriggerTarget),
+  firstRunAt: Schema.optionalKey(IsoDateTime),
   schedule: ProjectTriggerSchedule,
   threadTemplate: ProjectTriggerThreadTemplate,
 });

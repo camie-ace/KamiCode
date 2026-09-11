@@ -1,9 +1,17 @@
 import type {
+  ChatAttachment,
   EnvironmentId,
+  KamiUser,
+  ModelSelection,
   ProjectId,
+  ProjectTriggerDisabledReason,
   ProjectTriggerId as ContractProjectTriggerId,
   ProjectTriggerRecord as ContractProjectTriggerRecord,
+  ProjectTriggerRunRecord,
   ProjectTriggerRuntimeTarget,
+  ProviderInteractionMode,
+  RuntimeMode,
+  ThreadId,
 } from "@t3tools/contracts";
 import {
   squashAtomCommandFailure,
@@ -40,6 +48,9 @@ export interface ProjectTrigger {
   readonly description?: string | null;
   readonly schedule: string;
   readonly enabled: boolean;
+  readonly targetThreadId: ThreadId | null;
+  readonly createdBy: KamiUser | null;
+  readonly disabledReason: ProjectTriggerDisabledReason | null;
   readonly prompt?: string | null;
   readonly timezone?: string | null;
   readonly executionLocation?: ProjectTriggerExecutionLocation | null;
@@ -47,6 +58,21 @@ export interface ProjectTrigger {
   readonly lastFiredAt?: string | null;
   readonly lastRunStatus?: ContractProjectTriggerRecord["lastRunStatus"];
   readonly runtimeLabel?: string | null;
+}
+
+export interface ThreadRecurringScheduleCreateInput {
+  readonly projectId: ProjectId;
+  readonly threadId: ThreadId;
+  readonly name: string;
+  readonly schedule: string;
+  readonly timezone: string;
+  readonly firstRunAt: string;
+  readonly prompt: string;
+  readonly attachments: readonly ChatAttachment[];
+  readonly modelSelection: ModelSelection;
+  readonly runtimeMode: RuntimeMode;
+  readonly interactionMode: ProviderInteractionMode;
+  readonly executionLocation: ProjectTriggerExecutionLocation;
 }
 
 export interface ProjectTriggerMutationInput {
@@ -180,6 +206,9 @@ function toProjectTrigger(record: ContractProjectTriggerRecord): ProjectTrigger 
     description: record.description,
     schedule: schedule.expression,
     enabled: record.enabled,
+    targetThreadId: record.target?.kind === "thread" ? record.target.threadId : null,
+    createdBy: record.createdBy ?? null,
+    disabledReason: record.disabledReason ?? null,
     prompt: record.threadTemplate.prompt,
     timezone: schedule.timezone,
     executionLocation: schedule.executionLocation,
@@ -233,6 +262,10 @@ export function useProjectTriggerActions() {
     label: "fire project trigger",
     reportFailure: false,
   });
+  const listRunsCommand = useAtomCommand(projectTriggerEnvironment.listRuns, {
+    label: "list project trigger runs",
+    reportFailure: false,
+  });
 
   return useMemo(
     () => ({
@@ -262,6 +295,39 @@ export function useProjectTriggerActions() {
               enabled: input.trigger.enabled,
               schedule: toContractSchedule(input.trigger),
               threadTemplate: toContractThreadTemplate(input.trigger),
+            },
+          }),
+        );
+        return toProjectTrigger(result.trigger);
+      },
+      createThreadRecurringSchedule: async (input: {
+        readonly environmentId: EnvironmentId;
+        readonly schedule: ThreadRecurringScheduleCreateInput;
+      }): Promise<ProjectTrigger> => {
+        const schedule = input.schedule;
+        const result = unwrapCommandResult(
+          await createCommand({
+            environmentId: input.environmentId,
+            input: {
+              projectId: schedule.projectId,
+              name: schedule.name,
+              description: "Recurring message",
+              enabled: true,
+              target: { kind: "thread", threadId: schedule.threadId },
+              firstRunAt: schedule.firstRunAt,
+              schedule: {
+                kind: "cron",
+                expression: schedule.schedule,
+                timezone: schedule.timezone,
+                runtime: toRuntimeTarget(schedule.executionLocation),
+              },
+              threadTemplate: {
+                prompt: schedule.prompt,
+                attachments: [...schedule.attachments],
+                modelSelection: schedule.modelSelection,
+                runtimeMode: schedule.runtimeMode,
+                interactionMode: schedule.interactionMode,
+              },
             },
           }),
         );
@@ -314,8 +380,24 @@ export function useProjectTriggerActions() {
           startedAt: result.run.startedAt ?? result.run.createdAt,
         };
       },
+      listProjectTriggerRuns: async (input: {
+        readonly environmentId: EnvironmentId;
+        readonly triggerId: ProjectTriggerId;
+        readonly limit?: number;
+      }): Promise<readonly ProjectTriggerRunRecord[]> => {
+        const result = unwrapCommandResult(
+          await listRunsCommand({
+            environmentId: input.environmentId,
+            input: {
+              triggerId: input.triggerId,
+              ...(input.limit === undefined ? {} : { limit: input.limit }),
+            },
+          }),
+        );
+        return result.runs;
+      },
     }),
-    [createCommand, deleteCommand, fireCommand, listCommand, updateCommand],
+    [createCommand, deleteCommand, fireCommand, listCommand, listRunsCommand, updateCommand],
   );
 }
 
@@ -363,12 +445,14 @@ interface ProjectTriggersControlProps {
   readonly environmentId: EnvironmentId;
   readonly projectId: ProjectId | undefined;
   readonly projectName: string | undefined;
+  readonly onOpenProjectSettings?: (() => void) | undefined;
 }
 
 export default function ProjectTriggersControl({
   environmentId,
   projectId,
   projectName,
+  onOpenProjectSettings,
 }: ProjectTriggersControlProps) {
   const navigate = useNavigate();
   const primaryEnvironmentId = usePrimaryEnvironmentId();
@@ -393,7 +477,11 @@ export default function ProjectTriggersControl({
     setLoadError(null);
     try {
       const nextTriggers = await listProjectTriggers({ environmentId, projectId });
-      setTriggers([...nextTriggers].sort(compareNextFire));
+      setTriggers(
+        [...nextTriggers]
+          .filter((trigger) => trigger.targetThreadId === null)
+          .sort(compareNextFire),
+      );
     } catch (error) {
       setTriggers([]);
       setLoadError(error instanceof Error ? error.message : "Failed to load project triggers.");
@@ -416,8 +504,15 @@ export default function ProjectTriggersControl({
     if (projectId) {
       writeProjectTriggersSettingsFocus({ environmentId, projectId });
     }
-    void navigate({ to: "/settings/shared-projects" });
-  }, [environmentId, navigate, projectId]);
+    if (onOpenProjectSettings) {
+      onOpenProjectSettings();
+      return;
+    }
+    void navigate({
+      to: "/settings/projects",
+      search: { project: undefined, machine: undefined },
+    });
+  }, [environmentId, navigate, onOpenProjectSettings, projectId]);
 
   const runTrigger = useCallback(
     async (trigger: ProjectTrigger) => {

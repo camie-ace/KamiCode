@@ -2434,14 +2434,22 @@ export default function Sidebar() {
   }, [clearSelection, projectScopeKey]);
 
   const openProjectSettings = useCallback(
-    (projectGroup: SidebarProjectSnapshot) => {
+    (projectGroup: SidebarProjectSnapshot, hash?: string) => {
       if (isMobile) {
         setOpenMobile(false);
       }
-      void router.navigate({
-        to: "/projects/$projectKey",
-        params: { projectKey: projectGroup.projectKey },
-      });
+      if (hash) {
+        void router.navigate({
+          to: "/settings/projects",
+          search: { project: projectGroup.projectKey, machine: undefined },
+          hash,
+        });
+      } else {
+        void router.navigate({
+          to: "/projects/$projectKey",
+          params: { projectKey: projectGroup.projectKey },
+        });
+      }
     },
     [isMobile, router, setOpenMobile],
   );
@@ -2459,6 +2467,16 @@ export default function Sidebar() {
       suppressNextScopeChangeRef.current = true;
       dispatchProjectScopeMenu({ type: "project-settings-opened" });
       openProjectSettings(projectGroup);
+    },
+    [openProjectSettings],
+  );
+  const handleProjectAutomations = useCallback(
+    (event: ReactMouseEvent<HTMLElement>, projectGroup: SidebarProjectSnapshot) => {
+      event.preventDefault();
+      event.stopPropagation();
+      suppressNextScopeChangeRef.current = true;
+      dispatchProjectScopeMenu({ type: "project-settings-opened" });
+      openProjectSettings(projectGroup, "project-triggers");
     },
     [openProjectSettings],
   );
@@ -4505,20 +4523,34 @@ export default function Sidebar() {
                             )}
                             <span className="min-w-0 flex-1 truncate text-sm">{item.label}</span>
                             {project ? (
-                              <Button
-                                size="icon-xs"
-                                variant="ghost-muted"
-                                tabIndex={-1}
-                                aria-hidden="true"
-                                title={`Project settings for ${project.displayName}`}
-                                className="ml-auto size-6 [--control-icon-color:currentColor] text-icon-muted focus-visible:bg-accent focus-visible:text-foreground"
-                                onPointerDown={(event) => event.stopPropagation()}
-                                onClick={(event) => {
-                                  void handleProjectSettings(event, project);
-                                }}
-                              >
-                                <SettingsIcon className="size-3.5" />
-                              </Button>
+                              <span className="ml-auto flex items-center gap-0.5">
+                                <Button
+                                  size="icon-xs"
+                                  variant="ghost-muted"
+                                  tabIndex={-1}
+                                  title={`Automations for ${project.displayName}`}
+                                  aria-label={`Automations for ${project.displayName}`}
+                                  className="size-6 [--control-icon-color:currentColor] text-icon-muted focus-visible:bg-accent focus-visible:text-foreground"
+                                  onPointerDown={(event) => event.stopPropagation()}
+                                  onClick={(event) => handleProjectAutomations(event, project)}
+                                >
+                                  <ClockIcon className="size-3.5" />
+                                </Button>
+                                <Button
+                                  size="icon-xs"
+                                  variant="ghost-muted"
+                                  tabIndex={-1}
+                                  aria-hidden="true"
+                                  title={`Project settings for ${project.displayName}`}
+                                  className="size-6 [--control-icon-color:currentColor] text-icon-muted focus-visible:bg-accent focus-visible:text-foreground"
+                                  onPointerDown={(event) => event.stopPropagation()}
+                                  onClick={(event) => {
+                                    void handleProjectSettings(event, project);
+                                  }}
+                                >
+                                  <SettingsIcon className="size-3.5" />
+                                </Button>
+                              </span>
                             ) : null}
                           </ComboboxItem>
                         );

@@ -5,7 +5,9 @@ import type {
   ProjectId,
   ProviderInteractionMode,
   RuntimeMode,
+  ThreadId,
   TurnDispatchPolicy,
+  KamiUser,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import type * as Effect from "effect/Effect";
@@ -32,6 +34,10 @@ export interface SaveProjectTriggerInput {
   readonly scheduleOnceAt: IsoDateTime | null;
   readonly timezone?: ProjectTriggerRow["timezone"];
   readonly runtimeTarget?: ProjectTriggerRow["runtimeTarget"];
+  readonly targetThreadId?: ThreadId | null;
+  readonly createdBy?: KamiUser | null;
+  readonly disabledReason?: ProjectTriggerRow["disabledReason"];
+  readonly firstRunAt?: IsoDateTime | null;
   readonly prompt: ProjectTriggerRow["prompt"];
   readonly attachments?: ReadonlyArray<ChatAttachment>;
   readonly modelSelection: ModelSelection;

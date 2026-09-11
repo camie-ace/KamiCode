@@ -71,8 +71,11 @@ const makeProjectTriggerScheduler = (options?: ProjectTriggerSchedulerLiveOption
         }
 
         const fireAt = trigger.nextFireAt;
+        // A thread recurrence gets at most one catch-up occurrence after downtime.
+        // Advancing from the current tick prevents a backlog of every missed cron slot.
+        const nextFireCursor = trigger.targetThreadId === null ? fireAt : scheduledAt;
         const nextFireAtExit = yield* Effect.exit(
-          computeProjectTriggerNextFireAt(trigger, fireAt, "after-fire"),
+          computeProjectTriggerNextFireAt(trigger, nextFireCursor, "after-fire"),
         );
         if (Exit.isFailure(nextFireAtExit)) {
           const detail = failureDetail(
@@ -123,6 +126,7 @@ const makeProjectTriggerScheduler = (options?: ProjectTriggerSchedulerLiveOption
       run: ProjectTriggerRunRow,
       dispatchedAt: string,
     ) {
+      yield* repository.disableInactiveThreadTargetTriggers({ now: dispatchedAt });
       const trigger = yield* repository.getTriggerById({ triggerId: run.triggerId });
       if (Option.isNone(trigger)) {
         return yield* skipRun(run, dispatchedAt, "Trigger no longer exists.");
@@ -131,32 +135,40 @@ const makeProjectTriggerScheduler = (options?: ProjectTriggerSchedulerLiveOption
         return yield* skipRun(run, dispatchedAt, "Trigger is disabled or deleted.");
       }
 
-      return yield* dispatcher.dispatch(run.command, { cleanupCreatedThreadOnFailure: false }).pipe(
-        Effect.matchEffect({
-          onFailure: (error) =>
-            repository
-              .markRunFailed({
-                runId: run.runId,
-                failedAt: dispatchedAt,
-                failureDetail: failureDetail(error, "Trigger dispatch failed."),
-              })
-              .pipe(Effect.map((marked) => (marked ? "failed" : "lost-claim"))),
-          onSuccess: (result) =>
-            repository
-              .markRunDispatched({
-                runId: run.runId,
-                dispatchedAt,
-                resultSequence: result.sequence,
-              })
-              .pipe(Effect.map((marked) => (marked ? "dispatched" : "lost-claim"))),
-        }),
-      );
+      return yield* dispatcher
+        .dispatch(run.command, {
+          cleanupCreatedThreadOnFailure: false,
+          ...(trigger.value.createdBy === null
+            ? {}
+            : { origin: { user: trigger.value.createdBy } }),
+        })
+        .pipe(
+          Effect.matchEffect({
+            onFailure: (error) =>
+              repository
+                .markRunFailed({
+                  runId: run.runId,
+                  failedAt: dispatchedAt,
+                  failureDetail: failureDetail(error, "Trigger dispatch failed."),
+                })
+                .pipe(Effect.map((marked) => (marked ? "failed" : "lost-claim"))),
+            onSuccess: (result) =>
+              repository
+                .markRunDispatched({
+                  runId: run.runId,
+                  dispatchedAt,
+                  resultSequence: result.sequence,
+                })
+                .pipe(Effect.map((marked) => (marked ? "dispatched" : "lost-claim"))),
+          }),
+        );
     });
 
     const runTick = Effect.gen(function* () {
       const now = yield* nowIso;
       const claimExpiresAt = addMillisIso(now, claimTtlMs);
 
+      yield* repository.disableInactiveThreadTargetTriggers({ now });
       const recoveredTriggerClaims = yield* repository.recoverExpiredTriggerClaims({ now });
       const recoveredRunClaims = yield* repository.recoverExpiredRunClaims({ now });
 

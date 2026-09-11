@@ -25,6 +25,7 @@ import {
   ClientOs,
   ClientSurface,
   ClientWebDeployment,
+  type ClientOrchestrationCommand,
   CommandId,
   DEFAULT_MODEL,
   DEFAULT_PROVIDER_INTERACTION_MODE,
@@ -39,6 +40,7 @@ import {
   type OrchestrationEvent,
   type OrchestrationShellStreamEvent,
   type OrchestrationShellStreamItem,
+  MessageId,
   OrchestrationGetFullThreadDiffError,
   OrchestrationGetSnapshotError,
   OrchestrationSearchThreadsError,
@@ -55,6 +57,7 @@ import {
   ProjectWriteFileError,
   ProjectTriggerFireError,
   ProjectTriggerNotFoundError,
+  ProjectTriggerValidationError,
   type ProjectTriggerRecord,
   type ProjectTriggerRunRecord,
   ProjectTriggerStoreError,
@@ -187,6 +190,7 @@ import { computeProjectTriggerNextFireAt } from "./projectTriggers/schedule.ts";
 import * as RelayClient from "@t3tools/shared/relayClient";
 const isOrchestrationDispatchCommandError = Schema.is(OrchestrationDispatchCommandError);
 const isProjectTriggerStoreError = Schema.is(ProjectTriggerStoreError);
+const isProjectTriggerValidationError = Schema.is(ProjectTriggerValidationError);
 
 const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
 const CONFIG_DISCOVERY_TIMEOUT = Duration.seconds(5);
@@ -807,6 +811,10 @@ const makeWsRpcLayer = (
             name: row.name,
             description: row.description,
             enabled: row.enabled,
+            target:
+              row.targetThreadId === null
+                ? { kind: "new-thread" }
+                : { kind: "thread", threadId: row.targetThreadId },
             schedule: {
               kind: "cron",
               expression: row.scheduleCron,
@@ -815,6 +823,7 @@ const makeWsRpcLayer = (
             },
             threadTemplate: {
               prompt: row.prompt,
+              ...(row.attachments.length > 0 ? { attachments: row.attachments } : {}),
               ...(row.titleSeed !== null ? { titleSeed: row.titleSeed } : {}),
               modelSelection: row.modelSelection,
               runtimeMode: row.runtimeMode,
@@ -822,6 +831,8 @@ const makeWsRpcLayer = (
               branch: row.bootstrap?.createThread?.branch ?? null,
               worktreePath: row.bootstrap?.createThread?.worktreePath ?? null,
             },
+            createdBy: row.createdBy,
+            disabledReason: row.disabledReason,
             lastRunId: latestRun?.runId ?? projectTriggerLastRunId(row),
             lastRunAt: latestRun?.fireAt ?? row.lastFireAt,
             lastRunStatus: latestRun ? projectTriggerRunStatus(latestRun.status) : null,
@@ -898,6 +909,69 @@ const makeWsRpcLayer = (
               makeProjectTriggerStoreError("create", "Failed to create project trigger.", cause),
             ),
           );
+
+      const assertActiveThreadTriggerTarget = (input: {
+        readonly threadId: ThreadId;
+        readonly projectId: ProjectId;
+      }) =>
+        Effect.gen(function* () {
+          const rows = yield* sql<{
+            readonly projectId: string;
+            readonly deletedAt: string | null;
+            readonly archivedAt: string | null;
+            readonly settledOverride: string | null;
+            readonly settledAt: string | null;
+          }>`
+              SELECT
+                project_id AS "projectId",
+                deleted_at AS "deletedAt",
+                archived_at AS "archivedAt",
+                settled_override AS "settledOverride",
+                settled_at AS "settledAt"
+              FROM projection_threads
+              WHERE thread_id = ${input.threadId}
+              LIMIT 1
+            `.pipe(
+            Effect.mapError((cause) =>
+              makeProjectTriggerStoreError(
+                "get",
+                "Failed to validate the recurring schedule thread.",
+                cause,
+              ),
+            ),
+          );
+          const thread = rows[0];
+          if (!thread) {
+            return yield* new ProjectTriggerValidationError({
+              field: "target.threadId",
+              message: "Recurring schedules require an existing thread.",
+            });
+          }
+          if (thread.projectId !== input.projectId) {
+            return yield* new ProjectTriggerValidationError({
+              field: "target.threadId",
+              message: "The recurring schedule target belongs to another project.",
+            });
+          }
+          if (thread.deletedAt !== null) {
+            return yield* new ProjectTriggerValidationError({
+              field: "target.threadId",
+              message: "Deleted threads cannot receive recurring schedules.",
+            });
+          }
+          if (thread.archivedAt !== null) {
+            return yield* new ProjectTriggerValidationError({
+              field: "target.threadId",
+              message: "Archived threads cannot receive recurring schedules.",
+            });
+          }
+          if (thread.settledOverride === "settled" || thread.settledAt !== null) {
+            return yield* new ProjectTriggerValidationError({
+              field: "target.threadId",
+              message: "Settled threads cannot receive recurring schedules.",
+            });
+          }
+        });
 
       const loadProjectTriggerSnapshot = (projectId: ProjectTriggerRow["projectId"]) =>
         projectTriggerService.listProjectTriggers({ projectId }).pipe(
@@ -1754,6 +1828,50 @@ const makeWsRpcLayer = (
               const interactionMode =
                 input.threadTemplate.interactionMode ?? DEFAULT_PROVIDER_INTERACTION_MODE;
               const triggerId = ProjectTriggerId.make(yield* randomUUID);
+              const targetThreadId = input.target?.kind === "thread" ? input.target.threadId : null;
+              if (targetThreadId !== null) {
+                yield* assertActiveThreadTriggerTarget({
+                  threadId: targetThreadId,
+                  projectId: input.projectId,
+                });
+              }
+
+              const requestedAttachments = input.threadTemplate.attachments ?? [];
+              if (targetThreadId === null && requestedAttachments.length > 0) {
+                return yield* new ProjectTriggerValidationError({
+                  field: "threadTemplate.attachments",
+                  message: "Attachments are only supported by thread recurring schedules.",
+                });
+              }
+
+              const attachmentCommand =
+                targetThreadId !== null && requestedAttachments.length > 0
+                  ? ({
+                      type: "thread.turn.start",
+                      commandId: CommandId.make(yield* randomUUID),
+                      threadId: targetThreadId,
+                      message: {
+                        messageId: MessageId.make(yield* randomUUID),
+                        role: "user",
+                        text: input.threadTemplate.prompt,
+                        attachments: requestedAttachments,
+                      },
+                      modelSelection,
+                      runtimeMode,
+                      interactionMode,
+                      dispatchPolicy: "queue",
+                      createdAt,
+                    } satisfies ClientOrchestrationCommand)
+                  : null;
+              const normalizedAttachmentCommand =
+                attachmentCommand === null
+                  ? null
+                  : yield* normalizeDispatchCommand(attachmentCommand);
+              const normalizedAttachments =
+                normalizedAttachmentCommand?.type === "thread.turn.start"
+                  ? normalizedAttachmentCommand.message.attachments
+                  : [];
+
               const row = yield* saveProjectTriggerFromCreateInput({
                 triggerId,
                 projectId: input.projectId,
@@ -1765,31 +1883,47 @@ const makeWsRpcLayer = (
                 scheduleOnceAt: null,
                 timezone: input.schedule.timezone ?? "UTC",
                 runtimeTarget: input.schedule.runtime,
+                targetThreadId,
+                createdBy: clientOrigin.user ?? null,
+                disabledReason: null,
+                firstRunAt: input.firstRunAt ?? null,
                 prompt: input.threadTemplate.prompt,
-                attachments: [],
+                attachments: normalizedAttachments,
                 modelSelection,
                 runtimeMode,
                 interactionMode,
-                dispatchPolicy: null,
+                dispatchPolicy: targetThreadId === null ? null : "queue",
                 titleSeed: input.threadTemplate.titleSeed ?? null,
-                bootstrap: projectTriggerBootstrapFromTemplate({
-                  projectId: input.projectId,
-                  name: input.name,
-                  modelSelection,
-                  runtimeMode,
-                  interactionMode,
-                  branch: input.threadTemplate.branch,
-                  worktreePath: input.threadTemplate.worktreePath,
-                  createdAt,
-                }),
+                bootstrap:
+                  targetThreadId === null
+                    ? projectTriggerBootstrapFromTemplate({
+                        projectId: input.projectId,
+                        name: input.name,
+                        modelSelection,
+                        runtimeMode,
+                        interactionMode,
+                        branch: input.threadTemplate.branch,
+                        worktreePath: input.threadTemplate.worktreePath,
+                        createdAt,
+                      })
+                    : null,
                 createdAt,
                 updatedAt: createdAt,
-              });
+              }).pipe(
+                attachmentCommand === null || normalizedAttachmentCommand === null
+                  ? (effect) => effect
+                  : Effect.tapError(() =>
+                      cleanupFailedUploadedAttachments(
+                        attachmentCommand,
+                        normalizedAttachmentCommand,
+                      ),
+                    ),
+              );
               const trigger = yield* toProjectTriggerRecord(row, "create");
               return { trigger };
             }).pipe(
               Effect.mapError((cause) =>
-                isProjectTriggerStoreError(cause)
+                isProjectTriggerStoreError(cause) || isProjectTriggerValidationError(cause)
                   ? cause
                   : makeProjectTriggerStoreError(
                       "create",
@@ -1821,18 +1955,31 @@ const makeWsRpcLayer = (
               const nextModelSelection = nextTemplate?.modelSelection ?? existing.modelSelection;
               const nextRuntimeMode = nextTemplate?.runtimeMode ?? existing.runtimeMode;
               const nextInteractionMode = nextTemplate?.interactionMode ?? existing.interactionMode;
+              const nextEnabled = input.patch.enabled ?? existing.enabled;
+              if (existing.targetThreadId !== null && nextEnabled) {
+                yield* assertActiveThreadTriggerTarget({
+                  threadId: existing.targetThreadId,
+                  projectId: existing.projectId,
+                });
+              }
 
               const rowWithoutNextFire: ProjectTriggerRow = {
                 ...existing,
                 name: nextName,
                 description: nextDescription,
-                enabled: input.patch.enabled ?? existing.enabled,
+                enabled: nextEnabled,
+                // Only an explicit resume clears a lifecycle stop. A redundant
+                // pause must preserve why the schedule was disabled.
+                disabledReason: input.patch.enabled === true ? null : existing.disabledReason,
                 scheduleKind: nextScheduleKind,
                 scheduleCron: nextScheduleCron,
                 scheduleOnceAt: input.patch.schedule ? null : existing.scheduleOnceAt,
                 timezone: nextTimezone,
                 runtimeTarget: nextRuntimeTarget,
                 prompt: nextTemplate?.prompt ?? existing.prompt,
+                // Attachment replacement needs the same durable claiming path as create.
+                // Existing editor clients omit the field, so preserve the captured payload.
+                attachments: existing.attachments,
                 modelSelection: nextModelSelection,
                 runtimeMode: nextRuntimeMode,
                 interactionMode: nextInteractionMode,
@@ -1841,7 +1988,7 @@ const makeWsRpcLayer = (
                     ? (nextTemplate.titleSeed ?? null)
                     : existing.titleSeed,
                 bootstrap:
-                  nextTemplate !== undefined
+                  nextTemplate !== undefined && existing.targetThreadId === null
                     ? projectTriggerBootstrapFromTemplate({
                         projectId: existing.projectId,
                         name: nextName,
@@ -1852,7 +1999,9 @@ const makeWsRpcLayer = (
                         worktreePath: nextTemplate.worktreePath,
                         createdAt: updatedAt,
                       })
-                    : existing.bootstrap,
+                    : existing.targetThreadId === null
+                      ? existing.bootstrap
+                      : null,
                 updatedAt,
                 nextFireAt: null,
                 scheduleClaimedAt: null,
@@ -1931,6 +2080,12 @@ const makeWsRpcLayer = (
             WS_METHODS.projectTriggersFire,
             Effect.gen(function* () {
               const trigger = yield* getActiveProjectTriggerRow(input.triggerId, "fire");
+              if (trigger.targetThreadId !== null) {
+                yield* assertActiveThreadTriggerTarget({
+                  threadId: trigger.targetThreadId,
+                  projectId: trigger.projectId,
+                });
+              }
               const fireAt = yield* nowIso;
               const run = makeProjectTriggerRunRow({
                 trigger,

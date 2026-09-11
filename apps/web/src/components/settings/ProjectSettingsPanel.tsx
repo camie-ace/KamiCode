@@ -80,6 +80,7 @@ import { useAtomCommand } from "../../state/use-atom-command";
 import { ProviderModelPicker } from "../chat/ProviderModelPicker";
 import { TraitsPicker } from "../chat/TraitsPicker";
 import { ProjectFavicon } from "../ProjectFavicon";
+import ProjectTriggersSection from "./ProjectTriggersSection";
 import { PULL_REQUEST_MERGE_METHOD_LABELS } from "../pullRequest/pullRequestDetail.logic";
 import {
   EMPTY_PROJECT_SCRIPT_INPUT,
@@ -1239,6 +1240,11 @@ function ProjectDetail({
             }
           />
         </SettingsSection>
+
+        <ProjectTriggersSection
+          projects={group.memberProjects}
+          preferredProjectId={selectedCheckout.id}
+        />
 
         <SettingsSection title="Checkout">
           {hasMultipleCheckouts ? (

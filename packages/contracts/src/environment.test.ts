@@ -65,4 +65,17 @@ describe("ExecutionEnvironmentDescriptor", () => {
       }).capabilities.speechTranscription,
     ).toBe(true);
   });
+
+  it("treats a missing recurring-schedule capability as unsupported", () => {
+    expect(decodeDescriptor(descriptor).capabilities.threadRecurringSchedules).toBeUndefined();
+  });
+
+  it("preserves an advertised recurring-schedule capability", () => {
+    expect(
+      decodeDescriptor({
+        ...descriptor,
+        capabilities: { ...descriptor.capabilities, threadRecurringSchedules: true },
+      }).capabilities.threadRecurringSchedules,
+    ).toBe(true);
+  });
 });

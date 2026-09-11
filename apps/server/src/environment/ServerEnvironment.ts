@@ -246,6 +246,7 @@ export const make = Effect.gen(function* () {
         ? { hostedBrowserPreview: true }
         : {}),
       ...(serverConfig.speechTranscriptionUrl !== undefined ? { speechTranscription: true } : {}),
+      threadRecurringSchedules: true,
     },
   };
 

@@ -2,9 +2,11 @@ import {
   ChatAttachment,
   CommandId,
   IsoDateTime,
+  KamiUser,
   MessageId,
   ModelSelection,
   ProjectId,
+  ProjectTriggerDisabledReason,
   ProjectTriggerRuntimeTarget,
   ProviderInteractionMode,
   RuntimeMode,
@@ -83,6 +85,9 @@ export const ProjectTriggerRow = Schema.Struct({
   scheduleOnceAt: Schema.NullOr(IsoDateTime),
   timezone: TrimmedNonEmptyString,
   runtimeTarget: ProjectTriggerRuntimeTarget,
+  targetThreadId: Schema.NullOr(ThreadId),
+  createdBy: Schema.NullOr(KamiUser),
+  disabledReason: Schema.NullOr(ProjectTriggerDisabledReason),
   nextFireAt: Schema.NullOr(IsoDateTime),
   lastFireAt: Schema.NullOr(IsoDateTime),
   prompt: TrimmedNonEmptyString,
@@ -158,6 +163,12 @@ export const RecoverExpiredProjectTriggerClaimsInput = Schema.Struct({
 export type RecoverExpiredProjectTriggerClaimsInput =
   typeof RecoverExpiredProjectTriggerClaimsInput.Type;
 
+export const DisableInactiveThreadTargetTriggersInput = Schema.Struct({
+  now: IsoDateTime,
+});
+export type DisableInactiveThreadTargetTriggersInput =
+  typeof DisableInactiveThreadTargetTriggersInput.Type;
+
 export const ClaimDueProjectTriggersInput = Schema.Struct({
   now: IsoDateTime,
   claimExpiresAt: IsoDateTime,
@@ -229,6 +240,9 @@ export interface ProjectTriggerRepositoryShape {
   ) => Effect.Effect<boolean, ProjectTriggerRepositoryError>;
   readonly recoverExpiredTriggerClaims: (
     input: RecoverExpiredProjectTriggerClaimsInput,
+  ) => Effect.Effect<number, ProjectTriggerRepositoryError>;
+  readonly disableInactiveThreadTargetTriggers: (
+    input: DisableInactiveThreadTargetTriggersInput,
   ) => Effect.Effect<number, ProjectTriggerRepositoryError>;
   readonly claimDueTriggers: (
     input: ClaimDueProjectTriggersInput,

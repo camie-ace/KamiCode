@@ -147,6 +147,10 @@ export const ExecutionEnvironmentCapabilities = Schema.Struct({
   /** Server can transcribe short microphone recordings into composer text.
       Absent on older or unconfigured servers, so clients hide the control. */
   speechTranscription: Schema.optionalKey(Schema.Boolean),
+  /** Server can persist recurring messages against an existing thread and
+      enqueue each occurrence through the normal per-thread queue. Absent on
+      older servers, so clients must not send thread-targeted trigger fields. */
+  threadRecurringSchedules: Schema.optionalKey(Schema.Boolean),
   /** Agent-activity publishes (push notifications and Live Activities)
       currently leave this environment: the publish opt-in is enabled and the
       relay link credentials exist. Clients skip seeding a Live Activity when
