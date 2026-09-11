@@ -57,9 +57,6 @@ const decodeV2TurnStartResponse = Schema.decodeUnknownEffect(EffectCodexSchema.V
 const decodeV2ThreadStartResponse = Schema.decodeUnknownEffect(
   EffectCodexSchema.V2ThreadStartResponse,
 );
-const decodeV2ThreadResumeResponse = Schema.decodeUnknownEffect(
-  EffectCodexSchema.V2ThreadResumeResponse,
-);
 
 const PROVIDER = ProviderDriverKind.make("codex");
 
@@ -192,6 +189,13 @@ export interface CodexSessionRuntimeOptions {
   readonly issueTestHarnessPairingCredential?: (() => Effect.Effect<string, string>) | undefined;
   readonly projectTriggerDynamicToolRunner?: ProjectTriggerDynamicToolRunner | undefined;
   readonly appServerArgs?: ReadonlyArray<string>;
+  /**
+   * Whether the attached `t3-code` MCP server exposes the preview tools. The
+   * server is attached for every session now (the pull request toolkit is
+   * always on), so its presence in `appServerArgs` no longer implies browser
+   * access; the credential's own capability decides the developer prompt.
+   */
+  readonly browserToolsAvailable?: boolean;
 }
 
 export interface CodexSessionRuntimeSendTurnInput {
@@ -250,7 +254,7 @@ export type CodexSessionRuntimeError =
   | CodexSessionRuntimeInvalidUserInputAnswersError
   | CodexSessionRuntimeThreadIdMissingError;
 
-export class CodexSessionRuntimePendingApprovalNotFoundError extends Schema.TaggedErrorClass<CodexSessionRuntimePendingApprovalNotFoundError>()(
+export class CodexSessionRuntimePendingApprovalNotFoundError extends Schema.TaggedError<CodexSessionRuntimePendingApprovalNotFoundError>()(
   "CodexSessionRuntimePendingApprovalNotFoundError",
   {
     requestId: Schema.String,
@@ -261,7 +265,7 @@ export class CodexSessionRuntimePendingApprovalNotFoundError extends Schema.Tagg
   }
 }
 
-export class CodexSessionRuntimePendingUserInputNotFoundError extends Schema.TaggedErrorClass<CodexSessionRuntimePendingUserInputNotFoundError>()(
+export class CodexSessionRuntimePendingUserInputNotFoundError extends Schema.TaggedError<CodexSessionRuntimePendingUserInputNotFoundError>()(
   "CodexSessionRuntimePendingUserInputNotFoundError",
   {
     requestId: Schema.String,
@@ -272,7 +276,7 @@ export class CodexSessionRuntimePendingUserInputNotFoundError extends Schema.Tag
   }
 }
 
-export class CodexSessionRuntimeInvalidUserInputAnswersError extends Schema.TaggedErrorClass<CodexSessionRuntimeInvalidUserInputAnswersError>()(
+export class CodexSessionRuntimeInvalidUserInputAnswersError extends Schema.TaggedError<CodexSessionRuntimeInvalidUserInputAnswersError>()(
   "CodexSessionRuntimeInvalidUserInputAnswersError",
   {
     questionId: Schema.String,
@@ -283,7 +287,7 @@ export class CodexSessionRuntimeInvalidUserInputAnswersError extends Schema.Tagg
   }
 }
 
-export class CodexSessionRuntimeThreadIdMissingError extends Schema.TaggedErrorClass<CodexSessionRuntimeThreadIdMissingError>()(
+export class CodexSessionRuntimeThreadIdMissingError extends Schema.TaggedError<CodexSessionRuntimeThreadIdMissingError>()(
   "CodexSessionRuntimeThreadIdMissingError",
   {
     threadId: Schema.String,
@@ -713,11 +717,24 @@ export function isRecoverableThreadResumeError(error: unknown): boolean {
   return RECOVERABLE_THREAD_RESUME_ERROR_SNIPPETS.some((snippet) => message.includes(snippet));
 }
 
-type CodexThreadOpenResponse =
-  | CodexRpc.ClientRequestResponsesByMethod["thread/start"]
-  | CodexRpc.ClientRequestResponsesByMethod["thread/resume"];
+const CodexThreadResumeMetadata = Schema.Struct({
+  cwd: Schema.String,
+  model: Schema.String,
+  thread: Schema.Struct({ id: Schema.String, sessionId: Schema.String }),
+});
+const decodeCodexThreadResumeMetadata = Schema.decodeUnknownEffect(CodexThreadResumeMetadata);
 
-type CodexThreadOpenMethod = "thread/start" | "thread/resume";
+function toCodexThreadOpenMetadata(input: {
+  readonly cwd: string;
+  readonly model: string;
+  readonly thread: { readonly id: string; readonly sessionId: string };
+}): typeof CodexThreadResumeMetadata.Type {
+  return {
+    cwd: input.cwd,
+    model: input.model,
+    thread: { id: input.thread.id, sessionId: input.thread.sessionId },
+  };
+}
 
 function withCodexThreadSessionIdCompat(rawResponse: unknown): unknown {
   if (typeof rawResponse !== "object" || rawResponse === null) {
@@ -743,6 +760,8 @@ function withCodexThreadSessionIdCompat(rawResponse: unknown): unknown {
   };
 }
 
+type CodexThreadOpenMethod = "thread/start" | "thread/resume";
+
 interface CodexThreadOpenClient {
   readonly raw?: {
     readonly request: <M extends CodexThreadOpenMethod>(
@@ -759,49 +778,44 @@ interface CodexThreadOpenClient {
 function requestCodexThreadStart(
   client: CodexThreadOpenClient,
   payload: CodexThreadStartParamsWithDynamicTools,
-): Effect.Effect<
-  CodexRpc.ClientRequestResponsesByMethod["thread/start"],
-  CodexErrors.CodexAppServerError
-> {
+): Effect.Effect<typeof CodexThreadResumeMetadata.Type, CodexErrors.CodexAppServerError> {
   if (client.raw) {
-    return client.raw
-      .request("thread/start", payload)
-      .pipe(
-        Effect.flatMap((rawResponse) =>
-          decodeV2ThreadStartResponse(withCodexThreadSessionIdCompat(rawResponse)).pipe(
-            Effect.mapError((error) =>
-              CodexErrors.CodexAppServerProtocolParseError.fromSchemaError(
-                "decode-response-payload",
-                error,
-                { method: "thread/start" },
-              ),
+    return client.raw.request("thread/start", payload).pipe(
+      Effect.flatMap((rawResponse) =>
+        decodeV2ThreadStartResponse(withCodexThreadSessionIdCompat(rawResponse)).pipe(
+          Effect.map((response) =>
+            toCodexThreadOpenMetadata(response as EffectCodexSchema.V2ThreadStartResponse),
+          ),
+          Effect.mapError((error) =>
+            CodexErrors.CodexAppServerProtocolParseError.fromSchemaError(
+              "decode-response-payload",
+              error,
+              { method: "thread/start" },
             ),
           ),
         ),
-      );
+      ),
+    );
   }
 
-  return client.request("thread/start", payload);
+  return client.request("thread/start", payload).pipe(Effect.map(toCodexThreadOpenMetadata));
 }
 
 function requestCodexThreadResume(
   client: CodexThreadOpenClient,
   payload: CodexRpc.ClientRequestParamsByMethod["thread/resume"],
-): Effect.Effect<
-  CodexRpc.ClientRequestResponsesByMethod["thread/resume"],
-  CodexErrors.CodexAppServerError
-> {
+): Effect.Effect<typeof CodexThreadResumeMetadata.Type, CodexErrors.CodexAppServerError> {
   if (client.raw) {
     return client.raw
-      .request("thread/resume", payload)
+      .request("thread/resume", { ...payload, excludeTurns: true })
       .pipe(
         Effect.flatMap((rawResponse) =>
-          decodeV2ThreadResumeResponse(withCodexThreadSessionIdCompat(rawResponse)).pipe(
+          decodeCodexThreadResumeMetadata(withCodexThreadSessionIdCompat(rawResponse)).pipe(
             Effect.mapError((error) =>
-              CodexErrors.CodexAppServerProtocolParseError.fromSchemaError(
-                "decode-response-payload",
+              CodexErrors.CodexAppServerRequestError.invalidPayload(
+                "thread/resume",
+                "decode-payload",
                 error,
-                { method: "thread/resume" },
               ),
             ),
           ),
@@ -809,7 +823,7 @@ function requestCodexThreadResume(
       );
   }
 
-  return client.request("thread/resume", payload);
+  return client.request("thread/resume", payload).pipe(Effect.map(toCodexThreadOpenMetadata));
 }
 
 export const openCodexThread = (input: {
@@ -821,7 +835,7 @@ export const openCodexThread = (input: {
   readonly requestedModel: string | undefined;
   readonly serviceTier: CodexServiceTier | undefined;
   readonly resumeThreadId: string | undefined;
-}): Effect.Effect<CodexThreadOpenResponse, CodexErrors.CodexAppServerError> => {
+}): Effect.Effect<typeof CodexThreadResumeMetadata.Type, CodexErrors.CodexAppServerError> => {
   const resumeThreadId = input.resumeThreadId;
   const startParams = buildThreadStartParams({
     cwd: input.cwd,
@@ -835,6 +849,9 @@ export const openCodexThread = (input: {
     return requestCodexThreadStart(input.client, startParams);
   }
 
+  // Older providers may still return history despite excludeTurns. Only the
+  // session metadata is decoded here, so unrelated historical items cannot
+  // prevent resuming a valid provider thread.
   return requestCodexThreadResume(input.client, {
     threadId: resumeThreadId,
     ...startParams,
@@ -2527,7 +2544,9 @@ export const makeCodexSessionRuntime = (
             // Derived from the session's own MCP configuration rather than the
             // setting, so the prompt describes the tools this turn actually
             // has even if the setting changed after the session started.
-            browserToolsAvailable: hasConfiguredMcpServer(options.appServerArgs),
+            browserToolsAvailable:
+              hasConfiguredMcpServer(options.appServerArgs) &&
+              (options.browserToolsAvailable ?? true),
           });
           const rawResponse = yield* client.raw.request("turn/start", params);
           const response = yield* decodeV2TurnStartResponse(rawResponse).pipe(

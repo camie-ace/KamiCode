@@ -72,6 +72,10 @@ import Migration0057 from "./Migrations/045_ProjectionProjectsAutoPull.ts";
 import Migration0058 from "./Migrations/046_RepairAutomaticSettlementTimestamps.ts";
 import Migration0059 from "./Migrations/047_ProjectionProjectIcon.ts";
 import Migration0060 from "./Migrations/060_KcWebUserProfiles.ts";
+import Migration0061 from "./Migrations/048_ProjectionThreadBranchPullRequest.ts";
+import Migration0062 from "./Migrations/049_ProjectionThreadsActiveOrderKey.ts";
+import Migration0063 from "./Migrations/050_ProjectionThreadPullRequests.ts";
+import Migration0064 from "./Migrations/064_ProjectionTurnQueueScheduling.ts";
 
 /**
  * Migration loader with all migrations defined inline.
@@ -83,7 +87,7 @@ import Migration0060 from "./Migrations/060_KcWebUserProfiles.ts";
  * Uses Migrator.fromRecord which parses the key format and
  * returns migrations sorted by ID.
  */
-export const migrationEntries = [
+const migrationEntries = [
   [1, "OrchestrationEvents", Migration0001],
   [2, "OrchestrationCommandReceipts", Migration0002],
   [3, "CheckpointDiffBlobs", Migration0003],
@@ -151,11 +155,16 @@ export const migrationEntries = [
   [58, "RepairAutomaticSettlementTimestamps", Migration0058],
   [59, "ProjectionProjectIcon", Migration0059],
   [60, "KcWebUserProfiles", Migration0060],
+  // Append later upstream migrations after the fork-owned/profile range.
+  [61, "ProjectionThreadBranchPullRequest", Migration0061],
+  [62, "ProjectionThreadsActiveOrderKey", Migration0062],
+  [63, "ProjectionThreadPullRequests", Migration0063],
+  [64, "ProjectionTurnQueueScheduling", Migration0064],
 ] as const;
 
 export const migrationManifest = migrationEntries.map(([id, name]) => [id, name] as const);
 
-export const makeMigrationLoader = (throughId?: number) =>
+const makeMigrationLoader = (throughId?: number) =>
   Migrator.fromRecord(
     Object.fromEntries(
       migrationEntries

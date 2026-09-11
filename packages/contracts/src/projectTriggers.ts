@@ -250,7 +250,7 @@ export const ProjectTriggerStreamEvent = Schema.Union([
 ]);
 export type ProjectTriggerStreamEvent = typeof ProjectTriggerStreamEvent.Type;
 
-export class ProjectTriggerNotFoundError extends Schema.TaggedErrorClass<ProjectTriggerNotFoundError>()(
+export class ProjectTriggerNotFoundError extends Schema.TaggedError<ProjectTriggerNotFoundError>()(
   "ProjectTriggerNotFoundError",
   {
     triggerId: ProjectTriggerId,
@@ -261,7 +261,7 @@ export class ProjectTriggerNotFoundError extends Schema.TaggedErrorClass<Project
   }
 }
 
-export class ProjectTriggerValidationError extends Schema.TaggedErrorClass<ProjectTriggerValidationError>()(
+export class ProjectTriggerValidationError extends Schema.TaggedError<ProjectTriggerValidationError>()(
   "ProjectTriggerValidationError",
   {
     message: TrimmedNonEmptyString,
@@ -269,7 +269,7 @@ export class ProjectTriggerValidationError extends Schema.TaggedErrorClass<Proje
   },
 ) {}
 
-export class ProjectTriggerStoreError extends Schema.TaggedErrorClass<ProjectTriggerStoreError>()(
+export class ProjectTriggerStoreError extends Schema.TaggedError<ProjectTriggerStoreError>()(
   "ProjectTriggerStoreError",
   {
     operation: Schema.Literals([
@@ -287,7 +287,7 @@ export class ProjectTriggerStoreError extends Schema.TaggedErrorClass<ProjectTri
   },
 ) {}
 
-export class ProjectTriggerFireError extends Schema.TaggedErrorClass<ProjectTriggerFireError>()(
+export class ProjectTriggerFireError extends Schema.TaggedError<ProjectTriggerFireError>()(
   "ProjectTriggerFireError",
   {
     triggerId: ProjectTriggerId,

@@ -513,10 +513,10 @@ import { LATEST_WINDOWS_DOWNLOAD_URL, REPOSITORY_URL } from "../lib/releases";
 
   const hero = document.querySelector<HTMLElement>(".hero");
   const field = document.querySelector<HTMLElement>(".hero-float");
-  const endorsements = document.querySelector<HTMLElement>(".endorsement-carousel");
+  const tracks = Array.from(document.querySelectorAll<HTMLElement>(".endorsement-track"));
   const caret = document.querySelector<HTMLElement>(".caret");
-  if (hero && field && endorsements && caret) {
-    startHomeMotion({ hero, field, endorsements, caret });
+  if (hero && field && caret) {
+    startHomeMotion({ hero, field, tracks, caret });
   }
 </script>
 

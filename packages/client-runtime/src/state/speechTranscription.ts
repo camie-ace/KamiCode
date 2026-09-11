@@ -5,19 +5,16 @@ import {
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 
+import { RemoteEnvironmentAuthorization } from "../authorization/service.ts";
 import type { PreparedConnection } from "../connection/model.ts";
 import { environmentEndpointUrl } from "../environment/endpoint.ts";
 import { ManagedRelayDpopSigner } from "../relay/managedRelay.ts";
-import {
-  executeEnvironmentHttpRequest,
-  makeEnvironmentHttpApiClient,
-  type RemoteEnvironmentRequestError,
-} from "../rpc/http.ts";
-import { buildEnvironmentAuthHeaders, withEnvironmentCredentials } from "./environmentHttpAuth.ts";
+import type { RemoteEnvironmentRequestError } from "../rpc/http.ts";
+import { executeAuthenticatedEnvironmentHttpRequest } from "./environmentHttpAuth.ts";
 
 const SPEECH_TRANSCRIPTION_TIMEOUT_MS = 75_000;
 
-export class SpeechTranscriptionValidationError extends Schema.TaggedErrorClass<SpeechTranscriptionValidationError>()(
+export class SpeechTranscriptionValidationError extends Schema.TaggedError<SpeechTranscriptionValidationError>()(
   "SpeechTranscriptionValidationError",
   { message: Schema.String },
 ) {}
@@ -36,26 +33,20 @@ export const transcribeEnvironmentSpeech = Effect.fn(
     });
   }
 
-  const requestUrl = environmentEndpointUrl(input.prepared.httpBaseUrl, "/api/speech/transcribe");
-  const client = yield* makeEnvironmentHttpApiClient(input.prepared.httpBaseUrl);
   const signer = yield* Effect.serviceOption(ManagedRelayDpopSigner);
-  const headers = yield* buildEnvironmentAuthHeaders(
-    input.prepared.httpAuthorization,
-    "POST",
-    requestUrl,
-    signer,
-  );
+  const remoteAuthorization = yield* Effect.serviceOption(RemoteEnvironmentAuthorization);
   const payload = new FormData();
   payload.append("files", input.file, input.file.name);
 
-  return yield* executeEnvironmentHttpRequest(
-    requestUrl,
-    SPEECH_TRANSCRIPTION_TIMEOUT_MS,
-    withEnvironmentCredentials(
-      input.prepared.httpAuthorization,
-      client.speech.transcribe({ headers, payload }),
-    ),
-  );
+  return yield* executeAuthenticatedEnvironmentHttpRequest({
+    prepared: input.prepared,
+    signer,
+    remoteAuthorization,
+    method: "POST",
+    url: (httpBaseUrl) => environmentEndpointUrl(httpBaseUrl, "/api/speech/transcribe"),
+    timeoutMs: SPEECH_TRANSCRIPTION_TIMEOUT_MS,
+    request: ({ client, headers }) => client.speech.transcribe({ headers, payload }),
+  });
 });
 
 export type TranscribeEnvironmentSpeechError =

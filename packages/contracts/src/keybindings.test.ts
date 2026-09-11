@@ -96,6 +96,12 @@ it.effect("parses keybinding rules", () =>
     });
     assert.strictEqual(parsedQueue.command, "chat.queue");
 
+    const parsedSchedule = yield* decode(KeybindingRule, {
+      key: "mod+alt+enter",
+      command: "chat.schedule",
+    });
+    assert.strictEqual(parsedSchedule.command, "chat.schedule");
+
     const parsedModelPickerToggle = yield* decode(KeybindingRule, {
       key: "mod+shift+m",
       command: "modelPicker.toggle",
@@ -127,6 +133,12 @@ it.effect("parses keybinding rules", () =>
       when: "!terminalFocus",
     });
     assert.strictEqual(parsedThreadCopyReference.command, "thread.copyReference");
+
+    const parsedThreadStop = yield* decode(KeybindingRule, {
+      key: "mod+escape",
+      command: "thread.stop",
+    });
+    assert.strictEqual(parsedThreadStop.command, "thread.stop");
   }),
 );
 

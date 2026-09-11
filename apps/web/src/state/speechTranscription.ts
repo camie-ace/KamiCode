@@ -8,7 +8,7 @@ import * as Schema from "effect/Schema";
 import { connectionAtomRuntime } from "../connection/runtime";
 import { environmentSession } from "./session";
 
-class SpeechTranscriptionConnectionError extends Schema.TaggedErrorClass<SpeechTranscriptionConnectionError>()(
+class SpeechTranscriptionConnectionError extends Schema.TaggedError<SpeechTranscriptionConnectionError>()(
   "SpeechTranscriptionConnectionError",
   { message: Schema.String },
 ) {}

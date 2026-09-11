@@ -56,6 +56,7 @@ const makeProjectionTurnQueueRepository = Effect.gen(function* () {
           message_id,
           status,
           requested_at,
+          scheduled_for,
           started_at,
           completed_at,
           turn_id,
@@ -75,6 +76,7 @@ const makeProjectionTurnQueueRepository = Effect.gen(function* () {
           ${row.messageId},
           ${row.status},
           ${row.requestedAt},
+          ${row.scheduledFor},
           ${row.startedAt},
           ${row.completedAt},
           ${row.turnId},
@@ -104,6 +106,7 @@ const makeProjectionTurnQueueRepository = Effect.gen(function* () {
           message_id AS "messageId",
           status,
           requested_at AS "requestedAt",
+          scheduled_for AS "scheduledFor",
           started_at AS "startedAt",
           completed_at AS "completedAt",
           turn_id AS "turnId",
@@ -210,6 +213,7 @@ const makeProjectionTurnQueueRepository = Effect.gen(function* () {
           message_id AS "messageId",
           status,
           requested_at AS "requestedAt",
+          scheduled_for AS "scheduledFor",
           started_at AS "startedAt",
           completed_at AS "completedAt",
           turn_id AS "turnId",
@@ -294,7 +298,7 @@ const makeProjectionTurnQueueRepository = Effect.gen(function* () {
             completed_at = ${recoveredAt}
         WHERE status IN ('queued', 'dispatching')
           AND (
-            requested_at < ${staleBefore}
+            (scheduled_for IS NULL AND requested_at < ${staleBefore})
             OR thread_id IN (
               SELECT thread_id
               FROM projection_threads

@@ -9,16 +9,13 @@ import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import { Atom } from "effect/unstable/reactivity";
 
+import { RemoteEnvironmentAuthorization } from "../authorization/service.ts";
 import type { PreparedConnection } from "../connection/model.ts";
 import { environmentEndpointUrl } from "../environment/endpoint.ts";
 import { ManagedRelayDpopSigner } from "../relay/managedRelay.ts";
-import {
-  executeEnvironmentHttpRequest,
-  makeEnvironmentHttpApiClient,
-  type RemoteEnvironmentRequestError,
-} from "../rpc/http.ts";
+import type { RemoteEnvironmentRequestError } from "../rpc/http.ts";
 import { createEnvironmentRpcQueryAtomFamily } from "./runtime.ts";
-import { buildEnvironmentAuthHeaders, withEnvironmentCredentials } from "./environmentHttpAuth.ts";
+import { executeAuthenticatedEnvironmentHttpRequest } from "./environmentHttpAuth.ts";
 import type { EnvironmentConnectionPhase } from "../connection/presentation.ts";
 import type { EnvironmentRegistry } from "../connection/registry.ts";
 import {
@@ -124,15 +121,8 @@ export const uploadEnvironmentWorkspaceFiles = Effect.fn(
     });
   }
 
-  const requestUrl = environmentEndpointUrl(input.prepared.httpBaseUrl, "/api/workspace/upload");
-  const client = yield* makeEnvironmentHttpApiClient(input.prepared.httpBaseUrl);
   const signer = yield* Effect.serviceOption(ManagedRelayDpopSigner);
-  const headers = yield* buildEnvironmentAuthHeaders(
-    input.prepared.httpAuthorization,
-    "POST",
-    requestUrl,
-    signer,
-  );
+  const remoteAuthorization = yield* Effect.serviceOption(RemoteEnvironmentAuthorization);
   const payload = new FormData();
   payload.append("cwd", input.cwd);
   payload.append("directory", input.directory);
@@ -141,14 +131,15 @@ export const uploadEnvironmentWorkspaceFiles = Effect.fn(
     payload.append("files", file, file.name);
   }
 
-  return yield* executeEnvironmentHttpRequest(
-    requestUrl,
-    WORKSPACE_UPLOAD_TIMEOUT_MS,
-    withEnvironmentCredentials(
-      input.prepared.httpAuthorization,
-      client.workspace.upload({ headers, payload }),
-    ),
-  );
+  return yield* executeAuthenticatedEnvironmentHttpRequest({
+    prepared: input.prepared,
+    signer,
+    remoteAuthorization,
+    method: "POST",
+    url: (httpBaseUrl) => environmentEndpointUrl(httpBaseUrl, "/api/workspace/upload"),
+    timeoutMs: WORKSPACE_UPLOAD_TIMEOUT_MS,
+    request: ({ client, headers }) => client.workspace.upload({ headers, payload }),
+  });
 });
 
 export type UploadEnvironmentWorkspaceFilesError =

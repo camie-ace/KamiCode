@@ -36,6 +36,7 @@ export const ProjectionTurnQueueRow = Schema.Struct({
   messageId: MessageId,
   status: ProjectionTurnQueueStatus,
   requestedAt: IsoDateTime,
+  scheduledFor: Schema.NullOr(IsoDateTime),
   startedAt: Schema.NullOr(IsoDateTime),
   completedAt: Schema.NullOr(IsoDateTime),
   turnId: Schema.NullOr(TurnId),

@@ -21,6 +21,7 @@ import { assistantCitationsToPlainText } from "@t3tools/shared/assistantCitation
 import { isTemporaryWorktreeBranch, WORKTREE_BRANCH_PREFIX } from "@t3tools/shared/git";
 import * as Cache from "effect/Cache";
 import * as Cause from "effect/Cause";
+import * as Clock from "effect/Clock";
 import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
@@ -69,6 +70,7 @@ import {
 import { ProjectionTurnRepositoryLive } from "../../persistence/Layers/ProjectionTurns.ts";
 import { ProjectionTurnQueueRepositoryLive } from "../../persistence/Layers/ProjectionTurnQueue.ts";
 import { ServerConfig } from "../../config.ts";
+import { findNextDueQueuedTurn } from "../turnQueueScheduling.ts";
 const isProviderAdapterRequestError = Schema.is(ProviderAdapterRequestError);
 const isProviderAdapterValidationError = Schema.is(ProviderAdapterValidationError);
 const isProviderWorkspaceMissingError = Schema.is(ProviderWorkspaceMissingError);
@@ -1175,8 +1177,12 @@ const make = Effect.gen(function* () {
           return;
         }
 
+        const nowMs = yield* Clock.currentTimeMillis;
         const claimedAt = yield* DateTime.now.pipe(Effect.map(DateTime.formatIso));
-        const nextQueuedTurn = (thread.queuedTurns ?? []).find((turn) => turn.status === "queued");
+        const nextQueuedTurn = findNextDueQueuedTurn(
+          (thread.queuedTurns ?? []).filter((turn) => turn.status === "queued"),
+          nowMs,
+        );
         if (!nextQueuedTurn) {
           return;
         }
@@ -1485,12 +1491,15 @@ const make = Effect.gen(function* () {
       return;
     }
 
-    const thread = yield* resolveThreadDetail(event.payload.threadId);
+    const thread = yield* resolveThreadShell(event.payload.threadId);
     if (!thread) {
       return;
     }
-    const message = thread.messages.find((entry) => entry.id === event.payload.messageId);
-    if (!message || message.role !== "user") {
+    const turnStart = yield* projectionSnapshotQuery.getTurnStartMessage({
+      threadId: thread.id,
+      messageId: event.payload.messageId,
+    });
+    if (Option.isNone(turnStart) || turnStart.value.message.role !== "user") {
       yield* appendProviderFailureActivity({
         threadId: event.payload.threadId,
         kind: "provider.turn.start.failed",
@@ -1502,6 +1511,7 @@ const make = Effect.gen(function* () {
       });
       return;
     }
+    const { message, hasOtherUserMessages } = turnStart.value;
     const appendTurnStartFailure = (summary: string, detail: string) =>
       appendProviderFailureActivity({
         threadId: event.payload.threadId,
@@ -1594,10 +1604,7 @@ const make = Effect.gen(function* () {
     yield* ensureThreadWorktree(thread);
 
     const isCompactCommand = isCompactCommandMessage(message);
-    const nonCompactUserMessageCount = thread.messages.filter(
-      (entry) => entry.role === "user" && !isCompactCommandMessage(entry),
-    ).length;
-    if (nonCompactUserMessageCount === 1 && !isCompactCommand) {
+    if (!hasOtherUserMessages && !isCompactCommand) {
       const project = yield* resolveProject(thread.projectId);
       const generationCwd =
         resolveThreadWorkspaceCwd({
@@ -1668,7 +1675,7 @@ const make = Effect.gen(function* () {
         ),
       );
     if (isCompactCommand) {
-      if (nonCompactUserMessageCount === 0) {
+      if (!hasOtherUserMessages) {
         return yield* appendTurnStartFailure(
           "Context compaction failed",
           "Context compaction requires an existing conversation.",
@@ -1906,6 +1913,9 @@ const make = Effect.gen(function* () {
           threadId: event.payload.threadId,
           requestId: event.payload.requestId,
           answers: event.payload.answers,
+          ...(event.payload.attachmentsByQuestionId
+            ? { attachmentsByQuestionId: event.payload.attachmentsByQuestionId }
+            : {}),
         })
         .pipe(
           Effect.catchCause((cause) =>
@@ -2132,26 +2142,31 @@ const make = Effect.gen(function* () {
         );
       }),
     );
-    const queuedThreadIds = yield* projectionTurnQueueRepository.listQueuedThreadIds.pipe(
+    const drainPersistedQueues = projectionTurnQueueRepository.listQueuedThreadIds.pipe(
       Effect.catchCause((cause) =>
         Effect.logWarning("provider command reactor failed to load persisted queued threads", {
           cause: Cause.pretty(cause),
         }).pipe(Effect.as<ReadonlyArray<ThreadId>>([])),
       ),
-    );
-    yield* Effect.forEach(
-      queuedThreadIds,
-      (threadId) =>
-        drainThreadQueue(threadId).pipe(
-          Effect.catchCause((cause) =>
-            Effect.logWarning("provider command reactor could not resume a persisted queue", {
-              threadId,
-              cause: Cause.pretty(cause),
-            }),
-          ),
+      Effect.flatMap((queuedThreadIds) =>
+        Effect.forEach(
+          queuedThreadIds,
+          (threadId) =>
+            drainThreadQueue(threadId).pipe(
+              Effect.catchCause((cause) =>
+                Effect.logWarning("provider command reactor could not resume a persisted queue", {
+                  threadId,
+                  cause: Cause.pretty(cause),
+                }),
+              ),
+            ),
+          { concurrency: 8, discard: true },
         ),
-      { concurrency: 8, discard: true },
-    ).pipe(Effect.forkScoped);
+      ),
+    );
+    yield* forkParked(
+      drainPersistedQueues.pipe(Effect.repeat(Schedule.spaced(Duration.seconds(1))), Effect.asVoid),
+    );
 
     const activation = yield* ServerActivation;
     if (activation === undefined) {

@@ -9,6 +9,7 @@ import {
   ProjectId,
   ThreadId,
   ProviderInstanceId,
+  type ProjectScript,
 } from "@t3tools/contracts";
 import { createModelSelection } from "@t3tools/shared/model";
 import { expect, it } from "@effect/vitest";
@@ -208,6 +209,115 @@ it.layer(NodeServices.layer)("decider project scripts", (it) => {
       expect(event.type).toBe("project.meta-updated");
       expect((event.payload as { scripts?: unknown[] }).scripts).toEqual(scripts);
     }),
+  );
+
+  const script = (id: string): ProjectScript => ({
+    id,
+    name: "Install dependencies",
+    command: "vp i",
+    icon: "configure",
+    runOnWorktreeCreate: false,
+  });
+
+  const projectWithScripts = (scripts: ReadonlyArray<ProjectScript>) => {
+    const now = "2026-01-01T00:00:00.000Z";
+    return projectEvent(createEmptyReadModel(now), {
+      sequence: 1,
+      eventId: asEventId("evt-legacy-scripts"),
+      aggregateKind: "project",
+      aggregateId: asProjectId("project-scripts"),
+      type: "project.created",
+      occurredAt: now,
+      commandId: CommandId.make("cmd-legacy-scripts"),
+      causationEventId: null,
+      correlationId: CommandId.make("cmd-legacy-scripts"),
+      metadata: {},
+      payload: {
+        projectId: asProjectId("project-scripts"),
+        title: "Scripts",
+        workspaceRoot: "/tmp/scripts",
+        defaultModelSelection: null,
+        scripts,
+        createdAt: now,
+        updatedAt: now,
+      },
+    });
+  };
+
+  for (const id of ["install-javascript-dependencies", "A", "a.b", "a b", "-a", "a".repeat(25)]) {
+    it.effect(`rejects a new script ID that cannot have a shortcut: ${id}`, () =>
+      Effect.gen(function* () {
+        const readModel = yield* projectWithScripts([]);
+        const failure = yield* Effect.flip(
+          decideOrchestrationCommand({
+            readModel,
+            command: {
+              type: "project.meta.update",
+              commandId: CommandId.make("cmd-invalid-script"),
+              projectId: asProjectId("project-scripts"),
+              scripts: [script("lint"), script(id)],
+            },
+          }),
+        );
+        expect(failure).toMatchObject({ _tag: "OrchestrationCommandInvariantError" });
+        expect(failure.message).toContain("Script ID");
+        expect(failure.message).toContain("24");
+        expect(readModel.projects[0]?.scripts).toEqual([]);
+      }),
+    );
+  }
+
+  it.effect("accepts a script ID at the shortcut length limit", () =>
+    Effect.gen(function* () {
+      const readModel = yield* projectWithScripts([]);
+      const scripts = [script("a".repeat(24))];
+      const result = yield* decideOrchestrationCommand({
+        readModel,
+        command: {
+          type: "project.meta.update",
+          commandId: CommandId.make("cmd-valid-script"),
+          projectId: asProjectId("project-scripts"),
+          scripts,
+        },
+      });
+      const event = Array.isArray(result) ? result[0] : result;
+      expect(event.payload).toMatchObject({ scripts });
+    }),
+  );
+
+  it.effect(
+    "keeps legacy scripts readable, editable and removable while allowing valid additions",
+    () =>
+      Effect.gen(function* () {
+        const legacy = script("install-javascript-dependencies");
+        const readModel = yield* projectWithScripts([legacy]);
+        expect(readModel.projects[0]?.scripts).toEqual([legacy]);
+        for (const scripts of [[{ ...legacy, command: "vp install" }, script("lint")], []]) {
+          const result = yield* decideOrchestrationCommand({
+            readModel,
+            command: {
+              type: "project.meta.update",
+              commandId: CommandId.make("cmd-repair-script"),
+              projectId: asProjectId("project-scripts"),
+              scripts,
+            },
+          });
+          const event = Array.isArray(result) ? result[0] : result;
+          expect(event.payload).toMatchObject({ scripts });
+        }
+        const failure = yield* Effect.flip(
+          decideOrchestrationCommand({
+            readModel,
+            command: {
+              type: "project.meta.update",
+              commandId: CommandId.make("cmd-new-invalid-script"),
+              projectId: asProjectId("project-scripts"),
+              scripts: [legacy, script("another.invalid.id")],
+            },
+          }),
+        );
+        expect(failure).toMatchObject({ _tag: "OrchestrationCommandInvariantError" });
+      }),
   );
 
   it.effect("propagates project icon metadata in project.meta.update", () =>
@@ -462,7 +572,63 @@ it.layer(NodeServices.layer)("decider project scripts", (it) => {
         ]),
         runtimeMode: "approval-required",
         interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        dispatchPolicy: "immediate",
+        scheduledFor: null,
       });
+
+      const scheduledFor = "2026-01-02T09:30:00.000Z";
+      const scheduledResult = yield* decideOrchestrationCommand({
+        command: {
+          type: "thread.turn.start",
+          commandId: CommandId.make("cmd-turn-start-scheduled"),
+          threadId: ThreadId.make("thread-1"),
+          message: {
+            messageId: asMessageId("message-user-scheduled"),
+            role: "user",
+            text: "send this tomorrow",
+            attachments: [],
+          },
+          runtimeMode: "approval-required",
+          interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+          dispatchPolicy: "queue",
+          scheduledFor,
+          createdAt: now,
+        },
+        readModel,
+      });
+      const scheduledEvents = Array.isArray(scheduledResult) ? scheduledResult : [scheduledResult];
+      const scheduledTurnStart = scheduledEvents.find(
+        (event) => event.type === "thread.turn-start-requested",
+      );
+      expect(scheduledTurnStart?.type).toBe("thread.turn-start-requested");
+      if (scheduledTurnStart?.type === "thread.turn-start-requested") {
+        expect(scheduledTurnStart.payload.dispatchPolicy).toBe("queue");
+        expect(scheduledTurnStart.payload.scheduledFor).toBe(scheduledFor);
+      }
+
+      const invalidSchedule = yield* Effect.flip(
+        decideOrchestrationCommand({
+          command: {
+            type: "thread.turn.start",
+            commandId: CommandId.make("cmd-turn-start-invalid-schedule"),
+            threadId: ThreadId.make("thread-1"),
+            message: {
+              messageId: asMessageId("message-user-invalid-schedule"),
+              role: "user",
+              text: "invalid schedule",
+              attachments: [],
+            },
+            runtimeMode: "approval-required",
+            interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+            scheduledFor,
+            createdAt: now,
+          },
+          readModel,
+        }),
+      );
+      expect(invalidSchedule.message).toContain(
+        "Scheduled turns must use the queue dispatch policy",
+      );
     }),
   );
 

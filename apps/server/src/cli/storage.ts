@@ -21,7 +21,7 @@ const applyFlag = Flag.boolean("apply").pipe(
 );
 const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 
-class StorageCommandServerRunningError extends Schema.TaggedErrorClass<StorageCommandServerRunningError>()(
+class StorageCommandServerRunningError extends Schema.TaggedError<StorageCommandServerRunningError>()(
   "StorageCommandServerRunningError",
   { pid: Schema.Int },
 ) {

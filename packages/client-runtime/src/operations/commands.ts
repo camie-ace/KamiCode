@@ -11,6 +11,7 @@ import * as Schedule from "effect/Schedule";
 import * as SubscriptionRef from "effect/SubscriptionRef";
 import { HttpClient } from "effect/unstable/http";
 
+import { RemoteEnvironmentAuthorization } from "../authorization/service.ts";
 import type { PreparedConnection } from "../connection/model.ts";
 import { EnvironmentSupervisor } from "../connection/supervisor.ts";
 import { environmentEndpointUrl } from "../environment/endpoint.ts";
@@ -22,15 +23,8 @@ import {
   isEnvironmentRpcTransportFailure,
   request,
 } from "../rpc/client.ts";
-import {
-  executeEnvironmentHttpRequest,
-  makeEnvironmentHttpApiClient,
-  type RemoteEnvironmentRequestError,
-} from "../rpc/http.ts";
-import {
-  buildEnvironmentAuthHeaders,
-  withEnvironmentCredentials,
-} from "../state/environmentHttpAuth.ts";
+import type { RemoteEnvironmentRequestError } from "../rpc/http.ts";
+import { executeAuthenticatedEnvironmentHttpRequest } from "../state/environmentHttpAuth.ts";
 
 type CommandType = ClientOrchestrationCommand["type"];
 type CommandOf<T extends CommandType> = Extract<ClientOrchestrationCommand, { readonly type: T }>;
@@ -59,7 +53,10 @@ export type UnsnoozeThreadInput = CommandInput<"thread.unsnooze">;
 export type PinThreadInput = CommandInput<"thread.pin">;
 export type UnpinThreadInput = CommandInput<"thread.unpin">;
 export type ReorderPinnedThreadInput = CommandInput<"thread.pin.reorder">;
+export type ReorderActiveThreadInput = CommandInput<"thread.active.reorder">;
 export type UpdateThreadMetadataInput = CommandInput<"thread.meta.update">;
+export type LinkThreadPullRequestInput = CommandInput<"thread.pull-request.link">;
+export type UnlinkThreadPullRequestInput = CommandInput<"thread.pull-request.unlink">;
 export type SetThreadRuntimeModeInput = CommandInput<"thread.runtime-mode.set">;
 export type SetThreadInteractionModeInput = CommandInput<"thread.interaction-mode.set">;
 export type DeleteThreadQueuedTurnInput = CommandInput<"thread.queued-turn.delete">;
@@ -70,6 +67,7 @@ export type RecordThreadWorkflowInput = CommandInput<"thread.workflow.record">;
 export type InterruptThreadTurnInput = CommandInput<"thread.turn.interrupt">;
 export type RespondToThreadApprovalInput = CommandInput<"thread.approval.respond">;
 export type RespondToThreadUserInputInput = CommandInput<"thread.user-input.respond">;
+export type DismissThreadUserInputInput = CommandInput<"thread.user-input.dismiss">;
 export type RevertThreadCheckpointInput = CommandInput<"thread.checkpoint.revert">;
 export type StopThreadSessionInput = CommandInput<"thread.session.stop">;
 
@@ -156,23 +154,17 @@ const dispatchAttachmentTurn = Effect.fn("EnvironmentCommands.dispatchAttachment
   command: Extract<ClientOrchestrationCommand, { readonly type: "thread.turn.start" }>,
 ) {
   const prepared = yield* currentPreparedConnection();
-  const requestUrl = environmentEndpointUrl(prepared.httpBaseUrl, "/api/orchestration/dispatch");
-  const client = yield* makeEnvironmentHttpApiClient(prepared.httpBaseUrl);
   const signer = yield* Effect.serviceOption(ManagedRelayDpopSigner);
-  const headers = yield* buildEnvironmentAuthHeaders(
-    prepared.httpAuthorization,
-    "POST",
-    requestUrl,
+  const remoteAuthorization = yield* Effect.serviceOption(RemoteEnvironmentAuthorization);
+  return yield* executeAuthenticatedEnvironmentHttpRequest({
+    prepared,
     signer,
-  );
-  return yield* executeEnvironmentHttpRequest(
-    requestUrl,
-    ATTACHMENT_TURN_HTTP_TIMEOUT_MS,
-    withEnvironmentCredentials(
-      prepared.httpAuthorization,
-      client.orchestration.dispatch({ headers, payload: command }),
-    ),
-  );
+    remoteAuthorization,
+    method: "POST",
+    url: (httpBaseUrl) => environmentEndpointUrl(httpBaseUrl, "/api/orchestration/dispatch"),
+    timeoutMs: ATTACHMENT_TURN_HTTP_TIMEOUT_MS,
+    request: ({ client, headers }) => client.orchestration.dispatch({ headers, payload: command }),
+  });
 });
 
 export const createProject: (input: CreateProjectInput) => CommandEffect = Effect.fn(
@@ -319,6 +311,16 @@ export const reorderPinnedThread: (input: ReorderPinnedThreadInput) => CommandEf
   });
 });
 
+export const reorderActiveThread: (input: ReorderActiveThreadInput) => CommandEffect = Effect.fn(
+  "EnvironmentCommands.reorderActiveThread",
+)(function* (input) {
+  return yield* dispatch({
+    ...input,
+    type: "thread.active.reorder",
+    commandId: yield* commandId(input),
+  });
+});
+
 export const updateThreadMetadata: (input: UpdateThreadMetadataInput) => CommandEffect = Effect.fn(
   "EnvironmentCommands.updateThreadMetadata",
 )(function* (input) {
@@ -328,6 +330,24 @@ export const updateThreadMetadata: (input: UpdateThreadMetadataInput) => Command
     commandId: yield* commandId(input),
   });
 });
+
+export const linkThreadPullRequest: (input: LinkThreadPullRequestInput) => CommandEffect =
+  Effect.fn("EnvironmentCommands.linkThreadPullRequest")(function* (input) {
+    return yield* dispatch({
+      ...input,
+      type: "thread.pull-request.link",
+      commandId: yield* commandId(input),
+    });
+  });
+
+export const unlinkThreadPullRequest: (input: UnlinkThreadPullRequestInput) => CommandEffect =
+  Effect.fn("EnvironmentCommands.unlinkThreadPullRequest")(function* (input) {
+    return yield* dispatch({
+      ...input,
+      type: "thread.pull-request.unlink",
+      commandId: yield* commandId(input),
+    });
+  });
 
 export const setThreadRuntimeMode: (input: SetThreadRuntimeModeInput) => CommandEffect = Effect.fn(
   "EnvironmentCommands.setThreadRuntimeMode",
@@ -450,6 +470,17 @@ export const respondToThreadUserInput: (input: RespondToThreadUserInputInput) =>
     return yield* dispatch({
       ...input,
       type: "thread.user-input.respond",
+      commandId: metadata.commandId,
+      createdAt: metadata.createdAt,
+    });
+  });
+
+export const dismissThreadUserInput: (input: DismissThreadUserInputInput) => CommandEffect =
+  Effect.fn("EnvironmentCommands.dismissThreadUserInput")(function* (input) {
+    const metadata = yield* timestampedCommandMetadata(input);
+    return yield* dispatch({
+      ...input,
+      type: "thread.user-input.dismiss",
       commandId: metadata.commandId,
       createdAt: metadata.createdAt,
     });

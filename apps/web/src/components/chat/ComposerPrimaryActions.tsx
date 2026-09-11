@@ -1,7 +1,8 @@
-import { memo, type PointerEventHandler } from "react";
+import { memo, type MouseEventHandler, type PointerEventHandler } from "react";
 import { ChevronDownIcon, ChevronLeftIcon, ListPlusIcon } from "lucide-react";
 import { useEnvironmentIdentificationMode } from "~/hooks/useSettings";
 import { cn } from "~/lib/utils";
+import { ensureLocalApi } from "../../localApi";
 import { StageBackdropButtonArt, useSidebarStageBackdropVariant } from "../SidebarStageBackdrop";
 import { Button } from "../ui/button";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
@@ -31,12 +32,14 @@ interface ComposerPrimaryActionsProps {
   hasSendableContent: boolean;
   sendLabel?: string;
   queueShortcutLabel: string | null | undefined;
+  scheduleShortcutLabel: string | null | undefined;
   preserveComposerFocusOnPointerDown?: boolean;
   /** Enter-to-send is disabled on mobile viewports, where stop would otherwise
    * be the only primary action and a running turn could not be steered. */
   showSendWhileRunning?: boolean;
   onPreviousPendingQuestion: () => void;
   onQueueMessage: () => void;
+  onScheduleMessage: () => void;
   onInterrupt: () => void;
   onImplementPlanInNewThread: () => void;
 }
@@ -77,10 +80,12 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
   hasSendableContent,
   sendLabel,
   queueShortcutLabel = null,
+  scheduleShortcutLabel = null,
   preserveComposerFocusOnPointerDown = false,
   showSendWhileRunning = false,
   onPreviousPendingQuestion,
   onQueueMessage,
+  onScheduleMessage,
   onInterrupt,
   onImplementPlanInNewThread,
 }: ComposerPrimaryActionsProps) {
@@ -92,6 +97,22 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
   const stageBackdropVariant = useSidebarStageBackdropVariant(
     environmentIdentificationMode === "artwork",
   );
+  const openScheduleContextMenu: MouseEventHandler<HTMLButtonElement> = (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (!hasSendableContent) return;
+    const label = scheduleShortcutLabel
+      ? `Schedule message (${scheduleShortcutLabel})`
+      : "Schedule message";
+    void ensureLocalApi()
+      .contextMenu.show([{ id: "schedule-message", label, icon: "clock" }], {
+        x: event.clientX,
+        y: event.clientY,
+      })
+      .then((action) => {
+        if (action === "schedule-message") onScheduleMessage();
+      });
+  };
 
   const renderStopGenerationButton = (insidePendingAction: boolean) => (
     <button
@@ -126,6 +147,7 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
             className="flex size-8 items-center justify-center rounded-full border border-border/70 bg-background/80 text-muted-foreground transition-all duration-150 enabled:cursor-pointer enabled:hover:border-border enabled:hover:bg-accent enabled:hover:text-foreground enabled:hover:scale-105 disabled:pointer-events-none disabled:opacity-35 sm:h-8 sm:w-8"
             {...pointerFocusProps}
             onClick={onQueueMessage}
+            onContextMenu={openScheduleContextMenu}
             disabled={!hasSendableContent}
             aria-label="Queue message"
           >
@@ -268,6 +290,7 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
           : "bg-message-action text-message-action-foreground enabled:shadow-message-action/24 hover:bg-message-action-hover",
       )}
       {...pointerFocusProps}
+      onContextMenu={openScheduleContextMenu}
       disabled={
         isSendBusy ||
         isSendDisabled ||

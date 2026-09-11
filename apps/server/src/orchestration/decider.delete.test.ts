@@ -183,6 +183,7 @@ it.layer(NodeServices.layer)("decider deletion flows", (it) => {
           runtimeMode: "approval-required",
           interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
           dispatchPolicy: "queue",
+          scheduledFor: null,
           createdAt: now,
         },
       });
@@ -266,6 +267,7 @@ it.layer(NodeServices.layer)("decider deletion flows", (it) => {
           runtimeMode: "approval-required",
           interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
           dispatchPolicy: "queue",
+          scheduledFor: null,
           createdAt: now,
         },
       });
@@ -341,6 +343,7 @@ it.layer(NodeServices.layer)("decider deletion flows", (it) => {
           runtimeMode: "approval-required",
           interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
           dispatchPolicy: "queue",
+          scheduledFor: null,
           createdAt: now,
         },
       });

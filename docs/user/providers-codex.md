@@ -135,7 +135,9 @@ contains a copied Codex setup. Use a fresh shadow directory and sign in again.
 Codex can ask a question and keep working. Answer it in the thread's question
 panel. The answer becomes a new message: it reaches the active turn, or starts
 another turn if Codex has finished. Unanswered questions survive reconnects.
-This requires a Codex version that supports async questions.
+If you do not want to answer, dismiss the question from its panel. Dismissing
+closes it without sending anything to Codex. This requires a Codex version that
+supports async questions.
 
 ## Approve app access
 
@@ -203,6 +205,15 @@ find ~/.codex_p -mindepth 1 ! -name auth.json -exec rm -rf {} +
 ## When To Use A Separate CODEX_HOME
 
 Use a totally separate `CODEX_HOME path` only when you want a separate Codex workspace.
+
+## Codex says I hit a usage limit
+
+When Codex stops on a usage limit, the thread names the window that ran out and
+when it resets, when Codex reports them. Send the message again after the reset. On a workspace plan the
+message also says whether your workspace owner needs to add credits or raise the
+spend limit to continue sooner.
+
+## Send feedback to OpenAI
 
 In an existing Codex thread, send `/feedback` with an optional description, for
 example `/feedback The agent stopped before finishing the tests`. This uploads

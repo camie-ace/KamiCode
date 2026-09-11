@@ -3,6 +3,7 @@ import {
   assetUrlStateFromResult,
   EMPTY_ASSET_URL_ATOM,
   resolveAssetUrl,
+  type AssetUrlState as RuntimeAssetUrlState,
 } from "@t3tools/client-runtime/state/assets";
 import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 import type { AssetResource, EnvironmentId } from "@t3tools/contracts";
@@ -20,10 +21,7 @@ const FALLBACK_ASSET_RESOURCE: AssetResource = {
   cwd: ".",
 };
 
-export type AssetUrlState =
-  | { readonly _tag: "Loading" }
-  | { readonly _tag: "Failure" }
-  | { readonly _tag: "Success"; readonly url: string; readonly sourcePath?: string };
+export type AssetUrlState = RuntimeAssetUrlState;
 
 export function useAssetUrlState(
   environmentId: EnvironmentId | null,

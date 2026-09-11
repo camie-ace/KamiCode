@@ -67,7 +67,7 @@ const discordReleaseErrorContext = {
   hasRoleMentionSyntax: Schema.Boolean,
 };
 
-export class DiscordReleaseWebhookRequestError extends Schema.TaggedErrorClass<DiscordReleaseWebhookRequestError>()(
+export class DiscordReleaseWebhookRequestError extends Schema.TaggedError<DiscordReleaseWebhookRequestError>()(
   "DiscordReleaseWebhookRequestError",
   {
     ...discordReleaseErrorContext,
@@ -79,7 +79,7 @@ export class DiscordReleaseWebhookRequestError extends Schema.TaggedErrorClass<D
   }
 }
 
-export class DiscordReleaseWebhookResponseError extends Schema.TaggedErrorClass<DiscordReleaseWebhookResponseError>()(
+export class DiscordReleaseWebhookResponseError extends Schema.TaggedError<DiscordReleaseWebhookResponseError>()(
   "DiscordReleaseWebhookResponseError",
   {
     ...discordReleaseErrorContext,

@@ -81,7 +81,9 @@ describe("DesktopEarlyElectronStartup", () => {
     });
 
     assert.deepEqual(options, {
+      isDevelopment: true,
       linuxWmClass: "kamicode-dev",
+      linuxDesktopEntryName: "kamicode-dev.desktop",
       passwordStore: "gnome-libsecret",
     });
   });

@@ -93,6 +93,7 @@ describe("DesktopEnvironment", () => {
       assert.equal(toPortablePath(environment.backendCwd), "/repo");
       assert.equal(environment.appUserModelId, "tech.camie.kamicode.dev");
       assert.equal(environment.linuxWmClass, "kamicode-dev");
+      assert.equal(environment.linuxDesktopEntryName, "kamicode-dev.desktop");
       assert.deepEqual(
         Option.map(environment.devServerUrl, (url) => url.href),
         Option.some("http://localhost:5173/"),
@@ -146,6 +147,19 @@ describe("DesktopEnvironment", () => {
         toPortablePath(environment.backendEntryPath),
         "/install/resources/server.asar/apps/server/dist/bin.mjs",
       );
+    }),
+  );
+
+  it.effect("uses the stable desktop entry as the packaged Linux portal identity", () =>
+    Effect.gen(function* () {
+      const environment = yield* makeEnvironment({
+        platform: "linux",
+        isPackaged: true,
+        appPath: "/tmp/.mount_t3code/resources/app.asar",
+        resourcesPath: "/tmp/.mount_t3code/resources",
+      });
+
+      assert.equal(environment.linuxDesktopEntryName, "com.t3tools.T3Code.desktop");
     }),
   );
 

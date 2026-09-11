@@ -50,7 +50,7 @@ export interface WorkspaceUploadFilesInput {
   readonly files: ReadonlyArray<WorkspaceUploadSourceFile>;
 }
 
-export class WorkspaceFileSystemOperationError extends Schema.TaggedErrorClass<WorkspaceFileSystemOperationError>()(
+export class WorkspaceFileSystemOperationError extends Schema.TaggedError<WorkspaceFileSystemOperationError>()(
   "WorkspaceFileSystemOperationError",
   {
     workspaceRoot: Schema.String,
@@ -75,7 +75,7 @@ export class WorkspaceFileSystemOperationError extends Schema.TaggedErrorClass<W
   }
 }
 
-export class WorkspaceUploadOperationError extends Schema.TaggedErrorClass<WorkspaceUploadOperationError>()(
+export class WorkspaceUploadOperationError extends Schema.TaggedError<WorkspaceUploadOperationError>()(
   "WorkspaceUploadOperationError",
   {
     workspaceRoot: Schema.String,
@@ -97,7 +97,7 @@ export class WorkspaceUploadOperationError extends Schema.TaggedErrorClass<Works
   }
 }
 
-export class WorkspaceFilePathEscapeError extends Schema.TaggedErrorClass<WorkspaceFilePathEscapeError>()(
+export class WorkspaceFilePathEscapeError extends Schema.TaggedError<WorkspaceFilePathEscapeError>()(
   "WorkspaceFilePathEscapeError",
   {
     workspaceRoot: Schema.String,
@@ -111,7 +111,7 @@ export class WorkspaceFilePathEscapeError extends Schema.TaggedErrorClass<Worksp
   }
 }
 
-export class WorkspacePathNotFileError extends Schema.TaggedErrorClass<WorkspacePathNotFileError>()(
+export class WorkspacePathNotFileError extends Schema.TaggedError<WorkspacePathNotFileError>()(
   "WorkspacePathNotFileError",
   {
     workspaceRoot: Schema.String,
@@ -124,7 +124,7 @@ export class WorkspacePathNotFileError extends Schema.TaggedErrorClass<Workspace
   }
 }
 
-export class WorkspaceBinaryFileError extends Schema.TaggedErrorClass<WorkspaceBinaryFileError>()(
+export class WorkspaceBinaryFileError extends Schema.TaggedError<WorkspaceBinaryFileError>()(
   "WorkspaceBinaryFileError",
   {
     workspaceRoot: Schema.String,
@@ -137,7 +137,7 @@ export class WorkspaceBinaryFileError extends Schema.TaggedErrorClass<WorkspaceB
   }
 }
 
-export class WorkspaceUploadTargetError extends Schema.TaggedErrorClass<WorkspaceUploadTargetError>()(
+export class WorkspaceUploadTargetError extends Schema.TaggedError<WorkspaceUploadTargetError>()(
   "WorkspaceUploadTargetError",
   {
     workspaceRoot: Schema.String,
@@ -420,6 +420,7 @@ export class WorkspaceFileSystem extends Context.Service<
   }
 >()("t3/workspace/WorkspaceFileSystem") {}
 
+/** @public Service construction is part of the canonical Effect module API. */
 export const make = Effect.gen(function* () {
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;

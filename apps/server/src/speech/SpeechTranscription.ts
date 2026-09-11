@@ -81,7 +81,7 @@ export function hasSupportedAudioSignature(bytes: Uint8Array, contentType: strin
   return false;
 }
 
-export class SpeechTranscriptionInputError extends Schema.TaggedErrorClass<SpeechTranscriptionInputError>()(
+export class SpeechTranscriptionInputError extends Schema.TaggedError<SpeechTranscriptionInputError>()(
   "SpeechTranscriptionInputError",
   {
     reason: Schema.Literals(["empty_audio", "invalid_audio", "unsupported_media_type"]),
@@ -95,7 +95,7 @@ export class SpeechTranscriptionInputError extends Schema.TaggedErrorClass<Speec
   }
 }
 
-export class SpeechTranscriptionServiceError extends Schema.TaggedErrorClass<SpeechTranscriptionServiceError>()(
+export class SpeechTranscriptionServiceError extends Schema.TaggedError<SpeechTranscriptionServiceError>()(
   "SpeechTranscriptionServiceError",
   {
     reason: Schema.Literals(["not_configured", "request_failed"]),

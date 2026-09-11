@@ -4,7 +4,7 @@ import { CronExpressionParser } from "cron-parser";
 
 import type { ProjectTriggerRow } from "./Services/ProjectTriggerRepository.ts";
 
-export class ProjectTriggerScheduleError extends Schema.TaggedErrorClass<ProjectTriggerScheduleError>()(
+export class ProjectTriggerScheduleError extends Schema.TaggedError<ProjectTriggerScheduleError>()(
   "ProjectTriggerScheduleError",
   {
     triggerId: Schema.String,

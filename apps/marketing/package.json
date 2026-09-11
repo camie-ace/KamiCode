@@ -19,6 +19,6 @@
     "@vercel/config": "^0.3.0",
     "sharp": "^0.34.5",
     "to-ico": "^1.1.5",
-    "typescript": "catalog:"
+    "typescript": "~6.0.3"
   }
 }
