@@ -2226,6 +2226,16 @@ function mapToRuntimeEvents(
     ];
   }
 
+  if (event.method === "kamicode/projectMemoryWarning") {
+    return [
+      {
+        type: "runtime.warning",
+        ...runtimeEventBase(event, canonicalThreadId),
+        payload: { message: event.message ?? "Project memory exceeds its budget." },
+      },
+    ];
+  }
+
   if (event.method === "process/stderr") {
     const message = event.message ?? "Codex process stderr";
     const isFatal = isFatalCodexProcessStderrMessage(message);

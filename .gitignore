@@ -40,3 +40,6 @@ node_modules/
 *.log
 .env*
 !.env.example
+
+# Local agent memory is user data and must never be committed.
+.camie/

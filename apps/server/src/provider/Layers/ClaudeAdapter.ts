@@ -117,7 +117,7 @@ import {
   type ProviderAdapterError,
 } from "../Errors.ts";
 import { type ClaudeAdapterShape } from "../Services/ClaudeAdapter.ts";
-import { applyProjectMemoryPromptPrefix, readProjectMemory } from "../ProjectMemory.ts";
+import { applyProjectMemoryPromptPrefix, readProjectMemorySnapshot } from "../ProjectMemory.ts";
 import { appendRepositoryOperatingContract } from "../RepositoryOperatingContract.ts";
 import { applyTestModePromptPrefix } from "../TestModeInstructions.ts";
 import { type EventNdjsonLogger, makeEventNdjsonLogger } from "./EventNdjsonLogger.ts";
@@ -4966,6 +4966,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         updatedAt: startedAt,
       };
 
+      const memorySnapshot = readProjectMemorySnapshot(input.cwd);
       const context: ClaudeSessionContext = {
         session,
         promptQueue,
@@ -4992,13 +4993,17 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         lastKnownTotalProcessedTokens: undefined,
         lastAssistantUuid: resumeState?.resumeSessionAt,
         lastThreadStartedId: undefined,
-        projectMemoryAtSessionStart: readProjectMemory(input.cwd) ?? "",
+        projectMemoryAtSessionStart: memorySnapshot.memory ?? "",
         projectMemoryInjected: false,
         announcedUsageLimits: undefined,
         stopped: false,
       };
       yield* Ref.set(contextRef, context);
       sessions.set(threadId, context);
+      for (const message of memorySnapshot.notices) {
+        yield* Effect.logWarning(message);
+        yield* emitRuntimeWarning(context, message);
+      }
 
       const sessionStartedStamp = yield* makeEventStamp();
       yield* offerRuntimeEvent({

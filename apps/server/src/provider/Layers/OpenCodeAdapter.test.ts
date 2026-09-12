@@ -1,3 +1,7 @@
+// @effect-diagnostics nodeBuiltinImport:off
+import * as NodeFS from "node:fs";
+import * as NodeOS from "node:os";
+import * as NodePath from "node:path";
 import * as NodeAssert from "node:assert/strict";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { it } from "@effect/vitest";
@@ -16,7 +20,7 @@ import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 import * as TestClock from "effect/testing/TestClock";
-import { beforeEach, vi } from "vite-plus/test";
+import { afterAll, beforeEach, vi } from "vite-plus/test";
 import type {
   Event as OpenCodeEvent,
   PermissionRequest,
@@ -51,6 +55,14 @@ import {
   mergeOpenCodeAssistantText,
 } from "./OpenCodeAdapter.ts";
 import { symlinksSupported } from "@t3tools/shared/testing/symlinks";
+
+// Keep adapter tests independent of real project memory in the checkout or its ancestors.
+const testWorkspaceCwd = NodeFS.mkdtempSync(
+  NodePath.join(NodeOS.tmpdir(), "adapter-memory-fixture-"),
+);
+NodeFS.mkdirSync(NodePath.join(testWorkspaceCwd, ".camie"));
+NodeFS.writeFileSync(NodePath.join(testWorkspaceCwd, ".camie", "project-memory.md"), "");
+afterAll(() => NodeFS.rmSync(testWorkspaceCwd, { recursive: true, force: true }));
 
 // Test-local service tag so the rest of the file can keep using `yield* OpenCodeAdapter`.
 class OpenCodeAdapter extends Context.Service<OpenCodeAdapter, OpenCodeAdapterShape>()(
@@ -547,7 +559,7 @@ const OpenCodeAdapterTestLayer = Layer.effect(
   makeOpenCodeAdapter(openCodeAdapterTestSettings),
 ).pipe(
   Layer.provideMerge(Layer.succeed(OpenCodeRuntime, OpenCodeRuntimeTestDouble)),
-  Layer.provideMerge(ServerConfig.layerTest(process.cwd(), process.cwd())),
+  Layer.provideMerge(ServerConfig.layerTest(testWorkspaceCwd, testWorkspaceCwd)),
   Layer.provideMerge(
     ServerSettingsService.layerTest({
       providers: {
@@ -1239,7 +1251,7 @@ it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
       const threadId = asThreadId("thread-opencode-samedir");
       // Same working tree, different spelling (trailing slash) — must reuse,
       // not fork.
-      runtimeMock.state.sessionDirectoryById.set("ses_samedir", `${process.cwd()}/`);
+      runtimeMock.state.sessionDirectoryById.set("ses_samedir", `${testWorkspaceCwd}/`);
 
       const session = yield* adapter.startSession({
         provider: ProviderDriverKind.make("opencode"),
@@ -1383,7 +1395,7 @@ it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
           makeOpenCodeAdapter(openCodeAdapterTestSettings),
         ).pipe(
           Layer.provideMerge(Layer.succeed(OpenCodeRuntime, OpenCodeRuntimeTestDouble)),
-          Layer.provideMerge(ServerConfig.layerTest(process.cwd(), process.cwd())),
+          Layer.provideMerge(ServerConfig.layerTest(testWorkspaceCwd, testWorkspaceCwd)),
           Layer.provideMerge(ServerSettingsService.layerTest()),
           Layer.provideMerge(providerSessionDirectoryTestLayer),
           Layer.provideMerge(NodeServices.layer),
@@ -6180,7 +6192,7 @@ it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
       makeOpenCodeAdapter(openCodeAdapterTestSettings, { instanceId }),
     ).pipe(
       Layer.provideMerge(Layer.succeed(OpenCodeRuntime, OpenCodeRuntimeTestDouble)),
-      Layer.provideMerge(ServerConfig.layerTest(process.cwd(), process.cwd())),
+      Layer.provideMerge(ServerConfig.layerTest(testWorkspaceCwd, testWorkspaceCwd)),
       Layer.provideMerge(ServerSettingsService.layerTest()),
       Layer.provideMerge(providerSessionDirectoryTestLayer),
       Layer.provideMerge(NodeServices.layer),
@@ -6236,7 +6248,7 @@ it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
             type: "text",
             text: applyProjectMemoryPromptPrefix({
               prompt: "Fix it",
-              projectMemory: readProjectMemory(process.cwd()),
+              projectMemory: readProjectMemory(testWorkspaceCwd),
             }),
           },
         ],
@@ -6270,7 +6282,7 @@ it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
       makeOpenCodeAdapter(openCodeAdapterTestSettings, { instanceId }),
     ).pipe(
       Layer.provideMerge(Layer.succeed(OpenCodeRuntime, OpenCodeRuntimeTestDouble)),
-      Layer.provideMerge(ServerConfig.layerTest(process.cwd(), process.cwd())),
+      Layer.provideMerge(ServerConfig.layerTest(testWorkspaceCwd, testWorkspaceCwd)),
       Layer.provideMerge(ServerSettingsService.layerTest()),
       Layer.provideMerge(providerSessionDirectoryTestLayer),
       Layer.provideMerge(NodeServices.layer),
@@ -6316,7 +6328,7 @@ it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
             type: "text",
             text: applyProjectMemoryPromptPrefix({
               prompt: "Fix it",
-              projectMemory: readProjectMemory(process.cwd()),
+              projectMemory: readProjectMemory(testWorkspaceCwd),
             }),
           },
         ],
@@ -6331,7 +6343,7 @@ it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
       makeOpenCodeAdapter(openCodeAdapterTestSettings, { instanceId }),
     ).pipe(
       Layer.provideMerge(Layer.succeed(OpenCodeRuntime, OpenCodeRuntimeTestDouble)),
-      Layer.provideMerge(ServerConfig.layerTest(process.cwd(), process.cwd())),
+      Layer.provideMerge(ServerConfig.layerTest(testWorkspaceCwd, testWorkspaceCwd)),
       Layer.provideMerge(ServerSettingsService.layerTest()),
       Layer.provideMerge(providerSessionDirectoryTestLayer),
       Layer.provideMerge(NodeServices.layer),
@@ -7496,7 +7508,7 @@ it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
         }),
       ).pipe(
         Layer.provideMerge(Layer.succeed(OpenCodeRuntime, OpenCodeRuntimeTestDouble)),
-        Layer.provideMerge(ServerConfig.layerTest(process.cwd(), process.cwd())),
+        Layer.provideMerge(ServerConfig.layerTest(testWorkspaceCwd, testWorkspaceCwd)),
         Layer.provideMerge(
           ServerSettingsService.layerTest({
             providers: {
@@ -7578,7 +7590,7 @@ it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
         }),
       ).pipe(
         Layer.provideMerge(Layer.succeed(OpenCodeRuntime, OpenCodeRuntimeTestDouble)),
-        Layer.provideMerge(ServerConfig.layerTest(process.cwd(), process.cwd())),
+        Layer.provideMerge(ServerConfig.layerTest(testWorkspaceCwd, testWorkspaceCwd)),
         Layer.provideMerge(
           ServerSettingsService.layerTest({
             providers: {

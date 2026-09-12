@@ -35,6 +35,13 @@ jobs:
             exit 1
           fi
 
+      - name: Reject tracked local project memory
+        run: |
+          if git ls-files --error-unmatch ':(glob)**/.camie/**' >/dev/null 2>&1; then
+            echo "::error::.camie/ is local user data. Remove it from the Git index."
+            exit 1
+          fi
+
       - name: Setup Vite+
         uses: voidzero-dev/setup-vp@v1
         with:

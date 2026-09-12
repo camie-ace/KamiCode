@@ -45,7 +45,7 @@ import {
 } from "../Errors.ts";
 import { buildRuntimeInstructions } from "../RuntimeInstructions.ts";
 import { type OpenCodeAdapterShape } from "../Services/OpenCodeAdapter.ts";
-import { applyProjectMemoryPromptPrefix, readProjectMemory } from "../ProjectMemory.ts";
+import { applyProjectMemoryPromptPrefix, readProjectMemorySnapshot } from "../ProjectMemory.ts";
 import { appendRepositoryOperatingContract } from "../RepositoryOperatingContract.ts";
 import {
   buildOpenCodePermissionRules,
@@ -2984,6 +2984,7 @@ export function makeOpenCodeAdapter(
           updatedAt: createdAt,
         };
 
+        const memorySnapshot = readProjectMemorySnapshot(directory);
         const context: OpenCodeSessionContext = {
           session,
           client: started.client,
@@ -3013,7 +3014,7 @@ export function makeOpenCodeAdapter(
           promptAdmission: undefined,
           promptSemaphore: Semaphore.makeUnsafe(1),
           firstConnection: Deferred.makeUnsafe<void, ProviderAdapterRequestError>(),
-          projectMemoryAtSessionStart: readProjectMemory(directory) ?? "",
+          projectMemoryAtSessionStart: memorySnapshot.memory ?? "",
           projectMemoryInjected: false,
           stopped: yield* Ref.make(false),
           sessionScope: started.sessionScope,
@@ -3052,6 +3053,14 @@ export function makeOpenCodeAdapter(
           return yield* Effect.failCause(connectionExit.cause);
         }
         yield* awaitOpenCodeContextReady(context);
+        for (const message of memorySnapshot.notices) {
+          yield* Effect.logWarning(message);
+          yield* emit({
+            ...(yield* buildEventBase({ threadId: input.threadId })),
+            type: "runtime.warning",
+            payload: { message },
+          });
+        }
         if (!started.created) {
           yield* schedulePendingRequestRecovery(context);
         }

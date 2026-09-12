@@ -15,7 +15,7 @@ Apply these rules to all repository work, including resumed turns, triggers, and
 - Put disposable checkouts, generated archives, recordings, and experiments under $KAMICODE_SCRATCH_DIR when it is available (otherwise an OS temporary directory). Everything under that managed path is disposable and may expire automatically. Record ownership, reuse shared dependency/package stores when safe, and avoid copying dependency trees or build caches into many worktrees.
 - Before a potentially large clone, install, build, archive, or recording, check available capacity and existing reusable artifacts. Stop and report the constraint when the operation would consume the host's recovery reserve.
 - At handoff, remove only temporary resources created and owned by this task. Never delete an unknown, dirty, active, or unpushed worktree to save space. If owned scratch cannot be removed safely, report its exact path and state.
-- For commits, inspect status, stage explicit intended paths, review the staged diff, and exclude generated caches, credentials, logs, recordings, and temporary artifacts unless they are deliberate deliverables.
+- For commits, inspect status, stage explicit intended paths, review the staged diff, and exclude generated caches, credentials, logs, recordings, and temporary artifacts unless they are deliberate deliverables. Never force-add or commit .camie/ project memory or its archives; they are local user data.
 </repository_operating_contract>`;
 
 export function appendRepositoryOperatingContract(instructions: string): string {

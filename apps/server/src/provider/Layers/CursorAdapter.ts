@@ -77,7 +77,7 @@ import {
   extractTodosAsPlan,
 } from "../acp/CursorAcpExtension.ts";
 import { type CursorAdapterShape } from "../Services/CursorAdapter.ts";
-import { applyProjectMemoryPromptPrefix, readProjectMemory } from "../ProjectMemory.ts";
+import { applyProjectMemoryPromptPrefix, readProjectMemorySnapshot } from "../ProjectMemory.ts";
 import { REPOSITORY_OPERATING_CONTRACT } from "../RepositoryOperatingContract.ts";
 import { applyTestModePromptPrefix } from "../TestModeInstructions.ts";
 import { resolveCursorAcpBaseModelId } from "./CursorProvider.ts";
@@ -789,6 +789,7 @@ export function makeCursorAdapter(
             updatedAt: now,
           };
 
+          const memorySnapshot = readProjectMemorySnapshot(cwd);
           ctx = {
             threadId: input.threadId,
             session,
@@ -801,7 +802,7 @@ export function makeCursorAdapter(
             lastPlanFingerprint: undefined,
             activeTurnId: undefined,
             cursorSkillNames: undefined,
-            projectMemoryAtSessionStart: readProjectMemory(cwd) ?? "",
+            projectMemoryAtSessionStart: memorySnapshot.memory ?? "",
             projectMemoryInjected: false,
             promptsInFlight: 0,
             assistantReply: new CursorTransportFailure(),
@@ -913,6 +914,16 @@ export function makeCursorAdapter(
 
           ctx.notificationFiber = nf;
           sessions.set(input.threadId, ctx);
+          for (const message of memorySnapshot.notices) {
+            yield* Effect.logWarning(message);
+            yield* offerRuntimeEvent({
+              type: "runtime.warning",
+              ...(yield* makeEventStamp()),
+              provider: PROVIDER,
+              threadId: input.threadId,
+              payload: { message },
+            });
+          }
           sessionScopeTransferred = true;
 
           yield* offerRuntimeEvent({

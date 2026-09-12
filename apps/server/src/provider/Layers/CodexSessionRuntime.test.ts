@@ -340,11 +340,14 @@ describe("buildTurnStartParams", () => {
 
     const developerInstructions = params.collaborationMode?.settings?.developer_instructions ?? "";
     assert.match(developerInstructions, /<project_memory_policy>/);
-    assert.match(developerInstructions, /<project_memory path="\.camie\/project-memory\.md">/);
+    assert.match(
+      developerInstructions,
+      /<project_memory path="\.camie\/project-memory\.md" snapshot_id="sha256:/,
+    );
     assert.match(developerInstructions, /Product is KAMI\./);
   });
 
-  it("can inject project memory policy even when memory is currently empty", () => {
+  it("injects an empty replacement snapshot when memory is currently empty", () => {
     const params = Effect.runSync(
       buildTurnStartParams({
         threadId: "provider-thread-1",
@@ -357,7 +360,7 @@ describe("buildTurnStartParams", () => {
     const developerInstructions = params.collaborationMode?.settings?.developer_instructions ?? "";
     assert.equal(params.collaborationMode?.mode, "default");
     assert.match(developerInstructions, /<project_memory_policy>/);
-    assert.notMatch(developerInstructions, /<project_memory path=/);
+    assert.match(developerInstructions, /<project_memory path=/);
   });
 
   it("injects the repository contract when interaction mode is absent", () => {

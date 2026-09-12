@@ -165,3 +165,9 @@ Full glossary with file links: `docs/internals/glossary.md`
 
 - Don't verify with browsers or computer use unless the user explicitly agrees or requests it.
 - Security is important, but should not be over-indexed on, especially for dev mode/maintainer-only features.
+
+## Local project memory and staging
+
+- Stage explicit paths; do not use recursive staging (`git add -A` or `git add .`).
+- `.camie/` contains local user data. Never force-add or commit it, including archives.
+- Review `git diff --cached --name-only` before every commit.

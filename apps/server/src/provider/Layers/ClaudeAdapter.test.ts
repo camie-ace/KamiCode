@@ -312,6 +312,53 @@ const RESUME_THREAD_ID = ThreadId.make("thread-claude-resume");
 const SYNTHETIC_SUBAGENT_MODEL = "claude-synthetic-subagent[expanded]";
 
 describe("ClaudeAdapterLive", () => {
+  it.effect("supersedes corrected and deleted memory after session re-establishment", () => {
+    const root = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "claude-memory-resume-"));
+    const memoryPath = NodePath.join(root, ".camie", "project-memory.md");
+    NodeFS.mkdirSync(NodePath.dirname(memoryPath));
+    const readResumedPrompt = (memory: string) => {
+      NodeFS.writeFileSync(memoryPath, memory);
+      const harness = makeHarness({ cwd: root, baseDir: root });
+      return Effect.gen(function* () {
+        const adapter = yield* ClaudeAdapter;
+        yield* adapter.startSession({
+          threadId: THREAD_ID,
+          provider: ProviderDriverKind.make("claudeAgent"),
+          runtimeMode: "full-access",
+          cwd: root,
+          resumeCursor: { resume: "550e8400-e29b-41d4-a716-446655440000" },
+        });
+        yield* adapter.sendTurn({ threadId: THREAD_ID, input: "Continue", attachments: [] });
+        return (
+          (yield* Effect.promise(() => readFirstPromptText(harness.getLastCreateQueryInput()))) ??
+          ""
+        );
+      }).pipe(
+        Effect.provideService(Random.Random, makeDeterministicRandomService()),
+        Effect.provide(harness.layer),
+        Effect.scoped,
+      );
+    };
+    return Effect.gen(function* () {
+      yield* Effect.addFinalizer(() =>
+        Effect.sync(() => NodeFS.rmSync(root, { recursive: true, force: true })),
+      );
+      const first = yield* readResumedPrompt("- API port: 3000.\n- Deploy with legacy.sh.");
+      const corrected = yield* readResumedPrompt("- API port: 4000.");
+      const cleared = yield* readResumedPrompt("");
+      assert.match(first, /3000/);
+      assert.match(corrected, /4000/);
+      assert.notMatch(corrected, /3000|legacy\.sh/);
+      assert.match(corrected, /supersedes ALL earlier injected project-memory blocks/);
+      assert.match(cleared, /<project_memory path=/);
+      assert.notMatch(cleared, /API port:/);
+      const id = (prompt: string) => prompt.match(/snapshot_id="([^"]+)"/)?.[1];
+      assert.isDefined(id(first));
+      assert.notEqual(id(first), id(corrected));
+      assert.notEqual(id(corrected), id(cleared));
+    });
+  });
+
   it.effect("returns validation error for non-claude provider on startSession", () => {
     const harness = makeHarness();
     return Effect.gen(function* () {

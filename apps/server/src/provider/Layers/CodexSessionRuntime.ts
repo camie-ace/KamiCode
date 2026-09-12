@@ -44,7 +44,7 @@ import {
   buildCodexDeveloperInstructions,
   type T3CodeToolAvailability,
 } from "../CodexDeveloperInstructions.ts";
-import { appendProjectMemoryInstructions, readProjectMemory } from "../ProjectMemory.ts";
+import { appendProjectMemoryInstructions, readProjectMemorySnapshot } from "../ProjectMemory.ts";
 import {
   KAMI_TEST_HARNESS_DYNAMIC_TOOL_SPEC,
   isKamiTestHarnessDynamicToolCall,
@@ -1320,7 +1320,8 @@ export const makeCodexSessionRuntime = (
     const collabChildLiveTurnsRef = yield* Ref.make(new Map<string, string>());
     const suppressMemoryConsolidationNotification = makeMemoryConsolidationNotificationFilter();
     const closedRef = yield* Ref.make(false);
-    const projectMemoryAtSessionStart = readProjectMemory(options.cwd) ?? "";
+    const memorySnapshot = readProjectMemorySnapshot(options.cwd);
+    const projectMemoryAtSessionStart = memorySnapshot.memory ?? "";
     const projectMemoryInjectedRef = yield* Ref.make(false);
 
     // `~` is not shell-expanded when env vars are set via
@@ -2480,6 +2481,16 @@ export const makeCodexSessionRuntime = (
       } satisfies ProviderSession;
       yield* Ref.set(sessionRef, session);
       yield* emitSessionEvent("session/ready", "Codex App Server session ready.");
+      for (const message of memorySnapshot.notices) {
+        yield* Effect.logWarning(message);
+        yield* emitEvent({
+          kind: "notification",
+          threadId: options.threadId,
+          method: "kamicode/projectMemoryWarning",
+          message,
+        });
+      }
+
       return session;
     });
 
