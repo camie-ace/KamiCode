@@ -93,15 +93,31 @@ they do not prove that a language model will obey supersession, nor do they eras
 old messages from a provider's history. No live conversation was modified to test
 this behavior.
 
-## Compaction safeguards
+## Linked memory and lossless relocation
 
-Archive original bytes before writing a sibling candidate. Replacement must reject
-missing operational literals, removed caution lines without human review, output
-outside 10–90% of original size, and a file above the headroom target. Check for a
-concurrent writer before replacement. Archives are immutable by convention and
-must not be committed.
+Large files can use a compact memory index with on-demand references beneath
+the memory directory's `standing-facts/` folder. The index retains the standing
+facts and recent activity sections, routing entries to relevant files rather
+than injecting all referenced content. Resolve links relative to the actual
+memory file, especially when a worktree inherits its parent's index.
 
-Some accumulated files cannot satisfy these rules: protected caution lines alone
-may exceed the entire cap, and a file above 400,000 characters cannot fit below
-40,000 while retaining at least 10%. In that case preserve the live original and
-report the failed gates; do not silently weaken the loss check.
+The server injects only the index. Agents read relevant references through their
+normal file tools before acting; there is no automatic eager expansion. Keep
+multiline entries and fenced commands together, retain historical ordering, and
+make dates and supersession notes available. A historical statement still needs
+verification against current operational state. Never automatically evict standing
+facts from reference files.
+
+For lossless relocation, archive original bytes before writing references and
+the candidate index. Verify that concatenating reference payloads in manifest
+order reproduces the original bytes and SHA-256 exactly; verify each reference,
+every complete caution line, and all index links before replacing the live file.
+Check for concurrent edits immediately before an atomic replacement. Keep the
+index below 32,000 UTF-16 units to leave injection headroom. Archives remain
+unchanged; reference files can receive deliberate future fact corrections.
+
+The old 10–90% summary-size gate does not measure lossless relocation: the index
+can be much smaller while 100% of the original content remains in linked files.
+This format requires explicit authorization to move protected statements out of
+the injected file. Actual lossy summarization still requires separate loss and
+caution review; an archive alone does not justify dropping operational facts.

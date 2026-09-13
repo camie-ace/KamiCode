@@ -108,6 +108,7 @@ The latest project_memory snapshot in conversation order supersedes ALL earlier 
 Before finalizing each turn, update ${PROJECT_MEMORY_RELATIVE_PATH} when you learned durable repo-specific facts, decisions, paths, commands, constraints, completed features, cleanup, or user preferences worth preserving.
 If no durable update is needed, leave the file untouched.
 Write durable paths, commands, constraints, preferences, and operational gotchas under "## Standing facts". Never automatically evict standing facts.
+Project memory may be an index linking to standing-facts files. Resolve those links relative to the memory file that was found, including an ancestor file. Read only task-relevant references before acting; do not bulk-load every reference. Linked facts remain valid even when their text is absent from the index. Update durable facts in the relevant reference and keep the index concise.
 Write dated summaries of completed work under "## Recent activity"; deduplicate and archive older activity as it ages out.
 Update the existing ancestor memory file when one was found; do not create a worktree fork. Keep .camie/ out of Git and stage explicit paths.
 Keep updates concise, deduplicated, and future-facing. Do not store secrets, tokens, passwords, private keys, or transient debug logs.

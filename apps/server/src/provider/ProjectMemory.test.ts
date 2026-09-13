@@ -158,6 +158,35 @@ describe("ProjectMemory", () => {
     NodeAssert.doesNotMatch(buildProjectMemoryInstructionBlock(undefined), /<project_memory path=/);
   });
 
+  it("injects an inherited index without eagerly loading its references", () => {
+    const root = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "memory-index-"));
+    try {
+      const memoryDir = NodePath.join(root, ".camie");
+      const refs = NodePath.join(memoryDir, "standing-facts");
+      const worktree = NodePath.join(root, "worktrees", "task");
+      NodeFS.mkdirSync(refs, { recursive: true });
+      NodeFS.mkdirSync(worktree, { recursive: true });
+      const index =
+        "# Project Memory\n\n## Standing facts\n- [Deployment](standing-facts/deploy.md)\n\n## Recent activity\n";
+      NodeFS.writeFileSync(NodePath.join(memoryDir, "project-memory.md"), index);
+      NodeFS.writeFileSync(
+        NodePath.join(refs, "deploy.md"),
+        "Never restart the deployment service without checking active jobs.",
+      );
+      const memory = readProjectMemory(worktree);
+      NodeAssert.equal(memory, index);
+      const prompt = applyProjectMemoryPromptPrefix({
+        prompt: "Check deployment",
+        projectMemory: memory,
+      });
+      NodeAssert.match(prompt, /standing-facts\/deploy\.md/);
+      NodeAssert.match(prompt, /Resolve those links relative to the memory file/);
+      NodeAssert.doesNotMatch(prompt, /Never restart the deployment service/);
+    } finally {
+      NodeFS.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it("builds a reusable memory policy and prompt prefix", () => {
     NodeAssert.equal(PROJECT_MEMORY_RELATIVE_PATH, ".camie/project-memory.md");
 
