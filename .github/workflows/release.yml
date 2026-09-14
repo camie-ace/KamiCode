@@ -17,6 +17,11 @@ on:
         options:
           - stable
           - nightly
+      publish_only:
+        description: "Publish artifacts without deploying hosted apps or announcing the release."
+        type: boolean
+        required: false
+        default: false
       version:
         description: "Stable version override (for example 1.2.3). Defaults to the version the latest nightly previewed."
         required: false
@@ -996,7 +1001,7 @@ jobs:
   deploy_web:
     name: Deploy hosted web app
     needs: [preflight, relay_public_config, release]
-    if: ${{ !failure() && !cancelled() && needs.preflight.result == 'success' && needs.relay_public_config.result == 'success' && needs.release.result == 'success' }}
+    if: ${{ !inputs.publish_only && !failure() && !cancelled() && needs.preflight.result == 'success' && needs.relay_public_config.result == 'success' && needs.release.result == 'success' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     env:
@@ -1115,7 +1120,7 @@ jobs:
   deploy_marketing:
     name: Deploy marketing site
     needs: [preflight, release]
-    if: ${{ !failure() && !cancelled() && needs.preflight.result == 'success' && needs.release.result == 'success' && needs.preflight.outputs.release_channel == 'nightly' }}
+    if: ${{ !inputs.publish_only && !failure() && !cancelled() && needs.preflight.result == 'success' && needs.release.result == 'success' && needs.preflight.outputs.release_channel == 'nightly' }}
     runs-on: blacksmith-8vcpu-ubuntu-2404
     timeout-minutes: 10
     env:
@@ -1248,7 +1253,7 @@ jobs:
   announce_discord:
     name: Announce release on Discord
     if: |
-      always() && !cancelled() &&
+      always() && !cancelled() && !inputs.publish_only &&
       needs.preflight.result == 'success' &&
       needs.relay_public_config.result == 'success' &&
       needs.release.result == 'success' &&
