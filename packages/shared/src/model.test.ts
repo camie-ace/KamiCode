@@ -74,10 +74,10 @@ const claudeCaps: ModelCapabilities = createModelCapabilities({
 });
 
 describe("descriptor helpers", () => {
-  it("uses GPT-5.6 Codex defaults", () => {
-    expect(DEFAULT_MODEL).toBe("gpt-5.6-sol");
+  it("uses the nightly Codex and text-generation defaults", () => {
+    expect(DEFAULT_MODEL).toBe("gpt-6-astra");
     expect(DEFAULT_GIT_TEXT_GENERATION_MODEL).toBe("gpt-5.6-luna");
-    expect(DEFAULT_MODEL_BY_PROVIDER[ProviderDriverKind.make("codex")]).toBe("gpt-5.6-sol");
+    expect(DEFAULT_MODEL_BY_PROVIDER[ProviderDriverKind.make("codex")]).toBe("gpt-6-astra");
   });
 
   it("normalizes GPT-5.6 Codex shorthand and named variants", () => {
