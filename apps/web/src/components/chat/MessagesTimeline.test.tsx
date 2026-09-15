@@ -1078,7 +1078,7 @@ describe("MessagesTimeline", () => {
     ).not.toContain('data-maintain-scroll-at-end="enabled"');
   });
 
-  it("renders a sent TeX attachment as a file link instead of a broken image", async () => {
+  it("renders a sent TeX attachment with file preview and download controls", async () => {
     const { MessagesTimeline } = await import("./MessagesTimeline");
     const entry = {
       ...buildUserTimelineEntry("Review this source."),
@@ -1101,9 +1101,8 @@ describe("MessagesTimeline", () => {
       <MessagesTimeline {...buildProps()} timelineEntries={[entry]} />,
     );
 
-    expect(markup).toContain('data-attachment-kind="file"');
-    expect(markup).toContain('aria-label="Open paper.tex"');
-    expect(markup).toContain('href="/api/assets/signed-tex-attachment"');
+    expect(markup).toContain('aria-label="Preview paper.tex"');
+    expect(markup).toContain('aria-label="Download paper.tex"');
     expect(markup).not.toContain('<img src="/api/assets/signed-tex-attachment"');
   });
 
