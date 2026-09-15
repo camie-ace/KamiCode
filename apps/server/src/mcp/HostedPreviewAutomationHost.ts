@@ -1,5 +1,6 @@
 // @effect-diagnostics globalDate:off globalTimers:off nodeBuiltinImport:off cryptoRandomUUID:off
 import * as NodeCrypto from "node:crypto";
+import * as NodeModule from "node:module";
 import * as NodePath from "node:path";
 
 import {
@@ -51,6 +52,9 @@ import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
 import * as PreviewManager from "../preview/Manager.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as PreviewAutomationBroker from "./PreviewAutomationBroker.ts";
+
+// Playwright reads companion files from disk; SEA binaries must load it through require.
+const requireForPlaywright = NodeModule.createRequire(import.meta.url);
 
 const DEFAULT_VIEWPORT: PreviewRenderedViewportSize = { width: 1_280, height: 800 };
 const MAX_HISTORY_ENTRIES = 200;
@@ -580,8 +584,7 @@ export class HostedPreviewAutomationController {
     if (this.context) return this.context;
     let context: BrowserContext;
     try {
-      const playwrightPackage = "playwright";
-      const playwright = await import(playwrightPackage);
+      const playwright = requireForPlaywright("playwright") as typeof import("playwright");
       const proxy = parseHostedBrowserProxyUrl(this.options.proxyUrl?.() ?? "");
       context = await playwright.chromium.launchPersistentContext(this.options.profileDir, {
         headless: true,

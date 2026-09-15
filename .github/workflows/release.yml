@@ -254,6 +254,9 @@ jobs:
 
       - uses: ./.github/actions/setup-apt-mirrors
 
+      - name: Install browser test runtime
+        run: vp run --filter t3 test:browser:install
+
       - name: Install browser secret helper build libraries
         run: sudo apt-get update && sudo apt-get install -y libsecret-1-dev pkg-config
 

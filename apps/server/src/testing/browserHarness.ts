@@ -1,5 +1,6 @@
 // @effect-diagnostics nodeBuiltinImport:off cryptoRandomUUID:off globalDate:off globalTimers:off
 import * as NodeCrypto from "node:crypto";
+import * as NodeModule from "node:module";
 import * as NodeFSP from "node:fs/promises";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
@@ -10,6 +11,9 @@ import {
   markBrowserHarnessRunComplete,
   pruneBrowserHarnessRuns,
 } from "./browserHarnessRetention.ts";
+
+// Playwright reads companion files from disk; SEA binaries must load it through require.
+const requireForPlaywright = NodeModule.createRequire(import.meta.url);
 
 const crypto = NodeCrypto;
 const Fs = NodeFSP;
@@ -1044,8 +1048,7 @@ export async function runBrowserHarness(
       );
     }
 
-    const playwrightPackage = "playwright";
-    const playwright = (await import(playwrightPackage)) as PlaywrightModule;
+    const playwright = requireForPlaywright("playwright") as PlaywrightModule;
     const browserType = playwright[browserName];
     if (!browserType) {
       throw new Error(`Unsupported browser '${browserName}'.`);
