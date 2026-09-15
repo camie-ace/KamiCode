@@ -1,4 +1,4 @@
-const NIGHTLY_VERSION_PATTERN = /-nightly\.\d{8}\.(?:\d+|[0-9a-f]{7,40})$/i;
+const NIGHTLY_VERSION_PATTERN = /-(?:nightly|preview)\.\d{8}\.(?:\d+|[0-9a-f]{7,40})$/i;
 
 export function isNightlyAppVersion(version: string | null | undefined): boolean {
   return typeof version === "string" && NIGHTLY_VERSION_PATTERN.test(version);

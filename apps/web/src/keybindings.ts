@@ -11,6 +11,7 @@ import {
 import { isMacPlatform } from "./lib/utils";
 
 export interface ShortcutEventLike {
+  getModifierState?: (key: "AltGraph") => boolean;
   type?: string;
   code?: string;
   key: string;
@@ -125,6 +126,12 @@ function matchesShortcut(
   shortcut: KeybindingShortcut,
   platform: ShortcutPlatform = navigator.platform,
 ): boolean {
+  if (
+    !isMacPlatform(platform) &&
+    event.getModifierState?.("AltGraph") &&
+    !/^[a-z0-9]$/i.test(event.key)
+  )
+    return false;
   if (!matchesShortcutModifiers(event, shortcut, platform)) return false;
   return resolveEventKeys(event).has(shortcut.key);
 }

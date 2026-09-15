@@ -39,13 +39,14 @@ export const transcribeEnvironmentSpeech = Effect.fn(
   payload.append("files", input.file, input.file.name);
 
   return yield* executeAuthenticatedEnvironmentHttpRequest({
+    group: "speech",
     prepared: input.prepared,
     signer,
     remoteAuthorization,
     method: "POST",
     url: (httpBaseUrl) => environmentEndpointUrl(httpBaseUrl, "/api/speech/transcribe"),
     timeoutMs: SPEECH_TRANSCRIPTION_TIMEOUT_MS,
-    request: ({ client, headers }) => client.speech.transcribe({ headers, payload }),
+    request: ({ client, headers }) => client.transcribe({ headers, payload }),
   });
 });
 

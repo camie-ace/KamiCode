@@ -78,6 +78,8 @@ import Migration0063 from "./Migrations/050_ProjectionThreadPullRequests.ts";
 import Migration0064 from "./Migrations/064_ProjectionTurnQueueScheduling.ts";
 import Migration0065 from "./Migrations/065_ProjectionTurnQueuePriorityAndMessageTiming.ts";
 import Migration0066 from "./Migrations/066_ThreadTargetedProjectTriggers.ts";
+import Migration0067 from "./Migrations/051_ProjectionThreadMessageContext.ts";
+import Migration0068 from "./Migrations/052_ProjectionThreadTitleState.ts";
 
 /**
  * Migration loader with all migrations defined inline.
@@ -164,6 +166,8 @@ const migrationEntries = [
   [64, "ProjectionTurnQueueScheduling", Migration0064],
   [65, "ProjectionTurnQueuePriorityAndMessageTiming", Migration0065],
   [66, "ThreadTargetedProjectTriggers", Migration0066],
+  [67, "ProjectionThreadMessageContext", Migration0067],
+  [68, "ProjectionThreadTitleState", Migration0068],
 ] as const;
 
 export const migrationManifest = migrationEntries.map(([id, name]) => [id, name] as const);

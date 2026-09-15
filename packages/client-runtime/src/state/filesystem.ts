@@ -132,13 +132,14 @@ export const uploadEnvironmentWorkspaceFiles = Effect.fn(
   }
 
   return yield* executeAuthenticatedEnvironmentHttpRequest({
+    group: "workspace",
     prepared: input.prepared,
     signer,
     remoteAuthorization,
     method: "POST",
     url: (httpBaseUrl) => environmentEndpointUrl(httpBaseUrl, "/api/workspace/upload"),
     timeoutMs: WORKSPACE_UPLOAD_TIMEOUT_MS,
-    request: ({ client, headers }) => client.workspace.upload({ headers, payload }),
+    request: ({ client, headers }) => client.upload({ headers, payload }),
   });
 });
 

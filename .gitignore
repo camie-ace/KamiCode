@@ -6,6 +6,7 @@ node_modules
 *.cpuprofile
 *.tsbuildinfo
 apps/*/dist
+apps/*/dist-exe
 infra/*/dist
 .astro
 packages/*/dist
@@ -32,6 +33,8 @@ dist-electron/
 .electron-runtime/
 .showcase/
 apps/mobile/.showcase/
+apps/mobile/.generated/
+/.generated/
 artifacts/app-store/screenshots/
 .github/pr-assets/
 native/**/target/
@@ -43,3 +46,5 @@ node_modules/
 
 # Local agent memory is user data and must never be committed.
 .camie/
+# pnpm content-addressable store; never belongs in the repo.
+.pnpm-store/

@@ -1,5 +1,5 @@
 import { memo, type MouseEventHandler, type PointerEventHandler } from "react";
-import { ChevronDownIcon, ChevronLeftIcon, ListPlusIcon } from "lucide-react";
+import { ChevronDownIcon, ChevronLeftIcon } from "lucide-react";
 import { useEnvironmentIdentificationMode } from "~/hooks/useSettings";
 import { cn } from "~/lib/utils";
 import { ensureLocalApi } from "../../localApi";
@@ -7,7 +7,7 @@ import { StageBackdropButtonArt, useSidebarStageBackdropVariant } from "../Sideb
 import { Button } from "../ui/button";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
 import { Spinner } from "../ui/spinner";
-import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
+
 import { composerFloatingLayerProps } from "./composerEventScope";
 
 interface PendingActionState {
@@ -34,9 +34,6 @@ interface ComposerPrimaryActionsProps {
   queueShortcutLabel: string | null | undefined;
   scheduleShortcutLabel: string | null | undefined;
   preserveComposerFocusOnPointerDown?: boolean;
-  /** Enter-to-send is disabled on mobile viewports, where stop would otherwise
-   * be the only primary action and a running turn could not be steered. */
-  showSendWhileRunning?: boolean;
   onPreviousPendingQuestion: () => void;
   onQueueMessage: () => void;
   onScheduleMessage: () => void;
@@ -82,7 +79,6 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
   queueShortcutLabel = null,
   scheduleShortcutLabel = null,
   preserveComposerFocusOnPointerDown = false,
-  showSendWhileRunning = false,
   onPreviousPendingQuestion,
   onQueueMessage,
   onScheduleMessage,
@@ -105,12 +101,25 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
       ? `Schedule message (${scheduleShortcutLabel})`
       : "Schedule message";
     void ensureLocalApi()
-      .contextMenu.show([{ id: "schedule-message", label, icon: "clock" }], {
-        x: event.clientX,
-        y: event.clientY,
-      })
+      .contextMenu.show(
+        [
+          {
+            id: "queue-message",
+            label: queueShortcutLabel
+              ? `Queue after this turn (${queueShortcutLabel})`
+              : "Queue after this turn",
+            icon: "list-plus",
+          },
+          { id: "schedule-message", label, icon: "clock" },
+        ],
+        {
+          x: event.clientX,
+          y: event.clientY,
+        },
+      )
       .then((action) => {
         if (action === "schedule-message") onScheduleMessage();
+        if (action === "queue-message") onQueueMessage();
       });
   };
 
@@ -121,7 +130,7 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
         "flex cursor-pointer items-center justify-center rounded-full bg-destructive/90 text-white shadow-xs shadow-destructive/24 inset-shadow-[0_1px_--theme(--color-white/16%)] transition-all duration-150 hover:bg-destructive hover:scale-105 active:inset-shadow-[0_1px_--theme(--color-black/8%)] active:shadow-none",
         insidePendingAction
           ? "size-8 sm:size-7"
-          : showSendWhileRunning && hasSendableContent
+          : hasSendableContent
             ? "size-9 sm:size-8"
             : "size-8 sm:h-8 sm:w-8",
       )}
@@ -134,30 +143,6 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
       </svg>
     </button>
   );
-
-  const renderQueueMessageButton = () => {
-    const queueTitle = queueShortcutLabel
-      ? `Queue message (${queueShortcutLabel})`
-      : "Queue message";
-    return (
-      <Tooltip>
-        <TooltipTrigger render={<span className="inline-flex" />}>
-          <button
-            type="button"
-            className="flex size-8 items-center justify-center rounded-full border border-border/70 bg-background/80 text-muted-foreground transition-all duration-150 enabled:cursor-pointer enabled:hover:border-border enabled:hover:bg-accent enabled:hover:text-foreground enabled:hover:scale-105 disabled:pointer-events-none disabled:opacity-35 sm:h-8 sm:w-8"
-            {...pointerFocusProps}
-            onClick={onQueueMessage}
-            onContextMenu={openScheduleContextMenu}
-            disabled={!hasSendableContent}
-            aria-label="Queue message"
-          >
-            <ListPlusIcon className="size-4" aria-hidden="true" />
-          </button>
-        </TooltipTrigger>
-        <TooltipPopup side="top">{queueTitle}</TooltipPopup>
-      </Tooltip>
-    );
-  };
 
   if (pendingAction) {
     return (
@@ -214,14 +199,6 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
     );
   }
 
-  if (isRunning && !showSendWhileRunning) {
-    return (
-      <div className="flex items-center justify-end gap-1.5">
-        {renderQueueMessageButton()}
-        {renderStopGenerationButton(false)}
-      </div>
-    );
-  }
   if (showPlanFollowUpPrompt) {
     if (promptHasText) {
       return (
@@ -309,7 +286,7 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
                 ? "Preparing worktree"
                 : isSendBusy
                   ? "Sending"
-                  : (sendLabel ?? "Send message")
+                  : (sendLabel ?? (isRunning ? "Queue message" : "Send message"))
       }
     >
       {stageBackdropVariant ? (
@@ -339,11 +316,12 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
     return sendButton;
   }
 
+  // While a turn runs, a sendable draft queues for the next tool boundary, so
+  // the send button stays next to Stop on every viewport.
   return (
     <div className="flex items-center justify-end gap-1.5">
-      {renderQueueMessageButton()}
       {renderStopGenerationButton(false)}
-      {showSendWhileRunning && hasSendableContent ? sendButton : null}
+      {hasSendableContent ? sendButton : null}
     </div>
   );
 });

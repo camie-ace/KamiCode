@@ -69,7 +69,9 @@ export type InterruptThreadTurnInput = CommandInput<"thread.turn.interrupt">;
 export type RespondToThreadApprovalInput = CommandInput<"thread.approval.respond">;
 export type RespondToThreadUserInputInput = CommandInput<"thread.user-input.respond">;
 export type DismissThreadUserInputInput = CommandInput<"thread.user-input.dismiss">;
-export type RevertThreadCheckpointInput = CommandInput<"thread.checkpoint.revert">;
+export type RevertThreadCheckpointInput = CommandInput<"thread.checkpoint.revert"> & {
+  readonly restoreFiles?: boolean;
+};
 export type StopThreadSessionInput = CommandInput<"thread.session.stop">;
 
 type DispatchTag = typeof ORCHESTRATION_WS_METHODS.dispatchCommand;
@@ -158,13 +160,14 @@ const dispatchAttachmentTurn = Effect.fn("EnvironmentCommands.dispatchAttachment
   const signer = yield* Effect.serviceOption(ManagedRelayDpopSigner);
   const remoteAuthorization = yield* Effect.serviceOption(RemoteEnvironmentAuthorization);
   return yield* executeAuthenticatedEnvironmentHttpRequest({
+    group: "orchestration",
     prepared,
     signer,
     remoteAuthorization,
     method: "POST",
     url: (httpBaseUrl) => environmentEndpointUrl(httpBaseUrl, "/api/orchestration/dispatch"),
     timeoutMs: ATTACHMENT_TURN_HTTP_TIMEOUT_MS,
-    request: ({ client, headers }) => client.orchestration.dispatch({ headers, payload: command }),
+    request: ({ client, headers }) => client.dispatch({ headers, payload: command }),
   });
 });
 
@@ -501,9 +504,10 @@ export const dismissThreadUserInput: (input: DismissThreadUserInputInput) => Com
 export const revertThreadCheckpoint: (input: RevertThreadCheckpointInput) => CommandEffect =
   Effect.fn("EnvironmentCommands.revertThreadCheckpoint")(function* (input) {
     const metadata = yield* timestampedCommandMetadata(input);
+    const { restoreFiles, ...command } = input;
     return yield* dispatch({
-      ...input,
-      type: "thread.checkpoint.revert",
+      ...command,
+      type: restoreFiles === false ? "thread.conversation.revert" : "thread.checkpoint.revert",
       commandId: metadata.commandId,
       createdAt: metadata.createdAt,
     });
