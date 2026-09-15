@@ -99,6 +99,14 @@ import { RpcClient, RpcSerialization } from "effect/unstable/rpc";
 import * as Socket from "effect/unstable/socket/Socket";
 import { vi } from "vite-plus/test";
 
+const decodeTransferThreadSnapshot = Schema.decodeUnknownEffect(
+  Schema.fromJsonString(OrchestrationThreadDetailSnapshot),
+);
+const decodeTransferShellSnapshot = Schema.decodeUnknownEffect(
+  Schema.fromJsonString(OrchestrationShellSnapshot),
+);
+const encodeTestJson = Schema.encodeUnknownSync(Schema.fromJsonString(Schema.Unknown));
+
 const TEST_EPOCH = DateTime.makeUnsafe("1970-01-01T00:00:00.000Z");
 
 import * as BackgroundPolicy from "./background/BackgroundPolicy.ts";
