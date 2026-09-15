@@ -5532,6 +5532,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       pendingCount +
       otherQuestionAttachments;
     const acceptedFiles: File[] = [];
+    const reattachMarkers = composerFilesRef.current.filter(composerFileNeedsReattach);
+    const replacedMarkerIds = new Set<string>();
     let error: string | null = null;
     for (const file of files) {
       const mimeType = inferComposerFileMimeType(file);
@@ -5544,12 +5546,22 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         error = `'${file.name}' is not a supported image type. Attach GIF, HEIC, HEIF, JPEG, PNG, or WebP images.`;
         continue;
       }
-      if (nextAttachmentCount >= PROVIDER_SEND_TURN_MAX_ATTACHMENTS) {
+      const marker = reattachMarkers.find(
+        (candidate) =>
+          !replacedMarkerIds.has(candidate.id) &&
+          composerFileMatchesReattachMarker(candidate, {
+            name: file.name,
+            mimeType,
+            sizeBytes: file.size,
+          }),
+      );
+      if (!marker && nextAttachmentCount >= PROVIDER_SEND_TURN_MAX_ATTACHMENTS) {
         error = `You can attach up to ${PROVIDER_SEND_TURN_MAX_ATTACHMENTS} files per message.`;
-        break;
+        continue;
       }
       acceptedFiles.push(file);
-      nextAttachmentCount += 1;
+      if (marker) replacedMarkerIds.add(marker.id);
+      else nextAttachmentCount += 1;
     }
     if (targetThreadId) {
       setThreadError(targetThreadId, error);
@@ -5596,16 +5608,27 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         }
         return false;
       }
-      const acceptedIds = new Set(addComposerAttachmentsToDraft(nextAttachments));
-      const storedImages = nextAttachments.filter(
-        (attachment): attachment is ComposerImageAttachment =>
-          attachment.type === "image" && acceptedIds.has(attachment.id),
+      // Documents use the persisted file store behind inline file references.
+      // Native video and unsupported attachments retain KamiCode's media shelf.
+      const nextFiles = nextAttachments.filter(
+        (attachment): attachment is ComposerFileAttachment & { readonly file: File } =>
+          attachment.type === "file" && attachment.status !== "unsupported",
       );
-      if (storedImages.length > 0) {
-        insertedAny = insertAttachmentReferences(
-          storedImages.map(imageContextReference),
-          options?.selection,
-        );
+      const nextMedia = nextAttachments.filter(
+        (attachment) => attachment.type !== "file" || attachment.status === "unsupported",
+      );
+      const acceptedFileIds = new Set(addComposerFilesToDraft(nextFiles));
+      const acceptedMediaIds = new Set(addComposerAttachmentsToDraft(nextMedia));
+      const storedImages = nextMedia.filter(
+        (attachment): attachment is ComposerImageAttachment =>
+          attachment.type === "image" && acceptedMediaIds.has(attachment.id),
+      );
+      const references = [
+        ...nextFiles.filter((file) => acceptedFileIds.has(file.id)).map(fileContextReference),
+        ...storedImages.map(imageContextReference),
+      ];
+      if (references.length > 0) {
+        insertedAny = insertAttachmentReferences(references, options?.selection);
       }
       if (processingError) {
         if (targetThreadId) {
