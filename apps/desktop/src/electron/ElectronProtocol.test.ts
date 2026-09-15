@@ -148,7 +148,6 @@ describe("ElectronProtocol", () => {
           yield* protocol.registerDesktopProtocol({
             scheme: "t3code-dev",
             targetOrigin: new URL("http://127.0.0.1:5733/"),
-            backendOrigin: new URL("http://127.0.0.1:3773/"),
             clerkFrontendApiHostname: undefined,
           });
           assert.isDefined(handler);
@@ -172,7 +171,7 @@ describe("ElectronProtocol", () => {
       assert.equal(forwardedHeaders.get("host"), null);
       assert.equal(forwardedHeaders.get("connection"), null);
       assert.equal(forwardedHeaders.get("accept"), "text/javascript");
-    }).pipe(Effect.provide(ElectronProtocol.layer)),
+    }).pipe(Effect.provide(protocolLayer)),
   );
 
   it.effect("rejects custom protocol requests for another host", () =>

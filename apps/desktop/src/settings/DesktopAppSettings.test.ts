@@ -142,6 +142,7 @@ describe("DesktopSettings", () => {
   it("routes legacy Dev prerelease versions to the stable update channel", () => {
     assert.deepEqual(DesktopAppSettings.resolveDefaultDesktopSettings("0.0.17-dev.20260415.1"), {
       linuxPasswordStore: "auto",
+      localEnvironmentEnabled: true,
       mainWindowBounds: null,
       mainWindowMaximized: false,
       serverExposureMode: "local-only",
