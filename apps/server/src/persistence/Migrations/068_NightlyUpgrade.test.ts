@@ -6,7 +6,7 @@ import { runMigrations } from "../Migrations.ts";
 
 it.layer(NodeSqliteClient.layerMemory())("KamiCode nightly database upgrade", (it) => {
   it.effect(
-    "appends upstream context and title migrations after KamiCode's existing 66 migrations",
+    "appends context, title, and thread-lock migrations after KamiCode's existing 66 migrations",
     () =>
       Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient;
@@ -24,13 +24,15 @@ it.layer(NodeSqliteClient.layerMemory())("KamiCode nightly database upgrade", (i
         assert.deepEqual(after.slice(0, 66), before);
         assert.deepEqual(
           after.slice(66).map((entry) => entry.migration_id),
-          [67, 68],
+          [67, 68, 69],
         );
         const messages = yield* sql<{
           readonly name: string;
         }>`PRAGMA table_info(projection_thread_messages)`;
         const threads = yield* sql<{
           readonly name: string;
+          readonly notnull: number;
+          readonly dflt_value: string | null;
         }>`PRAGMA table_info(projection_threads)`;
         const queue = yield* sql<{
           readonly name: string;
@@ -43,6 +45,9 @@ it.layer(NodeSqliteClient.layerMemory())("KamiCode nightly database upgrade", (i
           threads.map((column) => column.name),
           "title_state_json",
         );
+        const locked = threads.find((column) => column.name === "locked");
+        assert.equal(locked?.notnull, 1);
+        assert.equal(locked?.dflt_value, "0");
         assert.include(
           queue.map((column) => column.name),
           "scheduled_for",

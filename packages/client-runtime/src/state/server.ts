@@ -1079,6 +1079,22 @@ export function createServerEnvironmentAtoms<R, E>(
       scheduler: configScheduler,
       concurrency: configConcurrency,
     }),
+    lockThread: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:thread-lock",
+      tag: WS_METHODS.threadLock,
+      concurrency: {
+        mode: "singleFlight",
+        key: ({ environmentId, input }) => `${environmentId}:${input.threadId}`,
+      },
+    }),
+    unlockThread: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:thread-unlock",
+      tag: WS_METHODS.threadUnlock,
+      concurrency: {
+        mode: "singleFlight",
+        key: ({ environmentId, input }) => `${environmentId}:${input.threadId}`,
+      },
+    }),
     updateServer,
     upsertKeybinding: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:server:upsert-keybinding",

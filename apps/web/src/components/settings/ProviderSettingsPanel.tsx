@@ -25,7 +25,7 @@ import * as Arr from "effect/Array";
 import * as Duration from "effect/Duration";
 import * as Equal from "effect/Equal";
 import * as Result from "effect/Result";
-import { PlusIcon } from "lucide-react";
+import { ArrowDownIcon, ArrowUpIcon, PlusIcon, Trash2Icon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import { isDesktopLocalConnectionTarget } from "../../connection/desktopLocal";
@@ -75,6 +75,7 @@ import {
   NumberFieldInput,
 } from "../ui/number-field";
 import { ScrollArea } from "../ui/scroll-area";
+import { Switch } from "../ui/switch";
 import { Toggle, ToggleGroup } from "../ui/toggle-group";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { stackedThreadToast, toastManager } from "../ui/toast";
@@ -111,6 +112,137 @@ import {
   resolveRemoteOperateAccess,
   resolveSelectedProviderEnvironmentId,
 } from "./ProviderSettingsPanel.logic";
+
+function ProviderWaterfallSettings({
+  rows,
+  value,
+  readOnly,
+  onChange,
+}: {
+  readonly rows: ReadonlyArray<{
+    readonly instanceId: ProviderInstanceId;
+    readonly instance: ProviderInstanceConfig;
+    readonly driver: ProviderDriverKind;
+  }>;
+  readonly value: {
+    readonly enabled: boolean;
+    readonly sequence: ReadonlyArray<ProviderInstanceId>;
+  };
+  readonly readOnly: boolean;
+  readonly onChange: (next: {
+    readonly enabled: boolean;
+    readonly sequence: ReadonlyArray<ProviderInstanceId>;
+  }) => void;
+}) {
+  const rowById = new Map(rows.map((row) => [row.instanceId, row]));
+  const sequence = value.sequence.filter((instanceId) => rowById.has(instanceId));
+  const candidates = rows.filter((row) => !sequence.includes(row.instanceId));
+  const labelFor = (instanceId: ProviderInstanceId) => {
+    const row = rowById.get(instanceId);
+    if (!row) return String(instanceId);
+    const label =
+      row.instance.displayName?.trim() ||
+      `${PROVIDER_DISPLAY_NAMES[row.driver] ?? row.driver} (${String(instanceId)})`;
+    return resolveProviderInstanceEnabled(row.instance) ? label : `${label} (disabled)`;
+  };
+  const updateSequence = (next: ReadonlyArray<ProviderInstanceId>) =>
+    onChange({ enabled: value.enabled, sequence: next });
+
+  return (
+    <SettingsSection {...searchableSetting("provider-waterfall")} title="Waterfall">
+      <SettingsRow
+        title="Automatic provider fallback"
+        description="When an account reaches its usage limit, continue the same thread with the next configured provider."
+        control={
+          <Switch
+            checked={value.enabled}
+            disabled={readOnly}
+            aria-label="Enable provider waterfall"
+            onCheckedChange={(enabled) => onChange({ enabled, sequence })}
+          />
+        }
+      />
+      <div
+        inert={readOnly}
+        aria-disabled={readOnly || undefined}
+        className={cn("space-y-2 px-3 pb-3 sm:px-4", readOnly && "opacity-50")}
+      >
+        {sequence.length === 0 ? (
+          <p className="text-xs text-muted-foreground">
+            Add at least two provider profiles to define the fallback order. Disabled or unavailable
+            profiles are skipped at runtime.
+          </p>
+        ) : null}
+        {sequence.map((instanceId, index) => (
+          <div
+            key={instanceId}
+            className="flex min-w-0 items-center gap-2 rounded-md border border-border/60 bg-muted/10 px-2 py-1.5"
+          >
+            <span className="w-5 shrink-0 text-center text-xs text-muted-foreground">
+              {index + 1}
+            </span>
+            <span className="min-w-0 flex-1 truncate text-sm">{labelFor(instanceId)}</span>
+            <Button
+              size="icon-xs"
+              variant="ghost-muted"
+              disabled={index === 0}
+              aria-label={`Move ${labelFor(instanceId)} up`}
+              onClick={() => {
+                const next = [...sequence];
+                [next[index - 1], next[index]] = [next[index]!, next[index - 1]!];
+                updateSequence(next);
+              }}
+            >
+              <ArrowUpIcon />
+            </Button>
+            <Button
+              size="icon-xs"
+              variant="ghost-muted"
+              disabled={index === sequence.length - 1}
+              aria-label={`Move ${labelFor(instanceId)} down`}
+              onClick={() => {
+                const next = [...sequence];
+                [next[index], next[index + 1]] = [next[index + 1]!, next[index]!];
+                updateSequence(next);
+              }}
+            >
+              <ArrowDownIcon />
+            </Button>
+            <Button
+              size="icon-xs"
+              variant="ghost-muted"
+              aria-label={`Remove ${labelFor(instanceId)} from waterfall`}
+              onClick={() => updateSequence(sequence.filter((id) => id !== instanceId))}
+            >
+              <Trash2Icon />
+            </Button>
+          </div>
+        ))}
+        {candidates.length > 0 ? (
+          <label className="flex items-center gap-2 pt-1 text-xs text-muted-foreground">
+            <PlusIcon className="size-3.5" />
+            <span>Add provider</span>
+            <select
+              className="min-w-0 flex-1 rounded-md border border-input bg-background px-2 py-1.5 text-sm text-foreground"
+              value=""
+              onChange={(event) => {
+                const instanceId = event.currentTarget.value as ProviderInstanceId;
+                if (instanceId) updateSequence([...sequence, instanceId]);
+              }}
+            >
+              <option value="">Choose a provider profile…</option>
+              {candidates.map((row) => (
+                <option key={row.instanceId} value={row.instanceId}>
+                  {labelFor(row.instanceId)}
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : null}
+      </div>
+    </SettingsSection>
+  );
+}
 
 function withoutProviderInstanceKey<V>(
   record: Readonly<Record<ProviderInstanceId, V>> | undefined,
@@ -1080,6 +1212,13 @@ export function EnvironmentProviderSettings({
           </div>
         </div>
       </SettingsSection>
+
+      <ProviderWaterfallSettings
+        rows={rows}
+        value={settings.providerWaterfall}
+        readOnly={readOnly}
+        onChange={(providerWaterfall) => updateSettings({ providerWaterfall })}
+      />
 
       <UsageProviderSettings
         key={environmentId}

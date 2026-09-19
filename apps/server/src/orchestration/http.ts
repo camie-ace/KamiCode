@@ -19,6 +19,7 @@ import {
 import * as ProjectCloneTracker from "../project/ProjectCloneTracker.ts";
 import { ProjectionSnapshotQuery } from "./Services/ProjectionSnapshotQuery.ts";
 import { ServerOrchestrationDispatcher } from "./Services/ServerOrchestrationDispatcher.ts";
+import { ThreadLockService } from "./ThreadLockService.ts";
 
 export const orchestrationHttpApiLayer = HttpApiBuilder.group(
   EnvironmentHttpApi,
@@ -27,6 +28,7 @@ export const orchestrationHttpApiLayer = HttpApiBuilder.group(
     const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
     const orchestrationDispatcher = yield* ServerOrchestrationDispatcher;
     const projectCloneTracker = yield* ProjectCloneTracker.ProjectCloneTracker;
+    const threadLocks = yield* ThreadLockService;
 
     return handlers
       .handle(
@@ -66,7 +68,21 @@ export const orchestrationHttpApiLayer = HttpApiBuilder.group(
         "threadSnapshot",
         Effect.fn("environment.orchestration.threadSnapshot")(function* (args) {
           yield* annotateEnvironmentRequest(args.endpoint.name);
-          yield* requireEnvironmentScope(AuthOrchestrationReadScope);
+          const principal = yield* requireEnvironmentScope(AuthOrchestrationReadScope);
+          const shell = yield* projectionSnapshotQuery
+            .getThreadShellById(args.params.threadId)
+            .pipe(
+              Effect.catch((cause) =>
+                failEnvironmentInternal("orchestration_snapshot_failed", cause),
+              ),
+            );
+          if (
+            Option.isSome(shell) &&
+            shell.value.locked &&
+            !threadLocks.isAuthorized(args.params.threadId, String(principal.sessionId))
+          ) {
+            return yield* failEnvironmentNotFound("thread_not_found");
+          }
           const snapshot = yield* projectionSnapshotQuery
             .getThreadDetailSnapshot(
               args.params.threadId,
@@ -94,7 +110,7 @@ export const orchestrationHttpApiLayer = HttpApiBuilder.group(
         "dispatch",
         Effect.fn("environment.orchestration.dispatch")(function* (args) {
           yield* annotateEnvironmentRequest(args.endpoint.name);
-          yield* requireEnvironmentScope(AuthOrchestrationOperateScope);
+          const principal = yield* requireEnvironmentScope(AuthOrchestrationOperateScope);
           yield* ProjectCloneTracker.rejectCommandsDuringClone(
             projectCloneTracker,
             args.payload,
@@ -106,6 +122,22 @@ export const orchestrationHttpApiLayer = HttpApiBuilder.group(
           const normalizedCommand = yield* normalizeDispatchCommand(args.payload).pipe(
             Effect.catch(() => failEnvironmentInvalidRequest("invalid_command")),
           );
+          if ("threadId" in normalizedCommand) {
+            const shell = yield* projectionSnapshotQuery
+              .getThreadShellById(normalizedCommand.threadId)
+              .pipe(
+                Effect.catch((cause) =>
+                  failEnvironmentInternal("orchestration_dispatch_failed", cause),
+                ),
+              );
+            if (
+              Option.isSome(shell) &&
+              shell.value.locked &&
+              !threadLocks.isAuthorized(normalizedCommand.threadId, String(principal.sessionId))
+            ) {
+              return yield* failEnvironmentInvalidRequest("invalid_command");
+            }
+          }
           const result = yield* orchestrationDispatcher.dispatch(normalizedCommand).pipe(
             Effect.tapError(() =>
               cleanupFailedUploadedAttachments(args.payload, normalizedCommand),

@@ -774,6 +774,9 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           projectId: asProjectId("project-1"),
           title: "Thread 1",
           titleState: null,
+          modelSelection: snapshot.threads[0]!.modelSelection,
+          runtimeMode: snapshot.threads[0]!.runtimeMode,
+          interactionMode: snapshot.threads[0]!.interactionMode,
           session: snapshot.threads[0]?.session ?? null,
         });
       }

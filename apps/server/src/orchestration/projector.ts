@@ -649,6 +649,7 @@ export function projectEvent(
               ...(payload.modelSelection !== undefined
                 ? { modelSelection: payload.modelSelection }
                 : {}),
+              ...(payload.locked !== undefined ? { locked: payload.locked } : {}),
               ...(payload.branch !== undefined ? { branch: payload.branch } : {}),
               ...(payload.worktreePath !== undefined ? { worktreePath: payload.worktreePath } : {}),
               ...(payload.activeOrderKey !== undefined

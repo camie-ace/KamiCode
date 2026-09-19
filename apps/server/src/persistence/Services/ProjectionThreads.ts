@@ -46,6 +46,7 @@ export const ProjectionThread = Schema.Struct({
   latestTurnId: Schema.NullOr(TurnId),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
+  locked: Schema.optionalKey(Schema.Boolean),
   archivedAt: Schema.NullOr(IsoDateTime),
   settledOverride: Schema.NullOr(Schema.Literals(["settled", "active"])),
   settledAt: Schema.NullOr(IsoDateTime),

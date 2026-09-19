@@ -1,7 +1,7 @@
 import * as Schema from "effect/Schema";
 import * as Rpc from "effect/unstable/rpc/Rpc";
 import * as RpcGroup from "effect/unstable/rpc/RpcGroup";
-import { NonNegativeInt, TrimmedNonEmptyString } from "./baseSchemas.ts";
+import { NonNegativeInt, ThreadId, TrimmedNonEmptyString } from "./baseSchemas.ts";
 import {
   ProviderAuthCancelInput,
   ProviderAuthCompleteInput,
@@ -336,6 +336,10 @@ export const WS_METHODS = {
   providerInstallCancel: "provider.install.cancel",
   providerInstallSubscribe: "provider.install.subscribe",
   providerInstallRemove: "provider.install.remove",
+
+  // Thread locks
+  threadLock: "thread.lock",
+  threadUnlock: "thread.unlock",
 
   // VCS methods
   vcsPull: "vcs.pull",
@@ -1389,6 +1393,31 @@ const WsOrchestrationSubscribeThreadRpc = Rpc.make(ORCHESTRATION_WS_METHODS.subs
   stream: true,
 });
 
+export const ThreadPasscode = Schema.String.pipe(
+  Schema.check(Schema.isMinLength(4), Schema.isMaxLength(128)),
+);
+
+export class ThreadLockError extends Schema.TaggedError<ThreadLockError>()("ThreadLockError", {
+  reason: Schema.Literals(["invalid_passcode", "not_found", "storage_error"]),
+  message: Schema.String,
+}) {}
+
+const WsThreadLockRpc = Rpc.make(WS_METHODS.threadLock, {
+  payload: Schema.Struct({ threadId: ThreadId, passcode: ThreadPasscode }),
+  success: Schema.Struct({ locked: Schema.Literal(true) }),
+  error: Schema.Union([ThreadLockError, EnvironmentAuthorizationError]),
+});
+
+const WsThreadUnlockRpc = Rpc.make(WS_METHODS.threadUnlock, {
+  payload: Schema.Struct({
+    threadId: ThreadId,
+    passcode: ThreadPasscode,
+    removeLock: Schema.Boolean,
+  }),
+  success: Schema.Struct({ locked: Schema.Boolean }),
+  error: Schema.Union([ThreadLockError, EnvironmentAuthorizationError]),
+});
+
 const WsSubscribeTerminalEventsRpc = Rpc.make(WS_METHODS.subscribeTerminalEvents, {
   payload: Schema.Struct({}),
   success: TerminalEvent,
@@ -1470,6 +1499,8 @@ export const WsRpcGroup = RpcGroup.make(
   WsProviderInstallCancelRpc,
   WsProviderInstallSubscribeRpc,
   WsProviderInstallRemoveRpc,
+  WsThreadLockRpc,
+  WsThreadUnlockRpc,
   WsServerUpdateServerRpc,
   WsServerUpdateServerWithProgressRpc,
   WsServerCommitDesktopUpdateRpc,

@@ -1,4 +1,10 @@
 import { requestCustomSnooze } from "./CustomSnoozeDialog";
+import {
+  forgetThreadLockAccess,
+  hasThreadLockAccess,
+  markThreadLockAccess,
+  requestThreadPasscode,
+} from "./ThreadLockDialog";
 import { useSupportsMultiplePullRequests } from "~/hooks/useSupportsMultiplePullRequests";
 import { resolveThreadCurrentPullRequestLink } from "@t3tools/shared/threadPullRequests";
 import { useAtomValue } from "@effect/atom-react";
@@ -130,7 +136,11 @@ import {
   useProjects,
   useThreadShells,
 } from "../state/entities";
-import { environmentServerConfigsAtom, primaryServerKeybindingsAtom } from "../state/server";
+import {
+  environmentServerConfigsAtom,
+  primaryServerKeybindingsAtom,
+  serverEnvironment,
+} from "../state/server";
 import { vcsEnvironment } from "../state/vcs";
 import { threadEnvironment } from "../state/threads";
 import { useEnvironmentQuery } from "../state/query";
@@ -2154,6 +2164,8 @@ export default function Sidebar() {
   const updateThreadMetadata = useAtomCommand(threadEnvironment.updateMetadata, {
     reportFailure: false,
   });
+  const lockThread = useAtomCommand(serverEnvironment.lockThread, { reportFailure: false });
+  const unlockThread = useAtomCommand(serverEnvironment.unlockThread, { reportFailure: false });
   const { copyToClipboard: copyPathToClipboard } = useCopyToClipboard<{ path: string }>({
     onCopy: ({ path }) => {
       toastManager.add({
@@ -3009,9 +3021,35 @@ export default function Sidebar() {
       if (isTrailingDoubleClick(event.detail)) {
         return;
       }
+      const thread = threadByKeyRef.current.get(threadKey);
+      if (thread?.locked && !hasThreadLockAccess(threadRef)) {
+        event.preventDefault();
+        void (async () => {
+          const choice = await requestThreadPasscode("open", thread.title);
+          if (!choice) return;
+          const result = await unlockThread({
+            environmentId: threadRef.environmentId,
+            input: { threadId: threadRef.threadId, passcode: choice.passcode, removeLock: false },
+          });
+          if (result._tag === "Failure") {
+            if (!isAtomCommandInterrupted(result)) {
+              const error = squashAtomCommandFailure(result);
+              toastManager.add({
+                type: "error",
+                title: "Could not open thread",
+                description: error instanceof Error ? error.message : "Incorrect passcode.",
+              });
+            }
+            return;
+          }
+          markThreadLockAccess(threadRef);
+          navigateToThread(threadRef);
+        })();
+        return;
+      }
       navigateToThread(threadRef);
     },
-    [navigateToThread, rangeSelectTo, toggleThreadSelection],
+    [navigateToThread, rangeSelectTo, toggleThreadSelection, unlockThread],
   );
 
   // A settle per thread at a time: double clicks and repeated menu picks
@@ -4069,6 +4107,7 @@ export default function Sidebar() {
               isRegeneratingTitle,
               isRunning:
                 thread.session?.status === "running" && thread.session.activeTurnId != null,
+              isLocked: thread.locked ?? false,
               supports: {
                 settlement: supportsSettlement,
                 snooze: supportsSnooze,
@@ -4212,6 +4251,41 @@ export default function Sidebar() {
             }
             return;
           }
+          case "lock":
+          case "unlock": {
+            const choice = await requestThreadPasscode(
+              clicked.value === "lock" ? "lock" : "remove",
+              thread.title,
+            );
+            if (!choice) return;
+            const result =
+              clicked.value === "lock"
+                ? await lockThread({
+                    environmentId: threadRef.environmentId,
+                    input: { threadId: threadRef.threadId, passcode: choice.passcode },
+                  })
+                : await unlockThread({
+                    environmentId: threadRef.environmentId,
+                    input: {
+                      threadId: threadRef.threadId,
+                      passcode: choice.passcode,
+                      removeLock: true,
+                    },
+                  });
+            if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
+              const error = squashAtomCommandFailure(result);
+              toastManager.add({
+                type: "error",
+                title:
+                  clicked.value === "lock" ? "Failed to lock thread" : "Failed to unlock thread",
+                description: error instanceof Error ? error.message : "An error occurred.",
+              });
+            } else if (result._tag === "Success") {
+              if (clicked.value === "lock") forgetThreadLockAccess(threadRef);
+              else markThreadLockAccess(threadRef);
+            }
+            return;
+          }
           case "delete": {
             if (confirmThreadDelete) {
               const confirmed = await settlePromise(() =>
@@ -4259,12 +4333,14 @@ export default function Sidebar() {
       copyThreadIdToClipboard,
       deleteThread,
       handleMultiSelectContextMenu,
+      lockThread,
       markThreadUnread,
       openProjectSettings,
       projectByKey,
       serverConfigs,
       startThreadRename,
       updateThreadMetadata,
+      unlockThread,
       timestampFormat,
     ],
   );

@@ -2,6 +2,7 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import * as SqlSchema from "effect/unstable/sql/SqlSchema";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as Struct from "effect/Struct";
 
@@ -28,6 +29,7 @@ const ProjectionThreadDbRow = ProjectionThread.mapFields(
     titleState: Schema.NullOr(Schema.fromJsonString(ThreadTitleState)),
     linkedPullRequest: Schema.NullOr(Schema.fromJsonString(ThreadLinkedPullRequest)),
     branchPullRequest: Schema.NullOr(Schema.fromJsonString(ThreadLinkedPullRequest)),
+    locked: Schema.Number,
   }),
 );
 type ProjectionThreadDbRow = typeof ProjectionThreadDbRow.Type;
@@ -58,6 +60,7 @@ const makeProjectionThreadRepository = Effect.gen(function* () {
           latest_turn_id,
           created_at,
           updated_at,
+          locked,
           archived_at,
           settled_override,
           settled_at,
@@ -94,6 +97,7 @@ const makeProjectionThreadRepository = Effect.gen(function* () {
           ${row.latestTurnId},
           ${row.createdAt},
           ${row.updatedAt},
+          ${row.locked ? 1 : 0},
           ${row.archivedAt},
           ${row.settledOverride},
           ${row.settledAt},
@@ -130,6 +134,7 @@ const makeProjectionThreadRepository = Effect.gen(function* () {
           latest_turn_id = excluded.latest_turn_id,
           created_at = excluded.created_at,
           updated_at = excluded.updated_at,
+          locked = excluded.locked,
           archived_at = excluded.archived_at,
           settled_override = excluded.settled_override,
           settled_at = excluded.settled_at,
@@ -173,6 +178,7 @@ const makeProjectionThreadRepository = Effect.gen(function* () {
           latest_turn_id AS "latestTurnId",
           created_at AS "createdAt",
           updated_at AS "updatedAt",
+          locked,
           archived_at AS "archivedAt",
           settled_override AS "settledOverride",
           settled_at AS "settledAt",
@@ -218,6 +224,7 @@ const makeProjectionThreadRepository = Effect.gen(function* () {
           latest_turn_id AS "latestTurnId",
           created_at AS "createdAt",
           updated_at AS "updatedAt",
+          locked,
           archived_at AS "archivedAt",
           settled_override AS "settledOverride",
           settled_at AS "settledAt",
@@ -256,11 +263,13 @@ const makeProjectionThreadRepository = Effect.gen(function* () {
 
   const getById: ProjectionThreadRepositoryShape["getById"] = (input) =>
     getProjectionThreadRow(input).pipe(
+      Effect.map(Option.map((row) => ({ ...row, locked: row.locked === 1 }))),
       Effect.mapError(toPersistenceSqlError("ProjectionThreadRepository.getById:query")),
     );
 
   const listByProjectId: ProjectionThreadRepositoryShape["listByProjectId"] = (input) =>
     listProjectionThreadRows(input).pipe(
+      Effect.map((rows) => rows.map((row) => ({ ...row, locked: row.locked === 1 }))),
       Effect.mapError(toPersistenceSqlError("ProjectionThreadRepository.listByProjectId:query")),
     );
 

@@ -128,6 +128,7 @@ import * as ServerEnvironment from "./environment/ServerEnvironment.ts";
 import * as RemoteOpenTargets from "./environment/RemoteOpenTargets.ts";
 import { authHttpApiLayer, environmentAuthenticatedAuthLayer } from "./auth/http.ts";
 import * as ServerSecretStore from "./auth/ServerSecretStore.ts";
+import { ThreadLockServiceLive } from "./orchestration/ThreadLockService.ts";
 import * as EnvironmentAuth from "./auth/EnvironmentAuth.ts";
 import {
   connectHttpApiLayer,
@@ -653,6 +654,10 @@ const RuntimeDependenciesLive = RuntimeCoreDependenciesLive.pipe(
   Layer.provide(NetService.layer),
 );
 
+const ThreadLockServiceLayerLive = ThreadLockServiceLive.pipe(
+  Layer.provide(ServerSecretStore.layer),
+);
+
 const commandReadinessLayer = HttpRouter.middleware(
   (httpEffect) =>
     Effect.flatMap(ServerRuntimeStartup.ServerRuntimeStartup, (startup) =>
@@ -717,6 +722,7 @@ export const makeRoutesLayer = Layer.mergeAll(
   McpHttpServer.layer.pipe(Layer.provide(McpSessionRegistry.layer)),
   HostedPreviewAutomationHost.layer,
 ).pipe(
+  Layer.provide(ThreadLockServiceLayerLive),
   Layer.provide(SpeechTranscription.layer),
   // Both transports consume the same service instance, so caches single-flight across clients
   // and mutations observed on WebSocket invalidate patches subsequently read over HTTP.

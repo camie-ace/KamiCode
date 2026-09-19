@@ -13,10 +13,14 @@ import {
   TurnId,
   type OrchestrationCheckpointSummary,
   type OrchestrationThreadActivity,
+  type OrchestrationThreadShell,
   type ProjectId,
   type ProviderRuntimeEvent,
+  type ProviderInstanceId,
+  type ServerProvider,
   type ResponseStreamingMode,
   RuntimeRequestId,
+  isProviderAvailable,
 } from "@t3tools/contracts";
 import * as Cache from "effect/Cache";
 import * as Cause from "effect/Cause";
@@ -33,6 +37,7 @@ import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
 import { formatTokens } from "@t3tools/shared/usageFormat";
 
 import { ProviderService } from "../../provider/Services/ProviderService.ts";
+import { ProviderRegistry } from "../../provider/Services/ProviderRegistry.ts";
 import { ProjectionTurnRepository } from "../../persistence/Services/ProjectionTurns.ts";
 import { ProjectionTurnRepositoryLive } from "../../persistence/Layers/ProjectionTurns.ts";
 import { ProjectionThreadActivityRepository } from "../../persistence/Services/ProjectionThreadActivities.ts";
@@ -175,6 +180,26 @@ function maxCheckpointTurnCount(
 
 function truncateDetail(value: string, limit = 180): string {
   return value.length > limit ? `${value.slice(0, limit - 3)}...` : value;
+}
+
+export function selectNextWaterfallProvider(input: {
+  readonly sequence: ReadonlyArray<ProviderInstanceId>;
+  readonly failedInstanceId: ProviderInstanceId;
+  readonly providers: ReadonlyArray<ServerProvider>;
+}) {
+  const failedIndex = input.sequence.indexOf(input.failedInstanceId);
+  if (failedIndex < 0) return undefined;
+  return input.sequence
+    .slice(failedIndex + 1)
+    .map((instanceId) => input.providers.find((provider) => provider.instanceId === instanceId))
+    .find(
+      (provider) =>
+        provider !== undefined &&
+        provider.enabled &&
+        provider.installed &&
+        isProviderAvailable(provider) &&
+        provider.models.length > 0,
+    );
 }
 
 function normalizeProposedPlanMarkdown(planMarkdown: string | undefined): string | undefined {
@@ -978,6 +1003,7 @@ const make = Effect.gen(function* () {
   const orchestrationEngine = yield* OrchestrationEngineService;
   const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
   const providerService = yield* ProviderService;
+  const providerRegistry = yield* Effect.serviceOption(ProviderRegistry);
   const projectionThreadMessages = yield* ProjectionThreadMessageRepository;
   const projectionThreadProposedPlans = yield* ProjectionThreadProposedPlanRepository;
   const projectionTurnRepository = yield* ProjectionTurnRepository;
@@ -989,6 +1015,100 @@ const make = Effect.gen(function* () {
     crypto.randomUUIDv4.pipe(
       Effect.map((uuid) => CommandId.make(`provider:${event.eventId}:${tag}:${uuid}`)),
     );
+  const handledWaterfallFailures = new Set<string>();
+
+  const maybeStartProviderWaterfall = Effect.fn("maybeStartProviderWaterfall")(function* (
+    event: ProviderRuntimeEvent,
+    thread: Pick<
+      OrchestrationThreadShell,
+      | "id"
+      | "projectId"
+      | "title"
+      | "titleState"
+      | "session"
+      | "modelSelection"
+      | "runtimeMode"
+      | "interactionMode"
+    >,
+  ) {
+    if (
+      (event.type !== "runtime.error" && event.type !== "runtime.warning") ||
+      event.payload.code !== "usage_limit" ||
+      Option.isNone(providerRegistry)
+    ) {
+      return;
+    }
+    const settings = yield* serverSettingsService.getSettings;
+    const waterfall = settings.providerWaterfall;
+    if (!waterfall.enabled || waterfall.sequence.length < 2) return;
+
+    const failedInstanceId = event.providerInstanceId ?? thread.session?.providerInstanceId;
+    if (failedInstanceId === undefined) return;
+    const failureKey = `${thread.id}:${String(event.turnId ?? "no-turn")}:${failedInstanceId}`;
+    if (handledWaterfallFailures.has(failureKey)) return;
+
+    const providers = yield* providerRegistry.value.getProviders;
+    const nextProvider = selectNextWaterfallProvider({
+      sequence: waterfall.sequence,
+      failedInstanceId,
+      providers,
+    });
+    if (!nextProvider) return;
+    handledWaterfallFailures.add(failureKey);
+    if (handledWaterfallFailures.size > 10_000) {
+      handledWaterfallFailures.delete(handledWaterfallFailures.values().next().value!);
+    }
+
+    const messages = yield* projectionThreadMessages.listByThreadId({ threadId: thread.id });
+    const latestUserMessage = messages.toReversed().find((message) => message.role === "user");
+    if (!latestUserMessage) return;
+    const selectedModel =
+      nextProvider.models.find((model) => model.slug === thread.modelSelection.model) ??
+      nextProvider.models.find((model) => model.isDefault === true) ??
+      nextProvider.models.find((model) => model.isLegacy !== true) ??
+      nextProvider.models[0]!;
+    const modelSelection = {
+      instanceId: nextProvider.instanceId,
+      model: selectedModel.slug,
+    };
+
+    yield* providerService.stopSession({ threadId: thread.id }).pipe(Effect.ignoreCause);
+    yield* orchestrationEngine.dispatch({
+      type: "thread.activity.append",
+      commandId: yield* providerCommandId(event, "waterfall-handoff"),
+      threadId: thread.id,
+      activity: {
+        id: EventId.make(`waterfall:${event.eventId}:${nextProvider.instanceId}`),
+        createdAt: event.createdAt,
+        tone: "info",
+        kind: "runtime.warning",
+        summary: `Waterfall switched to ${nextProvider.displayName ?? nextProvider.driver}`,
+        payload: {
+          message: `Usage limit reached on ${failedInstanceId}. Continuing with ${nextProvider.displayName ?? nextProvider.instanceId}.`,
+          fromProviderInstanceId: failedInstanceId,
+          toProviderInstanceId: nextProvider.instanceId,
+        },
+        turnId: event.turnId ? TurnId.make(String(event.turnId)) : null,
+      },
+      createdAt: event.createdAt,
+    });
+    yield* orchestrationEngine.dispatch({
+      type: "thread.turn.start",
+      commandId: yield* providerCommandId(event, "waterfall-turn-start"),
+      threadId: thread.id,
+      message: {
+        messageId: latestUserMessage.messageId,
+        role: "user",
+        text: latestUserMessage.text,
+        attachments: [...(latestUserMessage.attachments ?? [])],
+        ...(latestUserMessage.context !== undefined ? { context: latestUserMessage.context } : {}),
+      },
+      modelSelection,
+      runtimeMode: thread.runtimeMode,
+      interactionMode: thread.interactionMode,
+      createdAt: event.createdAt,
+    });
+  });
 
   const turnMessageIdsByTurnKey = yield* Cache.make<string, Set<MessageId>>({
     capacity: TURN_MESSAGE_IDS_BY_TURN_CACHE_CAPACITY,
@@ -2114,6 +2234,13 @@ const make = Effect.gen(function* () {
             createdAt: now,
           });
         }
+      }
+
+      if (
+        (event.type === "runtime.error" || event.type === "runtime.warning") &&
+        event.payload.code === "usage_limit"
+      ) {
+        yield* maybeStartProviderWaterfall(event, thread);
       }
 
       if (event.type === "thread.metadata.updated" && event.payload.name) {

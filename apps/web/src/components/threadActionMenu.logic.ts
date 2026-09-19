@@ -24,6 +24,8 @@ export type ThreadActionMenuId =
   | "copy-branch"
   | "copy-thread-id"
   | "archive"
+  | "lock"
+  | "unlock"
   | "delete";
 
 export interface ThreadActionMenuState {
@@ -35,6 +37,7 @@ export interface ThreadActionMenuState {
   readonly isRegeneratingTitle: boolean;
   /** Archive rejects a thread with an active turn, so disable it here rather than let the action fail. */
   readonly isRunning: boolean;
+  readonly isLocked?: boolean;
   readonly supports: {
     readonly settlement: boolean;
     readonly snooze: boolean;
@@ -136,6 +139,9 @@ export function buildThreadActionMenuItems(
       disabled: state.isRunning,
       separatorBefore: true,
     },
+    state.isLocked
+      ? { id: "unlock", label: "Unlock thread", icon: "unlock" }
+      : { id: "lock", label: "Lock thread", icon: "lock" },
     {
       id: "delete",
       label: "Delete",

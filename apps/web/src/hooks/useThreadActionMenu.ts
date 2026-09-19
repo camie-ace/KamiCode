@@ -1,4 +1,9 @@
 import { requestCustomSnooze } from "../components/CustomSnoozeDialog";
+import {
+  forgetThreadLockAccess,
+  markThreadLockAccess,
+  requestThreadPasscode,
+} from "../components/ThreadLockDialog";
 import { scopeProjectRef, scopedThreadKey } from "@t3tools/client-runtime/environment";
 import {
   type AtomCommandResult,
@@ -18,6 +23,7 @@ import {
 } from "../components/threadActionMenu.logic";
 import { stackedThreadToast, toastManager } from "../components/ui/toast";
 import { threadEnvironment } from "../state/threads";
+import { serverEnvironment } from "../state/server";
 import { useAtomCommand } from "../state/use-atom-command";
 import {
   readEnvironmentSupportsPinning,
@@ -94,6 +100,8 @@ export function useThreadActionMenu(input: {
   const updateThreadMetadata = useAtomCommand(threadEnvironment.updateMetadata, {
     reportFailure: false,
   });
+  const lockThread = useAtomCommand(serverEnvironment.lockThread, { reportFailure: false });
+  const unlockThread = useAtomCommand(serverEnvironment.unlockThread, { reportFailure: false });
   const handleNewThread = useNewThreadHandler();
   const markThreadUnread = useUiStateStore((s) => s.markThreadUnread);
   const confirmThreadDelete = useClientSettings((s) => s.confirmThreadDelete);
@@ -146,6 +154,7 @@ export function useThreadActionMenu(input: {
           canSnoozeNow: canSnooze(thread, { now: now.toISOString() }),
           isRegeneratingTitle,
           isRunning: thread.session?.status === "running" && thread.session.activeTurnId != null,
+          isLocked: thread.locked ?? false,
           supports,
           snoozePresets,
         });
@@ -301,6 +310,38 @@ export function useThreadActionMenu(input: {
             }
             return;
           }
+          case "lock":
+          case "unlock": {
+            const choice = await requestThreadPasscode(
+              action === "lock" ? "lock" : "remove",
+              thread.title,
+            );
+            if (!choice) return;
+            const result =
+              action === "lock"
+                ? await lockThread({
+                    environmentId: threadRef.environmentId,
+                    input: { threadId: threadRef.threadId, passcode: choice.passcode },
+                  })
+                : await unlockThread({
+                    environmentId: threadRef.environmentId,
+                    input: {
+                      threadId: threadRef.threadId,
+                      passcode: choice.passcode,
+                      removeLock: true,
+                    },
+                  });
+            if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
+              failureToast(
+                action === "lock" ? "Failed to lock thread" : "Failed to unlock thread",
+                squashAtomCommandFailure(result),
+              );
+            } else if (result._tag === "Success") {
+              if (action === "lock") forgetThreadLockAccess(threadRef);
+              else markThreadLockAccess(threadRef);
+            }
+            return;
+          }
           case "delete": {
             if (confirmThreadDelete) {
               const confirmed = await settlePromise(() =>
@@ -342,6 +383,7 @@ export function useThreadActionMenu(input: {
       copyThreadIdToClipboard,
       deleteThread,
       handleNewThread,
+      lockThread,
       logicalProjectKeyByPhysicalKey,
       markThreadUnread,
       onStartRename,
@@ -355,6 +397,7 @@ export function useThreadActionMenu(input: {
       threadRef,
       timestampFormat,
       unsettleThread,
+      unlockThread,
       unsnoozeThread,
       updateThreadMetadata,
     ],

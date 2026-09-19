@@ -472,6 +472,13 @@ export const SETTINGS_SEARCH_ITEMS = [
     providerSettingsOnly: true,
   },
   {
+    id: "provider-waterfall",
+    title: "Provider waterfall",
+    to: "/settings/providers",
+    searchTerms: ["fallback failover credits usage limit provider order sequence"],
+    providerSettingsOnly: true,
+  },
+  {
     id: "provider-health-check-interval",
     title: "Health check interval",
     to: "/settings/providers",

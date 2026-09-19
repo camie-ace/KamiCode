@@ -2524,6 +2524,7 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
                   payload: {
                     message: usageLimitMessage,
                     class: "provider_error",
+                    code: "usage_limit",
                     ...(turnError.message ? { detail: turnError.message } : {}),
                   },
                 };

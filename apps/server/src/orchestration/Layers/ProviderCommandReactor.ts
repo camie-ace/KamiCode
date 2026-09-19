@@ -742,19 +742,6 @@ const make = Effect.gen(function* () {
         requestedModelSelection,
       });
     }
-    if (
-      thread.session !== null &&
-      requestedModelSelection !== undefined &&
-      requestedModelSelection.instanceId !== currentInstanceId
-    ) {
-      if (currentInfo.driverKind !== desiredInfo.driverKind) {
-        return yield* new ProviderAdapterRequestError({
-          provider: preferredProvider,
-          method: "thread.turn.start",
-          detail: `Thread '${threadId}' is bound to driver '${currentInfo.driverKind}' and cannot switch to '${desiredInfo.driverKind}'.`,
-        });
-      }
-    }
     const providerResumeStateCompatible =
       currentInfo.continuationIdentity.continuationKey ===
       desiredInfo.continuationIdentity.continuationKey;
@@ -911,6 +898,39 @@ const make = Effect.gen(function* () {
         new Error(`Thread '${input.threadId}' was not found in read model.`),
       );
     }
+    let messageText = input.messageText;
+    if (
+      input.modelSelection !== undefined &&
+      input.modelSelection.instanceId !== thread.modelSelection.instanceId
+    ) {
+      const currentInfo = yield* providerService.getInstanceInfo(thread.modelSelection.instanceId);
+      const desiredInfo = yield* providerService.getInstanceInfo(input.modelSelection.instanceId);
+      if (
+        currentInfo.continuationIdentity.continuationKey !==
+        desiredInfo.continuationIdentity.continuationKey
+      ) {
+        const detail = yield* resolveThreadDetail(input.threadId);
+        const conversation = (detail?.messages ?? []).filter(
+          (message) => message.role === "user" || message.role === "assistant",
+        );
+        const finalMessage = conversation.at(-1);
+        const transcriptMessages =
+          finalMessage?.role === "user" && finalMessage.text === input.messageText
+            ? conversation.slice(0, -1)
+            : conversation;
+        const transcript = transcriptMessages
+          .map((message) => `${message.role === "user" ? "User" : "Assistant"}: ${message.text}`)
+          .join("\n\n")
+          .slice(-60_000);
+        messageText = [
+          "Continue this existing KamiCode thread. The provider changed because the previous account reached its usage limit. Preserve the conversation's intent and continue naturally; do not restart the task or mention this handoff unless it matters.",
+          transcript ? `Conversation transcript:\n${transcript}` : "",
+          `Current user request:\n${input.messageText}`,
+        ]
+          .filter(Boolean)
+          .join("\n\n");
+      }
+    }
     yield* ensureSessionForThread(input.threadId, input.createdAt, {
       ...(input.modelSelection !== undefined ? { modelSelection: input.modelSelection } : {}),
       ...(input.runtimeMode !== undefined ? { runtimeMode: input.runtimeMode } : {}),
@@ -926,7 +946,7 @@ const make = Effect.gen(function* () {
     const normalizedInput = toNonEmptyProviderInput(
       appendProviderAttachmentContext({
         messageText: buildTestModeTurnInput({
-          messageText: input.messageText,
+          messageText,
           project: project ?? null,
           ...(input.interactionMode !== undefined
             ? { interactionMode: input.interactionMode }
@@ -1800,6 +1820,18 @@ const make = Effect.gen(function* () {
 
     if (Option.isNone(sendTurnRequest)) {
       return;
+    }
+
+    if (
+      event.payload.modelSelection !== undefined &&
+      !Equal.equals(thread.modelSelection, event.payload.modelSelection)
+    ) {
+      yield* orchestrationEngine.dispatch({
+        type: "thread.meta.update",
+        commandId: yield* serverCommandId("provider-waterfall-selection"),
+        threadId: event.payload.threadId,
+        modelSelection: event.payload.modelSelection,
+      });
     }
 
     const send = providerService

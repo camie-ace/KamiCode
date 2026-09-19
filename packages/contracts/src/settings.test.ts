@@ -681,6 +681,29 @@ describe("ServerSettings.providerInstances (slice-2 invariant)", () => {
   });
 });
 
+describe("ServerSettings.providerWaterfall", () => {
+  it("is disabled with an empty sequence for legacy settings", () => {
+    expect(decodeServerSettings({}).providerWaterfall).toEqual({
+      enabled: false,
+      sequence: [],
+    });
+  });
+
+  it("round-trips an ordered cross-provider sequence", () => {
+    const input = {
+      providerWaterfall: {
+        enabled: true,
+        sequence: [ProviderInstanceId.make("codex_work"), ProviderInstanceId.make("claude_team")],
+      },
+    };
+    const decoded = decodeServerSettings(input);
+
+    expect(decoded.providerWaterfall).toEqual(input.providerWaterfall);
+    expect(encodeServerSettings(decoded)).toMatchObject(input);
+    expect(decodeServerSettingsPatch(input)).toEqual(input);
+  });
+});
+
 describe("provider enabled defaults", () => {
   it("enables only the stable bindings by default", () => {
     const decoded = decodeServerSettings({});

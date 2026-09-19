@@ -1901,10 +1901,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       // A worktree bootstrap persists the message ahead of the turn with
       // `thread.message.user.append`; the turn then only references it.
       const persistedUserMessage = targetThread.messages.find(
-        (message) =>
-          message.id === command.message.messageId &&
-          message.role === "user" &&
-          message.turnId === null,
+        (message) => message.id === command.message.messageId && message.role === "user",
       );
       const userMessageEvent: Omit<OrchestrationEvent, "sequence"> | null = persistedUserMessage
         ? null
@@ -2034,6 +2031,27 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         },
       };
       return [...turnEvents, workflowPlannedEvent];
+    }
+
+    case "thread.lock.set": {
+      const thread = yield* requireThread({ readModel, command, threadId: command.threadId });
+      if (thread.locked === command.locked) return [];
+      return [
+        {
+          ...(yield* withEventBase({
+            aggregateKind: "thread",
+            aggregateId: command.threadId,
+            occurredAt: command.createdAt,
+            commandId: command.commandId,
+          })),
+          type: "thread.meta-updated",
+          payload: {
+            threadId: command.threadId,
+            locked: command.locked,
+            updatedAt: command.createdAt,
+          },
+        },
+      ];
     }
 
     case "thread.message.user.append": {

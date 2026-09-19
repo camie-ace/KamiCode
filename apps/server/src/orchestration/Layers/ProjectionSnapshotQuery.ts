@@ -18,6 +18,8 @@ import {
   ProjectScript,
   ProjectIconOverride,
   ProjectTestEnvironment,
+  ProviderInteractionMode,
+  RuntimeMode,
   TurnId,
   type OrchestrationCheckpointSummary,
   type OrchestrationLatestTurn,
@@ -138,6 +140,7 @@ const ProjectionThreadDbRowSchema = ProjectionThread.mapFields(
     titleState: Schema.NullOr(Schema.fromJsonString(ThreadTitleState)),
     linkedPullRequest: Schema.NullOr(Schema.fromJsonString(ThreadLinkedPullRequest)),
     branchPullRequest: Schema.NullOr(Schema.fromJsonString(ThreadLinkedPullRequest)),
+    locked: Schema.Number,
   }),
 );
 const ProjectionThreadActivityDbRowSchema = ProjectionThreadActivity.mapFields(
@@ -155,6 +158,9 @@ const ProjectionThreadRuntimeContextDbRowSchema = Schema.Struct({
   id: ThreadId,
   projectId: ProjectId,
   title: Schema.String,
+  modelSelection: Schema.fromJsonString(ModelSelection),
+  runtimeMode: RuntimeMode,
+  interactionMode: ProviderInteractionMode,
   session: Schema.NullOr(ProjectionThreadSessionDbRowSchema),
 });
 const ProjectionCheckpointDbRowSchema = ProjectionCheckpoint.mapFields(
@@ -630,6 +636,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           latest_turn_id AS "latestTurnId",
           created_at AS "createdAt",
           updated_at AS "updatedAt",
+          locked,
           archived_at AS "archivedAt",
           settled_override AS "settledOverride",
           settled_at AS "settledAt",
@@ -675,6 +682,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           latest_turn_id AS "latestTurnId",
           created_at AS "createdAt",
           updated_at AS "updatedAt",
+          locked,
           archived_at AS "archivedAt",
           settled_override AS "settledOverride",
           settled_at AS "settledAt",
@@ -722,6 +730,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           latest_turn_id AS "latestTurnId",
           created_at AS "createdAt",
           updated_at AS "updatedAt",
+          locked,
           archived_at AS "archivedAt",
           settled_override AS "settledOverride",
           settled_at AS "settledAt",
@@ -1145,6 +1154,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
             ON projects.project_id = threads.project_id
           WHERE threads.deleted_at IS NULL
             AND threads.archived_at IS NULL
+            AND threads.locked = 0
             AND projects.deleted_at IS NULL
             AND messages.is_streaming = 0
             AND (
@@ -1315,6 +1325,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           latest_turn_id AS "latestTurnId",
           created_at AS "createdAt",
           updated_at AS "updatedAt",
+          locked,
           archived_at AS "archivedAt",
           settled_override AS "settledOverride",
           settled_at AS "settledAt",
@@ -1349,6 +1360,9 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           threads.project_id AS "projectId",
           threads.title,
           threads.title_state_json AS "titleState",
+          threads.model_selection_json AS "modelSelection",
+          threads.runtime_mode AS "runtimeMode",
+          threads.interaction_mode AS "interactionMode",
           sessions.thread_id AS "threadId",
           sessions.status,
           sessions.provider_name AS "providerName",
@@ -1371,6 +1385,9 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
             projectId: row.projectId,
             title: row.title,
             titleState: row.titleState,
+            modelSelection: row.modelSelection,
+            runtimeMode: row.runtimeMode,
+            interactionMode: row.interactionMode,
             session: row.threadId === null ? null : row,
           })),
         ),
@@ -2442,6 +2459,7 @@ pending_approval_requests AS (
                 latestTurn: latestTurnByThread.get(row.threadId) ?? null,
                 createdAt: row.createdAt,
                 updatedAt: row.updatedAt,
+                locked: row.locked === 1,
                 archivedAt: row.archivedAt,
                 settledOverride: row.settledOverride,
                 settledAt: row.settledAt,
@@ -2717,6 +2735,7 @@ pending_approval_requests AS (
                   latestTurn: latestTurnByThread.get(row.threadId) ?? null,
                   createdAt: row.createdAt,
                   updatedAt: row.updatedAt,
+                  locked: row.locked === 1,
                   archivedAt: row.archivedAt,
                   settledOverride: row.settledOverride,
                   settledAt: row.settledAt,
@@ -2898,6 +2917,7 @@ pending_approval_requests AS (
                         latestTurn: latestTurnByThread.get(row.threadId) ?? null,
                         createdAt: row.createdAt,
                         updatedAt: row.updatedAt,
+                        locked: row.locked === 1,
                         archivedAt: row.archivedAt,
                         settledOverride: row.settledOverride,
                         settledAt: row.settledAt,
@@ -3086,6 +3106,7 @@ pending_approval_requests AS (
                   latestTurn: latestTurnByThread.get(row.threadId) ?? null,
                   createdAt: row.createdAt,
                   updatedAt: row.updatedAt,
+                  locked: row.locked === 1,
                   archivedAt: row.archivedAt,
                   settledOverride: row.settledOverride,
                   settledAt: row.settledAt,
@@ -3460,6 +3481,7 @@ pending_approval_requests AS (
         latestTurn: Option.isSome(latestTurnRow) ? mapLatestTurn(latestTurnRow.value) : null,
         createdAt: threadRow.value.createdAt,
         updatedAt: threadRow.value.updatedAt,
+        locked: threadRow.value.locked === 1,
         archivedAt: threadRow.value.archivedAt,
         settledOverride: threadRow.value.settledOverride,
         settledAt: threadRow.value.settledAt,
@@ -3499,6 +3521,9 @@ pending_approval_requests AS (
         projectId: row.projectId,
         title: row.title,
         titleState: row.titleState,
+        modelSelection: row.modelSelection,
+        runtimeMode: row.runtimeMode,
+        interactionMode: row.interactionMode,
         session: row.session === null ? null : mapSessionRow(row.session),
       }));
     });
@@ -3778,6 +3803,7 @@ pending_approval_requests AS (
         latestTurn: Option.isSome(latestTurnRow) ? mapLatestTurn(latestTurnRow.value) : null,
         createdAt: threadRow.value.createdAt,
         updatedAt: threadRow.value.updatedAt,
+        locked: threadRow.value.locked === 1,
         archivedAt: threadRow.value.archivedAt,
         settledOverride: threadRow.value.settledOverride,
         settledAt: threadRow.value.settledAt,

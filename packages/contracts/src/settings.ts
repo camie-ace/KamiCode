@@ -1073,6 +1073,16 @@ export const ProjectSettingsOverrides = Schema.Struct({
 } satisfies Record<ProjectScopedServerSettingKey, unknown>);
 export type ProjectSettingsOverrides = typeof ProjectSettingsOverrides.Type;
 
+/**
+ * Ordered provider instances used when a turn reaches an account usage limit.
+ * Disabled by default so existing environments retain their current behavior.
+ */
+export const ProviderWaterfallSettings = Schema.Struct({
+  enabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  sequence: Schema.Array(ProviderInstanceId).pipe(Schema.withDecodingDefault(Effect.succeed([]))),
+});
+export type ProviderWaterfallSettings = typeof ProviderWaterfallSettings.Type;
+
 export const ServerSettings = Schema.Struct({
   // How assistant text reaches clients during a turn. Deliberately a fresh
   // key (was `enableLegacyTokenStreaming`, before that
@@ -1248,6 +1258,7 @@ export const ServerSettings = Schema.Struct({
   providerInstances: Schema.Record(ProviderInstanceId, ProviderInstanceConfig).pipe(
     Schema.withDecodingDefault(Effect.succeed({})),
   ),
+  providerWaterfall: ProviderWaterfallSettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
   observability: ObservabilitySettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
   hostedCollaboration: HostedCollaborationSettings.pipe(
     Schema.withDecodingDefault(Effect.succeed({})),
@@ -1527,6 +1538,12 @@ export const ServerSettingsPatch = Schema.Struct({
   // patches risk leaving driver-specific config in a half-merged state.
   // The web UI sends a fully-formed map every time it edits this field.
   providerInstances: Schema.optionalKey(Schema.Record(ProviderInstanceId, ProviderInstanceConfig)),
+  providerWaterfall: Schema.optionalKey(
+    Schema.Struct({
+      enabled: Schema.optionalKey(Schema.Boolean),
+      sequence: Schema.optionalKey(Schema.Array(ProviderInstanceId)),
+    }),
+  ),
   // Per-entry, unlike `providerInstances`: a client only ever adds or removes
   // one source, and sending the whole map races another edit that has not
   // echoed back yet. `null` removes; the server merges into its current map.

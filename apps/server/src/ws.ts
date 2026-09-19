@@ -80,6 +80,7 @@ import {
   RpcClientId,
   EnvironmentAuthorizationError,
   ThreadId,
+  ThreadLockError,
   type TerminalAttachStreamEvent,
   type TerminalError,
   type TerminalEvent,
@@ -110,6 +111,7 @@ import {
 import * as OrchestrationEngine from "./orchestration/Services/OrchestrationEngine.ts";
 import * as ProjectionSnapshotQuery from "./orchestration/Services/ProjectionSnapshotQuery.ts";
 import { ServerOrchestrationDispatcher } from "./orchestration/Services/ServerOrchestrationDispatcher.ts";
+import { ThreadLockService } from "./orchestration/ThreadLockService.ts";
 import {
   observeRpcEffect as instrumentRpcEffect,
   observeRpcStream as instrumentRpcStream,
@@ -198,6 +200,9 @@ import { ProjectTriggerService } from "./projectTriggers/Services/ProjectTrigger
 import { computeProjectTriggerNextFireAt } from "./projectTriggers/schedule.ts";
 import * as RelayClient from "@t3tools/shared/relayClient";
 const isOrchestrationDispatchCommandError = Schema.is(OrchestrationDispatchCommandError);
+const isOrchestrationGetTurnDiffError = Schema.is(OrchestrationGetTurnDiffError);
+const isOrchestrationGetFullThreadDiffError = Schema.is(OrchestrationGetFullThreadDiffError);
+const isThreadLockError = Schema.is(ThreadLockError);
 const isProjectTriggerStoreError = Schema.is(ProjectTriggerStoreError);
 const isProjectTriggerValidationError = Schema.is(ProjectTriggerValidationError);
 
@@ -521,6 +526,7 @@ const makeWsRpcLayer = (
               Effect.orElseSucceed(() => null),
             );
       const orchestrationEngine = yield* OrchestrationEngine.OrchestrationEngineService;
+      const threadLocks = yield* ThreadLockService;
       const orchestrationDispatcher = yield* ServerOrchestrationDispatcher;
       const analytics = yield* AnalyticsService.AnalyticsService;
       // Every command dispatched on this connection carries the connecting
@@ -1352,6 +1358,21 @@ const makeWsRpcLayer = (
             Effect.gen(function* () {
               yield* ProjectCloneTracker.rejectCommandsDuringClone(projectCloneTracker, command);
               const normalizedCommand = yield* normalizeDispatchCommand(command);
+              if ("threadId" in normalizedCommand) {
+                const target = yield* projectionSnapshotQuery.getThreadShellById(
+                  normalizedCommand.threadId,
+                );
+                if (
+                  Option.isSome(target) &&
+                  target.value.locked &&
+                  !threadLocks.isAuthorized(normalizedCommand.threadId, String(currentSessionId))
+                ) {
+                  return yield* new OrchestrationDispatchCommandError({
+                    message: "Unlock this thread before changing it.",
+                    cause: "thread_locked",
+                  });
+                }
+              }
               // Archive removes the thread from the client, so this transport
               // closes its session and terminals after the command lands.
               // Settlement cleanup is driven by thread.settled events in the
@@ -1433,6 +1454,105 @@ const makeWsRpcLayer = (
             ),
             { "rpc.aggregate": "orchestration" },
           ),
+        [WS_METHODS.threadLock]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.threadLock,
+            Effect.gen(function* () {
+              const thread = yield* projectionSnapshotQuery.getThreadShellById(input.threadId);
+              if (Option.isNone(thread)) {
+                return yield* new ThreadLockError({
+                  reason: "not_found",
+                  message: "Thread not found.",
+                });
+              }
+              if (
+                thread.value.locked &&
+                !threadLocks.isAuthorized(input.threadId, String(currentSessionId))
+              ) {
+                return yield* new ThreadLockError({
+                  reason: "invalid_passcode",
+                  message: "Unlock this thread before changing its passcode.",
+                });
+              }
+              yield* threadLocks.setPasscode(input.threadId, input.passcode).pipe(
+                Effect.mapError(
+                  () =>
+                    new ThreadLockError({
+                      reason: "storage_error",
+                      message: "Could not save the thread lock.",
+                    }),
+                ),
+              );
+              const createdAt = yield* nowIso;
+              const uuid = yield* crypto.randomUUIDv4;
+              yield* dispatchFromClient({
+                type: "thread.lock.set",
+                commandId: CommandId.make(`thread-lock:${uuid}`),
+                threadId: input.threadId,
+                locked: true,
+                createdAt,
+              });
+              threadLocks.revoke(input.threadId);
+              return { locked: true as const };
+            }).pipe(
+              Effect.mapError((error) =>
+                isThreadLockError(error)
+                  ? error
+                  : new ThreadLockError({
+                      reason: "storage_error",
+                      message: "Could not lock the thread.",
+                    }),
+              ),
+            ),
+            { "rpc.aggregate": "orchestration" },
+          ),
+        [WS_METHODS.threadUnlock]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.threadUnlock,
+            Effect.gen(function* () {
+              const thread = yield* projectionSnapshotQuery.getThreadShellById(input.threadId);
+              if (Option.isNone(thread)) {
+                return yield* new ThreadLockError({
+                  reason: "not_found",
+                  message: "Thread not found.",
+                });
+              }
+              const valid = yield* threadLocks.authorize(
+                input.threadId,
+                String(currentSessionId),
+                input.passcode,
+              );
+              if (!valid) {
+                return yield* new ThreadLockError({
+                  reason: "invalid_passcode",
+                  message: "Incorrect passcode.",
+                });
+              }
+              if (input.removeLock) {
+                const createdAt = yield* nowIso;
+                const uuid = yield* crypto.randomUUIDv4;
+                yield* dispatchFromClient({
+                  type: "thread.lock.set",
+                  commandId: CommandId.make(`thread-unlock:${uuid}`),
+                  threadId: input.threadId,
+                  locked: false,
+                  createdAt,
+                });
+                yield* threadLocks.remove(input.threadId, String(currentSessionId), input.passcode);
+              }
+              return { locked: !input.removeLock };
+            }).pipe(
+              Effect.mapError((error) =>
+                isThreadLockError(error)
+                  ? error
+                  : new ThreadLockError({
+                      reason: "storage_error",
+                      message: "Could not unlock the thread.",
+                    }),
+              ),
+            ),
+            { "rpc.aggregate": "orchestration" },
+          ),
         [ORCHESTRATION_WS_METHODS.getWorkflowScript]: (input) =>
           observeRpcEffect(
             ORCHESTRATION_WS_METHODS.getWorkflowScript,
@@ -1442,13 +1562,27 @@ const makeWsRpcLayer = (
         [ORCHESTRATION_WS_METHODS.getTurnDiff]: (input) =>
           observeRpcEffect(
             ORCHESTRATION_WS_METHODS.getTurnDiff,
-            checkpointDiffQuery.getTurnDiff(input).pipe(
-              Effect.mapError(
-                (cause) =>
-                  new OrchestrationGetTurnDiffError({
-                    message: "Failed to load turn diff",
-                    cause,
-                  }),
+            Effect.gen(function* () {
+              const target = yield* projectionSnapshotQuery.getThreadShellById(input.threadId);
+              if (
+                Option.isSome(target) &&
+                target.value.locked &&
+                !threadLocks.isAuthorized(input.threadId, String(currentSessionId))
+              ) {
+                return yield* new OrchestrationGetTurnDiffError({
+                  message: "Unlock this thread before viewing its diff.",
+                  cause: "thread_locked",
+                });
+              }
+              return yield* checkpointDiffQuery.getTurnDiff(input);
+            }).pipe(
+              Effect.mapError((cause) =>
+                isOrchestrationGetTurnDiffError(cause)
+                  ? cause
+                  : new OrchestrationGetTurnDiffError({
+                      message: "Failed to load turn diff",
+                      cause,
+                    }),
               ),
             ),
             { "rpc.aggregate": "orchestration" },
@@ -1456,13 +1590,27 @@ const makeWsRpcLayer = (
         [ORCHESTRATION_WS_METHODS.getFullThreadDiff]: (input) =>
           observeRpcEffect(
             ORCHESTRATION_WS_METHODS.getFullThreadDiff,
-            checkpointDiffQuery.getFullThreadDiff(input).pipe(
-              Effect.mapError(
-                (cause) =>
-                  new OrchestrationGetFullThreadDiffError({
-                    message: "Failed to load full thread diff",
-                    cause,
-                  }),
+            Effect.gen(function* () {
+              const target = yield* projectionSnapshotQuery.getThreadShellById(input.threadId);
+              if (
+                Option.isSome(target) &&
+                target.value.locked &&
+                !threadLocks.isAuthorized(input.threadId, String(currentSessionId))
+              ) {
+                return yield* new OrchestrationGetFullThreadDiffError({
+                  message: "Unlock this thread before viewing its diff.",
+                  cause: "thread_locked",
+                });
+              }
+              return yield* checkpointDiffQuery.getFullThreadDiff(input);
+            }).pipe(
+              Effect.mapError((cause) =>
+                isOrchestrationGetFullThreadDiffError(cause)
+                  ? cause
+                  : new OrchestrationGetFullThreadDiffError({
+                      message: "Failed to load full thread diff",
+                      cause,
+                    }),
               ),
             ),
             { "rpc.aggregate": "orchestration" },
@@ -1658,6 +1806,25 @@ const makeWsRpcLayer = (
           observeRpcStreamEffect(
             ORCHESTRATION_WS_METHODS.subscribeThread,
             Effect.gen(function* () {
+              const target = yield* projectionSnapshotQuery.getThreadShellById(input.threadId).pipe(
+                Effect.mapError(
+                  (cause) =>
+                    new OrchestrationGetSnapshotError({
+                      message: "Failed to check thread lock state.",
+                      cause,
+                    }),
+                ),
+              );
+              if (
+                Option.isSome(target) &&
+                target.value.locked &&
+                !threadLocks.isAuthorized(input.threadId, String(currentSessionId))
+              ) {
+                return yield* new OrchestrationGetSnapshotError({
+                  message: "Thread is locked.",
+                  cause: "thread_locked",
+                });
+              }
               const isThisThreadDetailEvent = (event: OrchestrationEvent) =>
                 event.aggregateKind === "thread" &&
                 event.aggregateId === input.threadId &&

@@ -1199,6 +1199,7 @@ export const OrchestrationThread = Schema.Struct({
   queuedTurns: Schema.optional(Schema.Array(OrchestrationQueuedTurn)),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
+  locked: Schema.optionalKey(Schema.Boolean),
   archivedAt: Schema.NullOr(IsoDateTime).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
   settledOverride: Schema.NullOr(Schema.Literals(["settled", "active"])).pipe(
     Schema.withDecodingDefault(Effect.succeed(null)),
@@ -1291,6 +1292,7 @@ export const OrchestrationThreadShell = Schema.Struct({
   queuedTurnCount: Schema.optional(NonNegativeInt),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
+  locked: Schema.optionalKey(Schema.Boolean),
   archivedAt: Schema.NullOr(IsoDateTime).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
   settledOverride: Schema.NullOr(Schema.Literals(["settled", "active"])).pipe(
     Schema.withDecodingDefault(Effect.succeed(null)),
@@ -2071,6 +2073,14 @@ const ThreadSessionSetCommand = Schema.Struct({
   createdAt: IsoDateTime,
 });
 
+const ThreadLockSetCommand = Schema.Struct({
+  type: Schema.Literal("thread.lock.set"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  locked: Schema.Boolean,
+  createdAt: IsoDateTime,
+});
+
 const ThreadQueuedTurnStatusSetCommand = Schema.Struct({
   type: Schema.Literal("thread.queued-turn.status.set"),
   commandId: CommandId,
@@ -2233,6 +2243,7 @@ const InternalOrchestrationCommand = Schema.Union([
   ThreadPullRequestSyncCommand,
   ThreadPullRequestLinkSyncCommand,
   ThreadSessionSetCommand,
+  ThreadLockSetCommand,
   ThreadQueuedTurnStatusSetCommand,
   ThreadMessageAssistantDeltaCommand,
   ThreadMessageAssistantCompleteCommand,
@@ -2437,6 +2448,7 @@ export const ThreadMetaUpdatedPayload = Schema.Struct({
   titleRegeneration: Schema.optional(Schema.NullOr(ThreadTitleRegeneration)),
   titleState: Schema.optional(Schema.NullOr(ThreadTitleState)),
   modelSelection: Schema.optional(ModelSelection),
+  locked: Schema.optional(Schema.Boolean),
   branch: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   worktreePath: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   // No longer produced; kept so persisted events from before

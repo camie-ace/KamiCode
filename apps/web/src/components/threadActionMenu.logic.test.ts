@@ -10,6 +10,7 @@ const baseState: ThreadActionMenuState = {
   canSnoozeNow: true,
   isRegeneratingTitle: false,
   isRunning: false,
+  isLocked: false,
   supports: { settlement: true, snooze: true, pinning: true, titleRegeneration: true },
   snoozePresets: [
     { id: "hour", label: "In 1 hour", whenLabel: "3:00 PM", snoozedUntil: "2026-08-07T15:00:00Z" },
@@ -33,7 +34,7 @@ describe("buildThreadActionMenuItems", () => {
         ...baseState,
         supports: { settlement: false, snooze: false, pinning: false, titleRegeneration: false },
       }),
-    ).toEqual(["rename", "mark-unread", "copy", "project-settings", "archive", "delete"]);
+    ).toEqual(["rename", "mark-unread", "copy", "project-settings", "archive", "lock", "delete"]);
   });
 
   it("groups project settings with utility actions before archive", () => {
@@ -81,14 +82,20 @@ describe("buildThreadActionMenuItems", () => {
     const items = buildThreadActionMenuItems({ ...baseState, branch: "main" });
     expect(items.at(-1)).toMatchObject({ id: "delete", destructive: true });
   });
-  it("offers archive as a non-destructive action right before delete", () => {
+  it("places the lock action between archive and delete", () => {
     const items = buildThreadActionMenuItems(baseState);
-    const archiveItem = items.at(-2);
+    const archiveItem = items.at(-3);
     expect(archiveItem?.id).toBe("archive");
     expect(archiveItem?.icon).toBe("archive");
     expect(archiveItem?.separatorBefore).toBe(true);
     expect(archiveItem?.destructive).toBeFalsy();
+    expect(items.at(-2)).toMatchObject({ id: "lock", icon: "lock" });
     expect(items.at(-1)?.id).toBe("delete");
+
+    expect(buildThreadActionMenuItems({ ...baseState, isLocked: true }).at(-2)).toMatchObject({
+      id: "unlock",
+      icon: "unlock",
+    });
   });
 
   it("keeps archive available even when the environment lacks every other capability", () => {
