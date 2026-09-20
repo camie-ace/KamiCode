@@ -23,27 +23,27 @@ class TestCommandError extends Data.TaggedError("TestCommandError")<{
   readonly cause?: unknown;
 }> {}
 
-const browserFlag = Flag.choice("browser", ["chromium", "firefox", "webkit"]).pipe(
+const browserFlag = Flag.Literals("browser", ["chromium", "firefox", "webkit"]).pipe(
   Flag.withDescription("Browser engine to launch."),
   Flag.withDefault("chromium"),
 );
 
-const headlessFlag = Flag.boolean("headless").pipe(
+const headlessFlag = Flag.Boolean("headless").pipe(
   Flag.withDescription("Run the browser headlessly. This is the default."),
   Flag.withDefault(true),
 );
 
-const visibleFlag = Flag.boolean("visible").pipe(
+const visibleFlag = Flag.Boolean("visible").pipe(
   Flag.withDescription("Open a visible browser window. Use only when live viewing is intended."),
   Flag.withDefault(false),
 );
 
-const noVideoFlag = Flag.boolean("no-video").pipe(
+const noVideoFlag = Flag.Boolean("no-video").pipe(
   Flag.withDescription("Disable Playwright video recording."),
   Flag.withDefault(false),
 );
 
-const jsonFlag = Flag.boolean("json").pipe(
+const jsonFlag = Flag.Boolean("json").pipe(
   Flag.withDescription("Print the full harness result as JSON."),
   Flag.withDefault(false),
 );
@@ -211,68 +211,72 @@ const runBrowserCommand = (flags: BrowserCommandFlags) =>
 
 const browserCommand = Command.make("browser", {
   ...browserCommandServerFlags,
-  url: Argument.string("url").pipe(Argument.withDescription("URL to open and test.")),
+  url: Argument.String("url").pipe(Argument.withDescription("URL to open and test.")),
   browser: browserFlag,
   headless: headlessFlag,
   visible: visibleFlag,
   noVideo: noVideoFlag,
   json: jsonFlag,
-  goal: Flag.string("goal").pipe(Flag.withDescription("Human-readable test goal."), Flag.optional),
-  script: Flag.string("script").pipe(
+  goal: Flag.String("goal").pipe(Flag.withDescription("Human-readable test goal."), Flag.optional),
+  script: Flag.String("script").pipe(
     Flag.withDescription(
       "Optional JS/MJS script exporting default async ({ page, context, step, screenshot }) => {}.",
     ),
     Flag.optional,
   ),
-  actions: Flag.string("actions").pipe(
+  actions: Flag.String("actions").pipe(
     Flag.withDescription("Optional JSON file containing ordered TestHarnessAction objects."),
     Flag.optional,
   ),
-  artifactsDir: Flag.string("artifacts-dir").pipe(
+  artifactsDir: Flag.String("artifacts-dir").pipe(
     Flag.withDescription("Artifact root directory. Defaults to KamiCode app data."),
     Flag.optional,
   ),
-  storageState: Flag.string("storage-state").pipe(
+  storageState: Flag.String("storage-state").pipe(
     Flag.withDescription(
       "Path to Playwright storage state. Defaults to KamiCode app data per project.",
     ),
     Flag.optional,
   ),
-  projectId: Flag.string("project-id").pipe(
+  projectId: Flag.String("project-id").pipe(
     Flag.withDescription("Stable project key for storage state and artifacts."),
     Flag.optional,
   ),
-  environmentId: Flag.string("environment-id").pipe(
+  environmentId: Flag.String("environment-id").pipe(
     Flag.withDescription("Project test environment id. Defaults to default."),
     Flag.optional,
   ),
-  auth: Flag.choice("auth", ["kamicode-pairing"]).pipe(
+  auth: Flag.Literals("auth", ["kamicode-pairing"]).pipe(
     Flag.withDescription("Optional auth flow to run before testing, for example kamicode-pairing."),
     Flag.optional,
   ),
-  authCredential: Flag.string("auth-credential").pipe(
+  authCredential: Flag.String("auth-credential").pipe(
     Flag.withDescription("Credential for the selected auth flow. Avoid committing or logging it."),
     Flag.optional,
   ),
-  authExpectation: Flag.choice("auth-expectation", ["unknown", "anonymous", "authenticated"]).pipe(
+  authExpectation: Flag.Literals("auth-expectation", [
+    "unknown",
+    "anonymous",
+    "authenticated",
+  ]).pipe(
     Flag.withDescription(
       "Expected auth state for the target. Authenticated runs that land on login/auth are blocked.",
     ),
     Flag.optional,
   ),
-  timeoutMs: Flag.integer("timeout-ms").pipe(
+  timeoutMs: Flag.Int("timeout-ms").pipe(
     Flag.withDescription("Default Playwright timeout in milliseconds."),
     Flag.withDefault(30_000),
   ),
-  lingerMs: Flag.integer("linger-ms").pipe(
+  lingerMs: Flag.Int("linger-ms").pipe(
     Flag.withDescription("Keep the browser open after the run for this many milliseconds."),
     Flag.withDefault(0),
   ),
-  viewportWidth: Flag.integer("viewport-width").pipe(
+  viewportWidth: Flag.Int("viewport-width").pipe(
     Flag.withDescription("Browser viewport width."),
     Flag.withDefault(1440),
   ),
-  viewportHeight: Flag.integer("viewport-height").pipe(
+  viewportHeight: Flag.Int("viewport-height").pipe(
     Flag.withDescription("Browser viewport height."),
     Flag.withDefault(960),
   ),

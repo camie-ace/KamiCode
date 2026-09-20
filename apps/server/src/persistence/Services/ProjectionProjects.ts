@@ -67,19 +67,11 @@ export interface ProjectionProjectRepositoryShape {
     input: GetProjectionProjectInput,
   ) => Effect.Effect<Option.Option<ProjectionProject>, ProjectionRepositoryError>;
 
-  /**
-   * List all projected project rows.
-   *
-   * Returned in deterministic creation order.
-   */
   readonly listAll: () => Effect.Effect<
     ReadonlyArray<ProjectionProject>,
     ProjectionRepositoryError
   >;
 
-  /**
-   * Soft-delete a projected project row by id.
-   */
   readonly deleteById: (
     input: DeleteProjectionProjectInput,
   ) => Effect.Effect<void, ProjectionRepositoryError>;

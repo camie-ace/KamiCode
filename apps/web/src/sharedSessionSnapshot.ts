@@ -63,35 +63,51 @@ export async function loadThreadDetailForSharing(threadRef: ScopedThreadRef): Pr
 }
 
 export function toSharedThreadMessages(thread: Thread): SharedThreadMessage[] {
-  return thread.messages.map((message) => ({
-    id: message.id as unknown as SharedThreadMessage["id"],
-    role: message.role,
-    text: message.text,
-    authorGithubLogin: null,
-    createdAt: message.createdAt as SharedThreadMessage["createdAt"],
-  }));
+  return thread.messages
+    .filter(
+      (
+        message,
+      ): message is typeof message & {
+        readonly role: "assistant" | "system" | "user";
+      } => message.role !== "reasoning",
+    )
+    .map((message) => ({
+      id: message.id as unknown as SharedThreadMessage["id"],
+      role: message.role,
+      text: message.text,
+      authorGithubLogin: null,
+      createdAt: message.createdAt as SharedThreadMessage["createdAt"],
+    }));
 }
 
 function toSharedSessionSnapshotMessages(thread: Thread): SharedSessionSnapshotMessage[] {
-  return thread.messages.map((message) => ({
-    id: message.id as unknown as SharedSessionSnapshotMessage["id"],
-    role: message.role,
-    text: message.text,
-    authorGithubLogin: null,
-    turnId:
-      message.turnId === null || message.turnId === undefined
-        ? null
-        : (message.turnId as unknown as SharedSessionSnapshotMessage["turnId"]),
-    createdAt: message.createdAt as SharedSessionSnapshotMessage["createdAt"],
-    completedAt: null,
-    attachments: (message.attachments ?? []).map((attachment) => ({
-      id: attachment.id as SharedSessionSnapshotMessage["attachments"][number]["id"],
-      type: attachment.type,
-      name: attachment.name,
-      mimeType: attachment.mimeType,
-      sizeBytes: attachment.sizeBytes,
-    })),
-  }));
+  return thread.messages
+    .filter(
+      (
+        message,
+      ): message is typeof message & {
+        readonly role: "assistant" | "system" | "user";
+      } => message.role !== "reasoning",
+    )
+    .map((message) => ({
+      id: message.id as unknown as SharedSessionSnapshotMessage["id"],
+      role: message.role,
+      text: message.text,
+      authorGithubLogin: null,
+      turnId:
+        message.turnId === null || message.turnId === undefined
+          ? null
+          : (message.turnId as unknown as SharedSessionSnapshotMessage["turnId"]),
+      createdAt: message.createdAt as SharedSessionSnapshotMessage["createdAt"],
+      completedAt: null,
+      attachments: (message.attachments ?? []).map((attachment) => ({
+        id: attachment.id as SharedSessionSnapshotMessage["attachments"][number]["id"],
+        type: attachment.type,
+        name: attachment.name,
+        mimeType: attachment.mimeType,
+        sizeBytes: attachment.sizeBytes,
+      })),
+    }));
 }
 
 export function toSharedSessionSnapshot(

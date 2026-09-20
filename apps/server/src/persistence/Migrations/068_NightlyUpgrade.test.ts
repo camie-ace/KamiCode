@@ -6,7 +6,7 @@ import { runMigrations } from "../Migrations.ts";
 
 it.layer(NodeSqliteClient.layerMemory())("KamiCode nightly database upgrade", (it) => {
   it.effect(
-    "appends context, title, and thread-lock migrations after KamiCode's existing 66 migrations",
+    "appends context, title, thread-lock, and pull-request-view migrations after KamiCode's existing 66 migrations",
     () =>
       Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient;
@@ -24,7 +24,7 @@ it.layer(NodeSqliteClient.layerMemory())("KamiCode nightly database upgrade", (i
         assert.deepEqual(after.slice(0, 66), before);
         assert.deepEqual(
           after.slice(66).map((entry) => entry.migration_id),
-          [67, 68, 69],
+          [67, 68, 69, 70],
         );
         const messages = yield* sql<{
           readonly name: string;

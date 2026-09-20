@@ -32,7 +32,6 @@ import {
   usePreviewMiniPlayerStore,
 } from "../previewMiniPlayerStore";
 import {
-  MAX_HIDDEN_MOUNTED_PREVIEW_THREADS,
   MAX_HIDDEN_MOUNTED_TERMINAL_THREADS,
   agentControlledBrowserCloseConfirmation,
   branchMismatchKey,
@@ -53,7 +52,6 @@ import {
   isBranchMismatchDismissedForSession,
   isPendingQueuedTurn,
   reconcileMountedTerminalThreadIds,
-  reconcileRetainedMountedThreadIds,
   resolveMediaFollowUpReferences,
   recallCheckoutIsRepo,
   rememberCheckoutIsRepo,
@@ -391,29 +389,35 @@ describe("proactive panels", () => {
     ).toBe(false);
   });
 
-  it("opens a completed turn diff only for changed files", () => {
-    const changedCheckpoint = {
-      status: "ready",
-      files: [{ path: "src/app.ts", kind: "modified", additions: 1, deletions: 0 }],
-    } satisfies Pick<TurnDiffSummary, "status" | "files">;
-    const unchangedCheckpoint = {
-      status: "ready",
-      files: [],
-    } satisfies Pick<TurnDiffSummary, "status" | "files">;
+  it.each([
+    { files: 0, additions: 0, deletions: 0, action: "ignore" },
+    { files: 1, additions: 1, deletions: 0, action: "ignore" },
+    { files: 2, additions: 12, deletions: 12, action: "ignore" },
+    { files: 1, additions: 25, deletions: 24, action: "ignore" },
+    { files: 1, additions: 25, deletions: 25, action: "open" },
+    { files: 1, additions: 0, deletions: 50, action: "open" },
+    { files: 3, additions: 1, deletions: 0, action: "open" },
+  ])(
+    "uses change size for automatic diffs: $files files, +$additions/-$deletions",
+    ({ files, additions, deletions, action }) => {
+      const changedCheckpoint = {
+        status: "ready",
+        files: Array.from({ length: files }, (_, index) => ({
+          path: `src/app-${index}.ts`,
+          kind: "modified" as const,
+          additions,
+          deletions,
+        })),
+      } satisfies Pick<TurnDiffSummary, "status" | "files">;
 
-    expect(
-      resolveProactiveTurnDiffAction({
-        checkpoint: changedCheckpoint,
-        isGitRepo: true,
-      }),
-    ).toBe("open");
-    expect(
-      resolveProactiveTurnDiffAction({
-        checkpoint: unchangedCheckpoint,
-        isGitRepo: true,
-      }),
-    ).toBe("ignore");
-  });
+      expect(
+        resolveProactiveTurnDiffAction({
+          checkpoint: changedCheckpoint,
+          isGitRepo: true,
+        }),
+      ).toBe(action);
+    },
+  );
 
   it("waits for definitive checkpoint and repository state", () => {
     const missingCheckpoint = {
@@ -633,7 +637,7 @@ describe("draft hero submission transition", () => {
       resolveDraftHeroState({
         isLocalDraftThread: false,
         hasTimelineEntries: true,
-        isWorking: true,
+        isWorking: false,
         draftHeroDockRequested: false,
         backgroundSubmissionPending: true,
       }),
@@ -2022,50 +2026,6 @@ describe("reconcileMountedTerminalThreadIds", () => {
   });
 });
 
-describe("reconcileRetainedMountedThreadIds", () => {
-  it("retains hidden open threads and adds the active open thread", () => {
-    expect(
-      reconcileRetainedMountedThreadIds({
-        currentThreadIds: [ThreadId.make("thread-hidden")],
-        openThreadIds: [ThreadId.make("thread-hidden")],
-        activeThreadId: ThreadId.make("thread-active"),
-        activeThreadOpen: true,
-        maxHiddenThreadCount: MAX_HIDDEN_MOUNTED_PREVIEW_THREADS,
-      }),
-    ).toEqual([ThreadId.make("thread-hidden"), ThreadId.make("thread-active")]);
-  });
-
-  it("can retain the active thread as hidden when it is inactive", () => {
-    expect(
-      reconcileRetainedMountedThreadIds({
-        currentThreadIds: [ThreadId.make("thread-active")],
-        openThreadIds: [ThreadId.make("thread-active")],
-        activeThreadId: ThreadId.make("thread-active"),
-        activeThreadOpen: false,
-        maxHiddenThreadCount: MAX_HIDDEN_MOUNTED_PREVIEW_THREADS,
-        retainInactiveActiveThread: true,
-      }),
-    ).toEqual([ThreadId.make("thread-active")]);
-  });
-
-  it("evicts the oldest hidden threads beyond the configured cap", () => {
-    const currentThreadIds = Array.from(
-      { length: MAX_HIDDEN_MOUNTED_PREVIEW_THREADS + 2 },
-      (_, index) => ThreadId.make(`thread-${index + 1}`),
-    );
-
-    expect(
-      reconcileRetainedMountedThreadIds({
-        currentThreadIds,
-        openThreadIds: currentThreadIds,
-        activeThreadId: null,
-        activeThreadOpen: false,
-        maxHiddenThreadCount: MAX_HIDDEN_MOUNTED_PREVIEW_THREADS,
-      }),
-    ).toEqual(currentThreadIds.slice(-MAX_HIDDEN_MOUNTED_PREVIEW_THREADS));
-  });
-});
-
 describe("shouldWriteThreadErrorToCurrentServerThread", () => {
   it("writes errors for a shell-derived active server thread", () => {
     const routeThreadRef = { environmentId, threadId };
@@ -2638,7 +2598,7 @@ describe("worktree setup visibility", () => {
         live: base,
         recorded: null,
         turnStarted: false,
-        isWorking: true,
+        followUpSent: false,
       }),
     ).toEqual(base);
     expect(
@@ -2646,7 +2606,7 @@ describe("worktree setup visibility", () => {
         live: null,
         recorded: settledDone,
         turnStarted: false,
-        isWorking: true,
+        followUpSent: false,
       }),
     ).toEqual(settledDone);
     expect(
@@ -2654,7 +2614,7 @@ describe("worktree setup visibility", () => {
         live: null,
         recorded: settledDone,
         turnStarted: true,
-        isWorking: true,
+        followUpSent: false,
       }),
     ).toBeNull();
   });
@@ -2669,7 +2629,7 @@ describe("worktree setup visibility", () => {
         live: null,
         recorded: scriptFailed,
         turnStarted: true,
-        isWorking: true,
+        followUpSent: false,
       }),
     ).toEqual(scriptFailed);
     expect(
@@ -2677,7 +2637,7 @@ describe("worktree setup visibility", () => {
         live: null,
         recorded: scriptFailed,
         turnStarted: true,
-        isWorking: false,
+        followUpSent: true,
       }),
     ).toBeNull();
     const failed = { ...settledDone, phase: "failed" as const, error: "git exploded" };
@@ -2686,7 +2646,7 @@ describe("worktree setup visibility", () => {
         live: null,
         recorded: failed,
         turnStarted: true,
-        isWorking: false,
+        followUpSent: false,
       }),
     ).toEqual(failed);
   });
@@ -2697,7 +2657,7 @@ describe("worktree setup visibility", () => {
         live: { ...base, sequence: 3 },
         recorded: { ...settledDone, sequence: 7 },
         turnStarted: false,
-        isWorking: false,
+        followUpSent: false,
       }),
     ).toEqual({ ...settledDone, sequence: 7 });
     expect(
@@ -2705,7 +2665,7 @@ describe("worktree setup visibility", () => {
         live: { ...settledDone, sequence: 9 },
         recorded: { ...base, sequence: 1 },
         turnStarted: false,
-        isWorking: false,
+        followUpSent: false,
       }),
     ).toEqual({ ...settledDone, sequence: 9 });
     expect(
@@ -2713,7 +2673,7 @@ describe("worktree setup visibility", () => {
         live: base,
         recorded: null,
         turnStarted: false,
-        isWorking: false,
+        followUpSent: false,
       }),
     ).toEqual(base);
   });

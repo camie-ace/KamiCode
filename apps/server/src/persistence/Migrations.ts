@@ -81,6 +81,7 @@ import Migration0066 from "./Migrations/066_ThreadTargetedProjectTriggers.ts";
 import Migration0067 from "./Migrations/051_ProjectionThreadMessageContext.ts";
 import Migration0068 from "./Migrations/052_ProjectionThreadTitleState.ts";
 import Migration0069 from "./Migrations/069_ProjectionThreadsLocked.ts";
+import Migration0070 from "./Migrations/053_PullRequestFilesViewed.ts";
 
 /**
  * Migration loader with all migrations defined inline.
@@ -170,6 +171,8 @@ const migrationEntries = [
   [67, "ProjectionThreadMessageContext", Migration0067],
   [68, "ProjectionThreadTitleState", Migration0068],
   [69, "ProjectionThreadsLocked", Migration0069],
+  // Upstream added migration 53 after the fork had already claimed that id.
+  [70, "PullRequestFilesViewed", Migration0070],
 ] as const;
 
 export const migrationManifest = migrationEntries.map(([id, name]) => [id, name] as const);

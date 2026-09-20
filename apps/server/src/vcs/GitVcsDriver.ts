@@ -502,6 +502,8 @@ export class GitVcsDriver extends Context.Service<
 >()("t3/vcs/GitVcsDriver") {}
 
 const WORKSPACE_FILES_MAX_OUTPUT_BYTES = 16 * 1024 * 1024;
+const CHECKPOINT_RECOVERY_MAX_CANDIDATES = 64;
+const CHECKPOINT_RECOVERY_TIMEOUT = "5 seconds";
 const GIT_CHECK_IGNORE_MAX_STDIN_BYTES = 256 * 1024;
 const CHECKPOINT_DIFF_MAX_OUTPUT_BYTES = 10_000_000;
 const WORKSPACE_GIT_HARDENED_CONFIG_ARGS = [
@@ -843,12 +845,13 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
       }),
     );
 
-  const hasHeadCommit = (cwd: string) =>
+  const hasHeadCommit = (cwd: string, env?: NodeJS.ProcessEnv) =>
     execute({
       operation: "GitVcsDriver.checkpoints.hasHeadCommit",
       cwd,
       args: ["rev-parse", "--verify", "HEAD"],
       allowNonZeroExit: true,
+      ...(env !== undefined ? { env } : {}),
     }).pipe(Effect.map((result) => result.exitCode === 0));
 
   const resolveCheckpointCommit = (cwd: string, checkpointRef: string) =>
@@ -890,6 +893,15 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
         return created;
       }),
     );
+
+  // Make checkpoint objects and refs durable before publication. This avoids
+  // zero-byte refs after an unclean restart on filesystems with lazy writeout.
+  const durableWrite = [
+    "-c",
+    "core.fsync=objects,reference",
+    "-c",
+    "core.fsyncMethod=fsync",
+  ] as const;
 
   const checkpoints: VcsDriver.VcsCheckpointOps = {
     assessCapture: Effect.fn("GitVcsDriver.checkpoints.assessCapture")(function* (input) {
@@ -955,7 +967,13 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
     }),
 
     captureCheckpoint: Effect.fn("GitVcsDriver.checkpoints.captureCheckpoint")(function* (input) {
-      const operation = "GitVcsDriver.checkpoints.captureCheckpoint";
+      const operation = VcsProcess.CHECKPOINT_CAPTURE_OPERATION;
+      const indexConfig = [
+        "-c",
+        "core.fsmonitor=false",
+        "-c",
+        "sparse.expectFilesOutsideOfPatterns=false",
+      ];
       const gitCommonDir = yield* resolveGitCommonDir(input.cwd);
       const checkpointLock = yield* checkpointLockFor(gitCommonDir);
 
@@ -1046,14 +1064,14 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
             yield* execute({
               operation: `${operation}.stageWorkspace`,
               cwd: input.cwd,
-              args: ["add", "-A", "--", "."],
+              args: [...durableWrite, "add", "-A", "--", "."],
               env: stagingEnv,
             });
 
             const writeTreeResult = yield* execute({
               operation: `${operation}.writeTree`,
               cwd: input.cwd,
-              args: ["write-tree"],
+              args: [...durableWrite, "write-tree"],
               env: stagingEnv,
             });
             const treeOid = writeTreeResult.stdout.trim();
@@ -1071,7 +1089,7 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
             const commitTreeResult = yield* execute({
               operation: `${operation}.commitTree`,
               cwd: input.cwd,
-              args: ["commit-tree", treeOid, "-m", message],
+              args: [...durableWrite, "commit-tree", treeOid, "-m", message],
               env: stagingEnv,
             });
             const commitOid = commitTreeResult.stdout.trim();
@@ -1088,7 +1106,7 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
             yield* execute({
               operation: `${operation}.recordQuarantineRef`,
               cwd: input.cwd,
-              args: ["update-ref", quarantineRef, commitOid],
+              args: [...durableWrite, "update-ref", quarantineRef, commitOid],
               env: {
                 ...stagingEnv,
                 GIT_DIR: quarantineDir,

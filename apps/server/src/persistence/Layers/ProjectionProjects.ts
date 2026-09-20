@@ -30,7 +30,6 @@ const ProjectionProjectDbRow = ProjectionProject.mapFields(
     testEnvironments: Schema.fromJsonString(Schema.Array(ProjectTestEnvironment)),
   }),
 );
-type ProjectionProjectDbRow = typeof ProjectionProjectDbRow.Type;
 
 const makeProjectionProjectRepository = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;

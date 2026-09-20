@@ -13,7 +13,7 @@ import { isProcessAlive, readPersistedServerRuntimeState } from "../serverRuntim
 import { compactDatabaseOffline, inspectDatabaseStorage } from "../storage/DatabaseCompaction.ts";
 import { baseDirFlag } from "./config.ts";
 
-const applyFlag = Flag.boolean("apply").pipe(
+const applyFlag = Flag.Boolean("apply").pipe(
   Flag.withDefault(false),
   Flag.withDescription(
     "Build, verify, and atomically install a compact copy. The server must be stopped.",

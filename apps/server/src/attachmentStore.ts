@@ -1,5 +1,6 @@
 // @effect-diagnostics nodeBuiltinImport:off
-import Mime from "@effect/platform-node/Mime";
+import * as Mime from "effect/unstable/http/Mime";
+import * as Option from "effect/Option";
 import { WORKSPACE_DOCUMENT_FILE_EXTENSIONS } from "@t3tools/shared/filePreview";
 import * as NodeCrypto from "node:crypto";
 import * as NodeFS from "node:fs";
@@ -133,7 +134,7 @@ function inferVideoExtension(input: { mimeType: string; fileName?: string }): st
     return fromMime;
   }
 
-  const fromMimeExtension = Mime.getExtension(input.mimeType);
+  const fromMimeExtension = Option.getOrUndefined(Mime.getExtension(input.mimeType));
   if (fromMimeExtension && SAFE_VIDEO_FILE_EXTENSIONS.has(fromMimeExtension)) {
     return fromMimeExtension;
   }
@@ -147,7 +148,7 @@ function inferVideoExtension(input: { mimeType: string; fileName?: string }): st
 }
 
 function inferGenericFileExtension(input: { mimeType: string; fileName?: string }): string {
-  const fromMimeExtension = Mime.getExtension(input.mimeType);
+  const fromMimeExtension = Option.getOrUndefined(Mime.getExtension(input.mimeType));
   if (fromMimeExtension && SAFE_GENERIC_FILE_EXTENSIONS.has(fromMimeExtension)) {
     return fromMimeExtension;
   }

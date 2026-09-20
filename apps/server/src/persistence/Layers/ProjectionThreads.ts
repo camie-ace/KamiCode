@@ -32,7 +32,6 @@ const ProjectionThreadDbRow = ProjectionThread.mapFields(
     locked: Schema.Number,
   }),
 );
-type ProjectionThreadDbRow = typeof ProjectionThreadDbRow.Type;
 
 const makeProjectionThreadRepository = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
