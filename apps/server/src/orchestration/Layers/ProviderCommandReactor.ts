@@ -764,16 +764,6 @@ const make = Effect.gen(function* () {
           detail: `Thread '${threadId}' is bound to driver '${currentInfo.driverKind}' and cannot switch to '${desiredInfo.driverKind}'.`,
         });
       }
-      if (
-        currentInfo.continuationIdentity.continuationKey !==
-        desiredInfo.continuationIdentity.continuationKey
-      ) {
-        return yield* new ProviderAdapterRequestError({
-          provider: preferredProvider,
-          method: "thread.turn.start",
-          detail: `Thread '${threadId}' cannot switch from instance '${currentInstanceId}' to '${desiredInstanceId}' because their provider resume state is incompatible.`,
-        });
-      }
     }
     const providerResumeStateCompatible =
       currentInfo.continuationIdentity.continuationKey ===
