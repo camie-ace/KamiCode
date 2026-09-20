@@ -1406,7 +1406,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           sessions.status,
           sessions.provider_name AS "providerName",
           sessions.provider_instance_id AS "providerInstanceId",
-          sessions.runtime_mode AS "runtimeMode",
+          sessions.runtime_mode AS "sessionRuntimeMode",
           sessions.active_turn_id AS "activeTurnId",
           sessions.last_error AS "lastError",
           sessions.updated_at AS "updatedAt"
@@ -1427,7 +1427,19 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
             modelSelection: row.modelSelection,
             runtimeMode: row.runtimeMode,
             interactionMode: row.interactionMode,
-            session: row.threadId === null ? null : row,
+            session:
+              row.threadId === null
+                ? null
+                : {
+                    threadId: row.threadId,
+                    status: row.status,
+                    providerName: row.providerName,
+                    providerInstanceId: row.providerInstanceId,
+                    runtimeMode: row.sessionRuntimeMode,
+                    activeTurnId: row.activeTurnId,
+                    lastError: row.lastError,
+                    updatedAt: row.updatedAt,
+                  },
           })),
         ),
       ),

@@ -1699,6 +1699,7 @@ it.layer(grokAdapterTestLayer)("GrokAdapterLive", (it) => {
       const runtimeEvents: ProviderRuntimeEvent[] = [];
       const activeTurnIdRef = yield* Ref.make<TurnId | undefined>(undefined);
       const trailingChunkTurnId = yield* Deferred.make<TurnId>();
+      let receivedText = "";
       const runtimeEventsFiber = yield* Stream.runForEach(adapter.streamEvents, (event) =>
         Effect.gen(function* () {
           runtimeEvents.push(event);
@@ -1708,7 +1709,11 @@ it.layer(grokAdapterTestLayer)("GrokAdapterLive", (it) => {
           if (event.type === "turn.started") {
             yield* Ref.set(activeTurnIdRef, event.turnId);
           }
-          if (event.type !== "content.delta" || event.payload.delta !== "mock") {
+          if (event.type !== "content.delta") {
+            return;
+          }
+          receivedText += event.payload.delta;
+          if (receivedText !== "hello from mock") {
             return;
           }
           const turnId = event.turnId ?? (yield* Ref.get(activeTurnIdRef));

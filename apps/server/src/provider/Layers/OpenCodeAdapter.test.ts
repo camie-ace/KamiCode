@@ -1720,10 +1720,18 @@ it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
       });
       NodeAssert.equal(runtimeMock.state.commandCalls.length, 0);
       const prompt = runtimeMock.state.promptCalls[0] as { parts: unknown; system: string };
-      NodeAssert.deepEqual(prompt.parts, [{ type: "text", text: "/unknown explain this" }]);
+      const promptParts = prompt.parts as ReadonlyArray<{ type: string; text: string }>;
+      NodeAssert.equal(promptParts.length, 1);
+      NodeAssert.equal(promptParts[0]?.type, "text");
+      NodeAssert.match(
+        promptParts[0]?.text ?? "",
+        /Current user request:\n\/unknown explain this$/,
+      );
       NodeAssert.equal(
         prompt.system,
-        buildRuntimeInstructions({ harness: "OpenCode", model: "openai/gpt-5" }),
+        appendRepositoryOperatingContract(
+          buildRuntimeInstructions({ harness: "OpenCode", model: "openai/gpt-5" }),
+        ),
       );
       yield* adapter.stopSession(threadId);
     }),

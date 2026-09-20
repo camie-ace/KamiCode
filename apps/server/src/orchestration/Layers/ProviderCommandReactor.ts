@@ -135,6 +135,11 @@ const HANDLED_TURN_START_KEY_MAX = 10_000;
 const HANDLED_TURN_START_KEY_TTL = Duration.minutes(30);
 const DEFAULT_RUNTIME_MODE: RuntimeMode = "full-access";
 
+function isProviderWaterfallTurnStart(commandId: CommandId | null): boolean {
+  const value = commandId === null ? "" : String(commandId);
+  return value.startsWith("provider:") && value.includes(":waterfall-turn-start:");
+}
+
 export function buildTestModeTurnInput(input: {
   readonly interactionMode?: ProviderInteractionMode;
   readonly messageText: string;
@@ -638,6 +643,7 @@ const make = Effect.gen(function* () {
       readonly modelSelection?: ModelSelection;
       readonly runtimeMode?: RuntimeMode;
       readonly interactionMode?: ProviderInteractionMode;
+      readonly allowCrossProviderHandoff?: boolean;
       readonly pendingTurnStart?: boolean;
     },
   ) {
@@ -744,6 +750,30 @@ const make = Effect.gen(function* () {
             : thread.modelSelection,
         requestedModelSelection,
       });
+    }
+    if (
+      thread.session !== null &&
+      requestedModelSelection !== undefined &&
+      requestedModelSelection.instanceId !== currentInstanceId &&
+      options?.allowCrossProviderHandoff !== true
+    ) {
+      if (currentInfo.driverKind !== desiredInfo.driverKind) {
+        return yield* new ProviderAdapterRequestError({
+          provider: preferredProvider,
+          method: "thread.turn.start",
+          detail: `Thread '${threadId}' is bound to driver '${currentInfo.driverKind}' and cannot switch to '${desiredInfo.driverKind}'.`,
+        });
+      }
+      if (
+        currentInfo.continuationIdentity.continuationKey !==
+        desiredInfo.continuationIdentity.continuationKey
+      ) {
+        return yield* new ProviderAdapterRequestError({
+          provider: preferredProvider,
+          method: "thread.turn.start",
+          detail: `Thread '${threadId}' cannot switch from instance '${currentInstanceId}' to '${desiredInstanceId}' because their provider resume state is incompatible.`,
+        });
+      }
     }
     const providerResumeStateCompatible =
       currentInfo.continuationIdentity.continuationKey ===
@@ -893,6 +923,7 @@ const make = Effect.gen(function* () {
     readonly modelSelection?: ModelSelection;
     readonly runtimeMode?: RuntimeMode;
     readonly interactionMode?: ProviderInteractionMode;
+    readonly allowCrossProviderHandoff?: boolean;
     readonly createdAt: string;
   }) {
     const thread = yield* resolveThreadShell(input.threadId);
@@ -904,7 +935,8 @@ const make = Effect.gen(function* () {
     let messageText = input.messageText;
     if (
       input.modelSelection !== undefined &&
-      input.modelSelection.instanceId !== thread.modelSelection.instanceId
+      input.modelSelection.instanceId !== thread.modelSelection.instanceId &&
+      input.allowCrossProviderHandoff === true
     ) {
       const currentInfo = yield* providerService.getInstanceInfo(thread.modelSelection.instanceId);
       const desiredInfo = yield* providerService.getInstanceInfo(input.modelSelection.instanceId);
@@ -938,6 +970,7 @@ const make = Effect.gen(function* () {
       ...(input.modelSelection !== undefined ? { modelSelection: input.modelSelection } : {}),
       ...(input.runtimeMode !== undefined ? { runtimeMode: input.runtimeMode } : {}),
       ...(input.interactionMode !== undefined ? { interactionMode: input.interactionMode } : {}),
+      ...(input.allowCrossProviderHandoff === true ? { allowCrossProviderHandoff: true } : {}),
       pendingTurnStart: true,
     });
     if (input.modelSelection !== undefined) {
@@ -1815,6 +1848,7 @@ const make = Effect.gen(function* () {
         : {}),
       runtimeMode: event.payload.runtimeMode,
       interactionMode: event.payload.interactionMode,
+      allowCrossProviderHandoff: isProviderWaterfallTurnStart(event.commandId),
       createdAt: event.payload.createdAt,
     }).pipe(
       Effect.map(Option.some),
