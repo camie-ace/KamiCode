@@ -768,6 +768,10 @@ const make = Effect.gen(function* () {
     const providerResumeStateCompatible =
       currentInfo.continuationIdentity.continuationKey ===
       desiredInfo.continuationIdentity.continuationKey;
+    const allowFreshInstanceHandoff =
+      requestedModelSelection !== undefined &&
+      requestedModelSelection.instanceId !== currentInstanceId &&
+      !providerResumeStateCompatible;
     const project = yield* resolveProject(thread.projectId);
     const effectiveCwd = resolveThreadWorkspaceCwd({
       thread,
@@ -791,6 +795,7 @@ const make = Effect.gen(function* () {
         ...(thread.title ? { title: thread.title } : {}),
         modelSelection: desiredModelSelection,
         ...(input?.resumeCursor !== undefined ? { resumeCursor: input.resumeCursor } : {}),
+        ...(allowFreshInstanceHandoff ? { allowFreshInstanceHandoff: true } : {}),
         runtimeMode: desiredRuntimeMode,
         interactionMode: desiredInteractionMode,
       });

@@ -474,7 +474,10 @@ function makeProviderServiceLayer(
   };
 }
 
-function makeCompatibleCodexHandoffFixture(input?: { readonly failReplacementStart?: boolean }) {
+function makeCodexHandoffFixture(input?: {
+  readonly failReplacementStart?: boolean;
+  readonly replacementContinuationKey?: string;
+}) {
   const replacementInstanceId = ProviderInstanceId.make("codex_work");
   const primary = makeFakeCodexAdapter();
   const replacement = makeFakeCodexAdapter();
@@ -493,7 +496,10 @@ function makeCompatibleCodexHandoffFixture(input?: { readonly failReplacementSta
   const replacementStartSession = vi.fn((startInput: ProviderSessionStartInput) =>
     Effect.gen(function* () {
       operations.push("replacement:start");
-      if (yield* primary.hasSession(startInput.threadId)) {
+      if (
+        startInput.resumeCursor !== undefined &&
+        (yield* primary.hasSession(startInput.threadId))
+      ) {
         return yield* new ProviderAdapterRequestError({
           provider: String(CODEX_DRIVER),
           method: "startSession",
@@ -539,7 +545,10 @@ function makeCompatibleCodexHandoffFixture(input?: { readonly failReplacementSta
             enabled: true,
             continuationIdentity: {
               driverKind: CODEX_DRIVER,
-              continuationKey: "codex:home:/shared",
+              continuationKey:
+                instanceId === replacementInstanceId
+                  ? (input?.replacementContinuationKey ?? "codex:home:/shared")
+                  : "codex:home:/shared",
             },
           })
         : Effect.fail(unsupported()),
@@ -1099,7 +1108,7 @@ it.effect("ProviderServiceLive rejects new sessions for disabled custom instance
 );
 
 it.effect("releases a compatible provider instance before resuming through another", () => {
-  const fixture = makeCompatibleCodexHandoffFixture();
+  const fixture = makeCodexHandoffFixture();
   return Effect.gen(function* () {
     const provider = yield* ProviderService.ProviderService;
     const directory = yield* ProviderSessionDirectory.ProviderSessionDirectory;
@@ -1137,7 +1146,7 @@ it.effect("releases a compatible provider instance before resuming through anoth
 });
 
 it.effect("restores the original provider instance when a compatible handoff fails", () => {
-  const fixture = makeCompatibleCodexHandoffFixture({ failReplacementStart: true });
+  const fixture = makeCodexHandoffFixture({ failReplacementStart: true });
   return Effect.gen(function* () {
     const provider = yield* ProviderService.ProviderService;
     const directory = yield* ProviderSessionDirectory.ProviderSessionDirectory;
@@ -1175,6 +1184,105 @@ it.effect("restores the original provider instance when a compatible handoff fai
     const binding = Option.getOrUndefined(yield* directory.getBinding(threadId));
     assert.equal(binding?.providerInstanceId, codexInstanceId);
     assert.equal(binding?.status, "running");
+  }).pipe(Effect.provide(fixture.layer));
+});
+
+for (const stopBeforeSwitch of [false, true] as const) {
+  it.effect(
+    `starts fresh on an incompatible same-driver instance when the previous session is ${stopBeforeSwitch ? "stopped" : "active"}`,
+    () => {
+      const fixture = makeCodexHandoffFixture({
+        replacementContinuationKey: "codex:home:/replacement",
+      });
+      return Effect.gen(function* () {
+        const provider = yield* ProviderService.ProviderService;
+        const directory = yield* ProviderSessionDirectory.ProviderSessionDirectory;
+        const threadId = asThreadId(
+          `thread-incompatible-instance-handoff-${stopBeforeSwitch ? "stopped" : "active"}`,
+        );
+        const cwd = fixtureCwd(
+          `incompatible-instance-handoff-${stopBeforeSwitch ? "stopped" : "active"}`,
+        );
+        yield* provider.startSession(threadId, {
+          provider: CODEX_DRIVER,
+          providerInstanceId: codexInstanceId,
+          threadId,
+          cwd,
+          runtimeMode: "full-access",
+        });
+        if (stopBeforeSwitch) {
+          yield* provider.stopSession({ threadId });
+        }
+        fixture.operations.length = 0;
+
+        const started = yield* provider.startSession(threadId, {
+          provider: CODEX_DRIVER,
+          providerInstanceId: fixture.replacementInstanceId,
+          threadId,
+          cwd,
+          allowFreshInstanceHandoff: true,
+          runtimeMode: "full-access",
+        });
+
+        assert.equal(started.providerInstanceId, fixture.replacementInstanceId);
+        assert.equal(yield* fixture.primary.hasSession(threadId), false);
+        assert.equal(yield* fixture.replacement.hasSession(threadId), true);
+        assert.deepEqual(
+          fixture.operations,
+          stopBeforeSwitch ? ["replacement:start"] : ["replacement:start", "primary:stop"],
+        );
+        assert.equal(
+          Object.hasOwn(fixture.replacementStartSession.mock.calls[0]?.[0] ?? {}, "resumeCursor"),
+          false,
+        );
+        assert.equal(
+          Object.hasOwn(
+            fixture.replacementStartSession.mock.calls[0]?.[0] ?? {},
+            "allowFreshInstanceHandoff",
+          ),
+          false,
+        );
+        const binding = Option.getOrUndefined(yield* directory.getBinding(threadId));
+        assert.equal(binding?.providerInstanceId, fixture.replacementInstanceId);
+      }).pipe(Effect.provide(fixture.layer));
+    },
+  );
+}
+
+it.effect("rejects an explicit resume cursor from an incompatible same-driver instance", () => {
+  const fixture = makeCodexHandoffFixture({
+    replacementContinuationKey: "codex:home:/replacement",
+  });
+  return Effect.gen(function* () {
+    const provider = yield* ProviderService.ProviderService;
+    const threadId = asThreadId("thread-incompatible-explicit-resume");
+    const cwd = fixtureCwd("incompatible-explicit-resume");
+    const initial = yield* provider.startSession(threadId, {
+      provider: CODEX_DRIVER,
+      providerInstanceId: codexInstanceId,
+      threadId,
+      cwd,
+      runtimeMode: "full-access",
+    });
+    fixture.operations.length = 0;
+
+    const failure = yield* provider
+      .startSession(threadId, {
+        provider: CODEX_DRIVER,
+        providerInstanceId: fixture.replacementInstanceId,
+        threadId,
+        cwd,
+        resumeCursor: initial.resumeCursor,
+        allowFreshInstanceHandoff: true,
+        runtimeMode: "full-access",
+      })
+      .pipe(Effect.flip);
+
+    assert.instanceOf(failure, ProviderValidationError);
+    assert.include(failure.issue, "provider resume state is incompatible");
+    assert.deepEqual(fixture.operations, []);
+    assert.equal(yield* fixture.primary.hasSession(threadId), true);
+    assert.equal(yield* fixture.replacement.hasSession(threadId), false);
   }).pipe(Effect.provide(fixture.layer));
 });
 

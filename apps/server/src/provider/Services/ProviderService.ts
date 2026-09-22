@@ -35,6 +35,12 @@ import type { ProviderServiceError } from "../Errors.ts";
 import type { ProviderAdapterCapabilities } from "./ProviderAdapter.ts";
 import type { ProviderInstanceRoutingInfo } from "./ProviderAdapterRegistry.ts";
 
+export interface ProviderServiceSessionStartInput extends ProviderSessionStartInput {
+  /** Internal orchestration signal: intentionally discard persisted native
+      resume state while moving this thread to another provider instance. */
+  readonly allowFreshInstanceHandoff?: boolean;
+}
+
 /**
  * ProviderServiceShape - Service API for provider session and turn orchestration.
  */
@@ -44,7 +50,7 @@ export interface ProviderServiceShape {
    */
   readonly startSession: (
     threadId: ThreadId,
-    input: ProviderSessionStartInput,
+    input: ProviderServiceSessionStartInput,
   ) => Effect.Effect<ProviderSession, ProviderServiceError>;
 
   /**
