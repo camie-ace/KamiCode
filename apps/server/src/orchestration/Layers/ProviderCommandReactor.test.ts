@@ -3427,6 +3427,9 @@ describe("ProviderCommandReactor", () => {
       providerInstanceId: ProviderInstanceId.make("codex_work"),
       resumeCursor: { opaque: "resume-1" },
     });
+    expect(
+      (harness.sendTurn.mock.calls[1]?.[0] as { input?: string } | undefined)?.input,
+    ).not.toContain("Conversation transcript");
 
     const readModel = await harness.readModel();
     const thread = readModel.threads.find((entry) => entry.id === ThreadId.make("thread-1"));
@@ -3495,6 +3498,11 @@ describe("ProviderCommandReactor", () => {
       allowFreshInstanceHandoff: true,
     });
     expect(harness.startSession.mock.calls[1]?.[1]).not.toHaveProperty("resumeCursor");
+    const handoffInput = (harness.sendTurn.mock.calls[1]?.[0] as { input?: string } | undefined)
+      ?.input;
+    expect(handoffInput).toContain("The user switched this thread to another provider account.");
+    expect(handoffInput).toContain("Conversation transcript:\nUser: first");
+    expect(handoffInput).toContain("Current user request:\nsecond");
 
     const readModel = await harness.readModel();
     const thread = readModel.threads.find((entry) => entry.id === ThreadId.make("thread-1"));

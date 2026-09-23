@@ -930,16 +930,27 @@ const make = Effect.gen(function* () {
       );
     }
     let messageText = input.messageText;
+    // Clients persist a manual selection before the turn starts, so the bound
+    // session instance is the one whose native history the new profile lacks.
+    const previousInstanceId =
+      thread.session?.providerInstanceId ?? thread.modelSelection.instanceId;
     if (
       input.modelSelection !== undefined &&
-      input.modelSelection.instanceId !== thread.modelSelection.instanceId &&
-      input.allowCrossProviderHandoff === true
+      input.modelSelection.instanceId !== previousInstanceId
     ) {
-      const currentInfo = yield* providerService.getInstanceInfo(thread.modelSelection.instanceId);
-      const desiredInfo = yield* providerService.getInstanceInfo(input.modelSelection.instanceId);
+      const currentInfo = yield* providerService
+        .getInstanceInfo(previousInstanceId)
+        .pipe(Effect.option);
+      const desiredInfo = yield* providerService
+        .getInstanceInfo(input.modelSelection.instanceId)
+        .pipe(Effect.option);
       if (
-        currentInfo.continuationIdentity.continuationKey !==
-        desiredInfo.continuationIdentity.continuationKey
+        Option.isSome(currentInfo) &&
+        Option.isSome(desiredInfo) &&
+        (input.allowCrossProviderHandoff === true ||
+          currentInfo.value.driverKind === desiredInfo.value.driverKind) &&
+        currentInfo.value.continuationIdentity.continuationKey !==
+          desiredInfo.value.continuationIdentity.continuationKey
       ) {
         const detail = yield* resolveThreadDetail(input.threadId);
         const conversation = (detail?.messages ?? []).filter(
@@ -967,7 +978,11 @@ const make = Effect.gen(function* () {
           .join("\n\n")
           .slice(-60_000);
         messageText = [
-          "Continue this existing KamiCode thread. The provider changed because the previous account reached its usage limit. Preserve the conversation's intent and continue naturally; do not restart the task or mention this handoff unless it matters.",
+          `Continue this existing KamiCode thread. ${
+            input.allowCrossProviderHandoff === true
+              ? "The provider changed because the previous account reached its usage limit."
+              : "The user switched this thread to another provider account."
+          } Preserve the conversation's intent and continue naturally; do not restart the task or mention this handoff unless it matters.`,
           transcript ? `Conversation transcript:\n${transcript}` : "",
           `Current user request:\n${input.messageText}`,
           partialReply
