@@ -1322,6 +1322,14 @@ export const OrchestrationProjectShell = Schema.Struct({
 });
 export type OrchestrationProjectShell = typeof OrchestrationProjectShell.Type;
 
+export const OrchestrationThreadCreator = Schema.Struct({
+  userId: KamiUser.fields.userId,
+  githubLogin: KamiUser.fields.githubLogin,
+  displayName: KamiUser.fields.displayName,
+  avatarUrl: KamiUser.fields.avatarUrl,
+});
+export type OrchestrationThreadCreator = typeof OrchestrationThreadCreator.Type;
+
 export const OrchestrationThreadShell = Schema.Struct({
   id: ThreadId,
   projectId: ProjectId,
@@ -1344,6 +1352,10 @@ export const OrchestrationThreadShell = Schema.Struct({
   branchPullRequest: Schema.optional(Schema.NullOr(ThreadLinkedPullRequest)),
   latestTurn: Schema.NullOr(OrchestrationLatestTurn),
   queuedTurnCount: Schema.optional(NonNegativeInt),
+  // Optional on the wire so clients remain compatible with servers that do
+  // not expose KC Web's GitHub-backed thread attribution yet. Historical
+  // threads created before attribution was enabled resolve to null.
+  createdBy: Schema.optionalKey(Schema.NullOr(OrchestrationThreadCreator)),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
   locked: Schema.optionalKey(Schema.Boolean),

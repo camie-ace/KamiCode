@@ -15,6 +15,7 @@ import {
   OrchestrationThreadSearchSource,
   OrchestrationShellSnapshot,
   OrchestrationThread,
+  OrchestrationThreadCreator,
   OrchestrationThreadDetailSnapshot,
   ProjectScript,
   ProjectIconOverride,
@@ -153,6 +154,13 @@ const ProjectionThreadActivityIdRowSchema = Schema.Struct({
   activityId: ProjectionThreadActivity.fields.activityId,
 });
 const ProjectionThreadSessionDbRowSchema = ProjectionThreadSession;
+const ProjectionThreadCreatorDbRowSchema = Schema.Struct({
+  threadId: ThreadId,
+  userId: OrchestrationThreadCreator.fields.userId,
+  githubLogin: OrchestrationThreadCreator.fields.githubLogin,
+  displayName: OrchestrationThreadCreator.fields.displayName,
+  avatarUrl: OrchestrationThreadCreator.fields.avatarUrl,
+});
 const ProjectionThreadRuntimeContextDbRowSchema = Schema.Struct({
   titleState: Schema.NullOr(Schema.fromJsonString(ThreadTitleState)),
   id: ThreadId,
@@ -448,6 +456,17 @@ function mapSessionRow(
   };
 }
 
+function mapThreadCreatorRow(
+  row: Schema.Schema.Type<typeof ProjectionThreadCreatorDbRowSchema>,
+): OrchestrationThreadCreator {
+  return {
+    userId: row.userId,
+    githubLogin: row.githubLogin,
+    displayName: row.displayName,
+    avatarUrl: row.avatarUrl,
+  };
+}
+
 function mapProjectShellRow(
   row: Schema.Schema.Type<typeof ProjectionProjectDbRowSchema>,
   repositoryIdentity: OrchestrationProject["repositoryIdentity"],
@@ -708,6 +727,46 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
         WHERE deleted_at IS NULL
           AND archived_at IS NULL
         ORDER BY project_id ASC, created_at ASC, thread_id ASC
+      `,
+  });
+
+  const listActiveThreadCreatorRows = SqlSchema.findAll({
+    Request: Schema.Void,
+    Result: ProjectionThreadCreatorDbRowSchema,
+    execute: () =>
+      sql`
+        SELECT
+          attribution.thread_id AS "threadId",
+          attribution.user_id AS "userId",
+          attribution.github_login AS "githubLogin",
+          attribution.display_name AS "displayName",
+          attribution.avatar_url AS "avatarUrl"
+        FROM user_thread_attribution attribution
+        INNER JOIN projection_threads threads
+          ON threads.thread_id = attribution.thread_id
+        WHERE threads.deleted_at IS NULL
+          AND threads.archived_at IS NULL
+        ORDER BY attribution.thread_id ASC
+      `,
+  });
+
+  const listArchivedThreadCreatorRows = SqlSchema.findAll({
+    Request: Schema.Void,
+    Result: ProjectionThreadCreatorDbRowSchema,
+    execute: () =>
+      sql`
+        SELECT
+          attribution.thread_id AS "threadId",
+          attribution.user_id AS "userId",
+          attribution.github_login AS "githubLogin",
+          attribution.display_name AS "displayName",
+          attribution.avatar_url AS "avatarUrl"
+        FROM user_thread_attribution attribution
+        INNER JOIN projection_threads threads
+          ON threads.thread_id = attribution.thread_id
+        WHERE threads.deleted_at IS NULL
+          AND threads.archived_at IS NOT NULL
+        ORDER BY attribution.thread_id ASC
       `,
   });
 
@@ -1385,6 +1444,23 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
         WHERE thread_id = ${threadId}
           AND deleted_at IS NULL
           AND archived_at IS NULL
+        LIMIT 1
+      `,
+  });
+
+  const getThreadCreatorRowByThread = SqlSchema.findOneOption({
+    Request: ThreadIdLookupInput,
+    Result: ProjectionThreadCreatorDbRowSchema,
+    execute: ({ threadId }) =>
+      sql`
+        SELECT
+          thread_id AS "threadId",
+          user_id AS "userId",
+          github_login AS "githubLogin",
+          display_name AS "displayName",
+          avatar_url AS "avatarUrl"
+        FROM user_thread_attribution
+        WHERE thread_id = ${threadId}
         LIMIT 1
       `,
   });
@@ -2844,6 +2920,14 @@ pending_approval_requests AS (
               ),
             ),
           ),
+          listActiveThreadCreatorRows(undefined).pipe(
+            Effect.mapError(
+              toPersistenceSqlOrDecodeError(
+                "ProjectionSnapshotQuery.getShellSnapshot:listThreadCreators:query",
+                "ProjectionSnapshotQuery.getShellSnapshot:listThreadCreators:decodeRows",
+              ),
+            ),
+          ),
           listActiveThreadSessionRows(undefined).pipe(
             Effect.mapError(
               toPersistenceSqlOrDecodeError(
@@ -2891,6 +2975,7 @@ pending_approval_requests AS (
           ([
             projectRows,
             threadRows,
+            creatorRows,
             sessionRows,
             pullRequestRows,
             latestTurnRows,
@@ -2925,6 +3010,9 @@ pending_approval_requests AS (
                 yield* resolveRepositoryIdentitiesForProjects(projectRows);
               const latestTurnByThread = new Map(
                 latestTurnRows.map((row) => [row.threadId, mapLatestTurn(row)] as const),
+              );
+              const creatorByThread = new Map(
+                creatorRows.map((row) => [row.threadId, mapThreadCreatorRow(row)] as const),
               );
               const sessionByThread = new Map(
                 sessionRows.map((row) => [row.threadId, mapSessionRow(row)] as const),
@@ -2966,6 +3054,7 @@ pending_approval_requests AS (
                           repositoryIdentities.get(row.projectId),
                         ),
                         latestTurn: latestTurnByThread.get(row.threadId) ?? null,
+                        createdBy: creatorByThread.get(row.threadId) ?? null,
                         createdAt: row.createdAt,
                         updatedAt: row.updatedAt,
                         locked: row.locked === 1,
@@ -3033,6 +3122,14 @@ pending_approval_requests AS (
               ),
             ),
           ),
+          listArchivedThreadCreatorRows(undefined).pipe(
+            Effect.mapError(
+              toPersistenceSqlOrDecodeError(
+                "ProjectionSnapshotQuery.getArchivedShellSnapshot:listThreadCreators:query",
+                "ProjectionSnapshotQuery.getArchivedShellSnapshot:listThreadCreators:decodeRows",
+              ),
+            ),
+          ),
           listArchivedThreadSessionRows(undefined).pipe(
             Effect.mapError(
               toPersistenceSqlOrDecodeError(
@@ -3080,6 +3177,7 @@ pending_approval_requests AS (
           ([
             projectRows,
             threadRows,
+            creatorRows,
             sessionRows,
             pullRequestRows,
             latestTurnRows,
@@ -3118,6 +3216,9 @@ pending_approval_requests AS (
               const latestTurnByThread = new Map(
                 latestTurnRows.map((row) => [row.threadId, mapLatestTurn(row)] as const),
               );
+              const creatorByThread = new Map(
+                creatorRows.map((row) => [row.threadId, mapThreadCreatorRow(row)] as const),
+              );
               const sessionByThread = new Map(
                 sessionRows.map((row) => [row.threadId, mapSessionRow(row)] as const),
               );
@@ -3155,6 +3256,7 @@ pending_approval_requests AS (
                     repositoryIdentities.get(row.projectId),
                   ),
                   latestTurn: latestTurnByThread.get(row.threadId) ?? null,
+                  createdBy: creatorByThread.get(row.threadId) ?? null,
                   createdAt: row.createdAt,
                   updatedAt: row.updatedAt,
                   locked: row.locked === 1,
@@ -3456,13 +3558,21 @@ pending_approval_requests AS (
 
   const getThreadShellById: ProjectionSnapshotQueryShape["getThreadShellById"] = (threadId) =>
     Effect.gen(function* () {
-      const [threadRow, latestTurnRow, sessionRow, pullRequestRows, queuedTurnRows] =
+      const [threadRow, creatorRow, latestTurnRow, sessionRow, pullRequestRows, queuedTurnRows] =
         yield* Effect.all([
           getActiveThreadRowById({ threadId }).pipe(
             Effect.mapError(
               toPersistenceSqlOrDecodeError(
                 "ProjectionSnapshotQuery.getThreadShellById:getThread:query",
                 "ProjectionSnapshotQuery.getThreadShellById:getThread:decodeRow",
+              ),
+            ),
+          ),
+          getThreadCreatorRowByThread({ threadId }).pipe(
+            Effect.mapError(
+              toPersistenceSqlOrDecodeError(
+                "ProjectionSnapshotQuery.getThreadShellById:getThreadCreator:query",
+                "ProjectionSnapshotQuery.getThreadShellById:getThreadCreator:decodeRow",
               ),
             ),
           ),
@@ -3530,6 +3640,7 @@ pending_approval_requests AS (
         ),
         branchPullRequest: threadRow.value.branchPullRequest,
         latestTurn: Option.isSome(latestTurnRow) ? mapLatestTurn(latestTurnRow.value) : null,
+        createdBy: Option.isSome(creatorRow) ? mapThreadCreatorRow(creatorRow.value) : null,
         createdAt: threadRow.value.createdAt,
         updatedAt: threadRow.value.updatedAt,
         locked: threadRow.value.locked === 1,

@@ -4,6 +4,7 @@ import {
   ComposerContextId,
   CheckpointRef,
   EventId,
+  KamiUserId,
   MessageId,
   ProjectId,
   ThreadId,
@@ -126,6 +127,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
       yield* sql`DELETE FROM projection_thread_proposed_plans`;
       yield* sql`DELETE FROM projection_thread_pull_requests`;
       yield* sql`DELETE FROM projection_turns`;
+      yield* sql`DELETE FROM user_thread_attribution WHERE thread_id = 'thread-1'`;
 
       yield* sql`
         INSERT INTO projection_projects (
@@ -236,6 +238,27 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           '2026-02-24T00:00:02.000Z',
           '2026-02-24T00:00:03.000Z',
           NULL
+        )
+      `;
+
+      yield* sql`
+        INSERT INTO user_thread_attribution (
+          thread_id,
+          project_id,
+          user_id,
+          github_login,
+          display_name,
+          avatar_url,
+          created_at
+        )
+        VALUES (
+          'thread-1',
+          'project-1',
+          'user-1',
+          'octocat',
+          'The Octocat',
+          'https://avatars.githubusercontent.com/u/583231',
+          '2026-02-24T00:00:02.000Z'
         )
       `;
 
@@ -625,6 +648,12 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
               planId: "plan-1",
             },
           },
+          createdBy: {
+            userId: KamiUserId.make("user-1"),
+            githubLogin: "octocat",
+            displayName: "The Octocat",
+            avatarUrl: "https://avatars.githubusercontent.com/u/583231",
+          },
           createdAt: "2026-02-24T00:00:02.000Z",
           updatedAt: "2026-02-24T00:00:03.000Z",
           locked: false,
@@ -800,6 +829,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
         assert.equal(changedContext.value.session?.providerInstanceId, "claude-secondary");
         assert.equal(changedContext.value.session?.lastError, "Starting another session");
       }
+      yield* sql`DELETE FROM user_thread_attribution WHERE thread_id = 'thread-1'`;
     }),
   );
 
@@ -970,6 +1000,10 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
       yield* sql`DELETE FROM projection_projects`;
       yield* sql`DELETE FROM projection_threads`;
       yield* sql`DELETE FROM projection_state`;
+      yield* sql`
+        DELETE FROM user_thread_attribution
+        WHERE thread_id IN ('thread-active', 'thread-archived')
+      `;
 
       yield* sql`
         INSERT INTO projection_projects (
@@ -1056,6 +1090,37 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
       `;
 
       yield* sql`
+        INSERT INTO user_thread_attribution (
+          thread_id,
+          project_id,
+          user_id,
+          github_login,
+          display_name,
+          avatar_url,
+          created_at
+        )
+        VALUES
+          (
+            'thread-active',
+            'project-archive-test',
+            'user-active',
+            'active-creator',
+            NULL,
+            NULL,
+            '2026-04-06T00:00:02.000Z'
+          ),
+          (
+            'thread-archived',
+            'project-archive-test',
+            'user-archived',
+            'archived-creator',
+            'Archived Creator',
+            'https://example.com/archived.png',
+            '2026-04-06T00:00:04.000Z'
+          )
+      `;
+
+      yield* sql`
         INSERT INTO projection_state (projector, last_applied_sequence, updated_at)
         VALUES
           (${ORCHESTRATION_PROJECTOR_NAMES.projects}, 4, '2026-04-06T00:00:07.000Z'),
@@ -1072,6 +1137,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
         shellSnapshot.threads.map((thread) => thread.id),
         [ThreadId.make("thread-active")],
       );
+      assert.equal(shellSnapshot.threads[0]?.createdBy?.githubLogin, "active-creator");
       assert.equal(shellSnapshot.threads[0]?.branchPullRequest, null);
 
       yield* sql`
@@ -1086,6 +1152,12 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
         [ThreadId.make("thread-archived")],
       );
       assert.equal(archivedShellSnapshot.threads[0]?.archivedAt, "2026-04-06T00:00:06.000Z");
+      assert.deepEqual(archivedShellSnapshot.threads[0]?.createdBy, {
+        userId: KamiUserId.make("user-archived"),
+        githubLogin: "archived-creator",
+        displayName: "Archived Creator",
+        avatarUrl: "https://example.com/archived.png",
+      });
       assert.deepEqual(archivedShellSnapshot.threads[0]?.branchPullRequest, branchPullRequest);
       const activeContext = yield* snapshotQuery.getThreadRuntimeContext(
         ThreadId.make("thread-active"),
@@ -1137,6 +1209,10 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           deletedAt: "2026-04-06T00:00:09.000Z",
         },
       ]);
+      yield* sql`
+        DELETE FROM user_thread_attribution
+        WHERE thread_id IN ('thread-active', 'thread-archived')
+      `;
     }),
   );
 

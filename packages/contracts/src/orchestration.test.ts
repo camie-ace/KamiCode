@@ -39,6 +39,7 @@ import {
   PROVIDER_SEND_TURN_MAX_FILE_BYTES,
 } from "./orchestration.ts";
 import { ProviderInstanceId } from "./providerInstance.ts";
+import { KamiUserId } from "./userAuth.ts";
 
 const decodeTurnDiffInput = Schema.decodeUnknownEffect(OrchestrationGetTurnDiffInput);
 const decodeFullThreadDiffInput = Schema.decodeUnknownEffect(OrchestrationGetFullThreadDiffInput);
@@ -1366,6 +1367,7 @@ it.effect("defaults settled fields when decoding historical thread data", () =>
     assert.strictEqual(thread.settledAt, null);
     assert.strictEqual(shell.settledOverride, null);
     assert.strictEqual(shell.settledAt, null);
+    assert.strictEqual(shell.createdBy, undefined);
     // Pre-link servers omit the array entirely.
     assert.deepStrictEqual(thread.pullRequests, []);
     assert.deepStrictEqual(shell.pullRequests, []);
@@ -1409,6 +1411,26 @@ it.effect("defaults settled fields when decoding historical thread data", () =>
     });
     const oldClientFields = yield* Schema.decodeUnknownEffect(oldLinkFields)(newServerWire);
     assert.deepStrictEqual(oldClientFields.linkedPullRequest, legacyLink);
+
+    const attributedShell = yield* decodeOrchestrationThreadShell({
+      ...common,
+      createdBy: {
+        userId: "user-1",
+        githubLogin: "octocat",
+        displayName: "The Octocat",
+        avatarUrl: "https://avatars.githubusercontent.com/u/583231",
+      },
+      latestUserMessageAt: null,
+      hasPendingApprovals: false,
+      hasPendingUserInput: false,
+      hasActionableProposedPlan: false,
+    });
+    assert.deepStrictEqual(attributedShell.createdBy, {
+      userId: KamiUserId.make("user-1"),
+      githubLogin: "octocat",
+      displayName: "The Octocat",
+      avatarUrl: "https://avatars.githubusercontent.com/u/583231",
+    });
   }),
 );
 
