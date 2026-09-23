@@ -65,6 +65,8 @@ export class ElectronProtocol extends Context.Service<
     readonly registerDesktopProtocol: (
       input: DesktopProtocolRegistrationInput,
     ) => Effect.Effect<void, ElectronProtocolRegistrationError, Scope.Scope>;
+    // Where bundled-asset mode forwards `/api/*`; `null` while no local backend runs.
+    readonly setLocalBackendOrigin: (origin: URL | null) => Effect.Effect<void>;
   }
 >()("@t3tools/desktop/electron/ElectronProtocol") {}
 
@@ -207,6 +209,29 @@ async function proxyRequest(
   return withContentSecurityPolicy(response, contentSecurityPolicy);
 }
 
+const LOCAL_BACKEND_API_PATH_PREFIX = "/api/";
+
+// Bundled-asset mode still has to reach the local backend for same-origin API
+// calls: desktop user auth relies on the main-process cookie jar that only this
+// proxy shares, so `/api/*` must not fall through to the static file server.
+async function proxyLocalBackendApiRequest(
+  request: Request,
+  localBackendOrigin: URL | null,
+  contentSecurityPolicy: string,
+): Promise<Response | null> {
+  const url = new URL(request.url);
+  if (url.host !== DESKTOP_HOST || !url.pathname.startsWith(LOCAL_BACKEND_API_PATH_PREFIX)) {
+    return null;
+  }
+  if (localBackendOrigin === null) {
+    return withContentSecurityPolicy(
+      Response.json({ error: "The local environment is not running." }, { status: 503 }),
+      contentSecurityPolicy,
+    );
+  }
+  return proxyRequest(request, localBackendOrigin, contentSecurityPolicy);
+}
+
 const TRANSIENT_FETCH_RETRY_DELAYS_MS = [0, 50, 150] as const;
 
 // Serves the packaged web client without a backend: files resolve within the
@@ -271,6 +296,7 @@ async function fetchWithTransientRetry(url: string, init: RequestInit): Promise<
 /** @public Service construction is part of the canonical Effect module API. */
 export const make = Effect.gen(function* () {
   const registered = yield* Ref.make(false);
+  const localBackendOrigin = yield* Ref.make<URL | null>(null);
   const context = yield* Effect.context<FileSystem.FileSystem | Path.Path>();
   const runPromise = Effect.runPromiseWith(context);
 
@@ -285,6 +311,12 @@ export const make = Effect.gen(function* () {
           try: () => {
             Electron.protocol.handle(input.scheme, async (request) => {
               if ("assetDirectory" in input) {
+                const apiResponse = await proxyLocalBackendApiRequest(
+                  request,
+                  await runPromise(Ref.get(localBackendOrigin)),
+                  contentSecurityPolicy,
+                );
+                if (apiResponse !== null) return apiResponse;
                 return withContentSecurityPolicy(
                   await runPromise(serveDesktopAsset(request, input.assetDirectory)),
                   contentSecurityPolicy,
@@ -308,7 +340,9 @@ export const make = Effect.gen(function* () {
     },
   );
 
-  return ElectronProtocol.of({ registerDesktopProtocol });
+  const setLocalBackendOrigin = (origin: URL | null) => Ref.set(localBackendOrigin, origin);
+
+  return ElectronProtocol.of({ registerDesktopProtocol, setLocalBackendOrigin });
 });
 
 export const layer = Layer.effect(ElectronProtocol, make);
