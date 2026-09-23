@@ -595,10 +595,13 @@ export function resolveComposerProviderSelection(input: {
     input.entries.find((entry) => entry.instanceId === requestedInstanceId)?.driverKind ??
     input.entries[0]?.driverKind ??
     ProviderDriverKind.make("unconfigured");
-  const lockedContinuationGroupKey = input.lockedProvider
-    ? (input.entries.find((entry) => entry.instanceId === input.lockedInstanceId)
-        ?.continuationGroupKey ?? null)
-    : null;
+  // Other drivers may hand a thread to another profile; the server starts it
+  // fresh and carries the transcript. Antigravity history stays on its Google profile.
+  const lockedContinuationGroupKey =
+    input.lockedProvider === "antigravity"
+      ? (input.entries.find((entry) => entry.instanceId === input.lockedInstanceId)
+          ?.continuationGroupKey ?? null)
+      : null;
   // Missing metadata must not move Antigravity history into another Google profile.
   const requiresExactInstance =
     input.lockedProvider === "antigravity" &&

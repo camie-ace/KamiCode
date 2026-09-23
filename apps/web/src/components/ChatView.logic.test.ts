@@ -18,7 +18,11 @@ import { appAtomRegistry } from "../rpc/atomRegistry";
 import { environmentThreadDetails } from "../state/threads";
 
 import type { Thread, ThreadShell, TurnDiffSummary } from "../types";
-import { deriveProviderInstanceEntries, NO_PROVIDER_MODEL_SELECTION } from "../providerInstances";
+import {
+  deriveProviderInstanceEntries,
+  NO_PROVIDER_MODEL_SELECTION,
+  type ProviderInstanceEntry,
+} from "../providerInstances";
 import type { CodexArtifactTemplate } from "@t3tools/client-runtime/codex-artifact-templates";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import {
@@ -1541,6 +1545,26 @@ describe("resolveComposerProviderSelection", () => {
     });
 
     expect(selection.selectedProviderEntry).toBeUndefined();
+  });
+
+  it("lets a started thread switch to another profile of the same driver", () => {
+    const sessionEntry = entry("codex", "codex", {
+      continuation: { groupKey: "codex:home:/home/kamicode/.codex" },
+    });
+    const otherProfile = entry("codex", "codex_camie", {
+      continuation: { groupKey: "codex:home:/home/kamicode/.codex-camie" },
+    });
+    const entries = [sessionEntry, otherProfile];
+    const resolve = (selected: ProviderInstanceEntry, session: ProviderInstanceEntry) =>
+      resolveComposerProviderSelection({
+        entries,
+        candidateInstanceIds: [selected.instanceId, session.instanceId],
+        lockedProvider: ProviderDriverKind.make("codex"),
+        lockedInstanceId: session.instanceId,
+      }).selectedProviderEntry?.instanceId;
+
+    expect(resolve(otherProfile, sessionEntry)).toBe(otherProfile.instanceId);
+    expect(resolve(sessionEntry, otherProfile)).toBe(sessionEntry.instanceId);
   });
 });
 
