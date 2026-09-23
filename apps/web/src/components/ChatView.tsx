@@ -41,6 +41,7 @@ import {
   PROVIDER_SEND_TURN_MAX_ATTACHMENTS,
   ProviderInteractionMode,
   ProviderDriverKind,
+  type ProviderOptionSelection,
   resolveEnvironmentMachineKind,
   RuntimeMode,
   TerminalOpenInput,
@@ -11666,6 +11667,38 @@ export default function ChatView(props: ChatViewProps) {
       settings,
     ],
   );
+  const onProviderModelOptionsChange = useCallback(
+    (
+      instanceId: ProviderInstanceId,
+      model: string,
+      options: ReadonlyArray<ProviderOptionSelection> | undefined,
+    ) => {
+      if (!serverThread) return;
+      const modelSelection = createModelSelection(instanceId, model, options);
+      const metadataUpdate = resolveThreadMetadataUpdateForNextTurn({
+        currentModelSelection: serverThread.modelSelection,
+        nextModelSelection: modelSelection,
+        currentBranch: serverThread.branch,
+      });
+      if (!metadataUpdate) return;
+
+      void updateThreadMetadata({
+        environmentId,
+        input: { threadId: serverThread.id, ...metadataUpdate },
+      }).then((result) => {
+        if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
+          toastManager.add(
+            stackedThreadToast({
+              type: "error",
+              title: "Model settings were not saved",
+              description: chatActionErrorMessage(squashAtomCommandFailure(result)),
+            }),
+          );
+        }
+      });
+    },
+    [environmentId, serverThread, updateThreadMetadata],
+  );
   const onEnvModeChange = useCallback(
     (mode: DraftThreadEnvMode) => {
       if (multipleModelSelections !== null) return;
@@ -12538,6 +12571,7 @@ export default function ChatView(props: ChatViewProps) {
                               onChangeActivePendingUserInputCustomAnswer
                             }
                             onProviderModelSelect={onProviderModelSelect}
+                            onProviderModelOptionsChange={onProviderModelOptionsChange}
                             onOpenProviderSetup={openProviderSetup}
                             getModelDisabledReason={getModelDisabledReason}
                             toggleInteractionMode={toggleInteractionMode}

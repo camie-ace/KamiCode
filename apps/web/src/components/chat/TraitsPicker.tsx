@@ -282,6 +282,7 @@ export interface TraitsMenuContentProps {
   triggerVariant?: VariantProps<typeof buttonVariants>["variant"];
   triggerClassName?: string;
   isComposerOwned?: boolean;
+  onModelOptionsPersist?: (nextOptions: ProviderOptions | undefined) => void;
 }
 
 export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
@@ -294,6 +295,7 @@ export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
   modelOptions,
   allowPromptInjectedEffort = true,
   planModeEnabled,
+  onModelOptionsPersist,
   ...persistence
 }: TraitsMenuContentProps & TraitsPersistence) {
   const setProviderModelOptions = useComposerDraftStore((store) => store.setProviderModelOptions);
@@ -312,8 +314,9 @@ export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
         model,
         persistSticky: true,
       });
+      onModelOptionsPersist?.(nextOptions);
     },
-    [instanceId, model, persistence, provider, setProviderModelOptions],
+    [instanceId, model, onModelOptionsPersist, persistence, provider, setProviderModelOptions],
   );
   const {
     descriptors,
@@ -549,6 +552,7 @@ export const TraitsPicker = memo(function TraitsPicker({
   triggerVariant,
   triggerClassName,
   isComposerOwned,
+  onModelOptionsPersist,
   size = "sm",
   hidden = false,
   ...persistence
@@ -660,6 +664,7 @@ export const TraitsPicker = memo(function TraitsPicker({
           modelOptions={modelOptions}
           allowPromptInjectedEffort={allowPromptInjectedEffort}
           planModeEnabled={planModeEnabled}
+          {...(onModelOptionsPersist ? { onModelOptionsPersist } : {})}
           {...persistence}
         />
       </MenuPopup>
