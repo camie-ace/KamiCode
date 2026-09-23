@@ -253,7 +253,9 @@ export const make = Effect.gen(function* () {
       ...(serverConfig.mode === "web" && serverConfig.hostedBrowserEnabled
         ? { hostedBrowserPreview: true }
         : {}),
-      ...(serverConfig.speechTranscriptionUrl !== undefined ? { speechTranscription: true } : {}),
+      ...(serverConfig.speechTranscriptionApiKey !== undefined
+        ? { speechTranscription: true }
+        : {}),
       threadRecurringSchedules: true,
     },
   };

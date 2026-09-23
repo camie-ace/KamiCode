@@ -15,7 +15,7 @@ describe("voice recording format selection", () => {
     expect(chooseVoiceRecordingMimeType(() => false)).toBeUndefined();
   });
 
-  it("uses extensions whisper.cpp/ffmpeg can recognize", () => {
+  it("uses extensions accepted by the transcription API", () => {
     expect(voiceRecordingFileExtension("audio/webm;codecs=opus")).toBe("webm");
     expect(voiceRecordingFileExtension("audio/mp4")).toBe("m4a");
     expect(voiceRecordingFileExtension("audio/ogg;codecs=opus")).toBe("ogg");

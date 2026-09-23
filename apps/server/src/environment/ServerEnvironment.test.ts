@@ -8,6 +8,7 @@ import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as PlatformError from "effect/PlatformError";
+import * as Redacted from "effect/Redacted";
 import * as Schema from "effect/Schema";
 
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
@@ -73,6 +74,7 @@ const makeServerConfig = Effect.fn(function* (baseDir: string) {
     devAllowedOrigins: [],
     noBrowser: false,
     speechTranscriptionUrl: undefined,
+    speechTranscriptionApiKey: undefined,
     speechTranscriptionModel: undefined,
     speechTranscriptionPrompt: undefined,
     startupPresentation: "browser",
@@ -186,7 +188,7 @@ it.layer(NodeServices.layer)("ServerEnvironmentLive", (it) => {
     }),
   );
 
-  it.effect("advertises speech transcription only when its endpoint is configured", () =>
+  it.effect("advertises speech transcription only when its API key is configured", () =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
       const baseDir = yield* fileSystem.makeTempDirectoryScoped({
@@ -194,7 +196,7 @@ it.layer(NodeServices.layer)("ServerEnvironmentLive", (it) => {
       });
       const serverConfig = {
         ...(yield* makeServerConfig(baseDir)),
-        speechTranscriptionUrl: new URL("http://127.0.0.1:8087/inference"),
+        speechTranscriptionApiKey: Redacted.make("openai-speech-secret"),
       } satisfies ServerConfig.ServerConfig["Service"];
       yield* ServerConfig.ensureServerDirectories(serverConfig);
 

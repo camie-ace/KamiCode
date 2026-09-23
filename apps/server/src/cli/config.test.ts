@@ -84,6 +84,7 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
     }) as const;
   const defaultSpeechTranscriptionConfig = {
     speechTranscriptionUrl: undefined,
+    speechTranscriptionApiKey: undefined,
     speechTranscriptionModel: undefined,
     speechTranscriptionPrompt: undefined,
   } as const;
@@ -254,8 +255,9 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
                   T3CODE_MANAGED_SCRATCH_MAX_AGE_HOURS: "36",
                   T3CODE_MANAGED_SCRATCH_MAX_BYTES: "876543210",
                   T3CODE_MANAGED_PACKAGE_CACHE_DIR: NodePath.join(baseDir, "managed", "packages"),
-                  T3CODE_SPEECH_TRANSCRIPTION_URL: "http://127.0.0.1:8087/inference",
-                  T3CODE_SPEECH_TRANSCRIPTION_MODEL: "Systran/faster-whisper-small.en",
+                  T3CODE_SPEECH_TRANSCRIPTION_URL: "https://api.openai.com/v1/audio/transcriptions",
+                  T3CODE_SPEECH_TRANSCRIPTION_API_KEY: "openai-speech-secret",
+                  T3CODE_SPEECH_TRANSCRIPTION_MODEL: "whisper-1",
                   T3CODE_SPEECH_TRANSCRIPTION_PROMPT:
                     "Nigerian English. KamiCode, TypeScript, GitHub, Playwright.",
                   T3CODE_AUTO_BOOTSTRAP_PROJECT_FROM_CWD: "false",
@@ -296,8 +298,9 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
         managedScratchMaxAgeHours: 36,
         managedScratchMaxBytes: 876_543_210,
         managedPackageCacheDir: NodePath.join(baseDir, "managed", "packages"),
-        speechTranscriptionUrl: new URL("http://127.0.0.1:8087/inference"),
-        speechTranscriptionModel: "Systran/faster-whisper-small.en",
+        speechTranscriptionUrl: new URL("https://api.openai.com/v1/audio/transcriptions"),
+        speechTranscriptionApiKey: Redacted.make("openai-speech-secret"),
+        speechTranscriptionModel: "whisper-1",
         speechTranscriptionPrompt: "Nigerian English. KamiCode, TypeScript, GitHub, Playwright.",
         startupPresentation: "browser",
         desktopBootstrapToken: undefined,
