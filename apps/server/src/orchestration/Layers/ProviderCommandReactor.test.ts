@@ -4111,6 +4111,170 @@ describe("ProviderCommandReactor", () => {
     });
   });
 
+  it("hands the retried request, earlier transcript, and partial reply to the Waterfall provider", async () => {
+    const harness = await createHarness();
+    const threadId = ThreadId.make("thread-1");
+    const dispatch = harness.dispatch;
+    const appendUser = (id: string, text: string, createdAt: string) =>
+      dispatch({
+        type: "thread.message.user.append",
+        commandId: CommandId.make(`cmd-append-${id}`),
+        threadId,
+        message: { messageId: asMessageId(id), text, attachments: [] },
+        createdAt,
+      });
+    const appendAssistant = async (id: string, text: string, createdAt: string) => {
+      await dispatch({
+        type: "thread.message.assistant.delta",
+        commandId: CommandId.make(`cmd-delta-${id}`),
+        threadId,
+        messageId: asMessageId(id),
+        delta: text,
+        createdAt,
+      });
+      await dispatch({
+        type: "thread.message.assistant.complete",
+        commandId: CommandId.make(`cmd-complete-${id}`),
+        threadId,
+        messageId: asMessageId(id),
+        createdAt,
+      });
+    };
+
+    await appendUser("earlier-request", "earlier request", "2026-01-01T00:00:01.000Z");
+    await appendAssistant("earlier-answer", "earlier answer", "2026-01-01T00:00:02.000Z");
+    await appendUser("retried-request", "retried request", "2026-01-01T00:00:03.000Z");
+    await appendAssistant("partial-answer", "partial answer", "2026-01-01T00:00:04.000Z");
+    await appendUser("queued-request", "queued request", "2026-01-01T00:00:05.000Z");
+    await dispatch({
+      type: "thread.session.set",
+      commandId: CommandId.make("cmd-session-set-stopped-waterfall-transcript"),
+      threadId,
+      session: {
+        threadId,
+        status: "stopped",
+        providerName: "codex",
+        providerInstanceId: ProviderInstanceId.make("codex"),
+        runtimeMode: "approval-required",
+        activeTurnId: null,
+        lastError: null,
+        updatedAt: "2026-01-01T00:00:06.000Z",
+      },
+      createdAt: "2026-01-01T00:00:06.000Z",
+    });
+
+    await dispatch({
+      type: "thread.turn.start",
+      commandId: CommandId.make("provider:usage-event:waterfall-turn-start:transcript"),
+      threadId,
+      message: {
+        messageId: asMessageId("retried-request"),
+        role: "user",
+        text: "retried request",
+        attachments: [],
+      },
+      modelSelection: {
+        instanceId: ProviderInstanceId.make("claudeAgent"),
+        model: "claude-opus-4-6",
+      },
+      interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+      runtimeMode: "approval-required",
+      createdAt: "2026-01-01T00:00:07.000Z",
+    });
+
+    await waitFor(() => harness.sendTurn.mock.calls.length === 1);
+    const input = String(
+      (harness.sendTurn.mock.calls[0]?.[0] as { input?: string } | undefined)?.input,
+    );
+    expect(input).toContain("User: earlier request\n\nAssistant: earlier answer");
+    expect(input).toContain("Current user request:\nretried request");
+    expect(input).toContain(
+      "Partial reply from the previous provider before it stopped:\npartial answer",
+    );
+    expect(input.split("retried request")).toHaveLength(2);
+    expect(input).not.toContain("queued request");
+  });
+
+  it("sends queued turns to the provider Waterfall moved the thread to", async () => {
+    const harness = await createHarness();
+    const threadId = ThreadId.make("thread-1");
+    const dispatch = harness.dispatch;
+    const claudeSelection = {
+      instanceId: ProviderInstanceId.make("claudeAgent"),
+      model: "claude-opus-4-6",
+    };
+
+    await dispatch({
+      type: "thread.session.set",
+      commandId: CommandId.make("cmd-session-set-stopped-waterfall-queue"),
+      threadId,
+      session: {
+        threadId,
+        status: "stopped",
+        providerName: "codex",
+        providerInstanceId: ProviderInstanceId.make("codex"),
+        runtimeMode: "approval-required",
+        activeTurnId: null,
+        lastError: null,
+        updatedAt: "2026-01-01T00:00:01.000Z",
+      },
+      createdAt: "2026-01-01T00:00:01.000Z",
+    });
+    await dispatch({
+      type: "thread.meta.update",
+      commandId: CommandId.make("cmd-waterfall-queue-selection"),
+      threadId,
+      modelSelection: claudeSelection,
+    });
+    await dispatch({
+      type: "thread.activity.append",
+      commandId: CommandId.make("cmd-waterfall-queue-handoff"),
+      threadId,
+      activity: {
+        id: EventId.make("waterfall-queue-handoff"),
+        createdAt: "2026-01-01T00:00:03.000Z",
+        tone: "info",
+        kind: "runtime.warning",
+        summary: "Waterfall switched to Claude",
+        payload: {
+          fromProviderInstanceId: ProviderInstanceId.make("codex"),
+          toProviderInstanceId: claudeSelection.instanceId,
+        },
+        turnId: null,
+      },
+      createdAt: "2026-01-01T00:00:03.000Z",
+    });
+
+    // Queued before the handoff, so it still names the exhausted instance.
+    await dispatch({
+      type: "thread.turn.start",
+      commandId: CommandId.make("cmd-queued-before-waterfall"),
+      threadId,
+      message: {
+        messageId: asMessageId("queued-before-waterfall"),
+        role: "user",
+        text: "queued before the handoff",
+        attachments: [],
+      },
+      modelSelection: {
+        instanceId: ProviderInstanceId.make("codex"),
+        model: "gpt-5-codex",
+      },
+      dispatchPolicy: "queue",
+      interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+      runtimeMode: "approval-required",
+      createdAt: "2026-01-01T00:00:02.000Z",
+    });
+
+    await waitFor(() => harness.sendTurn.mock.calls.length === 1);
+    expect(harness.startSession.mock.calls[0]?.[1]).toMatchObject({
+      providerInstanceId: claudeSelection.instanceId,
+    });
+    expect(harness.sendTurn.mock.calls[0]?.[0]).toMatchObject({
+      modelSelection: claudeSelection,
+    });
+  });
+
   it("reacts to thread.turn.interrupt-requested by calling provider interrupt", async () => {
     const harness = await createHarness();
     const now = "2026-01-01T00:00:00.000Z";

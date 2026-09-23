@@ -41,6 +41,8 @@ import { ProviderService } from "../../provider/Services/ProviderService.ts";
 import { ProviderRegistry } from "../../provider/Services/ProviderRegistry.ts";
 import { ProjectionTurnRepository } from "../../persistence/Services/ProjectionTurns.ts";
 import { ProjectionTurnRepositoryLive } from "../../persistence/Layers/ProjectionTurns.ts";
+import { ProjectionTurnQueueRepository } from "../../persistence/Services/ProjectionTurnQueue.ts";
+import { ProjectionTurnQueueRepositoryLive } from "../../persistence/Layers/ProjectionTurnQueue.ts";
 import { ProjectionThreadActivityRepository } from "../../persistence/Services/ProjectionThreadActivities.ts";
 import { ProjectionThreadActivityRepositoryLive } from "../../persistence/Layers/ProjectionThreadActivities.ts";
 import { UserActivityAttributionRepository } from "../../persistence/Services/UserActivityAttribution.ts";
@@ -199,11 +201,23 @@ export function selectNextWaterfallProvider(input: {
   readonly sequence: ReadonlyArray<ProviderInstanceId>;
   readonly failedInstanceId: ProviderInstanceId;
   readonly providers: ReadonlyArray<ServerProvider>;
+  /** Instances already tried for the same request; they are never retried. */
+  readonly attemptedInstanceIds?: ReadonlySet<ProviderInstanceId>;
 }) {
-  const failedIndex = input.sequence.indexOf(input.failedInstanceId);
-  if (failedIndex < 0) return undefined;
-  return input.sequence
-    .slice(failedIndex + 1)
+  // Settings written outside the UI can repeat an instance; keep its first slot.
+  const sequence = [...new Set(input.sequence)];
+  const failedIndex = sequence.indexOf(input.failedInstanceId);
+  // Later instances come first, then earlier ones whose limit may have reset.
+  // A failure outside the sequence starts from the top.
+  const candidates =
+    failedIndex < 0
+      ? sequence
+      : [...sequence.slice(failedIndex + 1), ...sequence.slice(0, failedIndex)];
+  return candidates
+    .filter(
+      (instanceId) =>
+        instanceId !== input.failedInstanceId && !input.attemptedInstanceIds?.has(instanceId),
+    )
     .map((instanceId) => input.providers.find((provider) => provider.instanceId === instanceId))
     .find(
       (provider) =>
@@ -1054,6 +1068,7 @@ const make = Effect.gen(function* () {
   const projectionThreadMessages = yield* ProjectionThreadMessageRepository;
   const projectionThreadProposedPlans = yield* ProjectionThreadProposedPlanRepository;
   const projectionTurnRepository = yield* ProjectionTurnRepository;
+  const projectionTurnQueueRepository = yield* ProjectionTurnQueueRepository;
   const projectionThreadActivityRepository = yield* ProjectionThreadActivityRepository;
   const userActivityAttributionRepository = yield* UserActivityAttributionRepository;
   const serverSettingsService = yield* ServerSettingsService;
@@ -1063,6 +1078,76 @@ const make = Effect.gen(function* () {
       Effect.map((uuid) => CommandId.make(`provider:${event.eventId}:${tag}:${uuid}`)),
     );
   const handledWaterfallFailures = new Set<string>();
+  // One chain per retried request: every instance it has run on, and the one it
+  // runs on now. This stops a request from cycling through exhausted accounts and
+  // ignores late limit events from an instance the request already left.
+  const waterfallChains = new Map<
+    string,
+    { readonly attempted: ReadonlySet<ProviderInstanceId>; readonly current: ProviderInstanceId }
+  >();
+  const trimOldest = (entries: Set<string> | Map<string, unknown>) => {
+    if (entries.size > 10_000) {
+      entries.delete(entries.keys().next().value!);
+    }
+  };
+
+  // The request to retry is the one that started the failed turn, never simply
+  // the newest user message: queued and scheduled messages are persisted as
+  // user messages before they run.
+  const resolveWaterfallRetryRequest = Effect.fn("resolveWaterfallRetryRequest")(function* (
+    threadId: ThreadId,
+    turnId: TurnId | undefined,
+  ) {
+    const planReference = (turnStart: {
+      readonly sourceProposedPlanThreadId: ThreadId | null;
+      readonly sourceProposedPlanId: OrchestrationProposedPlanId | null;
+    }) =>
+      turnStart.sourceProposedPlanThreadId !== null && turnStart.sourceProposedPlanId !== null
+        ? { threadId: turnStart.sourceProposedPlanThreadId, planId: turnStart.sourceProposedPlanId }
+        : null;
+    let turnStart: {
+      readonly messageId: MessageId;
+      readonly sourceProposedPlan: ReturnType<typeof planReference>;
+    } | null = null;
+    if (turnId !== undefined) {
+      const turn = yield* projectionTurnRepository.getByTurnId({ threadId, turnId });
+      if (Option.isSome(turn) && turn.value.pendingMessageId !== null) {
+        turnStart = {
+          messageId: turn.value.pendingMessageId,
+          sourceProposedPlan: planReference(turn.value),
+        };
+      }
+    }
+    if (turnStart === null) {
+      const pending = yield* projectionTurnRepository.getPendingTurnStartByThreadId({ threadId });
+      if (Option.isSome(pending)) {
+        turnStart = {
+          messageId: pending.value.messageId,
+          sourceProposedPlan: planReference(pending.value),
+        };
+      }
+    }
+    if (turnStart !== null) {
+      const message = yield* projectionThreadMessages.getByMessageId({
+        messageId: turnStart.messageId,
+      });
+      return Option.isSome(message) &&
+        message.value.threadId === threadId &&
+        message.value.role === "user"
+        ? { message: message.value, sourceProposedPlan: turnStart.sourceProposedPlan }
+        : undefined;
+    }
+    const waitingMessageIds = new Set(
+      (yield* projectionTurnQueueRepository.listActiveByThreadId({ threadId })).map(
+        (row) => row.messageId,
+      ),
+    );
+    const messages = yield* projectionThreadMessages.listByThreadId({ threadId });
+    const message = messages
+      .toReversed()
+      .find((entry) => entry.role === "user" && !waitingMessageIds.has(entry.messageId));
+    return message ? { message, sourceProposedPlan: null } : undefined;
+  });
 
   const maybeStartProviderWaterfall = Effect.fn("maybeStartProviderWaterfall")(function* (
     event: ProviderRuntimeEvent,
@@ -1087,36 +1172,59 @@ const make = Effect.gen(function* () {
     }
     const settings = yield* serverSettingsService.getSettings;
     const waterfall = settings.providerWaterfall;
-    if (!waterfall.enabled || waterfall.sequence.length < 2) return;
+    if (!waterfall.enabled || new Set(waterfall.sequence).size < 2) return;
 
     const failedInstanceId = event.providerInstanceId ?? thread.session?.providerInstanceId;
     if (failedInstanceId === undefined) return;
-    const failureKey = `${thread.id}:${String(event.turnId ?? "no-turn")}:${failedInstanceId}`;
+    // Without a turn id the event itself is the only stable identity; a
+    // thread-wide key would suppress every later limit on that instance.
+    const failureIdentity =
+      event.turnId !== undefined ? `turn:${event.turnId}` : `event:${event.eventId}`;
+    const failureKey = `${thread.id}:${failureIdentity}:${failedInstanceId}`;
     if (handledWaterfallFailures.has(failureKey)) return;
+    handledWaterfallFailures.add(failureKey);
+    trimOldest(handledWaterfallFailures);
+
+    const retry = yield* resolveWaterfallRetryRequest(thread.id, toTurnId(event.turnId));
+    if (!retry) return;
+    const chainKey = `${thread.id}:${retry.message.messageId}`;
+    const chain = waterfallChains.get(chainKey);
+    // A late limit from an instance this request already left is stale.
+    if (chain !== undefined && chain.current !== failedInstanceId) return;
+    const attempted = new Set(chain?.attempted);
+    attempted.add(failedInstanceId);
 
     const providers = yield* providerRegistry.value.getProviders;
     const nextProvider = selectNextWaterfallProvider({
       sequence: waterfall.sequence,
       failedInstanceId,
       providers,
+      attemptedInstanceIds: attempted,
     });
     if (!nextProvider) return;
-    handledWaterfallFailures.add(failureKey);
-    if (handledWaterfallFailures.size > 10_000) {
-      handledWaterfallFailures.delete(handledWaterfallFailures.values().next().value!);
-    }
+    attempted.add(nextProvider.instanceId);
+    waterfallChains.delete(chainKey);
+    waterfallChains.set(chainKey, { attempted, current: nextProvider.instanceId });
+    trimOldest(waterfallChains);
 
-    const messages = yield* projectionThreadMessages.listByThreadId({ threadId: thread.id });
-    const latestUserMessage = messages.toReversed().find((message) => message.role === "user");
-    if (!latestUserMessage) return;
+    const latestUserMessage = retry.message;
     const selectedModel =
       nextProvider.models.find((model) => model.slug === thread.modelSelection.model) ??
       nextProvider.models.find((model) => model.isDefault === true) ??
       nextProvider.models.find((model) => model.isLegacy !== true) ??
       nextProvider.models[0]!;
+    const failedDriver = providers.find(
+      (provider) => provider.instanceId === failedInstanceId,
+    )?.driver;
+    // Options are driver- and model-specific; keep them only when both carry over.
+    const keepsOptions =
+      failedDriver === nextProvider.driver &&
+      selectedModel.slug === thread.modelSelection.model &&
+      thread.modelSelection.options !== undefined;
     const modelSelection = {
       instanceId: nextProvider.instanceId,
       model: selectedModel.slug,
+      ...(keepsOptions ? { options: thread.modelSelection.options } : {}),
     };
 
     yield* providerService.stopSession({ threadId: thread.id }).pipe(Effect.ignoreCause);
@@ -1151,6 +1259,9 @@ const make = Effect.gen(function* () {
         ...(latestUserMessage.context !== undefined ? { context: latestUserMessage.context } : {}),
       },
       modelSelection,
+      ...(retry.sourceProposedPlan !== null
+        ? { sourceProposedPlan: retry.sourceProposedPlan }
+        : {}),
       runtimeMode: thread.runtimeMode,
       interactionMode: thread.interactionMode,
       createdAt: event.createdAt,
@@ -2897,4 +3008,5 @@ export const ProviderRuntimeIngestionLive = Layer.effect(
   Layer.provide(ProjectionThreadMessageRepositoryLive),
   Layer.provide(ProjectionThreadProposedPlanRepositoryLive),
   Layer.provide(ProjectionTurnRepositoryLive),
+  Layer.provide(ProjectionTurnQueueRepositoryLive),
 );

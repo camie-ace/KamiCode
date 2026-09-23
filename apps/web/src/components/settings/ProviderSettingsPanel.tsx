@@ -136,7 +136,7 @@ function ProviderWaterfallSettings({
   }) => void;
 }) {
   const rowById = new Map(rows.map((row) => [row.instanceId, row]));
-  const sequence = value.sequence.filter((instanceId) => rowById.has(instanceId));
+  const sequence = [...new Set(value.sequence)].filter((instanceId) => rowById.has(instanceId));
   const candidates = rows.filter((row) => !sequence.includes(row.instanceId));
   const labelFor = (instanceId: ProviderInstanceId) => {
     const row = rowById.get(instanceId);
@@ -168,7 +168,7 @@ function ProviderWaterfallSettings({
         aria-disabled={readOnly || undefined}
         className={cn("space-y-2 px-3 pb-3 sm:px-4", readOnly && "opacity-50")}
       >
-        {sequence.length === 0 ? (
+        {sequence.length < 2 ? (
           <p className="text-xs text-muted-foreground">
             Add at least two provider profiles to define the fallback order. Disabled or unavailable
             profiles are skipped at runtime.
