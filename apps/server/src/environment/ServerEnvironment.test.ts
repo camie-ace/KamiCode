@@ -8,7 +8,6 @@ import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as PlatformError from "effect/PlatformError";
-import * as Redacted from "effect/Redacted";
 import * as Schema from "effect/Schema";
 
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
@@ -183,21 +182,18 @@ it.layer(NodeServices.layer)("ServerEnvironmentLive", (it) => {
       expect(second.capabilities.threadPullRequests).toBe(true);
       expect(second.capabilities.threadPullRequestLinking).toBe(true);
       expect(second.capabilities.threadRecurringSchedules).toBe(true);
-      expect(second.capabilities.speechTranscription).toBeUndefined();
+      expect(second.capabilities.speechTranscription).toBe(true);
       expect(second.capabilities.agentActivityPublishing).toBe(false);
     }),
   );
 
-  it.effect("advertises speech transcription only when its API key is configured", () =>
+  it.effect("advertises API speech transcription without requiring a startup key", () =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
       const baseDir = yield* fileSystem.makeTempDirectoryScoped({
         prefix: "t3-server-environment-speech-test-",
       });
-      const serverConfig = {
-        ...(yield* makeServerConfig(baseDir)),
-        speechTranscriptionApiKey: Redacted.make("openai-speech-secret"),
-      } satisfies ServerConfig.ServerConfig["Service"];
+      const serverConfig = yield* makeServerConfig(baseDir);
       yield* ServerConfig.ensureServerDirectories(serverConfig);
 
       const descriptor = yield* Effect.gen(function* () {

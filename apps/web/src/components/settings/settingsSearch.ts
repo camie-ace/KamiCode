@@ -551,6 +551,13 @@ export const SETTINGS_SEARCH_ITEMS = [
     providerSettingsOnly: true,
   },
   {
+    id: "speech-transcription-api-key",
+    title: "Speech transcription API key",
+    to: "/settings/providers",
+    searchTerms: ["voice dictation microphone whisper OpenAI audio transcription secret"],
+    providerSettingsOnly: true,
+  },
+  {
     id: "provider-health-check-interval",
     title: "Health check interval",
     to: "/settings/providers",

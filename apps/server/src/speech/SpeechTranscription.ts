@@ -8,7 +8,9 @@ import * as HttpClient from "effect/unstable/http/HttpClient";
 import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest";
 import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse";
 
+import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import * as ServerConfig from "../config.ts";
+import { readSpeechTranscriptionApiKey } from "./SpeechTranscriptionApiKey.ts";
 
 const TRANSCRIPTION_TIMEOUT = "60 seconds";
 const TRANSCRIPTION_MODEL_MAX_LENGTH = 300;
@@ -130,6 +132,10 @@ export const makeWithEndpoint = (
   configuredPrompt?: string,
   configuredModel?: string,
   apiKey?: Redacted.Redacted<string>,
+  resolveApiKey: Effect.Effect<
+    Redacted.Redacted<string> | undefined,
+    SpeechTranscriptionServiceError
+  > = Effect.succeed(apiKey),
 ) =>
   Effect.gen(function* () {
     const fileSystem = yield* FileSystem.FileSystem;
@@ -141,7 +147,8 @@ export const makeWithEndpoint = (
     const transcribeRequest = Effect.fn("SpeechTranscription.transcribeRequest")(function* (
       recording: SpeechRecording,
     ) {
-      if (apiKey === undefined) {
+      const requestApiKey = yield* resolveApiKey;
+      if (requestApiKey === undefined) {
         return yield* new SpeechTranscriptionServiceError({ reason: "not_configured" });
       }
 
@@ -184,7 +191,7 @@ export const makeWithEndpoint = (
       }
 
       const response = yield* HttpClientRequest.post(endpoint.toString()).pipe(
-        HttpClientRequest.bearerToken(Redacted.value(apiKey)),
+        HttpClientRequest.bearerToken(Redacted.value(requestApiKey)),
         HttpClientRequest.bodyFormData(payload),
         httpClient.execute,
         Effect.flatMap(HttpClientResponse.filterStatusOk),
@@ -204,11 +211,18 @@ export const makeWithEndpoint = (
 
 export const make = Effect.gen(function* () {
   const config = yield* ServerConfig.ServerConfig;
+  const secrets = yield* ServerSecretStore.ServerSecretStore;
   return yield* makeWithEndpoint(
     config.speechTranscriptionUrl,
     config.speechTranscriptionPrompt,
     config.speechTranscriptionModel,
-    config.speechTranscriptionApiKey,
+    undefined,
+    readSpeechTranscriptionApiKey(secrets, config.speechTranscriptionApiKey).pipe(
+      Effect.map((state) => state.apiKey),
+      Effect.mapError(
+        (cause) => new SpeechTranscriptionServiceError({ reason: "request_failed", cause }),
+      ),
+    ),
   );
 });
 

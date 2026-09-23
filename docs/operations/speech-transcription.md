@@ -7,7 +7,12 @@ route. Audio is forwarded by the server; the API key is never sent to the browse
 
 ## Configure the API
 
-Set a dedicated API key before starting the server:
+Open **Settings → Providers**, choose the environment, and save an OpenAI API key under **Speech
+transcription**. KamiCode stores the key in that environment's protected server secret directory;
+the settings API returns only whether a key is configured, never the key itself. Saving or replacing
+the key takes effect on the next recording without restarting the server.
+
+For unattended deployments, the environment variable remains available as a fallback:
 
 ```sh
 export T3CODE_SPEECH_TRANSCRIPTION_API_KEY='your-api-key'
@@ -28,8 +33,8 @@ export T3CODE_SPEECH_TRANSCRIPTION_PROMPT='Nigerian English. KamiCode, TypeScrip
 ```
 
 The optional prompt supplies vocabulary and locale context. KamiCode normalizes whitespace and
-limits it to 1,000 characters before forwarding it. The environment advertises voice dictation only
-when `T3CODE_SPEECH_TRANSCRIPTION_API_KEY` is present, so unconfigured servers hide the microphone.
+limits it to 1,000 characters before forwarding it. A key saved through Settings takes precedence
+over `T3CODE_SPEECH_TRANSCRIPTION_API_KEY`; clearing the saved key returns to the environment value.
 
 ## Configure a background service
 
@@ -54,8 +59,8 @@ Reference that file from the service:
 EnvironmentFile=/etc/kamicode/speech-transcription.env
 ```
 
-Reload the service manager and restart KamiCode only after active work finishes. Confirm that the
-environment descriptor advertises speech transcription before removing any previous local runtime.
+Reload the service manager and restart KamiCode only after active work finishes. Confirm that voice
+dictation can transcribe a short recording before removing any previous local runtime.
 
 The browser caps a voice session at five minutes and rotates it every 20 seconds. The server accepts
 each audio part up to 12 MB, validates common browser audio MIME types, times each API request out

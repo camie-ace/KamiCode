@@ -606,6 +606,18 @@ export const SpeechTranscriptionResult = Schema.Struct({
 });
 export type SpeechTranscriptionResult = typeof SpeechTranscriptionResult.Type;
 
+export const SpeechTranscriptionApiKeyStatus = Schema.Struct({
+  configured: Schema.Boolean,
+  source: Schema.Literals(["settings", "environment", "none"]),
+});
+export type SpeechTranscriptionApiKeyStatus = typeof SpeechTranscriptionApiKeyStatus.Type;
+
+export const UpdateSpeechTranscriptionApiKeyRequest = Schema.Struct({
+  apiKey: Schema.NullOr(TrimmedNonEmptyString.check(Schema.isMaxLength(4_096))),
+});
+export type UpdateSpeechTranscriptionApiKeyRequest =
+  typeof UpdateSpeechTranscriptionApiKeyRequest.Type;
+
 export const EnvironmentSpeechTranscriptionPayload = Schema.Struct({
   files: Multipart.FilesSchema.check(Schema.isMinLength(1), Schema.isMaxLength(1)),
 }).pipe(
@@ -615,14 +627,30 @@ export const EnvironmentSpeechTranscriptionPayload = Schema.Struct({
   }),
 );
 
-export class EnvironmentSpeechHttpApi extends HttpApiGroup.make("speech").add(
-  HttpApiEndpoint.post("transcribe", "/api/speech/transcribe", {
-    headers: OptionalBearerHeaders,
-    payload: EnvironmentSpeechTranscriptionPayload,
-    success: SpeechTranscriptionResult,
-    error: EnvironmentSpeechTranscriptionErrors,
-  }).middleware(EnvironmentAuthenticatedAuth),
-) {}
+export class EnvironmentSpeechHttpApi extends HttpApiGroup.make("speech")
+  .add(
+    HttpApiEndpoint.get("apiKeyStatus", "/api/speech/api-key", {
+      headers: OptionalBearerHeaders,
+      success: SpeechTranscriptionApiKeyStatus,
+      error: EnvironmentScopedOperationErrors,
+    }).middleware(EnvironmentAuthenticatedAuth),
+  )
+  .add(
+    HttpApiEndpoint.put("updateApiKey", "/api/speech/api-key", {
+      headers: OptionalBearerHeaders,
+      payload: UpdateSpeechTranscriptionApiKeyRequest,
+      success: SpeechTranscriptionApiKeyStatus,
+      error: EnvironmentScopedOperationErrors,
+    }).middleware(EnvironmentAuthenticatedAuth),
+  )
+  .add(
+    HttpApiEndpoint.post("transcribe", "/api/speech/transcribe", {
+      headers: OptionalBearerHeaders,
+      payload: EnvironmentSpeechTranscriptionPayload,
+      success: SpeechTranscriptionResult,
+      error: EnvironmentSpeechTranscriptionErrors,
+    }).middleware(EnvironmentAuthenticatedAuth),
+  ) {}
 
 /** Large, compressible pull-request payloads travel over HTTP rather than the RPC socket. */
 class EnvironmentPullRequestsHttpApi extends HttpApiGroup.make("pullRequests").add(

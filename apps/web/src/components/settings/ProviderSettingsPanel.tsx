@@ -14,6 +14,7 @@ import {
   ProviderDriverKind,
   type ProviderInstanceConfig,
   type ProviderInstanceId,
+  type SpeechTranscriptionApiKeyStatus,
   resolveEnvironmentMachineKind,
   resolveProviderInstanceEnabled,
 } from "@t3tools/contracts";
@@ -47,6 +48,10 @@ import {
 } from "../../state/environments";
 import { EMPTY_SERVER_PROVIDERS, serverEnvironment } from "../../state/server";
 import { useEnvironmentSessionState } from "../../state/session";
+import {
+  fetchSpeechTranscriptionApiKeyStatusCommand,
+  updateSpeechTranscriptionApiKeyCommand,
+} from "../../state/speechTranscription";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { getRelativeTimeState } from "../../timestampFormat";
 import {
@@ -75,6 +80,7 @@ import {
   NumberFieldIncrement,
   NumberFieldInput,
 } from "../ui/number-field";
+import { Input } from "../ui/input";
 import { ScrollArea } from "../ui/scroll-area";
 import { Switch } from "../ui/switch";
 import { Toggle, ToggleGroup } from "../ui/toggle-group";
@@ -450,7 +456,8 @@ function ProviderSettingsPanelContent(target: ProviderSettingsTarget) {
     if (
       !target.scoped &&
       (searchTargetId === searchableSetting("provider-health-check-interval").id ||
-        searchTargetId === searchableSetting("usage-providers").id) &&
+        searchTargetId === searchableSetting("usage-providers").id ||
+        searchTargetId === searchableSetting("speech-transcription-api-key").id) &&
       !selectedEnvironmentCanRenderSettings &&
       searchableEnvironmentId !== undefined
     ) {
@@ -674,6 +681,9 @@ function AccessGatedProviderSettings({
     <EnvironmentProviderSettings
       environmentId={environment.environmentId}
       environmentLabel={environment.label}
+      supportsSpeechTranscription={
+        environment.serverConfig?.environment.capabilities.speechTranscription === true
+      }
       readOnly={access.kind === "read-only"}
       deviceTabs={deviceTabs}
       targetInstanceId={targetInstanceId}
@@ -681,15 +691,148 @@ function AccessGatedProviderSettings({
   );
 }
 
+function SpeechTranscriptionApiKeySettings({
+  environmentId,
+  environmentLabel,
+  readOnly,
+}: {
+  readonly environmentId: EnvironmentId;
+  readonly environmentLabel: string;
+  readonly readOnly: boolean;
+}) {
+  const fetchStatus = useAtomCommand(fetchSpeechTranscriptionApiKeyStatusCommand, {
+    reportFailure: false,
+  });
+  const updateApiKey = useAtomCommand(updateSpeechTranscriptionApiKeyCommand, {
+    reportFailure: false,
+  });
+  const [apiKey, setApiKey] = useState("");
+  const [status, setStatus] = useState<SpeechTranscriptionApiKeyStatus | null>(null);
+  const [loadFailed, setLoadFailed] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    void fetchStatus({ environmentId }).then((result) => {
+      if (cancelled) return;
+      if (result._tag === "Success") {
+        setStatus(result.value);
+        setLoadFailed(false);
+      } else if (!isAtomCommandInterrupted(result)) {
+        setLoadFailed(true);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [environmentId, fetchStatus]);
+
+  const persistApiKey = useCallback(
+    async (nextApiKey: string | null) => {
+      if (isSaving) return;
+      setIsSaving(true);
+      const result = await updateApiKey({ environmentId, apiKey: nextApiKey });
+      setIsSaving(false);
+      if (result._tag === "Success") {
+        setStatus(result.value);
+        setApiKey("");
+        setLoadFailed(false);
+        toastManager.add({
+          type: "success",
+          title:
+            nextApiKey === null ? "Transcription API key cleared" : "Transcription API key saved",
+          description:
+            nextApiKey === null && result.value.source === "environment"
+              ? `${environmentLabel} is still configured by its environment variable.`
+              : undefined,
+        });
+        return;
+      }
+      if (!isAtomCommandInterrupted(result)) {
+        const error = squashAtomCommandFailure(result);
+        toastManager.add({
+          type: "error",
+          title: "Could not save transcription API key",
+          description:
+            error instanceof Error ? error.message : "The environment rejected the change.",
+        });
+      }
+    },
+    [environmentId, environmentLabel, isSaving, updateApiKey],
+  );
+
+  const statusText = loadFailed
+    ? "Could not read the saved-key status."
+    : status === null
+      ? "Checking saved-key status."
+      : status.source === "settings"
+        ? `A key is saved securely on ${environmentLabel}.`
+        : status.source === "environment"
+          ? `${environmentLabel} is configured by T3CODE_SPEECH_TRANSCRIPTION_API_KEY.`
+          : "No transcription API key is configured.";
+
+  return (
+    <SettingsSection
+      {...searchableSetting("speech-transcription-api-key")}
+      title="Speech transcription"
+    >
+      <SettingsRow
+        title="OpenAI API key"
+        description="Used by this environment for voice dictation. The key is stored on the server and is never returned to the browser."
+        status={statusText}
+        control={
+          <div className="flex w-full min-w-0 max-w-md items-center gap-2 sm:w-96">
+            <Input
+              type="password"
+              value={apiKey}
+              disabled={readOnly || isSaving}
+              autoComplete="off"
+              aria-label="Speech transcription API key"
+              placeholder={status?.configured ? "Enter a replacement key" : "sk-…"}
+              onChange={(event) => setApiKey(event.currentTarget.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" && apiKey.trim().length > 0) {
+                  event.preventDefault();
+                  void persistApiKey(apiKey.trim());
+                }
+              }}
+            />
+            <Button
+              size="sm"
+              disabled={readOnly || isSaving || apiKey.trim().length === 0}
+              aria-busy={isSaving}
+              onClick={() => void persistApiKey(apiKey.trim())}
+            >
+              Save
+            </Button>
+            {status?.source === "settings" ? (
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={readOnly || isSaving}
+                onClick={() => void persistApiKey(null)}
+              >
+                Clear
+              </Button>
+            ) : null}
+          </div>
+        }
+      />
+    </SettingsSection>
+  );
+}
+
 export function EnvironmentProviderSettings({
   environmentId,
   environmentLabel,
+  supportsSpeechTranscription = false,
   readOnly = false,
   deviceTabs,
   targetInstanceId,
 }: {
   readonly environmentId: EnvironmentId;
   readonly environmentLabel: string;
+  readonly supportsSpeechTranscription?: boolean;
   readonly deviceTabs?: ReactNode;
   readonly targetInstanceId?: ProviderInstanceId | undefined;
   /**
@@ -1214,6 +1357,14 @@ export function EnvironmentProviderSettings({
           </div>
         </SettingsGroup>
       </SettingsSection>
+
+      {supportsSpeechTranscription ? (
+        <SpeechTranscriptionApiKeySettings
+          environmentId={environmentId}
+          environmentLabel={environmentLabel}
+          readOnly={readOnly}
+        />
+      ) : null}
 
       <ProviderWaterfallSettings
         rows={rows}

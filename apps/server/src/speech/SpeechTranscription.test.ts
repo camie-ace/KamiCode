@@ -196,4 +196,41 @@ describe("SpeechTranscription", () => {
       ),
     ).pipe(Effect.provide(NodeServices.layer));
   });
+
+  it.effect(
+    "reads the API key for each request so settings changes apply without a restart",
+    () => {
+      let currentApiKey: Redacted.Redacted<string> | undefined;
+      let requests = 0;
+      return withRecording("audio/webm", (path) =>
+        Effect.gen(function* () {
+          const service = yield* makeWithEndpoint(
+            endpoint,
+            undefined,
+            undefined,
+            undefined,
+            Effect.sync(() => currentApiKey),
+          );
+          const firstError = yield* service
+            .transcribe({ path, contentType: "audio/webm" })
+            .pipe(Effect.flip);
+          assert.isTrue(isServiceError(firstError));
+          currentApiKey = apiKey;
+          const text = yield* service.transcribe({ path, contentType: "audio/webm" });
+          assert.strictEqual(text, "available now");
+          assert.strictEqual(requests, 1);
+        }).pipe(
+          Effect.provide(
+            httpClientLayer((request) => {
+              requests += 1;
+              assert.strictEqual(request.headers.authorization, "Bearer openai-speech-secret");
+              return Effect.succeed(
+                HttpClientResponse.fromWeb(request, Response.json({ text: "available now" })),
+              );
+            }),
+          ),
+        ),
+      ).pipe(Effect.provide(NodeServices.layer));
+    },
+  );
 });
