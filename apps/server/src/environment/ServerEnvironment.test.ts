@@ -73,6 +73,7 @@ const makeServerConfig = Effect.fn(function* (baseDir: string) {
     devAllowedOrigins: [],
     noBrowser: false,
     speechTranscriptionUrl: undefined,
+    speechTranscriptionApiKey: undefined,
     speechTranscriptionModel: undefined,
     speechTranscriptionPrompt: undefined,
     startupPresentation: "browser",
@@ -181,21 +182,18 @@ it.layer(NodeServices.layer)("ServerEnvironmentLive", (it) => {
       expect(second.capabilities.threadPullRequests).toBe(true);
       expect(second.capabilities.threadPullRequestLinking).toBe(true);
       expect(second.capabilities.threadRecurringSchedules).toBe(true);
-      expect(second.capabilities.speechTranscription).toBeUndefined();
+      expect(second.capabilities.speechTranscription).toBe(true);
       expect(second.capabilities.agentActivityPublishing).toBe(false);
     }),
   );
 
-  it.effect("advertises speech transcription only when its endpoint is configured", () =>
+  it.effect("advertises API speech transcription without requiring a startup key", () =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
       const baseDir = yield* fileSystem.makeTempDirectoryScoped({
         prefix: "t3-server-environment-speech-test-",
       });
-      const serverConfig = {
-        ...(yield* makeServerConfig(baseDir)),
-        speechTranscriptionUrl: new URL("http://127.0.0.1:8087/inference"),
-      } satisfies ServerConfig.ServerConfig["Service"];
+      const serverConfig = yield* makeServerConfig(baseDir);
       yield* ServerConfig.ensureServerDirectories(serverConfig);
 
       const descriptor = yield* Effect.gen(function* () {

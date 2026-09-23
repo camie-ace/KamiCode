@@ -2,23 +2,27 @@ import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
+import * as Redacted from "effect/Redacted";
 import * as Schema from "effect/Schema";
-import * as Semaphore from "effect/Semaphore";
 import * as HttpClient from "effect/unstable/http/HttpClient";
 import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest";
 import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse";
 
+import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import * as ServerConfig from "../config.ts";
+import { readSpeechTranscriptionApiKey } from "./SpeechTranscriptionApiKey.ts";
 
 const TRANSCRIPTION_TIMEOUT = "60 seconds";
 const TRANSCRIPTION_MODEL_MAX_LENGTH = 300;
 const TRANSCRIPTION_PROMPT_MAX_LENGTH = 1_000;
+const DEFAULT_TRANSCRIPTION_ENDPOINT = new URL("https://api.openai.com/v1/audio/transcriptions");
+const DEFAULT_TRANSCRIPTION_MODEL = "whisper-1";
 
-const WhisperCppResponse = Schema.Struct({
+const TranscriptionResponse = Schema.Struct({
   text: Schema.String,
 });
 
-const decodeWhisperCppResponse = HttpClientResponse.schemaBodyJson(WhisperCppResponse);
+const decodeTranscriptionResponse = HttpClientResponse.schemaBodyJson(TranscriptionResponse);
 
 const supportedAudioTypes = new Map<string, string>([
   ["audio/aac", "aac"],
@@ -45,10 +49,6 @@ function normalizeModel(model: string | undefined): string | undefined {
   const normalized = model?.trim();
   if (normalized === undefined || normalized.length === 0) return undefined;
   return normalized.slice(0, TRANSCRIPTION_MODEL_MAX_LENGTH);
-}
-
-function supportsCarryInitialPrompt(endpoint: URL): boolean {
-  return endpoint.pathname.endsWith("/inference");
 }
 
 function bytesEqual(bytes: Uint8Array, offset: number, expected: ReadonlyArray<number>): boolean {
@@ -128,21 +128,27 @@ export class SpeechTranscription extends Context.Service<
 >()("t3/speech/SpeechTranscription") {}
 
 export const makeWithEndpoint = (
-  endpoint: URL | undefined,
+  configuredEndpoint: URL | undefined,
   configuredPrompt?: string,
   configuredModel?: string,
+  apiKey?: Redacted.Redacted<string>,
+  resolveApiKey: Effect.Effect<
+    Redacted.Redacted<string> | undefined,
+    SpeechTranscriptionServiceError
+  > = Effect.succeed(apiKey),
 ) =>
   Effect.gen(function* () {
     const fileSystem = yield* FileSystem.FileSystem;
     const httpClient = yield* HttpClient.HttpClient;
-    const semaphore = yield* Semaphore.make(1);
+    const endpoint = configuredEndpoint ?? DEFAULT_TRANSCRIPTION_ENDPOINT;
     const initialPrompt = normalizeInitialPrompt(configuredPrompt);
-    const model = normalizeModel(configuredModel);
+    const model = normalizeModel(configuredModel) ?? DEFAULT_TRANSCRIPTION_MODEL;
 
     const transcribeRequest = Effect.fn("SpeechTranscription.transcribeRequest")(function* (
       recording: SpeechRecording,
     ) {
-      if (endpoint === undefined) {
+      const requestApiKey = yield* resolveApiKey;
+      if (requestApiKey === undefined) {
         return yield* new SpeechTranscriptionServiceError({ reason: "not_configured" });
       }
 
@@ -179,19 +185,17 @@ export const makeWithEndpoint = (
       payload.append("file", new Blob([bytes], { type: contentType }), `recording.${extension}`);
       payload.append("response_format", "json");
       payload.append("temperature", "0.0");
-      if (model !== undefined) payload.append("model", model);
+      payload.append("model", model);
       if (initialPrompt !== undefined) {
         payload.append("prompt", initialPrompt);
-        if (supportsCarryInitialPrompt(endpoint)) {
-          payload.append("carry_initial_prompt", "true");
-        }
       }
 
       const response = yield* HttpClientRequest.post(endpoint.toString()).pipe(
+        HttpClientRequest.bearerToken(Redacted.value(requestApiKey)),
         HttpClientRequest.bodyFormData(payload),
         httpClient.execute,
         Effect.flatMap(HttpClientResponse.filterStatusOk),
-        Effect.flatMap(decodeWhisperCppResponse),
+        Effect.flatMap(decodeTranscriptionResponse),
         Effect.timeout(TRANSCRIPTION_TIMEOUT),
         Effect.mapError(
           (cause) => new SpeechTranscriptionServiceError({ reason: "request_failed", cause }),
@@ -201,16 +205,24 @@ export const makeWithEndpoint = (
     });
 
     return SpeechTranscription.of({
-      transcribe: (recording) => semaphore.withPermits(1)(transcribeRequest(recording)),
+      transcribe: transcribeRequest,
     });
   });
 
 export const make = Effect.gen(function* () {
   const config = yield* ServerConfig.ServerConfig;
+  const secrets = yield* ServerSecretStore.ServerSecretStore;
   return yield* makeWithEndpoint(
     config.speechTranscriptionUrl,
     config.speechTranscriptionPrompt,
     config.speechTranscriptionModel,
+    undefined,
+    readSpeechTranscriptionApiKey(secrets, config.speechTranscriptionApiKey).pipe(
+      Effect.map((state) => state.apiKey),
+      Effect.mapError(
+        (cause) => new SpeechTranscriptionServiceError({ reason: "request_failed", cause }),
+      ),
+    ),
   );
 });
 

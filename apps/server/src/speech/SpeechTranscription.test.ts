@@ -3,6 +3,7 @@ import { assert, describe, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
+import * as Redacted from "effect/Redacted";
 import * as Schema from "effect/Schema";
 import * as HttpClient from "effect/unstable/http/HttpClient";
 import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse";
@@ -13,8 +14,8 @@ import {
   SpeechTranscriptionServiceError,
 } from "./SpeechTranscription.ts";
 
-const endpoint = new URL("http://127.0.0.1:8087/inference");
-const openAiCompatibleEndpoint = new URL("http://127.0.0.1:8088/v1/audio/transcriptions");
+const endpoint = new URL("https://api.openai.com/v1/audio/transcriptions");
+const apiKey = Redacted.make("openai-speech-secret");
 const isInputError = Schema.is(SpeechTranscriptionInputError);
 const isServiceError = Schema.is(SpeechTranscriptionServiceError);
 
@@ -36,14 +37,15 @@ const withRecording = <A, E, R>(
   }).pipe(Effect.scoped);
 
 describe("SpeechTranscription", () => {
-  it.effect("forwards configured Whisper fields and trims the resulting text", () => {
+  it.effect("authenticates API requests, forwards configured fields, and trims the text", () => {
     let observedRequest = false;
     return withRecording("audio/webm;codecs=opus", (path) =>
       Effect.gen(function* () {
         const service = yield* makeWithEndpoint(
           endpoint,
           "  Nigerian English.  KamiCode, TypeScript, GitHub, Playwright.  ",
-          "  Systran/faster-whisper-small.en  ",
+          "  whisper-1  ",
+          apiKey,
         );
         const text = yield* service.transcribe({ path, contentType: "audio/webm;codecs=opus" });
         assert.strictEqual(text, "write the regression test");
@@ -54,6 +56,7 @@ describe("SpeechTranscription", () => {
             Effect.sync(() => {
               assert.strictEqual(request.url, endpoint.toString());
               assert.strictEqual(request.method, "POST");
+              assert.strictEqual(request.headers.authorization, "Bearer openai-speech-secret");
               assert.strictEqual(request.body._tag, "FormData");
               if (request.body._tag !== "FormData") {
                 throw new Error("Expected multipart form data");
@@ -65,15 +68,11 @@ describe("SpeechTranscription", () => {
               assert.strictEqual(file.size, 4);
               assert.strictEqual(request.body.formData.get("response_format"), "json");
               assert.strictEqual(request.body.formData.get("temperature"), "0.0");
-              assert.strictEqual(
-                request.body.formData.get("model"),
-                "Systran/faster-whisper-small.en",
-              );
+              assert.strictEqual(request.body.formData.get("model"), "whisper-1");
               assert.strictEqual(
                 request.body.formData.get("prompt"),
                 "Nigerian English. KamiCode, TypeScript, GitHub, Playwright.",
               );
-              assert.strictEqual(request.body.formData.get("carry_initial_prompt"), "true");
               observedRequest = true;
               return HttpClientResponse.fromWeb(
                 request,
@@ -86,29 +85,22 @@ describe("SpeechTranscription", () => {
     ).pipe(Effect.provide(NodeServices.layer));
   });
 
-  it.effect("omits whisper.cpp-only fields for an OpenAI-compatible endpoint", () =>
+  it.effect("uses the OpenAI endpoint and Whisper model defaults", () =>
     withRecording("audio/webm", (path) =>
       Effect.gen(function* () {
-        const service = yield* makeWithEndpoint(
-          openAiCompatibleEndpoint,
-          "Nigerian English.",
-          "Systran/faster-whisper-small.en",
-        );
+        const service = yield* makeWithEndpoint(undefined, "Nigerian English.", undefined, apiKey);
         yield* service.transcribe({ path, contentType: "audio/webm" });
       }).pipe(
         Effect.provide(
           httpClientLayer((request) => {
-            assert.strictEqual(request.url, openAiCompatibleEndpoint.toString());
+            assert.strictEqual(request.url, endpoint.toString());
+            assert.strictEqual(request.headers.authorization, "Bearer openai-speech-secret");
             assert.strictEqual(request.body._tag, "FormData");
             if (request.body._tag !== "FormData") {
               throw new Error("Expected multipart form data");
             }
             assert.strictEqual(request.body.formData.get("prompt"), "Nigerian English.");
-            assert.strictEqual(
-              request.body.formData.get("model"),
-              "Systran/faster-whisper-small.en",
-            );
-            assert.isNull(request.body.formData.get("carry_initial_prompt"));
+            assert.strictEqual(request.body.formData.get("model"), "whisper-1");
             return Effect.succeed(
               HttpClientResponse.fromWeb(request, Response.json({ text: "ship it" })),
             );
@@ -122,7 +114,7 @@ describe("SpeechTranscription", () => {
     let requests = 0;
     return withRecording("application/octet-stream", (path) =>
       Effect.gen(function* () {
-        const service = yield* makeWithEndpoint(endpoint);
+        const service = yield* makeWithEndpoint(endpoint, undefined, undefined, apiKey);
         const error = yield* service
           .transcribe({ path, contentType: "application/octet-stream" })
           .pipe(Effect.flip);
@@ -142,7 +134,7 @@ describe("SpeechTranscription", () => {
   it.effect("turns malformed upstream responses into a service error", () =>
     withRecording("audio/ogg", (path) =>
       Effect.gen(function* () {
-        const service = yield* makeWithEndpoint(endpoint);
+        const service = yield* makeWithEndpoint(endpoint, undefined, undefined, apiKey);
         const error = yield* service
           .transcribe({ path, contentType: "audio/ogg" })
           .pipe(Effect.flip);
@@ -163,7 +155,7 @@ describe("SpeechTranscription", () => {
       "audio/webm",
       (path) =>
         Effect.gen(function* () {
-          const service = yield* makeWithEndpoint(endpoint);
+          const service = yield* makeWithEndpoint(endpoint, undefined, undefined, apiKey);
           const error = yield* service
             .transcribe({ path, contentType: "audio/webm" })
             .pipe(Effect.flip);
@@ -183,33 +175,62 @@ describe("SpeechTranscription", () => {
     ).pipe(Effect.provide(NodeServices.layer));
   });
 
-  it.effect("serializes model work so concurrent recordings cannot saturate the CPU", () => {
-    let active = 0;
-    let maximumActive = 0;
+  it.effect("does not contact the API without a configured key", () => {
+    let requests = 0;
     return withRecording("audio/webm", (path) =>
       Effect.gen(function* () {
         const service = yield* makeWithEndpoint(endpoint);
-        yield* Effect.all(
-          [
-            service.transcribe({ path, contentType: "audio/webm" }),
-            service.transcribe({ path, contentType: "audio/webm" }),
-          ],
-          { concurrency: "unbounded" },
-        );
-        assert.strictEqual(maximumActive, 1);
+        const error = yield* service
+          .transcribe({ path, contentType: "audio/webm" })
+          .pipe(Effect.flip);
+        assert.isTrue(isServiceError(error));
+        assert.strictEqual(error.reason, "not_configured");
+        assert.strictEqual(requests, 0);
       }).pipe(
         Effect.provide(
-          httpClientLayer((request) =>
-            Effect.gen(function* () {
-              active += 1;
-              maximumActive = Math.max(maximumActive, active);
-              yield* Effect.yieldNow;
-              active -= 1;
-              return HttpClientResponse.fromWeb(request, Response.json({ text: "ok" }));
-            }),
-          ),
+          httpClientLayer((request) => {
+            requests += 1;
+            return Effect.succeed(HttpClientResponse.fromWeb(request, Response.json({ text: "" })));
+          }),
         ),
       ),
     ).pipe(Effect.provide(NodeServices.layer));
   });
+
+  it.effect(
+    "reads the API key for each request so settings changes apply without a restart",
+    () => {
+      let currentApiKey: Redacted.Redacted<string> | undefined;
+      let requests = 0;
+      return withRecording("audio/webm", (path) =>
+        Effect.gen(function* () {
+          const service = yield* makeWithEndpoint(
+            endpoint,
+            undefined,
+            undefined,
+            undefined,
+            Effect.sync(() => currentApiKey),
+          );
+          const firstError = yield* service
+            .transcribe({ path, contentType: "audio/webm" })
+            .pipe(Effect.flip);
+          assert.isTrue(isServiceError(firstError));
+          currentApiKey = apiKey;
+          const text = yield* service.transcribe({ path, contentType: "audio/webm" });
+          assert.strictEqual(text, "available now");
+          assert.strictEqual(requests, 1);
+        }).pipe(
+          Effect.provide(
+            httpClientLayer((request) => {
+              requests += 1;
+              assert.strictEqual(request.headers.authorization, "Bearer openai-speech-secret");
+              return Effect.succeed(
+                HttpClientResponse.fromWeb(request, Response.json({ text: "available now" })),
+              );
+            }),
+          ),
+        ),
+      ).pipe(Effect.provide(NodeServices.layer));
+    },
+  );
 });

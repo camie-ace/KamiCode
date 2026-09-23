@@ -188,6 +188,12 @@ const EnvServerConfig = Config.all({
     Config.option,
     Config.map(Option.getOrUndefined),
   ),
+  speechTranscriptionApiKey: Config.Redacted("T3CODE_SPEECH_TRANSCRIPTION_API_KEY").pipe(
+    Config.map((token) => Redacted.make(Redacted.value(token).trim())),
+    Config.option,
+    Config.map(Option.filter((token) => Redacted.value(token).length > 0)),
+    Config.map(Option.getOrUndefined),
+  ),
   speechTranscriptionModel: Config.String("T3CODE_SPEECH_TRANSCRIPTION_MODEL").pipe(
     Config.option,
     Config.map(Option.getOrUndefined),
@@ -527,6 +533,7 @@ export const resolveServerConfig = (
       managedScratchMaxBytes: env.managedScratchMaxBytes,
       managedPackageCacheDir,
       speechTranscriptionUrl: env.speechTranscriptionUrl,
+      speechTranscriptionApiKey: env.speechTranscriptionApiKey,
       speechTranscriptionModel: env.speechTranscriptionModel,
       speechTranscriptionPrompt: env.speechTranscriptionPrompt,
       startupPresentation,

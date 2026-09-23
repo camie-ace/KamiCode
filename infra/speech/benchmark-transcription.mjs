@@ -7,7 +7,8 @@ import * as NodePerfHooks from "node:perf_hooks";
 import * as NodeURL from "node:url";
 import * as NodeUtil from "node:util";
 
-const DEFAULT_ENDPOINT = "http://127.0.0.1:8087/inference";
+const DEFAULT_ENDPOINT = "https://api.openai.com/v1/audio/transcriptions";
+const DEFAULT_MODEL = "whisper-1";
 const DEFAULT_TIMEOUT_MS = 90_000;
 
 const MIME_TYPES = new Map([
@@ -184,16 +185,14 @@ async function transcribeSample(sample, options) {
     payload.append("file", audio, NodePath.basename(sample.audio));
     payload.append("response_format", "json");
     payload.append("temperature", "0.0");
-    if (options.model) payload.append("model", options.model);
+    payload.append("model", options.model);
     if (options.prompt) {
       payload.append("prompt", options.prompt);
-      if (new URL(options.endpoint).pathname.endsWith("/inference")) {
-        payload.append("carry_initial_prompt", "true");
-      }
     }
 
     const response = await fetch(options.endpoint, {
       body: payload,
+      headers: options.apiKey ? { authorization: `Bearer ${options.apiKey}` } : undefined,
       method: "POST",
       signal: AbortSignal.timeout(options.timeoutMs),
     });
@@ -238,9 +237,9 @@ function printUsage() {
   node infra/speech/benchmark-transcription.mjs --manifest <samples.jsonl> [options]
 
 Options:
-  --endpoint <url>       Whisper-compatible endpoint (default: ${DEFAULT_ENDPOINT})
+  --endpoint <url>       OpenAI-compatible endpoint (default: ${DEFAULT_ENDPOINT})
   --label <name>         model/runtime label stored in the report
-  --model <id>           model identifier for multi-model runtimes
+  --model <id>           transcription model (default: ${DEFAULT_MODEL})
   --output <path>        write the full JSON report
   --prompt <text>        initial vocabulary/context prompt
   --timeout-ms <number>  timeout for each sample (default: ${DEFAULT_TIMEOUT_MS})
@@ -248,6 +247,8 @@ Options:
 
 Manifest JSONL fields:
   {"audio":"clips/sample.wav","reference":"expected words","accent":"yoruba","durationSeconds":8.4}
+
+Authentication uses T3CODE_SPEECH_TRANSCRIPTION_API_KEY, then OPENAI_API_KEY.
 `);
 }
 
@@ -259,7 +260,7 @@ export async function main(argv = process.argv.slice(2)) {
       help: { type: "boolean", default: false },
       label: { type: "string" },
       manifest: { type: "string" },
-      model: { type: "string" },
+      model: { type: "string", default: DEFAULT_MODEL },
       output: { type: "string" },
       prompt: { type: "string" },
       "timeout-ms": { type: "string", default: String(DEFAULT_TIMEOUT_MS) },
@@ -281,6 +282,10 @@ export async function main(argv = process.argv.slice(2)) {
     throw new Error("--timeout-ms must be a positive integer.");
   }
   const endpoint = new URL(values.endpoint).toString();
+  const apiKey =
+    process.env.T3CODE_SPEECH_TRANSCRIPTION_API_KEY?.trim() ||
+    process.env.OPENAI_API_KEY?.trim() ||
+    undefined;
   const manifestPath = NodePath.resolve(values.manifest);
   const samples = await loadManifest(manifestPath);
   if (samples.length === 0) throw new Error("The benchmark manifest is empty.");
@@ -292,8 +297,9 @@ export async function main(argv = process.argv.slice(2)) {
     );
     results.push(
       await transcribeSample(sample, {
+        apiKey,
         endpoint,
-        model: values.model?.trim() || undefined,
+        model: values.model.trim(),
         prompt: values.prompt?.trim() || undefined,
         timeoutMs,
       }),
@@ -306,7 +312,7 @@ export async function main(argv = process.argv.slice(2)) {
     endpoint,
     label: values.label ?? endpoint,
     manifest: manifestPath,
-    model: values.model?.trim() || null,
+    model: values.model.trim(),
     prompt: values.prompt?.trim() || null,
     summary,
     results,

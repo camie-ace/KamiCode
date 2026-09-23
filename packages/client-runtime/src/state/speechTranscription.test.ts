@@ -8,8 +8,10 @@ import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse";
 
 import { PrimaryConnectionTarget, type PreparedConnection } from "../connection/model.ts";
 import {
+  fetchSpeechTranscriptionApiKeyStatus,
   SpeechTranscriptionValidationError,
   transcribeEnvironmentSpeech,
+  updateSpeechTranscriptionApiKey,
 } from "./speechTranscription.ts";
 
 const environmentId = EnvironmentId.make("environment-voice-test");
@@ -84,4 +86,36 @@ describe("transcribeEnvironmentSpeech", () => {
       assert.isTrue(isValidationError(error));
     }).pipe(Effect.provide(unusedClientLayer)),
   );
+});
+
+describe("speech transcription API key settings", () => {
+  it.effect("reads and updates key status without receiving the secret", () => {
+    const observedMethods: Array<string> = [];
+    const clientLayer = Layer.succeed(
+      HttpClient.HttpClient,
+      HttpClient.make((request) =>
+        Effect.sync(() => {
+          assert.strictEqual(request.url, "https://environment.example.test/api/speech/api-key");
+          assert.strictEqual(request.headers.authorization, "Bearer voice-token");
+          observedMethods.push(request.method);
+          return HttpClientResponse.fromWeb(
+            request,
+            Response.json({ configured: true, source: "settings" }),
+          );
+        }),
+      ),
+    );
+
+    return Effect.gen(function* () {
+      const prepared = preparedConnection({ _tag: "Bearer", token: "voice-token" });
+      const before = yield* fetchSpeechTranscriptionApiKeyStatus({ prepared });
+      const after = yield* updateSpeechTranscriptionApiKey({
+        prepared,
+        payload: { apiKey: "new-secret" },
+      });
+      assert.deepStrictEqual(before, { configured: true, source: "settings" });
+      assert.deepStrictEqual(after, { configured: true, source: "settings" });
+      assert.deepStrictEqual(observedMethods, ["GET", "PUT"]);
+    }).pipe(Effect.provide(clientLayer));
+  });
 });
