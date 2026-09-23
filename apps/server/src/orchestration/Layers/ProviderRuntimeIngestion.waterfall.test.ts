@@ -48,24 +48,51 @@ describe("selectNextWaterfallProvider", () => {
     ).toBe(claude.instanceId);
   });
 
-  it("does not wrap back to the beginning or select an unconfigured failure", () => {
+  it("wraps to earlier instances whose limits may have reset", () => {
     const first = provider("codex_first", "codex");
     const last = provider("claude_last", "claudeAgent");
-    const sequence = [first.instanceId, last.instanceId];
+
+    expect(
+      selectNextWaterfallProvider({
+        sequence: [first.instanceId, last.instanceId],
+        failedInstanceId: last.instanceId,
+        providers: [first, last],
+      })?.instanceId,
+    ).toBe(first.instanceId);
+  });
+
+  it("starts from the top when the failed instance is outside the sequence", () => {
+    const first = provider("codex_first", "codex");
+    const last = provider("claude_last", "claudeAgent");
+
+    expect(
+      selectNextWaterfallProvider({
+        sequence: [first.instanceId, last.instanceId],
+        failedInstanceId: ProviderInstanceId.make("outside_waterfall"),
+        providers: [first, last],
+      })?.instanceId,
+    ).toBe(first.instanceId);
+  });
+
+  it("never returns to an instance the request already tried, even when repeated", () => {
+    const first = provider("codex_first", "codex");
+    const second = provider("codex_second", "codex");
+    const sequence = [first.instanceId, second.instanceId, first.instanceId];
 
     expect(
       selectNextWaterfallProvider({
         sequence,
-        failedInstanceId: last.instanceId,
-        providers: [first, last],
+        failedInstanceId: second.instanceId,
+        providers: [first, second],
+        attemptedInstanceIds: new Set([first.instanceId, second.instanceId]),
       }),
     ).toBeUndefined();
     expect(
       selectNextWaterfallProvider({
         sequence,
-        failedInstanceId: ProviderInstanceId.make("outside_waterfall"),
-        providers: [first, last],
-      }),
-    ).toBeUndefined();
+        failedInstanceId: first.instanceId,
+        providers: [first, second],
+      })?.instanceId,
+    ).toBe(second.instanceId);
   });
 });

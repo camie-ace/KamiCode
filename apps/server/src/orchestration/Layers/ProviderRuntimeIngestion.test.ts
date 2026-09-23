@@ -22,6 +22,7 @@ import {
   ProjectId,
   ProviderItemId,
   RuntimeRequestId,
+  type ServerProvider,
   type ServerSettings,
   ThreadId,
   TurnId,
@@ -70,6 +71,7 @@ import { ProviderRuntimeIngestionService } from "../Services/ProviderRuntimeInge
 import { ProjectionSnapshotQuery } from "../Services/ProjectionSnapshotQuery.ts";
 import { ServerConfig } from "../../config.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
+import { makeProviderRegistryLayer } from "../../provider/testUtils/providerRegistryMock.ts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { makeSqlStatementCounter } from "../../../integration/SqlStatementCounter.integration.ts";
 
@@ -273,6 +275,7 @@ describe("ProviderRuntimeIngestion", () => {
 
   async function createHarness(options?: {
     serverSettings?: Partial<ServerSettings>;
+    providers?: ReadonlyArray<ServerProvider>;
     threadTitle?: string;
     workspaceSubdirectory?: string;
     isGitRepository?: CheckpointStore.CheckpointStore["Service"]["isGitRepository"];
@@ -336,6 +339,9 @@ describe("ProviderRuntimeIngestion", () => {
       Layer.provideMerge(SqlitePersistenceMemory),
       Layer.provideMerge(Layer.succeed(ProviderService, provider.service)),
       Layer.provideMerge(makeTestServerSettingsLayer(options?.serverSettings)),
+      Layer.provideMerge(
+        options?.providers ? makeProviderRegistryLayer(options.providers) : Layer.empty,
+      ),
       Layer.provideMerge(
         Layer.effect(
           CheckpointStore.CheckpointStore,
@@ -441,6 +447,25 @@ describe("ProviderRuntimeIngestion", () => {
         clockOffsetMs += ms;
       },
       emitAndDrain,
+      readTurnStartRequests: () =>
+        testRuntime.runPromise(
+          Effect.gen(function* () {
+            const sql = yield* SqlClient.SqlClient;
+            const rows = yield* sql<{ readonly payload: string }>`
+              SELECT payload_json AS "payload"
+              FROM orchestration_events
+              WHERE event_type = 'thread.turn-start-requested'
+              ORDER BY sequence ASC
+            `;
+            return rows.map(
+              (row) =>
+                JSON.parse(row.payload) as {
+                  readonly messageId: string;
+                  readonly modelSelection?: { readonly instanceId: string; readonly model: string };
+                },
+            );
+          }),
+        ),
       sqlCount: sqlCounter.count,
       setProviderSession: provider.setSession,
       drain,
@@ -741,6 +766,104 @@ describe("ProviderRuntimeIngestion", () => {
       );
     },
   );
+
+  it("retries the failed request, not a queued one, on the next Waterfall provider once", async () => {
+    const codexProfile = (instanceId: string): ServerProvider => ({
+      instanceId: ProviderInstanceId.make(instanceId),
+      driver: ProviderDriverKind.make("codex"),
+      enabled: true,
+      installed: true,
+      version: "1.0.0",
+      status: "ready",
+      auth: { status: "authenticated" },
+      checkedAt: "2026-01-01T00:00:00.000Z",
+      models: [{ slug: "gpt-5-codex", name: "GPT-5 Codex", isCustom: false, capabilities: null }],
+      slashCommands: [],
+      skills: [],
+    });
+    const codex = ProviderInstanceId.make("codex");
+    const camie = ProviderInstanceId.make("codex_camie");
+    const harness = await createHarness({
+      serverSettings: { providerWaterfall: { enabled: true, sequence: [codex, camie] } },
+      providers: [codexProfile("codex"), codexProfile("codex_camie")],
+    });
+    const threadId = asThreadId("thread-1");
+    const options = [{ id: "reasoningEffort", value: "xhigh" }];
+    await harness.dispatch({
+      type: "thread.meta.update",
+      commandId: CommandId.make("cmd-waterfall-options"),
+      threadId,
+      modelSelection: { instanceId: codex, model: "gpt-5-codex", options },
+    });
+    const startTurn = (messageId: string, createdAt: string, queued: boolean) =>
+      harness.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.make(`cmd-start-${messageId}`),
+        threadId,
+        message: {
+          messageId: asMessageId(messageId),
+          role: "user",
+          text: messageId,
+          attachments: [],
+        },
+        modelSelection: { instanceId: codex, model: "gpt-5-codex", options },
+        ...(queued ? { dispatchPolicy: "queue" as const } : {}),
+        runtimeMode: "approval-required",
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        createdAt,
+      });
+    const base = {
+      provider: ProviderDriverKind.make("codex"),
+      providerInstanceId: codex,
+      threadId,
+      turnId: asTurnId("turn-limited"),
+    };
+
+    await startTurn("limited-request", "2026-01-01T00:00:01.000Z", false);
+    await harness.emitAndDrain([
+      {
+        ...base,
+        type: "turn.started",
+        eventId: asEventId("limited-turn-started"),
+        createdAt: "2026-01-01T00:00:02.000Z",
+      },
+    ]);
+    await startTurn("queued-request", "2026-01-01T00:00:03.000Z", true);
+    const usageLimit = (eventId: string, providerInstanceId: ProviderInstanceId) => ({
+      ...base,
+      providerInstanceId,
+      type: "runtime.error",
+      eventId: asEventId(eventId),
+      createdAt: "2026-01-01T00:00:04.000Z",
+      payload: { message: "Usage limit reached.", class: "provider_error", code: "usage_limit" },
+    });
+    await harness.emitAndDrain([usageLimit("limit-on-codex", codex)]);
+    // A repeat from the instance the request already left is stale.
+    await harness.emitAndDrain([
+      { ...usageLimit("late-limit-on-codex", codex), turnId: undefined },
+    ]);
+
+    const waterfallStarts = (await harness.readTurnStartRequests()).filter(
+      (request) => request.modelSelection?.instanceId === camie,
+    );
+    expect(waterfallStarts).toEqual([
+      expect.objectContaining({
+        messageId: "limited-request",
+        modelSelection: { instanceId: camie, model: "gpt-5-codex", options },
+      }),
+    ]);
+
+    // Codex Camie is exhausted too: every instance has been tried for this
+    // request, so the Waterfall stops instead of cycling back to Codex.
+    await harness.emitAndDrain([
+      { ...usageLimit("limit-on-camie", camie), turnId: asTurnId("turn-camie") },
+    ]);
+    expect(
+      (await harness.readTurnStartRequests()).filter(
+        (request) => request.messageId === "limited-request",
+      ),
+    ).toHaveLength(2);
+  });
 
   it.each([
     { source: "the previous turn", turnId: asTurnId("opencode-stopped-turn") },

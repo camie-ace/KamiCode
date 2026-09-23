@@ -13,6 +13,7 @@ import {
   type OrchestrationSession,
   type OrchestrationThread,
   ThreadId,
+  type MessageId,
   TrimmedNonEmptyString,
   type ProviderSession,
   type RuntimeMode,
@@ -913,6 +914,7 @@ const make = Effect.gen(function* () {
 
   const buildSendTurnRequestForThread = Effect.fnUntraced(function* (input: {
     readonly threadId: ThreadId;
+    readonly messageId?: MessageId;
     readonly messageText: string;
     readonly attachments?: ReadonlyArray<ChatAttachment>;
     readonly modelSelection?: ModelSelection;
@@ -943,12 +945,24 @@ const make = Effect.gen(function* () {
         const conversation = (detail?.messages ?? []).filter(
           (message) => message.role === "user" || message.role === "assistant",
         );
-        const finalMessage = conversation.at(-1);
-        const transcriptMessages =
-          finalMessage?.role === "user" && finalMessage.text === input.messageText
-            ? conversation.slice(0, -1)
-            : conversation;
-        const transcript = transcriptMessages
+        // The request is sent separately below. Later user messages are still
+        // queued, so only the reply the previous provider had started is kept.
+        const requestIndex =
+          input.messageId === undefined
+            ? -1
+            : conversation.findIndex((message) => message.id === input.messageId);
+        const earlierMessages =
+          requestIndex < 0 ? conversation : conversation.slice(0, requestIndex);
+        const partialReply =
+          requestIndex < 0
+            ? ""
+            : conversation
+                .slice(requestIndex + 1)
+                .filter((message) => message.role === "assistant")
+                .map((message) => message.text)
+                .join("\n\n")
+                .slice(-20_000);
+        const transcript = earlierMessages
           .map((message) => `${message.role === "user" ? "User" : "Assistant"}: ${message.text}`)
           .join("\n\n")
           .slice(-60_000);
@@ -956,6 +970,9 @@ const make = Effect.gen(function* () {
           "Continue this existing KamiCode thread. The provider changed because the previous account reached its usage limit. Preserve the conversation's intent and continue naturally; do not restart the task or mention this handoff unless it matters.",
           transcript ? `Conversation transcript:\n${transcript}` : "",
           `Current user request:\n${input.messageText}`,
+          partialReply
+            ? `Partial reply from the previous provider before it stopped:\n${partialReply}`
+            : "",
         ]
           .filter(Boolean)
           .join("\n\n");
@@ -1190,6 +1207,40 @@ const make = Effect.gen(function* () {
       ),
     );
 
+  // A queued turn keeps the model selection from when it was queued. When
+  // Waterfall has since moved the thread off that instance, sending it there
+  // would return to the exhausted account (or fail across drivers), so it
+  // follows the thread instead.
+  const resolveQueuedTurnModelSelection = Effect.fnUntraced(function* (input: {
+    readonly threadId: ThreadId;
+    readonly queuedTurn: ProjectionTurnQueueRow;
+    readonly threadModelSelection: ModelSelection;
+  }) {
+    const queuedSelection = input.queuedTurn.modelSelection;
+    if (
+      queuedSelection === null ||
+      queuedSelection.instanceId === input.threadModelSelection.instanceId
+    ) {
+      return queuedSelection;
+    }
+    const detail = yield* projectionSnapshotQuery
+      .getThreadDetailById(input.threadId, { activityKinds: ["runtime.warning"] })
+      .pipe(Effect.map(Option.getOrUndefined));
+    const queuedAt = Date.parse(input.queuedTurn.requestedAt);
+    const waterfallLeftQueuedInstance = (detail?.activities ?? []).some((activity) => {
+      const payload = activity.payload;
+      return (
+        typeof payload === "object" &&
+        payload !== null &&
+        "fromProviderInstanceId" in payload &&
+        "toProviderInstanceId" in payload &&
+        payload.fromProviderInstanceId === queuedSelection.instanceId &&
+        Date.parse(activity.createdAt) >= queuedAt
+      );
+    });
+    return waterfallLeftQueuedInstance ? input.threadModelSelection : queuedSelection;
+  });
+
   const drainThreadQueue = Effect.fn("drainThreadQueue")(function* (threadId: ThreadId) {
     if (drainingThreadIds.has(threadId)) {
       return;
@@ -1256,14 +1307,18 @@ const make = Effect.gen(function* () {
           requestedAt: queuedTurn.requestedAt,
         });
 
+        const queuedModelSelection = yield* resolveQueuedTurnModelSelection({
+          threadId,
+          queuedTurn,
+          threadModelSelection: latestThread.modelSelection,
+        });
         const sendTurnRequest = yield* buildSendTurnRequestForThread({
           threadId,
+          messageId: message.id,
           messageText: message.text,
           ...(message.attachments !== undefined ? { attachments: message.attachments } : {}),
           ...(message.context !== undefined ? { context: message.context } : {}),
-          ...(queuedTurn.modelSelection !== null
-            ? { modelSelection: queuedTurn.modelSelection }
-            : {}),
+          ...(queuedModelSelection !== null ? { modelSelection: queuedModelSelection } : {}),
           runtimeMode: queuedTurn.runtimeMode,
           interactionMode: queuedTurn.interactionMode,
           createdAt: queuedTurn.requestedAt,
@@ -1832,6 +1887,7 @@ const make = Effect.gen(function* () {
     }
     const sendTurnRequest = yield* buildSendTurnRequestForThread({
       threadId: event.payload.threadId,
+      messageId: message.id,
       messageText: projectComposerContextForProvider({
         text: message.text,
         records: message.context?.records ?? [],
