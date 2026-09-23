@@ -160,6 +160,7 @@ import type { SidebarThreadSummary } from "../types";
 import type { EnvironmentProject } from "@t3tools/client-runtime/state/shell";
 import { cn } from "~/lib/utils";
 import { EnvironmentMachineIcon } from "./EnvironmentMachineIcon";
+import { GitHubIcon } from "./Icons";
 import { ProjectEnvironmentBadge } from "./ProjectEnvironmentBadge";
 import { buildThreadActionMenuItems } from "./threadActionMenu.logic";
 import {
@@ -326,6 +327,25 @@ function terminalProcessLabel(count: number): string {
   return `${count} terminal ${count === 1 ? "process" : "processes"} running`;
 }
 
+function ThreadCreatorAvatar({ avatarUrl }: { avatarUrl: string | null }) {
+  const [imageFailed, setImageFailed] = useState(false);
+
+  return (
+    <span className="grid size-3 shrink-0 place-items-center overflow-hidden rounded-full border border-border/70 bg-muted">
+      {avatarUrl !== null && !imageFailed ? (
+        <img
+          src={avatarUrl}
+          alt=""
+          className="size-full object-cover"
+          onError={() => setImageFailed(true)}
+        />
+      ) : (
+        <GitHubIcon aria-hidden className="size-2.5 text-muted-foreground" />
+      )}
+    </span>
+  );
+}
+
 function SidebarThreadTooltip({
   thread,
   project,
@@ -375,6 +395,21 @@ function SidebarThreadTooltip({
             <div className="flex min-w-0 items-center gap-2">
               {project ? <ProjectFavicon project={project} className="size-3 shrink-0" /> : null}
               <div className="min-w-0 truncate text-foreground/75">{projectDisplayName}</div>
+            </div>
+          ) : null}
+          {thread.createdBy ? (
+            <div className="flex min-w-0 items-center gap-2">
+              <ThreadCreatorAvatar avatarUrl={thread.createdBy.avatarUrl} />
+              <div
+                className="min-w-0 truncate text-foreground/75"
+                aria-label={
+                  thread.createdBy.displayName
+                    ? `${thread.createdBy.displayName} (@${thread.createdBy.githubLogin})`
+                    : `@${thread.createdBy.githubLogin}`
+                }
+              >
+                Created by @{thread.createdBy.githubLogin}
+              </div>
             </div>
           ) : null}
           {environmentLabel ? (
