@@ -1170,6 +1170,24 @@ describe("resolveThreadMetadataUpdateForNextTurn", () => {
       }),
     ).toBeNull();
   });
+
+  it("persists a reasoning effort change without waiting for the next turn", () => {
+    const nextModelSelection = {
+      ...modelSelection,
+      options: [{ id: "reasoningEffort", value: "xhigh" }],
+    };
+
+    expect(
+      resolveThreadMetadataUpdateForNextTurn({
+        currentModelSelection: {
+          ...modelSelection,
+          options: [{ id: "reasoningEffort", value: "low" }],
+        },
+        nextModelSelection,
+        currentBranch: "feature/current",
+      }),
+    ).toEqual({ modelSelection: nextModelSelection });
+  });
 });
 
 describe("buildThreadTurnInterruptInput", () => {

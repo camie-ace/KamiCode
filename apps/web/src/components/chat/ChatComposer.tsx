@@ -27,6 +27,7 @@ import type {
   PreviewAnnotationPayload,
   ProviderApprovalDecision,
   ProviderInteractionMode,
+  ProviderOptionSelection,
   ResolvedKeybindingsConfig,
   RuntimeMode,
   ScopedThreadRef,
@@ -1550,6 +1551,11 @@ export interface ChatComposerProps {
     model: string,
     options?: { focusComposer?: boolean },
   ) => void;
+  onProviderModelOptionsChange: (
+    instanceId: ProviderInstanceId,
+    model: string,
+    options: ReadonlyArray<ProviderOptionSelection> | undefined,
+  ) => void;
   onOpenProviderSetup: (instanceId: ProviderInstanceId) => void;
   getModelDisabledReason: (instanceId: ProviderInstanceId, model: string) => string | null;
   toggleInteractionMode: () => void;
@@ -1659,6 +1665,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     onPreviousActivePendingUserInputQuestion,
     onChangeActivePendingUserInputCustomAnswer,
     onProviderModelSelect,
+    onProviderModelOptionsChange,
     onOpenProviderSetup,
     getModelDisabledReason,
     toggleInteractionMode,
@@ -2750,6 +2757,12 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     },
     [composerDraftTarget, promptRef, scheduleComposerFocus, setComposerDraftPrompt],
   );
+  const persistProviderModelOptions = useCallback(
+    (nextOptions: ReadonlyArray<ProviderOptionSelection> | undefined) => {
+      onProviderModelOptionsChange(selectedInstanceId, selectedModel, nextOptions);
+    },
+    [onProviderModelOptionsChange, selectedInstanceId, selectedModel],
+  );
 
   const providerTraitsMenuContent = renderProviderTraitsMenuContent({
     provider: selectedProvider,
@@ -2761,6 +2774,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     modelOptions: composerModelOptions?.[selectedInstanceId],
     prompt,
     onPromptChange: setPromptFromTraits,
+    onModelOptionsPersist: persistProviderModelOptions,
     planModeEnabled: settings.planModeEnabled,
   });
   const providerTraitsPickerInput = {
@@ -2773,6 +2787,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     modelOptions: composerModelOptions?.[selectedInstanceId],
     prompt,
     onPromptChange: setPromptFromTraits,
+    onModelOptionsPersist: persistProviderModelOptions,
     planModeEnabled: settings.planModeEnabled,
     isComposerOwned: true,
   } satisfies Parameters<typeof renderProviderTraitsPicker>[0];
