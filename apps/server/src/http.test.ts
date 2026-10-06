@@ -153,14 +153,12 @@ const makeStaticRequest = Effect.fn("HttpTest.makeStaticRequest")(function* (
   );
   const client = Context.get(services, HttpClient.HttpClient);
   return (resource: string, options?: HttpClientRequest.Options) =>
-    client
-      .execute(HttpClientRequest.make(options?.method ?? "GET")(resource, options))
-      .pipe(
-        Effect.provideService(FetchHttpClient.RequestInit, {
-          redirect: "manual",
-          keepalive: false,
-        }),
-      );
+    client.execute(HttpClientRequest.make(options?.method ?? "GET")(resource, options)).pipe(
+      Effect.provideService(FetchHttpClient.RequestInit, {
+        redirect: "manual",
+        keepalive: false,
+      }),
+    );
 });
 
 it.layer(
