@@ -38,6 +38,7 @@ const mocks = vi.hoisted(() => ({
   recordingRuntimeTabId: null as string | null,
   recordVisitForThread: vi.fn(),
   hostedRemoteRenderCount: 0,
+  serverRuntime: false,
 }));
 
 const EMPTY_HISTORY: never[] = [];
@@ -122,6 +123,7 @@ vi.mock("~/previewStateStore", () => ({
       ? {}
       : {
           "tab-1": {
+            runtime: mocks.serverRuntime ? "server" : "desktop",
             threadId: "thread-1",
             tabId: "tab-1",
             navStatus: {
@@ -222,18 +224,20 @@ vi.mock("./PreviewChromeRow", () => ({
     onPictureInPicture?: () => void;
     pictureInPicture?: boolean;
     trailingActions?: {
-      props: { onNativePictureInPicture?: () => void };
+      props: { actions?: { toggleNativePictureInPicture?: () => void } };
     };
   }) => {
     mocks.submittedUrl = props.onSubmit;
     mocks.toggleAnnotation = props.onPickElement ?? null;
     mocks.togglePictureInPicture = props.onPictureInPicture ?? null;
     mocks.toggleNativePictureInPicture =
-      props.trailingActions?.props.onNativePictureInPicture ?? null;
+      props.trailingActions?.props.actions?.toggleNativePictureInPicture ?? null;
     mocks.pictureInPicturePressed = props.pictureInPicture ?? false;
     return null;
   },
 }));
+
+vi.mock("./usePreviewSession", () => ({ usePreviewSession: () => undefined }));
 
 vi.mock("./PreviewEmptyState", () => ({
   PreviewEmptyState: (props: { onOpenUrl: (url: string) => void }) => {
@@ -242,8 +246,8 @@ vi.mock("./PreviewEmptyState", () => ({
   },
 }));
 vi.mock("./PreviewMoreMenu", () => ({
-  PreviewMoreMenu: (props: { onNativePictureInPicture: () => void }) => {
-    mocks.toggleNativePictureInPicture = props.onNativePictureInPicture;
+  PreviewMoreMenu: (props: { actions: { toggleNativePictureInPicture?: () => void } }) => {
+    mocks.toggleNativePictureInPicture = props.actions.toggleNativePictureInPicture ?? null;
     return null;
   },
 }));
@@ -253,8 +257,8 @@ vi.mock("./AgentBrowserCursor", () => ({
   AgentBrowserCursor: () => createElement("agent-cursor"),
 }));
 vi.mock("~/browser/BrowserSurfaceSlot", () => ({ BrowserSurfaceSlot: () => null }));
-vi.mock("~/browser/HostedBrowserRemoteView", () => ({
-  HostedBrowserRemoteView: () => {
+vi.mock("~/browser/ServerBrowserSurface", () => ({
+  ServerBrowserSurface: () => {
     mocks.hostedRemoteRenderCount += 1;
     return <div data-testid="hosted-browser-remote" />;
   },
@@ -361,11 +365,13 @@ describe("PreviewView navigation", () => {
     mocks.recordingRuntimeTabId = null;
     mocks.recordVisitForThread.mockClear();
     mocks.hostedRemoteRenderCount = 0;
+    mocks.serverRuntime = false;
   });
 
   it("renders the server-hosted browser surface for web clients", () => {
+    mocks.serverRuntime = true;
     const markup = renderToStaticMarkup(
-      <PreviewView threadRef={TEST_THREAD_REF} tabId="tab-1" visible hostedBrowser />,
+      <PreviewView threadRef={TEST_THREAD_REF} tabId="tab-1" visible />,
     );
 
     expect(markup).toContain('data-testid="hosted-browser-remote"');

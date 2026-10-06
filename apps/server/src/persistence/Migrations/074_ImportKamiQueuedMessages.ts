@@ -1,5 +1,5 @@
 import * as Effect from "effect/Effect";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 
 /** V1 queue jobs become durable one-shot schedules on the same conversation. */
 export default Effect.gen(function* () {
@@ -15,14 +15,17 @@ export default Effect.gen(function* () {
     SELECT
       'migration:v1:queue:' || queue.queue_id, thread.project_id,
       'Scheduled: ' || substr(COALESCE(NULLIF(message.text, ''), 'Attached files'), 1, 140),
-      'Message preserved from the previous KamiCode queue',
+      CASE WHEN message.message_id IS NULL THEN 'Original queued message is missing; review before enabling.'
+        ELSE 'Message preserved from the previous KamiCode queue' END,
       CASE WHEN thread.deleted_at IS NOT NULL OR thread.archived_at IS NOT NULL
-        OR thread.settled_at IS NOT NULL OR queue.status = 'dispatching' THEN 0 ELSE 1 END,
+        OR thread.settled_at IS NOT NULL OR queue.status = 'dispatching'
+        OR message.message_id IS NULL THEN 0 ELSE 1 END,
       'once', NULL,
       COALESCE(queue.scheduled_for, strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '+' || queue.queue_position || ' seconds')),
       'UTC', 'local',
       COALESCE(queue.scheduled_for, strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '+' || queue.queue_position || ' seconds')),
-      NULL, COALESCE(NULLIF(message.text, ''), 'Continue with the attached files.'),
+      NULL, COALESCE(NULLIF(message.text, ''), 'Continue with the attached files.') ||
+        CASE WHEN plan.plan_markdown IS NULL THEN '' ELSE char(10) || char(10) || 'Referenced plan:' || char(10) || plan.plan_markdown END,
       COALESCE(message.attachments_json, '[]'),
       COALESCE(queue.model_selection_json, thread.model_selection_json, '{"instanceId":"codex","model":"gpt-5.4"}'),
       queue.runtime_mode, queue.interaction_mode, 'queue', queue.title_seed, NULL,
@@ -32,7 +35,8 @@ export default Effect.gen(function* () {
         WHEN thread.settled_at IS NOT NULL THEN 'thread-settled' ELSE NULL END
     FROM projection_turn_queue queue
     JOIN projection_threads thread ON thread.thread_id = queue.thread_id
-    JOIN projection_thread_messages message ON message.message_id = queue.message_id
+    LEFT JOIN projection_thread_messages message ON message.message_id = queue.message_id AND message.thread_id = queue.thread_id
+    LEFT JOIN projection_thread_proposed_plans plan ON plan.plan_id = queue.source_proposed_plan_id AND plan.thread_id = queue.source_proposed_plan_thread_id
     WHERE queue.status IN ('queued', 'dispatching')
     ON CONFLICT(trigger_id) DO NOTHING
   `;

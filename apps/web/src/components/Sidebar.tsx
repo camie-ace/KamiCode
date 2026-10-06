@@ -1303,7 +1303,8 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
   const topStatus =
     status === "working"
       ? {
-          label: "Working",
+          // A native /goal keeps the agent going across turns until it is met.
+          label: thread.goal?.status === "active" ? "Goal" : "Working",
           icon: "working" as const,
           // No shimmer: a label that animates forever is noise in a sidebar
           // full of them (and repaints every vsync on high-refresh displays).
@@ -5083,7 +5084,7 @@ export default function Sidebar() {
                                   tabIndex={-1}
                                   title={`Automations for ${project.displayName}`}
                                   aria-label={`Automations for ${project.displayName}`}
-                                  className="size-6 [--control-icon-color:currentColor] text-icon-muted focus-visible:bg-accent focus-visible:text-foreground"
+                                  className="size-6    "
                                   onPointerDown={(event) => event.stopPropagation()}
                                   onClick={(event) => handleProjectAutomations(event, project)}
                                 >
@@ -5095,7 +5096,7 @@ export default function Sidebar() {
                                   tabIndex={-1}
                                   aria-hidden="true"
                                   title={`Project settings for ${project.displayName}`}
-                                  className="size-6 [--control-icon-color:currentColor] text-icon-muted focus-visible:bg-accent focus-visible:text-foreground"
+                                  className="size-6    "
                                   onPointerDown={(event) => event.stopPropagation()}
                                   onClick={(event) => {
                                     void handleProjectSettings(event, project);

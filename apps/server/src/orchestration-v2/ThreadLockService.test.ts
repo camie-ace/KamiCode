@@ -5,7 +5,11 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
-import { ThreadLockService, ThreadLockServiceLive, requireThreadLockAccess } from "./ThreadLockService.ts";
+import {
+  ThreadLockService,
+  ThreadLockServiceLive,
+  requireThreadLockAccess,
+} from "./ThreadLockService.ts";
 
 const makeTestLayer = (values: Map<string, Uint8Array>) => {
   const store = ServerSecretStore.ServerSecretStore.of({
@@ -47,20 +51,23 @@ describe("ThreadLockService", () => {
       expect(values.size).toBe(0);
     }).pipe(Effect.provide(makeTestLayer(values)));
   });
-  it.effect("denies locked reads until this session unlocks and revokes access after a passcode change", () => {
-    const threadId = ThreadId.make("access-thread");
-    return Effect.gen(function* () {
-      const locks = yield* ThreadLockService;
-      yield* locks.setPasscode(threadId, "initial-passcode");
-      const read = (sessionId: string) => requireThreadLockAccess({ threadId, locked: true }, sessionId);
-      expect((yield* Effect.exit(read("first")))._tag).toBe("Failure");
-      yield* locks.authorize(threadId, "first", "initial-passcode");
-      yield* read("first");
-      expect((yield* Effect.exit(read("second")))._tag).toBe("Failure");
-      yield* locks.setPasscode(threadId, "replacement-passcode");
-      expect((yield* Effect.exit(read("first")))._tag).toBe("Failure");
-      yield* requireThreadLockAccess({ threadId, locked: false }, "second");
-    }).pipe(Effect.provide(makeTestLayer(new Map())));
-  });
-
+  it.effect(
+    "denies locked reads until this session unlocks and revokes access after a passcode change",
+    () => {
+      const threadId = ThreadId.make("access-thread");
+      return Effect.gen(function* () {
+        const locks = yield* ThreadLockService;
+        yield* locks.setPasscode(threadId, "initial-passcode");
+        const read = (sessionId: string) =>
+          requireThreadLockAccess({ threadId, locked: true }, sessionId);
+        expect((yield* Effect.exit(read("first")))._tag).toBe("Failure");
+        yield* locks.authorize(threadId, "first", "initial-passcode");
+        yield* read("first");
+        expect((yield* Effect.exit(read("second")))._tag).toBe("Failure");
+        yield* locks.setPasscode(threadId, "replacement-passcode");
+        expect((yield* Effect.exit(read("first")))._tag).toBe("Failure");
+        yield* requireThreadLockAccess({ threadId, locked: false }, "second");
+      }).pipe(Effect.provide(makeTestLayer(new Map())));
+    },
+  );
 });

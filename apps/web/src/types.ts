@@ -64,6 +64,8 @@ export interface ChatVideoAttachment extends ContractChatVideoAttachment {
 export interface ChatFileAttachment extends ContractChatFileAttachment {
   readonly previewUrl?: string;
   readonly downloadable?: boolean;
+  /** A page an agent published with `html_render`; its viewer hands it the app theme. */
+  readonly htmlRender?: boolean;
 }
 
 export function isVideoAttachment(attachment: {
@@ -95,7 +97,6 @@ export function isFileAttachment(attachment: ChatAttachment): attachment is Chat
   // picture, and callers filter both sets independently, so overlap renders it twice.
   return attachment.type === "file" && !isImageAttachment(attachment);
 }
-
 
 export function isBrowserPreviewAttachment(attachment: ChatFileAttachment): boolean {
   const mimeType = attachment.mimeType.split(";", 1)[0]?.trim().toLowerCase();

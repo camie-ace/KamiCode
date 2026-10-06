@@ -3,10 +3,10 @@ import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
-import * as NodeTimersPromises from "node:timers/promises";
 import * as Path from "effect/Path";
-import * as Mime from "effect/unstable/http/Mime";
+import * as Mime from "effect/http/Mime";
 import * as Ref from "effect/Ref";
+import * as Schedule from "effect/Schedule";
 import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
 
@@ -183,11 +183,29 @@ const registerDesktopSchemePrivileges = Effect.sync(registerDesktopSchemePrivile
 
 export const layerSchemePrivileges = Layer.effectDiscard(registerDesktopSchemePrivileges);
 
-async function proxyRequest(
+class ElectronProtocolFetchError extends Schema.TaggedError<ElectronProtocolFetchError>()(
+  "ElectronProtocolFetchError",
+  { cause: Schema.Defect() },
+) {}
+
+const netFetch = (url: string, init: RequestInit) =>
+  Effect.tryPromise({
+    try: () => Electron.net.fetch(url, init),
+    catch: (cause) => new ElectronProtocolFetchError({ cause }),
+  });
+
+// The dev renderer target can briefly refuse connections while Vite restarts:
+// retry idempotent requests after 50ms, then 150ms, and keep the last failure.
+const fetchWithTransientRetry = (url: string, init: RequestInit) =>
+  netFetch(url, init).pipe(
+    Effect.retry({ schedule: Schedule.exponential("50 millis", 3), times: 2 }),
+  );
+
+const proxyRequest = Effect.fn("desktop.protocol.proxyRequest")(function* (
   request: Request,
   targetOrigin: URL,
   contentSecurityPolicy: string,
-): Promise<Response> {
+) {
   const requestUrl = new URL(request.url);
   if (requestUrl.host !== DESKTOP_HOST) {
     return new Response(null, { status: 404 });
@@ -208,35 +226,31 @@ async function proxyRequest(
   }
   const response =
     request.method === "GET" || request.method === "HEAD"
-      ? await fetchWithTransientRetry(targetUrl.toString(), init)
-      : await Electron.net.fetch(targetUrl.toString(), init);
+      ? yield* fetchWithTransientRetry(targetUrl.toString(), init)
+      : yield* netFetch(targetUrl.toString(), init);
   return withContentSecurityPolicy(response, contentSecurityPolicy);
-}
+});
 
 const LOCAL_BACKEND_API_PATH_PREFIX = "/api/";
 
 // Bundled-asset mode still has to reach the local backend for same-origin API
 // calls: desktop user auth relies on the main-process cookie jar that only this
 // proxy shares, so `/api/*` must not fall through to the static file server.
-async function proxyLocalBackendApiRequest(
-  request: Request,
-  localBackendOrigin: URL | null,
-  contentSecurityPolicy: string,
-): Promise<Response | null> {
-  const url = new URL(request.url);
-  if (url.host !== DESKTOP_HOST || !url.pathname.startsWith(LOCAL_BACKEND_API_PATH_PREFIX)) {
-    return null;
-  }
-  if (localBackendOrigin === null) {
-    return withContentSecurityPolicy(
-      Response.json({ error: "The local environment is not running." }, { status: 503 }),
-      contentSecurityPolicy,
-    );
-  }
-  return proxyRequest(request, localBackendOrigin, contentSecurityPolicy);
-}
-
-const TRANSIENT_FETCH_RETRY_DELAYS_MS = [0, 50, 150] as const;
+const proxyLocalBackendApiRequest = Effect.fn("desktop.protocol.proxyLocalBackendApiRequest")(
+  function* (request: Request, localBackendOrigin: URL | null, contentSecurityPolicy: string) {
+    const url = new URL(request.url);
+    if (url.host !== DESKTOP_HOST || !url.pathname.startsWith(LOCAL_BACKEND_API_PATH_PREFIX)) {
+      return null;
+    }
+    if (localBackendOrigin === null) {
+      return withContentSecurityPolicy(
+        Response.json({ error: "The local environment is not running." }, { status: 503 }),
+        contentSecurityPolicy,
+      );
+    }
+    return yield* proxyRequest(request, localBackendOrigin, contentSecurityPolicy);
+  },
+);
 
 // Serves the packaged web client without a backend: files resolve within the
 // asset directory, and any other path falls back to index.html so the SPA
@@ -279,24 +293,6 @@ const serveDesktopAsset = Effect.fn("desktop.protocol.serveAsset")(function* (
   });
 });
 
-async function fetchWithTransientRetry(url: string, init: RequestInit): Promise<Response> {
-  let lastError: unknown;
-
-  for (const delayMs of TRANSIENT_FETCH_RETRY_DELAYS_MS) {
-    if (delayMs > 0) {
-      await NodeTimersPromises.setTimeout(delayMs);
-    }
-
-    try {
-      return await Electron.net.fetch(url, init);
-    } catch (error) {
-      lastError = error;
-    }
-  }
-
-  throw lastError;
-}
-
 /** @public Service construction is part of the canonical Effect module API. */
 export const make = Effect.gen(function* () {
   const registered = yield* Ref.make(false);
@@ -315,10 +311,12 @@ export const make = Effect.gen(function* () {
           try: () => {
             Electron.protocol.handle(input.scheme, async (request) => {
               if ("assetDirectory" in input) {
-                const apiResponse = await proxyLocalBackendApiRequest(
-                  request,
-                  await runPromise(Ref.get(localBackendOrigin)),
-                  contentSecurityPolicy,
+                const apiResponse = await runPromise(
+                  proxyLocalBackendApiRequest(
+                    request,
+                    await runPromise(Ref.get(localBackendOrigin)),
+                    contentSecurityPolicy,
+                  ),
                 );
                 if (apiResponse !== null) return apiResponse;
                 return withContentSecurityPolicy(
@@ -326,7 +324,14 @@ export const make = Effect.gen(function* () {
                   contentSecurityPolicy,
                 );
               }
-              return proxyRequest(request, input.targetOrigin, contentSecurityPolicy);
+              // Reject with net.fetch's own error, as an unproxied fetch would.
+              return runPromise(
+                proxyRequest(request, input.targetOrigin, contentSecurityPolicy).pipe(
+                  Effect.catchTags({
+                    ElectronProtocolFetchError: (error) => Effect.die(error.cause),
+                  }),
+                ),
+              );
             });
           },
           catch: (cause) => new ElectronProtocolRegistrationError({ scheme: input.scheme, cause }),

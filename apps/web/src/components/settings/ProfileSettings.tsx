@@ -56,15 +56,15 @@ function GitHubAvatar({
 function ProfileSessionSkeleton() {
   return (
     <SettingsRow
-      title={<Skeleton className="h-4 w-28 rounded-full" />}
-      description={<Skeleton className="h-3 w-52 rounded-full" />}
-      control={<Skeleton className="h-7 w-20 rounded-md" />}
+      title={<Skeleton className="h-4 w-28 " />}
+      description={<Skeleton className="h-3 w-52 " />}
+      control={<Skeleton className="h-7 w-20 " />}
     >
       <div className="mt-3 flex items-center gap-3 border-t border-border/50 py-4">
-        <Skeleton className="size-11 rounded-full" />
+        <Skeleton className="size-11 " />
         <div className="min-w-0 flex-1 space-y-2">
-          <Skeleton className="h-4 w-40 rounded-full" />
-          <Skeleton className="h-3 w-28 rounded-full" />
+          <Skeleton className="h-4 w-40 " />
+          <Skeleton className="h-3 w-28 " />
         </div>
       </div>
     </SettingsRow>

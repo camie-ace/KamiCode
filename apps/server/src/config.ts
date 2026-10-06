@@ -111,8 +111,11 @@ export class ServerConfig extends Context.Service<
     readonly githubOAuthClientId?: string | undefined;
     readonly githubOAuthClientSecret?: string | undefined;
     readonly githubOAuthCallbackUrl?: URL | undefined;
+    readonly desktopBootstrapSecret?: string | undefined;
     readonly desktopTelemetryFd?: number | undefined;
     readonly desktopTelemetryControlFd?: number | undefined;
+    readonly desktopBrowserFd?: number | undefined;
+    readonly desktopBrowserControlFd?: number | undefined;
     readonly resourceMonitorPath?: string | undefined;
     /** Automatic checkpoints pause before consuming the host's recovery reserve. */
     readonly checkpointMinFreeBytes?: number;
@@ -271,6 +274,8 @@ const makeTest = Effect.fn("ServerConfig.makeTest")(function* (
     githubOAuthCallbackUrl: undefined,
     desktopTelemetryFd: undefined,
     desktopTelemetryControlFd: undefined,
+    desktopBrowserFd: undefined,
+    desktopBrowserControlFd: undefined,
     resourceMonitorPath: undefined,
     checkpointMinFreeBytes: 0,
     checkpointMinFreePercent: 0,

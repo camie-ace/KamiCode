@@ -5,7 +5,7 @@ import {
   type PersistChatAttachmentsInput,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
-import * as Encoding from "effect/Encoding";
+import * as Base64 from "effect/encoding/Base64";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
 import * as ServerConfig from "../config.ts";
@@ -27,7 +27,7 @@ export const persistChatAttachments = Effect.fn("ws.assets.persistChatAttachment
           message: `Attachment ${attachment.name} has an invalid attachment payload.`,
         });
       }
-      const bytes = yield* Effect.fromResult(Encoding.decodeBase64(parsed.base64)).pipe(
+      const bytes = yield* Effect.fromResult(Base64.decode(parsed.base64)).pipe(
         Effect.mapError(
           (cause) =>
             new PersistChatAttachmentsError({

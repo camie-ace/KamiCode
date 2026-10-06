@@ -213,7 +213,7 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
 
   return (
     <Collapsible
-      className={cn("py-2", isAuthPrompt && "bg-amber-500/5")}
+      className={cn("", isAuthPrompt && "")}
       open={!isCollapsed}
       onOpenChange={(open) => {
         setCollapsedQuestionId(open ? null : activeQuestion.id);
@@ -235,10 +235,10 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
         >
           {isAuthPrompt ? (
             <>
-              <span className="flex size-6 shrink-0 items-center justify-center rounded-md border border-amber-500/25 bg-amber-500/10 text-amber-500">
+              <span className="flex size-6 shrink-0 items-center justify-center rounded-md border border-warning/25 bg-warning/10 text-warning">
                 <ShieldCheckIcon className="size-3.5" aria-hidden="true" />
               </span>
-              <span className="text-[11px] font-semibold tracking-widest text-amber-500/85 uppercase">
+              <span className="text-2xs font-semibold tracking-widest text-warning/85 uppercase">
                 Test Auth
               </span>
             </>
@@ -294,7 +294,7 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
       {/* The panel carries the horizontal padding itself: it clips its content
           while the height animates, so the option buttons have to sit inside
           that padding or their focus rings get shaved off at the edges. */}
-      <CollapsiblePanel className="px-3 sm:px-4">
+      <CollapsiblePanel className=" ">
         <div className="pt-2 pb-0.5">
           {isAuthPrompt ? (
             <p className="mb-2 text-xs text-muted-foreground/75">
@@ -319,10 +319,10 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
                 "group flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left outline-none transition-colors duration-150 focus-visible:ring-1 focus-visible:ring-primary/25",
                 isSelected
                   ? isAuthPrompt
-                    ? "border border-amber-500/40 bg-amber-500/10 text-foreground"
+                    ? "border border-warning/40 bg-warning/10 text-foreground"
                     : "bg-muted/55 text-foreground"
                   : isAuthPrompt
-                    ? "border border-amber-500/15 bg-background/60 text-foreground/85 hover:border-amber-500/30 hover:bg-amber-500/8"
+                    ? "border border-warning/15 bg-background/60 text-foreground/85 hover:border-warning/30 hover:bg-warning/8"
                     : "bg-transparent text-foreground/85 hover:bg-muted/30",
                 isResponding && "opacity-50 cursor-not-allowed",
                 !isResponding && "cursor-pointer",
@@ -334,8 +334,8 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
                       className={cn(
                         "flex size-8 shrink-0 items-center justify-center rounded-md transition-colors duration-150",
                         isSelected
-                          ? "bg-amber-500/20 text-amber-500"
-                          : "bg-muted/35 text-muted-foreground/65 group-hover:bg-amber-500/12 group-hover:text-amber-500",
+                          ? "bg-warning/20 text-warning"
+                          : "bg-muted/35 text-muted-foreground/65 group-hover:bg-warning/12 group-hover:text-warning",
                       )}
                     >
                       <AuthOptionIcon label={option.label} />
@@ -351,13 +351,13 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
                     <CheckIcon
                       className={cn(
                         "size-3.5 shrink-0",
-                        isAuthPrompt ? "text-amber-500" : "text-primary",
+                        isAuthPrompt ? "text-warning" : "text-primary",
                       )}
                     />
                   ) : shortcutKey !== null ? (
                     <kbd
                       className={cn(
-                        "flex size-5 shrink-0 items-center justify-center text-[10px] font-medium text-muted-foreground tabular-nums",
+                        "flex size-5 shrink-0 items-center justify-center text-3xs font-medium text-muted-foreground tabular-nums",
                       )}
                     >
                       {shortcutKey}

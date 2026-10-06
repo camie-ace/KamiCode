@@ -1,5 +1,5 @@
 import * as Effect from "effect/Effect";
-import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
+import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http";
 
 import { browserApiCorsHeaders } from "../httpCors.ts";
 

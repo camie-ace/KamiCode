@@ -8,7 +8,7 @@ import * as Context from "effect/Context";
 import * as Data from "effect/Data";
 import type * as DateTime from "effect/DateTime";
 import type * as Effect from "effect/Effect";
-import type * as HttpServerRequest from "effect/unstable/http/HttpServerRequest";
+import type * as HttpServerRequest from "effect/http/HttpServerRequest";
 
 export const DESKTOP_GITHUB_STATE_PREFIX = "desktop:";
 

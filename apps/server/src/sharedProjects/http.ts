@@ -48,8 +48,8 @@ import {
   HttpServerRequest,
   HttpServerRespondable,
   HttpServerResponse,
-} from "effect/unstable/http";
-import type * as HttpServerResponseModule from "effect/unstable/http/HttpServerResponse";
+} from "effect/http";
+import type * as HttpServerResponseModule from "effect/http/HttpServerResponse";
 
 import { browserApiCorsHeaders } from "../httpCors.ts";
 import { ServerSettingsService } from "../serverSettings.ts";

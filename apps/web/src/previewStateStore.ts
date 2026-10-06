@@ -16,7 +16,7 @@ import {
   type ServerConfig,
   type ScopedThreadRef,
 } from "@t3tools/contracts";
-import { Atom } from "effect/unstable/reactivity";
+import { Atom } from "effect/reactivity";
 
 import { PREVIEW_RECENT_URL_LIMIT } from "./components/preview/previewConstants";
 import { appAtomRegistry } from "./rpc/atomRegistry";
@@ -44,6 +44,8 @@ export interface ThreadPreviewState {
   desktopOverlay: DesktopPreviewOverlay | null;
   desktopByTabId: Record<string, DesktopPreviewOverlay>;
   recentlySeenUrls: string[];
+  /** Whether the first authoritative tab list has arrived. */
+  listLoaded: boolean;
   /** Server process currently authoritative for revision ordering. */
   serverEpoch: string | null;
   /** Latest ordered server revision applied from a list response or event. */
@@ -58,6 +60,7 @@ const EMPTY_THREAD_PREVIEW_STATE: ThreadPreviewState = Object.freeze({
   desktopOverlay: null,
   desktopByTabId: {},
   recentlySeenUrls: [] as string[],
+  listLoaded: false,
   serverEpoch: null,
   serverRevision: 0,
 });
@@ -312,7 +315,9 @@ export function reconcilePreviewServerSessions(
 ): void {
   updateThreadPreviewState(ref, (current) => {
     const sameServer = current.serverEpoch === result.serverEpoch;
-    if (sameServer && result.revision < current.serverRevision) return current;
+    if (sameServer && result.revision < current.serverRevision) {
+      return current;
+    }
     const snapshots = result.sessions;
     const sessions: Record<string, PreviewSessionSnapshot> = {};
     const currentSuppressedTabIds = sameServer ? current.suppressedTabIds : new Set<string>();
@@ -350,6 +355,7 @@ export function reconcilePreviewServerSessions(
       desktopByTabId,
       desktopOverlay: activeTabId ? (desktopByTabId[activeTabId] ?? null) : null,
       recentlySeenUrls,
+      listLoaded: true,
       serverEpoch: result.serverEpoch,
       serverRevision: result.revision,
     };
@@ -466,7 +472,7 @@ export function isPreviewSupportedInRuntime(
   if (typeof window === "undefined") return false;
   return (
     Boolean(window.desktopBridge?.preview) ||
-    serverConfig?.environment.capabilities.hostedBrowserPreview === true
+    serverConfig?.environment.capabilities.serverBrowser === true
   );
 }
 

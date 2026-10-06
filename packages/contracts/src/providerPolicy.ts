@@ -31,7 +31,13 @@ export const RuntimeMode = Schema.Literals([
 export type RuntimeMode = typeof RuntimeMode.Type;
 export const DEFAULT_RUNTIME_MODE: RuntimeMode = "full-access";
 
-export const ProviderInteractionMode = Schema.Literals(["default", "plan", "test", "workflow", "trigger"]);
+export const ProviderInteractionMode = Schema.Literals([
+  "default",
+  "plan",
+  "test",
+  "workflow",
+  "trigger",
+]);
 export type ProviderInteractionMode = typeof ProviderInteractionMode.Type;
 export const DEFAULT_PROVIDER_INTERACTION_MODE: ProviderInteractionMode = "default";
 

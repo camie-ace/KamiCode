@@ -8,9 +8,9 @@
  * schema is always up to date before the application starts.
  */
 
-import * as Migrator from "effect/unstable/sql/Migrator";
+import * as Migrator from "effect/sql/Migrator";
 import * as Effect from "effect/Effect";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 
 // Import all migrations statically
 import Migration0001 from "./Migrations/001_OrchestrationEvents.ts";
@@ -87,6 +87,8 @@ import Migration0071 from "./Migrations/054_ProjectionThreadsAutoSettleDisabledA
 import Migration0072 from "./Migrations/055_OrchestrationV2.ts";
 import Migration0074 from "./Migrations/074_ImportKamiQueuedMessages.ts";
 import Migration0073 from "./Migrations/056_RemoveRedundantProjectionIndexes.ts";
+import Migration0075 from "./Migrations/057_ScheduledTaskWebhooks.ts";
+import Migration0076 from "./Migrations/058_WebhookRelayDeliveries.ts";
 
 /**
  * Migration loader with all migrations defined inline.
@@ -183,6 +185,8 @@ export const migrationEntries = [
   [72, "OrchestrationV2", Migration0072],
   [73, "RemoveRedundantProjectionIndexes", Migration0073],
   [74, "ImportKamiQueuedMessages", Migration0074],
+  [75, "ScheduledTaskWebhooks", Migration0075],
+  [76, "WebhookRelayDeliveries", Migration0076],
 ] as const;
 
 export const migrationManifest = migrationEntries.map(([id, name]) => [id, name] as const);

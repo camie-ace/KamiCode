@@ -265,6 +265,7 @@ describe("KeybindingsSettings.logic", () => {
     expect(commandLabel("chat.queue")).toBe("Chat: Queue Message");
     expect(commandLabel("chat.schedule")).toBe("Chat: Schedule Message");
     expect(commandLabel("themeEditor.toggle")).toBe("Theme Editor: Toggle");
+    expect(commandLabel("view.reopenClosed")).toBe("Reopen Closed Tab");
     expect(commandLabel("script.setup-db.run")).toBe("Run Script: Setup Db");
   });
 

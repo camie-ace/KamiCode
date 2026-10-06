@@ -3,7 +3,7 @@ import { ProviderInstanceId } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 
-import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
+import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import { ProjectTriggerRepositoryLive } from "./Layers/ProjectTriggerRepository.ts";
 import { ProjectTriggerServiceLive } from "./Layers/ProjectTriggerService.ts";
 import {
@@ -16,7 +16,7 @@ import { ProjectTriggerService } from "./Services/ProjectTriggerService.ts";
 const layer = it.layer(
   ProjectTriggerServiceLive.pipe(
     Layer.provideMerge(ProjectTriggerRepositoryLive),
-    Layer.provideMerge(SqlitePersistenceMemory),
+    Layer.provideMerge(SqlitePersistence.layerMemory),
   ),
 );
 

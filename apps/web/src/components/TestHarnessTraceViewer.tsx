@@ -71,7 +71,7 @@ export function TestHarnessTraceViewer({
             <div className="flex flex-wrap items-start justify-between gap-3 pr-8">
               <div className="min-w-0">
                 <SheetTitle>Playwright Trace</SheetTitle>
-                <SheetDescription className="truncate">
+                <SheetDescription className="">
                   {filename} rendered from the saved harness artifact.
                 </SheetDescription>
               </div>
@@ -96,7 +96,7 @@ export function TestHarnessTraceViewer({
               </div>
             </div>
           </SheetHeader>
-          <SheetPanel className="p-0">
+          <SheetPanel className="">
             <iframe
               title={`Playwright trace ${filename}`}
               src={viewerUrl}

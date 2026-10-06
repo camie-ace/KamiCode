@@ -1,62 +1,31 @@
 # Distribution
 
-KamiCode currently ships team builds through GitHub Releases.
+KamiCode ships desktop installers and standalone CLI archives through [GitHub Releases](https://github.com/camie-ace/KamiCode/releases).
 
-The first supported target is Windows x64. macOS and Linux packaging can be restored later, but keeping the initial release path narrow makes updates easier to verify.
+## Downloads
 
-## User Download Link
+The release workflow builds Windows x64/arm64 installers, macOS x64/arm64 disk images, and Linux x64/arm64 AppImages. Installer names include the version and architecture, such as `KamiCode-0.1.10-x64.exe`.
 
-Use this stable link for the latest Windows installer:
+Use the [latest stable release](https://github.com/camie-ace/KamiCode/releases/latest) for stable downloads. Nightlies are marked as prereleases in the release list. Electron auto-update uses the release's channel metadata and blockmap files; keep those assets alongside the installers.
 
-```text
-https://github.com/camie-ace/KamiCode/releases/latest/download/KamiCode-Setup-x64.exe
-```
+## Publish a release
 
-The installer filename is intentionally stable across releases so this link does not change.
+Run the `Release` workflow manually on `main`, selecting `nightly` to publish a new prerelease. The workflow generates its version, builds the artifacts, runs its quality checks, and publishes updater metadata. Set `publish_only` to `true` to publish artifacts without deploying hosted apps or sending release announcements.
 
-## Publish A Release
+The `preview` channel builds an integration branch without offering it through the nightly updater. Stable releases build the commit of an already published nightly; select `stable` and optionally supply the stable version.
 
-From `main`:
+Release builds can run without relay service credentials. KamiCode Connect requires its own configured relay and Clerk deployment. Direct server connections remain available without that hosted service.
+
+## Local build
+
+From the repository root, build a Windows installer with:
 
 ```bash
-git pull --ff-only origin main
-git tag v0.1.0
-git push origin v0.1.0
+node scripts/build-desktop-artifact.ts --platform win --target nsis --arch x64 --build-version 0.1.10 --verbose
 ```
 
-The `Release` GitHub Actions workflow builds and uploads:
-
-```text
-KamiCode-Setup-x64.exe
-KamiCode-Setup-x64.exe.blockmap
-latest.yml
-```
-
-Electron auto-update uses `latest.yml` and the `.blockmap` file to find and install newer versions.
-
-## Manual Release
-
-You can also run the `Release` workflow manually from GitHub Actions and provide a version like `0.1.0`.
-
-## Local Build
-
-To build the Windows installer locally:
-
-```powershell
-cd "C:\Users\THIS PC\KamiCode\T3Code"
-
-node scripts/build-desktop-artifact.ts `
-  --platform win `
-  --target nsis `
-  --arch x64 `
-  --build-version 0.1.0 `
-  --verbose
-```
-
-Artifacts are written to `release/`.
+Use the corresponding platform and target on macOS or Linux. Artifacts are written to `release/`.
 
 ## Signing
 
-The current internal release path is unsigned. Windows may show SmartScreen warnings.
-
-Do not spend time on signing until the basic install and auto-update loop has been tested by the team.
+Signing is enabled when the platform's signing credentials are configured. Unsigned Windows builds may show SmartScreen warnings; unsigned macOS builds require the operating system's manual approval to open.

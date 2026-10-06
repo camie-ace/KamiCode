@@ -71,8 +71,8 @@ export const MediaPanel = memo(function MediaPanel({
           </span>
           <div className="min-w-0 flex-1">
             <div className="flex min-w-0 flex-wrap items-center gap-2">
-              <h2 className="text-sm font-semibold tracking-[-0.01em] text-foreground">Media</h2>
-              <span className="rounded-full border border-primary/25 bg-primary/10 px-2 py-0.5 text-[11px] font-medium text-primary">
+              <h2 className="text-sm font-semibold tracking-tight text-foreground">Media</h2>
+              <span className="rounded-full border border-primary/25 bg-primary/10 px-2 py-0.5 text-2xs font-medium text-primary">
                 {artifacts.length} {artifacts.length === 1 ? "asset" : "assets"}
               </span>
             </div>
@@ -101,10 +101,10 @@ export const MediaPanel = memo(function MediaPanel({
           {activeArtifact ? (
             <div className="mb-4 rounded-2xl border border-border/65 bg-card/45 p-2.5 shadow-sm">
               <div className="mb-2 flex min-w-0 items-center justify-between gap-2 px-1">
-                <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground/75">
+                <p className="text-2xs font-semibold uppercase tracking-section text-muted-foreground/75">
                   Selected
                 </p>
-                <p className="truncate text-[11px] text-muted-foreground">{activeArtifact.title}</p>
+                <p className="truncate text-2xs text-muted-foreground">{activeArtifact.title}</p>
               </div>
               <MediaArtifactCard
                 artifact={activeArtifact}
@@ -118,7 +118,7 @@ export const MediaPanel = memo(function MediaPanel({
           ) : null}
 
           <div className="mb-2 px-1">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground/75">
+            <p className="text-2xs font-semibold uppercase tracking-section text-muted-foreground/75">
               All media
             </p>
           </div>

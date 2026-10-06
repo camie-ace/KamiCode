@@ -1,3 +1,4 @@
+// @effect-diagnostics-next-line nodeBuiltinImport:off -- Effect's Crypto has no scrypt or timingSafeEqual; retain the stored passcode format.
 import * as NodeCrypto from "node:crypto";
 import * as NodeUtil from "node:util";
 import type { ThreadId } from "@t3tools/contracts";

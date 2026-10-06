@@ -1,4 +1,5 @@
-import * as NodeCrypto from "node:crypto";
+import * as NodeBuffer from "node:buffer";
+import * as Crypto from "effect/Crypto";
 
 import {
   KamiUserId,
@@ -14,10 +15,10 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
-import * as HttpServerRequest from "effect/unstable/http/HttpServerRequest";
+import * as HttpServerRequest from "effect/http/HttpServerRequest";
 
 import { ServerConfig } from "../../config.ts";
-import { UserAuthRepositoryLive } from "../../persistence/Layers/UserAuth.ts";
+import { UserAuthRepositoryLive } from "../../persistence/UserAuth.ts";
 import { UserAuthRepository } from "../../persistence/Services/UserAuth.ts";
 import type { UserAuthUserRecord } from "../../persistence/Services/UserAuth.ts";
 import { ServerSecretStore } from "../../auth/ServerSecretStore.ts";
@@ -150,10 +151,6 @@ function makeDisabledState(): UserAuthSessionState {
   };
 }
 
-function randomBase64Url(bytes: number): string {
-  return NodeCrypto.randomBytes(bytes).toString("base64url");
-}
-
 function parseDesktopGitHubLoginHandoffId(state: string): string | null {
   if (!isDesktopGitHubLoginState(state)) {
     return null;
@@ -172,6 +169,7 @@ function resolveRequestUrl(request: HttpServerRequest.HttpServerRequest): Option
 }
 
 export const makeUserAuth = Effect.gen(function* () {
+  const crypto = yield* Crypto.Crypto;
   const config = yield* ServerConfig;
   const secretStore = yield* ServerSecretStore;
   const userAuthRepository = yield* UserAuthRepository;
@@ -206,6 +204,15 @@ export const makeUserAuth = Effect.gen(function* () {
       ...(status ? { status } : {}),
       cause,
     });
+
+  const randomId = crypto.randomUUIDv4.pipe(
+    Effect.mapError(toUserAuthError("Failed to generate an authentication ID.", 500)),
+  );
+  const randomBase64Url = (bytes: number) =>
+    crypto.randomBytes(bytes).pipe(
+      Effect.map((value) => NodeBuffer.Buffer.from(value).toString("base64url")),
+      Effect.mapError(toUserAuthError("Failed to generate an authentication token.", 500)),
+    );
 
   const ensureGitHubLoginEnabled = () =>
     enabled && githubClientId
@@ -258,7 +265,7 @@ export const makeUserAuth = Effect.gen(function* () {
       const expiresAt = DateTime.add(issuedAt, {
         milliseconds: Duration.toMillis(DEFAULT_SESSION_TTL),
       });
-      const sessionId = UserAuthSessionId.make(NodeCrypto.randomUUID());
+      const sessionId = UserAuthSessionId.make(yield* randomId);
       const claims: UserSessionClaims = {
         v: 1,
         kind: "user-session",
@@ -466,15 +473,17 @@ export const makeUserAuth = Effect.gen(function* () {
           } satisfies UserAuthSessionState),
         ),
       ),
-      Effect.catchTag("UserAuthError", (error) => {
-        if (error.status !== 401) {
-          return Effect.fail(error);
-        }
-        return environmentSessionId === undefined
-          ? Effect.succeed(makeUnauthenticatedState())
-          : unbindEnvironmentSession(environmentSessionId).pipe(
-              Effect.as(makeUnauthenticatedState()),
-            );
+      Effect.catchTags({
+        UserAuthError: (error) => {
+          if (error.status !== 401) {
+            return Effect.fail(error);
+          }
+          return environmentSessionId === undefined
+            ? Effect.succeed(makeUnauthenticatedState())
+            : unbindEnvironmentSession(environmentSessionId).pipe(
+                Effect.as(makeUnauthenticatedState()),
+              );
+        },
       }),
     );
   };
@@ -482,7 +491,7 @@ export const makeUserAuth = Effect.gen(function* () {
   const createGitHubLogin: UserAuthShape["createGitHubLogin"] = (request) =>
     Effect.gen(function* () {
       const credentials = yield* ensureOAuthAppConfigured();
-      const state = randomBase64Url(32);
+      const state = yield* randomBase64Url(32);
       const issuedAt = yield* DateTime.now;
       const expiresAt = DateTime.add(issuedAt, {
         milliseconds: Duration.toMillis(DEFAULT_STATE_TTL),
@@ -504,7 +513,7 @@ export const makeUserAuth = Effect.gen(function* () {
   const createDesktopGitHubLogin: UserAuthShape["createDesktopGitHubLogin"] = (_request) =>
     Effect.gen(function* () {
       const credentials = yield* ensureGitHubLoginEnabled();
-      const handoffId = randomBase64Url(18);
+      const handoffId = yield* randomBase64Url(18);
       const issuedAt = yield* DateTime.now;
       const deviceLogin = yield* githubOAuthClient
         .createDeviceCode({
@@ -566,7 +575,7 @@ export const makeUserAuth = Effect.gen(function* () {
       const now = yield* DateTime.now;
       const user = yield* userAuthRepository
         .upsertGitHubUser({
-          userId: KamiUserId.make(NodeCrypto.randomUUID()),
+          userId: KamiUserId.make(yield* randomId),
           githubId: githubUser.githubId,
           githubLogin: githubUser.login,
           displayName: normalizeOptionalString(githubUser.displayName),
@@ -842,7 +851,7 @@ export const makeUserAuth = Effect.gen(function* () {
         return;
       }
       const authenticated = yield* verifyToken(token).pipe(
-        Effect.catchTag("UserAuthError", () => Effect.succeed(null)),
+        Effect.catchTags({ UserAuthError: () => Effect.succeed(null) }),
       );
       if (!authenticated) {
         if (environmentSessionId !== undefined) {

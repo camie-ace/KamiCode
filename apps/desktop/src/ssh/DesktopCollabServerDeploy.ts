@@ -1,3 +1,4 @@
+import * as Crypto from "effect/Crypto";
 import type {
   DesktopCollabServerDeployResult,
   DesktopSshEnvironmentTarget,
@@ -16,7 +17,7 @@ import {
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
-import { ChildProcessSpawner } from "effect/unstable/process";
+import { ChildProcessSpawner } from "effect/process";
 
 import * as DesktopSshPasswordPrompts from "./DesktopSshPasswordPrompts.ts";
 
@@ -415,6 +416,7 @@ export const deployCollabServer = Effect.fn("desktop.collabServer.deploy")(funct
   DesktopCollabServerDeployResult,
   DeployCollabServerError,
   | ChildProcessSpawner.ChildProcessSpawner
+  | Crypto.Crypto
   | FileSystem.FileSystem
   | Path.Path
   | DesktopSshPasswordPrompts.DesktopSshPasswordPrompts
@@ -430,7 +432,7 @@ export const deployCollabServer = Effect.fn("desktop.collabServer.deploy")(funct
       "-s",
       "--",
       publicBaseUrl,
-      remoteStateKey(input.target),
+      yield* remoteStateKey(input.target),
       input.installDocker ? "1" : "0",
     ],
     stdin: buildDeployScript(localCollabServerBundleBase64),

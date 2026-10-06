@@ -4,9 +4,9 @@ import { assert, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 
-import { SqlitePersistenceMemory } from "../../persistence/Layers/Sqlite.ts";
+import * as SqlitePersistence from "../../persistence/Sqlite.ts";
 import { makeProjectTriggerRunRow } from "../commands.ts";
 import {
   ProjectTriggerId,
@@ -15,7 +15,7 @@ import {
 import { ProjectTriggerRepositoryLive } from "./ProjectTriggerRepository.ts";
 
 const layer = it.layer(
-  ProjectTriggerRepositoryLive.pipe(Layer.provideMerge(SqlitePersistenceMemory)),
+  ProjectTriggerRepositoryLive.pipe(Layer.provideMerge(SqlitePersistence.layerMemory)),
 );
 
 layer("ProjectTriggerRepository", (it) => {

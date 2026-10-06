@@ -1409,7 +1409,7 @@ export function SharedProjectsSettings() {
           control={
             <div className="flex w-full gap-2 sm:w-auto">
               <Input
-                className="h-7 min-w-0 text-xs sm:w-48"
+                className="h-7 min-w-0  sm:w-48"
                 value={claimCode}
                 placeholder="Invite code"
                 onChange={(event) => setClaimCode(event.currentTarget.value)}
@@ -1510,7 +1510,7 @@ export function SharedProjectsSettings() {
           }
           status={
             collabReachability.status === "success" ? (
-              <span className="text-emerald-400">{collabReachability.message}</span>
+              <span className="text-success">{collabReachability.message}</span>
             ) : collabReachability.status === "error" ? (
               <span className="text-destructive">{collabReachability.message}</span>
             ) : collabReachability.status === "pending" ? (
@@ -1542,7 +1542,7 @@ export function SharedProjectsSettings() {
         >
           <div className="mt-3 grid gap-2 border-t border-border/50 py-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,16rem)]">
             <Input
-              className="h-7 min-w-0 text-xs"
+              className="h-7 min-w-0 "
               value={collabServerForm.url}
               placeholder="https://collab.example.com"
               onChange={(event) => {
@@ -1554,7 +1554,7 @@ export function SharedProjectsSettings() {
               }}
             />
             <Input
-              className="h-7 min-w-0 text-xs"
+              className="h-7 min-w-0 "
               type="password"
               value={collabServerForm.token}
               placeholder={
@@ -1624,7 +1624,7 @@ export function SharedProjectsSettings() {
               ))}
             </select>
             <Input
-              className="h-7 min-w-0 text-xs"
+              className="h-7 min-w-0 "
               value={collabServerForm.publicBaseUrl}
               placeholder="http://vps.example.com:8787"
               disabled={isDeployingCollabServer}
@@ -1637,7 +1637,7 @@ export function SharedProjectsSettings() {
               }}
             />
             <Input
-              className="h-7 min-w-0 text-xs"
+              className="h-7 min-w-0 "
               type="password"
               value={collabServerForm.password}
               placeholder="SSH password"
@@ -1922,7 +1922,7 @@ export function SharedProjectsSettings() {
                 control={
                   <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
                     <Input
-                      className="h-7 text-xs sm:w-44"
+                      className="h-7  sm:w-44"
                       value={inviteLogin}
                       placeholder="@octo-user"
                       onChange={(event) => setInviteLogin(event.currentTarget.value)}
@@ -2071,7 +2071,7 @@ export function SharedProjectsSettings() {
             ) : null}
             {detail.threads.length > 0 ? (
               <div className="border-t border-border/60 px-4 py-4 sm:px-5">
-                <p className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">
+                <p className="text-xs font-medium uppercase tracking-brand text-muted-foreground">
                   Available snapshot shares
                 </p>
                 <div className="mt-3 space-y-2">
@@ -2243,7 +2243,7 @@ export function SharedProjectsSettings() {
               >
                 <div className="mt-3 grid gap-2 border-t border-border/50 py-3 sm:grid-cols-[10rem_1fr_5rem_9rem_9rem]">
                   <Input
-                    className="h-7 text-xs"
+                    className="h-7 "
                     value={sshCredentialForm.label}
                     placeholder="VPS SSH"
                     onChange={(event) =>
@@ -2254,7 +2254,7 @@ export function SharedProjectsSettings() {
                     }
                   />
                   <Input
-                    className="h-7 text-xs"
+                    className="h-7 "
                     value={sshCredentialForm.host}
                     placeholder="203.0.113.10"
                     onChange={(event) =>
@@ -2265,7 +2265,7 @@ export function SharedProjectsSettings() {
                     }
                   />
                   <Input
-                    className="h-7 text-xs"
+                    className="h-7 "
                     value={sshCredentialForm.port}
                     placeholder="22"
                     inputMode="numeric"
@@ -2277,7 +2277,7 @@ export function SharedProjectsSettings() {
                     }
                   />
                   <Input
-                    className="h-7 text-xs"
+                    className="h-7 "
                     value={sshCredentialForm.username}
                     placeholder="root"
                     onChange={(event) =>
@@ -2307,7 +2307,7 @@ export function SharedProjectsSettings() {
                 {sshCredentialForm.authType === "password" ? (
                   <div className="pb-3">
                     <Input
-                      className="h-7 text-xs"
+                      className="h-7 "
                       type="password"
                       value={sshCredentialForm.password}
                       placeholder={
@@ -2325,7 +2325,7 @@ export function SharedProjectsSettings() {
                 {sshCredentialForm.authType === "private-key" ? (
                   <div className="grid gap-2 pb-3 sm:grid-cols-[1fr_14rem]">
                     <Textarea
-                      className="text-xs"
+                      className=""
                       value={sshCredentialForm.privateKey}
                       placeholder={
                         editingSshCredentialId
@@ -2340,7 +2340,7 @@ export function SharedProjectsSettings() {
                       }
                     />
                     <Input
-                      className="h-7 text-xs"
+                      className="h-7 "
                       type="password"
                       value={sshCredentialForm.passphrase}
                       placeholder="Passphrase optional"
@@ -2404,7 +2404,7 @@ export function SharedProjectsSettings() {
                       ))}
                     </select>
                     <Input
-                      className="h-7 text-xs"
+                      className="h-7 "
                       value={newRuntime.label}
                       onChange={(event) =>
                         setNewRuntime((current) => ({
@@ -2414,7 +2414,7 @@ export function SharedProjectsSettings() {
                       }
                     />
                     <Input
-                      className="h-7 text-xs"
+                      className="h-7 "
                       value={newRuntime.endpoint}
                       placeholder="https://staging.example.com"
                       onChange={(event) =>
@@ -2496,7 +2496,7 @@ export function SharedProjectsSettings() {
                 control={
                   <div className="grid w-full gap-2 sm:w-auto sm:grid-cols-[9rem_8rem_14rem_auto]">
                     <Input
-                      className="h-7 text-xs"
+                      className="h-7 "
                       value={newEnvironment.name}
                       onChange={(event) =>
                         setNewEnvironment((current) => ({
@@ -2522,7 +2522,7 @@ export function SharedProjectsSettings() {
                       ))}
                     </select>
                     <Input
-                      className="h-7 text-xs"
+                      className="h-7 "
                       value={newEnvironment.baseUrl}
                       placeholder="https://preview.example.com"
                       onChange={(event) =>
@@ -2560,7 +2560,7 @@ export function SharedProjectsSettings() {
                   control={
                     <div className="grid w-full gap-2 sm:w-auto sm:grid-cols-[9rem_9rem_13rem_9rem_auto]">
                       <Input
-                        className="h-7 text-xs"
+                        className="h-7 "
                         value={deployForm.branch}
                         placeholder={detail.project.repository.currentBranch ?? "branch"}
                         onChange={(event) =>
@@ -2587,7 +2587,7 @@ export function SharedProjectsSettings() {
                         ))}
                       </select>
                       <Input
-                        className="h-7 text-xs"
+                        className="h-7 "
                         value={deployForm.deployUrl}
                         placeholder="https://branch.example.com"
                         onChange={(event) =>
@@ -2598,7 +2598,7 @@ export function SharedProjectsSettings() {
                         }
                       />
                       <Input
-                        className="h-7 text-xs"
+                        className="h-7 "
                         value={deployForm.deployedSha}
                         placeholder={shortSha(detail.project.repository.headSha)}
                         onChange={(event) =>

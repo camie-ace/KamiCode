@@ -3,6 +3,8 @@
 import type { PreviewAnnotationPayload, ScopedThreadRef } from "@t3tools/contracts";
 
 import type { ComposerImageAttachment } from "~/composerDraftStore";
+import { usePreviewAvailable } from "~/browser/previewRuntime";
+
 import { PreviewPanelShell, type PreviewPanelMode } from "./PreviewPanelShell";
 import { PreviewView } from "./PreviewView";
 
@@ -25,10 +27,9 @@ export function PreviewPanel({
   tabId,
   configuredUrls,
   visible,
-  browserAvailable,
   onSendAnnotation,
 }: Props) {
-  if (!browserAvailable) {
+  if (!usePreviewAvailable(threadRef.environmentId)) {
     return (
       <PreviewPanelShell mode={mode}>
         <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 p-8 text-center">
@@ -40,8 +41,6 @@ export function PreviewPanel({
     );
   }
 
-  const hostedBrowser = typeof window !== "undefined" && !window.desktopBridge?.preview;
-
   return (
     <PreviewPanelShell mode={mode}>
       <PreviewView
@@ -49,7 +48,6 @@ export function PreviewPanel({
         {...(tabId !== undefined ? { tabId } : {})}
         configuredUrls={configuredUrls}
         visible={visible}
-        hostedBrowser={hostedBrowser}
         {...(onSendAnnotation ? { onSendAnnotation } : {})}
       />
     </PreviewPanelShell>

@@ -3194,111 +3194,113 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
                 : "Choose a shared collaboration target."}
             </DialogDescription>
           </DialogHeader>
-          <DialogPanel className="space-y-4">
-            <div className="grid gap-1.5">
-              <span className="text-xs font-medium text-foreground">Target</span>
-              <Select
-                value={projectSharingMode}
-                onValueChange={(value) => {
-                  if (value === "default" || value === "kamicode" || value === "profile") {
-                    setProjectSharingMode(value);
-                  }
-                }}
-              >
-                <SelectTrigger className="w-full" aria-label="Shared collaboration target">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectPopup align="end" alignItemWithTrigger={false}>
-                  <SelectItem hideIndicator value="default">
-                    Use global default
-                  </SelectItem>
-                  <SelectItem hideIndicator value="kamicode">
-                    Use KamiCode instance
-                  </SelectItem>
-                  <SelectItem hideIndicator value="profile">
-                    Use custom instance
-                  </SelectItem>
-                </SelectPopup>
-              </Select>
-            </div>
-            {projectSharingMode === "profile" ? (
-              <>
-                <div className="grid gap-1.5">
-                  <span className="text-xs font-medium text-foreground">Saved instance</span>
-                  <Select
-                    value={projectSharingProfileId as string}
-                    onValueChange={(value) => {
-                      setProjectSharingProfileId(
-                        value === null
-                          ? ""
-                          : value === "__new__"
-                            ? "__new__"
-                            : (value as SharedCollaborationInstanceId),
-                      );
-                    }}
-                  >
-                    <SelectTrigger className="w-full" aria-label="Shared collaboration profile">
-                      <SelectValue placeholder="Choose a saved instance" />
-                    </SelectTrigger>
-                    <SelectPopup align="end" alignItemWithTrigger={false}>
-                      {sharedCollaborationProfiles.map((profile) => (
-                        <SelectItem key={profile.id} hideIndicator value={profile.id}>
-                          {profile.label}
+          <DialogPanel className="">
+            <div className="space-y-4">
+              <div className="grid gap-1.5">
+                <span className="text-xs font-medium text-foreground">Target</span>
+                <Select
+                  value={projectSharingMode}
+                  onValueChange={(value) => {
+                    if (value === "default" || value === "kamicode" || value === "profile") {
+                      setProjectSharingMode(value);
+                    }
+                  }}
+                >
+                  <SelectTrigger className="w-full" aria-label="Shared collaboration target">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectPopup align="end" alignItemWithTrigger={false}>
+                    <SelectItem hideIndicator value="default">
+                      Use global default
+                    </SelectItem>
+                    <SelectItem hideIndicator value="kamicode">
+                      Use KamiCode instance
+                    </SelectItem>
+                    <SelectItem hideIndicator value="profile">
+                      Use custom instance
+                    </SelectItem>
+                  </SelectPopup>
+                </Select>
+              </div>
+              {projectSharingMode === "profile" ? (
+                <>
+                  <div className="grid gap-1.5">
+                    <span className="text-xs font-medium text-foreground">Saved instance</span>
+                    <Select
+                      value={projectSharingProfileId as string}
+                      onValueChange={(value) => {
+                        setProjectSharingProfileId(
+                          value === null
+                            ? ""
+                            : value === "__new__"
+                              ? "__new__"
+                              : (value as SharedCollaborationInstanceId),
+                        );
+                      }}
+                    >
+                      <SelectTrigger className="w-full" aria-label="Shared collaboration profile">
+                        <SelectValue placeholder="Choose a saved instance" />
+                      </SelectTrigger>
+                      <SelectPopup align="end" alignItemWithTrigger={false}>
+                        {sharedCollaborationProfiles.map((profile) => (
+                          <SelectItem key={profile.id} hideIndicator value={profile.id}>
+                            {profile.label}
+                          </SelectItem>
+                        ))}
+                        <SelectItem hideIndicator value="__new__">
+                          Add new instance
                         </SelectItem>
-                      ))}
-                      <SelectItem hideIndicator value="__new__">
-                        Add new instance
-                      </SelectItem>
-                    </SelectPopup>
-                  </Select>
-                </div>
-                {projectSharingProfileId === "__new__" ? (
-                  <div className="grid gap-3 rounded-md border border-border/60 p-3">
-                    <Input
-                      aria-label="New instance label"
-                      placeholder="Instance label"
-                      value={projectSharingNewProfileLabel}
-                      onChange={(event) => setProjectSharingNewProfileLabel(event.target.value)}
-                    />
-                    <Input
-                      aria-label="New instance URL"
-                      placeholder="https://your-collab-server.example"
-                      value={projectSharingNewProfileUrl}
-                      onChange={(event) => setProjectSharingNewProfileUrl(event.target.value)}
-                    />
-                    <Input
-                      aria-label="New instance token"
-                      placeholder="Secret token"
-                      value={projectSharingNewProfileToken}
-                      onChange={(event) => setProjectSharingNewProfileToken(event.target.value)}
-                    />
+                      </SelectPopup>
+                    </Select>
                   </div>
-                ) : null}
-              </>
-            ) : null}
-            <p className="text-xs text-muted-foreground">
-              {projectSharingMode === "kamicode"
-                ? hasKamiCodeInstanceConfigured
-                  ? "This project will use the configured KamiCode collaboration instance."
-                  : "No KamiCode collaboration server URL/token is configured yet. Configure it in Shared Projects settings or choose a custom instance."
-                : projectSharingMode === "profile"
-                  ? "Custom instances can be reused across projects, while each project can still pick its own target."
-                  : sharedCollaborationDefaultTarget.mode === "profile"
-                    ? "This project will follow the current global custom-instance default."
-                    : "This project will follow the current global KamiCode/default target."}
-            </p>
-            <p className="text-xs text-muted-foreground">
-              Need deployment help?{" "}
-              <a
-                className="text-foreground underline underline-offset-2"
-                href="https://github.com/camie-ace/KamiCode/tree/main/docs"
-                rel="noreferrer"
-                target="_blank"
-              >
-                Open the shared server deployment docs
-              </a>
-              .
-            </p>
+                  {projectSharingProfileId === "__new__" ? (
+                    <div className="grid gap-3 rounded-md border border-border/60 p-3">
+                      <Input
+                        aria-label="New instance label"
+                        placeholder="Instance label"
+                        value={projectSharingNewProfileLabel}
+                        onChange={(event) => setProjectSharingNewProfileLabel(event.target.value)}
+                      />
+                      <Input
+                        aria-label="New instance URL"
+                        placeholder="https://your-collab-server.example"
+                        value={projectSharingNewProfileUrl}
+                        onChange={(event) => setProjectSharingNewProfileUrl(event.target.value)}
+                      />
+                      <Input
+                        aria-label="New instance token"
+                        placeholder="Secret token"
+                        value={projectSharingNewProfileToken}
+                        onChange={(event) => setProjectSharingNewProfileToken(event.target.value)}
+                      />
+                    </div>
+                  ) : null}
+                </>
+              ) : null}
+              <p className="text-xs text-muted-foreground">
+                {projectSharingMode === "kamicode"
+                  ? hasKamiCodeInstanceConfigured
+                    ? "This project will use the configured KamiCode collaboration instance."
+                    : "No KamiCode collaboration server URL/token is configured yet. Configure it in Shared Projects settings or choose a custom instance."
+                  : projectSharingMode === "profile"
+                    ? "Custom instances can be reused across projects, while each project can still pick its own target."
+                    : sharedCollaborationDefaultTarget.mode === "profile"
+                      ? "This project will follow the current global custom-instance default."
+                      : "This project will follow the current global KamiCode/default target."}
+              </p>
+              <p className="text-xs text-muted-foreground">
+                Need deployment help?{" "}
+                <a
+                  className="text-foreground underline underline-offset-2"
+                  href="https://github.com/camie-ace/KamiCode/tree/main/docs"
+                  rel="noreferrer"
+                  target="_blank"
+                >
+                  Open the shared server deployment docs
+                </a>
+                .
+              </p>
+            </div>
           </DialogPanel>
           <DialogFooter>
             <Button variant="outline" onClick={closeProjectSharingDialog}>
@@ -3326,15 +3328,17 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
                 : "Import a shared session by link or code."}
             </DialogDescription>
           </DialogHeader>
-          <DialogPanel className="space-y-4">
-            <div className="grid gap-1.5">
-              <span className="text-xs font-medium text-foreground">Session link or code</span>
-              <Input
-                aria-label="Shared session link or code"
-                placeholder="Paste a shared session link or code"
-                value={projectImportLink}
-                onChange={(event) => setProjectImportLink(event.target.value)}
-              />
+          <DialogPanel className="">
+            <div className="space-y-4">
+              <div className="grid gap-1.5">
+                <span className="text-xs font-medium text-foreground">Session link or code</span>
+                <Input
+                  aria-label="Shared session link or code"
+                  placeholder="Paste a shared session link or code"
+                  value={projectImportLink}
+                  onChange={(event) => setProjectImportLink(event.target.value)}
+                />
+              </div>
             </div>
           </DialogPanel>
           <DialogFooter>
@@ -3363,22 +3367,24 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
                 : "Choose who can import this session."}
             </DialogDescription>
           </DialogHeader>
-          <DialogPanel className="space-y-4">
-            <div className="grid gap-1.5">
-              <span className="text-xs font-medium text-foreground">GitHub usernames</span>
-              <Input
-                aria-label="GitHub usernames"
-                placeholder="@alice, @bob"
-                value={threadShareGitHubLogins}
-                onChange={(event) => setThreadShareGitHubLogins(event.target.value)}
-              />
-            </div>
-            {threadShareLink ? (
+          <DialogPanel className="">
+            <div className="space-y-4">
               <div className="grid gap-1.5">
-                <span className="text-xs font-medium text-foreground">Share link</span>
-                <Input aria-label="Share link" readOnly value={threadShareLink} />
+                <span className="text-xs font-medium text-foreground">GitHub usernames</span>
+                <Input
+                  aria-label="GitHub usernames"
+                  placeholder="@alice, @bob"
+                  value={threadShareGitHubLogins}
+                  onChange={(event) => setThreadShareGitHubLogins(event.target.value)}
+                />
               </div>
-            ) : null}
+              {threadShareLink ? (
+                <div className="grid gap-1.5">
+                  <span className="text-xs font-medium text-foreground">Share link</span>
+                  <Input aria-label="Share link" readOnly value={threadShareLink} />
+                </div>
+              ) : null}
+            </div>
           </DialogPanel>
           <DialogFooter>
             <Button variant="outline" onClick={closeThreadShareDialog}>

@@ -289,13 +289,13 @@ function UnknownWhenVariableWarning({
           <span
             tabIndex={focusable ? 0 : undefined}
             aria-label={label}
-            className="inline-flex size-4.5 shrink-0 items-center justify-center rounded-sm text-warning outline-none transition-colors hover:bg-warning/10 focus-visible:ring-[3px] focus-visible:ring-warning/25"
+            className="inline-flex size-4.5 shrink-0 items-center justify-center rounded-sm text-warning outline-none transition-colors hover:bg-warning/10 focus-visible:ring-3 focus-visible:ring-warning/25"
           >
             <TriangleAlertIcon className="size-3.5" />
           </span>
         }
       />
-      <TooltipPopup side="top" className="max-w-72 whitespace-normal leading-relaxed">
+      <TooltipPopup side="top" className="max-w-72 whitespace-normal ">
         KamiCode does not recognize this condition yet. It can still be saved, but it may not match
         unless the runtime provides it.
       </TooltipPopup>
@@ -1574,7 +1574,7 @@ export function KeybindingsSettingsPanel() {
         }
       >
         {!isElectron ? (
-          <div className="flex items-start gap-2 border-b border-warning/20 bg-warning/5 px-3 py-2.5 text-[12px] leading-relaxed text-muted-foreground sm:px-4">
+          <div className="flex items-start gap-2 border-b border-warning/20 bg-warning/5 px-3 py-2.5 text-xs leading-relaxed text-muted-foreground sm:px-4">
             <InfoIcon className="mt-0.5 size-3.5 shrink-0 text-warning" />
             <p>
               Some shortcuts may be claimed by the browser before KamiCode sees them. Use the

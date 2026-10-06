@@ -2307,3 +2307,46 @@ code {
     }
   }
 }
+
+/* KamiCode identity and media surfaces retained across the upstream theme migration. */
+@theme {
+  --color-kami: #2323ff;
+  --color-kami-light: #5d5dff;
+  --color-kami-hover: #7777ff;
+  --color-media-background: #090a0c;
+  --text-detail: 0.8125rem;
+  --tracking-caption: 0.12em;
+  --tracking-label: 0.14em;
+  --tracking-section: 0.16em;
+  --tracking-brand: 0.18em;
+  --tracking-overline: 0.2em;
+  --shadow-media-dialog: 0 32px 120px rgba(0, 0, 0, 0.62);
+  --shadow-media-card: 0 24px 80px rgba(0, 0, 0, 0.55);
+  --shadow-media-preview: 0 18px 52px rgba(0, 0, 0, 0.18);
+}
+@utility bg-profile-surface {
+  background-image: linear-gradient(
+    145deg,
+    color-mix(in srgb, var(--background) 90%, var(--color-black)) 0%,
+    var(--background) 55%
+  );
+}
+@utility bg-media-surface {
+  background-image:
+    radial-gradient(circle at top, rgba(255, 255, 255, 0.09), transparent 34%),
+    linear-gradient(135deg, rgba(255, 255, 255, 0.055), rgba(255, 255, 255, 0.01));
+}
+@utility bg-profile-highlight {
+  background-image: radial-gradient(
+    28rem 18rem at left,
+    color-mix(in srgb, var(--color-sky-500) 10%, transparent),
+    transparent
+  );
+}
+@utility bg-profile-glow {
+  background-image: radial-gradient(
+    44rem 16rem at top,
+    color-mix(in srgb, var(--color-emerald-500) 14%, transparent),
+    transparent
+  );
+}

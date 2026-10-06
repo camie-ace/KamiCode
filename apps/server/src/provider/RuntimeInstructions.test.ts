@@ -36,9 +36,12 @@ describe("buildRuntimeInstructions", () => {
   });
 });
 
-it.each(["Claude Code", "Cursor", "Grok", "Antigravity", "OpenCode"])("preserves KamiCode repository rules in %s", (harness) => {
-  const instructions = buildRuntimeInstructions({ harness });
-  expect(instructions).toContain("running in KamiCode");
-  expect(instructions).toContain("<repository_operating_contract");
-  expect(instructions).toContain(".camie/");
-});
+it.each(["Claude Code", "Cursor", "Grok", "Antigravity", "OpenCode"])(
+  "preserves KamiCode repository rules in %s",
+  (harness) => {
+    const instructions = buildRuntimeInstructions({ harness });
+    expect(instructions).toContain("running in KamiCode");
+    expect(instructions).toContain("<repository_operating_contract");
+    expect(instructions).toContain(".camie/");
+  },
+);

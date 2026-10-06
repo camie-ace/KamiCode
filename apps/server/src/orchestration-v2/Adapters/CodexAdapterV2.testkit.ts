@@ -1,8 +1,12 @@
+import { buildKamiCodeAdditionalContext } from "../../provider/CodexDeveloperInstructions.ts";
+import { buildProjectMemoryInstructionBlock } from "../../provider/ProjectMemory.ts";
+import type { ProviderInteractionMode } from "@t3tools/contracts";
 import * as OtelEnvironment from "@t3tools/shared/otelEnvironment";
 import { DEFAULT_SIGNAL_EXPORT } from "@t3tools/shared/observability";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { type ProviderReplayTranscript } from "@t3tools/contracts";
 import * as CodexClient from "effect-codex-app-server/client";
+import type * as CodexError from "effect-codex-app-server/errors";
 import * as CodexReplay from "effect-codex-app-server/replay";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -45,7 +49,10 @@ export type CodexOrchestratorReplayHarnessError = typeof CodexOrchestratorReplay
 export function withCodexReplayChildMetadata(
   client: CodexClient.CodexAppServerClient["Service"],
   transcript: CodexReplay.CodexAppServerReplayTranscript,
-  readMetadata: (threadId: string) => Effect.Effect<unknown> = (threadId) =>
+  readMetadata: (
+    threadId: string,
+    method: "thread/read" | "thread/resume",
+  ) => Effect.Effect<unknown, CodexError.CodexAppServerError> = (threadId) =>
     Effect.succeed({ thread: { id: threadId }, model: null }),
 ): CodexClient.CodexAppServerClient["Service"] {
   const childThreadIds = new Set(
@@ -67,12 +74,12 @@ export function withCodexReplayChildMetadata(
     raw: {
       ...client.raw,
       request: (method, params) =>
-        method === "thread/resume" &&
+        (method === "thread/read" || method === "thread/resume") &&
         Predicate.isObject(params) &&
-        params.excludeTurns === true &&
+        (method === "thread/read" ? params.includeTurns === false : params.excludeTurns === true) &&
         typeof params.threadId === "string" &&
         childThreadIds.has(params.threadId)
-          ? readMetadata(params.threadId)
+          ? readMetadata(params.threadId, method)
           : client.raw.request(method, params),
     },
   };
@@ -177,18 +184,72 @@ export function makeReplayServerConfig(
   });
 }
 
-export function makeCodexProviderAdapterRegistryReplayLayer(input: {
+/** Adapt upstream recordings to the fork's application identity and instruction blocks. */
+export function withKamiCodeReplayContext(
+  transcript: CodexReplay.CodexAppServerReplayTranscript,
+  interactionMode: ProviderInteractionMode = "default",
+): CodexReplay.CodexAppServerReplayTranscript {
+  return {
+    ...transcript,
+    entries: transcript.entries.map((entry) => {
+      if (entry.type !== "expect_outbound" || !Predicate.isObject(entry.frame)) return entry;
+      const frame = entry.frame;
+      if (!Predicate.isObject(frame.params)) return entry;
+      if (frame.method === "initialize" && Predicate.isObject(frame.params.clientInfo)) {
+        return {
+          ...entry,
+          frame: {
+            ...frame,
+            params: {
+              ...frame.params,
+              clientInfo: {
+                ...frame.params.clientInfo,
+                name: "KamiCode",
+                title: "KamiCode Desktop",
+              },
+            },
+          },
+        };
+      }
+      if (frame.method !== "turn/start") return entry;
+      return {
+        ...entry,
+        frame: {
+          ...frame,
+          params: {
+            ...frame.params,
+            additionalContext: {
+              ...buildKamiCodeAdditionalContext(interactionMode),
+              kamicode_project_memory: {
+                kind: "application",
+                value: buildProjectMemoryInstructionBlock(""),
+              },
+              ...(Predicate.isObject(frame.params.additionalContext)
+                ? frame.params.additionalContext
+                : {}),
+            },
+          },
+        },
+      };
+    }),
+  };
+}
+
+export function layer(input: {
   readonly transcript: CodexReplay.CodexAppServerReplayTranscript;
   readonly driver?: CodexReplay.CodexAppServerReplayDriver;
 }) {
-  const replayLayer =
+  const layerReplay =
     input.driver === undefined
-      ? CodexReplay.layerReplay(input.transcript)
-      : CodexReplay.layerReplayWithDriver(input.driver);
-  const replayClientFactoryLayer = Layer.succeed(CodexAdapterV2.CodexAppServerClientFactory, {
+      ? CodexReplay.layerReplay(withKamiCodeReplayContext(input.transcript))
+      : CodexReplay.layerReplayWithDriver({
+          ...input.driver,
+          transcript: withKamiCodeReplayContext(input.driver.transcript),
+        });
+  const layerReplayClientFactory = Layer.succeed(CodexAdapterV2.CodexAppServerClientFactory, {
     open: (openInput) =>
       Effect.gen(function* () {
-        const context = yield* Layer.build(replayLayer).pipe(
+        const context = yield* Layer.build(layerReplay).pipe(
           Effect.mapError(
             (cause) =>
               new ProviderAdapterOpenSessionError({
@@ -204,11 +265,11 @@ export function makeCodexProviderAdapterRegistryReplayLayer(input: {
         );
       }),
   });
-  const serverConfigLayer = Layer.effect(
+  const layerServerConfig = Layer.effect(
     ServerConfig.ServerConfig,
     makeReplayServerConfig(input.transcript.scenario).pipe(Effect.orDie),
   ).pipe(Layer.provide(NodeServices.layer));
-  const registryLayer = ProviderAdapterRegistry.makeDriverLayer({
+  const layerRegistry = ProviderAdapterRegistry.layerFromDrivers({
     drivers: [CodexAdapterV2.CodexAdapterV2Driver],
     configMap: {
       [CodexAdapterV2.CODEX_DEFAULT_INSTANCE_ID]: {
@@ -218,15 +279,15 @@ export function makeCodexProviderAdapterRegistryReplayLayer(input: {
   }).pipe(
     Layer.provide(
       Layer.mergeAll(
-        replayClientFactoryLayer,
-        serverConfigLayer,
+        layerReplayClientFactory,
+        layerServerConfig,
         NodeServices.layer,
         IdAllocator.layer,
       ),
     ),
   );
 
-  return registryLayer;
+  return layerRegistry;
 }
 
 const decodeCodexAppServerReplayTranscript = Schema.decodeUnknownEffect(
@@ -267,9 +328,7 @@ export const CodexOrchestratorReplayHarness: OrchestratorV2ProviderReplayHarness
                   Effect.promise((signal) => replayGate.beforeEmit(entry.label, signal)),
               },
         );
-        return yield* Layer.build(
-          makeCodexProviderAdapterRegistryReplayLayer({ transcript, driver }),
-        );
+        return yield* Layer.build(layer({ transcript, driver }));
       }),
     );
   },

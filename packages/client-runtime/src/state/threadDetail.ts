@@ -1,6 +1,6 @@
 import type { OrchestrationV2ThreadProjection, ScopedThreadRef } from "@t3tools/contracts";
 import * as Option from "effect/Option";
-import { AsyncResult, Atom } from "effect/unstable/reactivity";
+import { AsyncResult, Atom } from "effect/reactivity";
 
 import {
   deriveThreadQueueWorkflowState,
@@ -52,9 +52,9 @@ export function createEnvironmentThreadDetailAtoms<E>(
 
   const emptyPlans: OrchestrationV2ThreadProjection["plans"] = Object.freeze([]);
   const proposedPlansAtomFamily = Atom.family((key: string) =>
-    Atom.make((get) => Option.getOrNull(get(threadStateValueAtomFamily(key)).data)?.plans ?? emptyPlans).pipe(
-      Atom.setIdleTTL(0), Atom.withLabel(`environment-thread-plans:${key}`),
-    ),
+    Atom.make(
+      (get) => Option.getOrNull(get(threadStateValueAtomFamily(key)).data)?.plans ?? emptyPlans,
+    ).pipe(Atom.setIdleTTL(0), Atom.withLabel(`environment-thread-plans:${key}`)),
   );
 
   const visibleTurnItemsAtomFamily = Atom.family((key: string) => {
@@ -207,41 +207,56 @@ export function createEnvironmentThreadDetailAtoms<E>(
 }
 
 /** Combine current shell metadata with independently streamed transcript collections. */
-export function mergeEnvironmentThread(detail: EnvironmentThread | null, shell: EnvironmentThreadShell | null): EnvironmentThread | null {
-  if (detail === null || shell === null || detail.environmentId !== shell.environmentId || detail.projection.thread.id !== shell.id) return detail;
+export function mergeEnvironmentThread(
+  detail: EnvironmentThread | null,
+  shell: EnvironmentThreadShell | null,
+): EnvironmentThread | null {
+  if (
+    detail === null ||
+    shell === null ||
+    detail.environmentId !== shell.environmentId ||
+    detail.projection.thread.id !== shell.id
+  )
+    return detail;
   const source = shell.source;
-  return { ...detail, projection: { ...detail.projection, thread: {
-    ...detail.projection.thread,
-    createdByUser: source.createdByUser ?? null,
-    id: source.id,
-    projectId: source.projectId,
-    title: source.title,
-    providerInstanceId: source.providerInstanceId,
-    modelSelection: source.modelSelection,
-    runtimeMode: source.runtimeMode,
-    interactionMode: source.interactionMode,
-    branch: source.branch,
-    worktreePath: source.worktreePath,
-    startedBy: source.startedBy ?? null,
-    workflowParentThreadId: source.workflowParentThreadId,
-    workflowLaneId: source.workflowLaneId,
-    workflowLaneRole: source.workflowLaneRole,
-    locked: source.locked ?? false,
-    lineage: source.lineage,
-    forkedFrom: source.forkedFrom,
-    activeProviderThreadId: source.activeProviderThreadId,
-    createdAt: source.createdAt,
-    updatedAt: source.updatedAt,
-    archivedAt: source.archivedAt,
-    settledOverride: source.settledOverride,
-    settledAt: source.settledAt,
-    unsettledAt: source.unsettledAt,
-    snoozedUntil: source.snoozedUntil,
-    snoozedAt: source.snoozedAt,
-    pinnedAt: source.pinnedAt,
-    autoSettleDisabledAt: source.autoSettleDisabledAt,
-    pinOrderKey: source.pinOrderKey,
-    activeOrderKey: source.activeOrderKey,
-    deletedAt: source.deletedAt,
-  } } };
+  return {
+    ...detail,
+    projection: {
+      ...detail.projection,
+      thread: {
+        ...detail.projection.thread,
+        createdByUser: source.createdByUser ?? null,
+        id: source.id,
+        projectId: source.projectId,
+        title: source.title,
+        providerInstanceId: source.providerInstanceId,
+        modelSelection: source.modelSelection,
+        runtimeMode: source.runtimeMode,
+        interactionMode: source.interactionMode,
+        branch: source.branch,
+        worktreePath: source.worktreePath,
+        startedBy: source.startedBy ?? null,
+        workflowParentThreadId: source.workflowParentThreadId,
+        workflowLaneId: source.workflowLaneId,
+        workflowLaneRole: source.workflowLaneRole,
+        locked: source.locked ?? false,
+        lineage: source.lineage,
+        forkedFrom: source.forkedFrom,
+        activeProviderThreadId: source.activeProviderThreadId,
+        createdAt: source.createdAt,
+        updatedAt: source.updatedAt,
+        archivedAt: source.archivedAt,
+        settledOverride: source.settledOverride,
+        settledAt: source.settledAt,
+        unsettledAt: source.unsettledAt,
+        snoozedUntil: source.snoozedUntil,
+        snoozedAt: source.snoozedAt,
+        pinnedAt: source.pinnedAt,
+        autoSettleDisabledAt: source.autoSettleDisabledAt,
+        pinOrderKey: source.pinOrderKey,
+        activeOrderKey: source.activeOrderKey,
+        deletedAt: source.deletedAt,
+      },
+    },
+  };
 }

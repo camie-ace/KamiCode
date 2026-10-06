@@ -28,7 +28,7 @@ const environmentInput = {
   runningUnderArm64Translation: false,
 } satisfies DesktopEnvironment.MakeDesktopEnvironmentInput;
 
-const electronAppLayer = Layer.succeed(ElectronApp.ElectronApp, {
+const layerElectronApp = Layer.succeed(ElectronApp.ElectronApp, {
   metadata: Effect.die("unexpected metadata read"),
   name: Effect.succeed("KamiCode"),
   systemLocale: Effect.succeed("en-US"),
@@ -57,7 +57,7 @@ const electronDialogShape = {
   showErrorBox: () => Effect.void,
 } satisfies ElectronDialog.ElectronDialog["Service"];
 
-const electronDialogLayer = Layer.succeed(ElectronDialog.ElectronDialog, electronDialogShape);
+const layerElectronDialog = Layer.succeed(ElectronDialog.ElectronDialog, electronDialogShape);
 
 const baseUpdateState: DesktopUpdateState = {
   enabled: true,
@@ -93,9 +93,9 @@ const desktopUpdatesShape = {
   installPrepared: () => Effect.die("unexpected installPrepared"),
 } satisfies DesktopUpdates.DesktopUpdates["Service"];
 
-const desktopUpdatesLayer = Layer.succeed(DesktopUpdates.DesktopUpdates, desktopUpdatesShape);
+const layerDesktopUpdates = Layer.succeed(DesktopUpdates.DesktopUpdates, desktopUpdatesShape);
 
-const makeDesktopWindowLayer = (selectedAction: Deferred.Deferred<string>) =>
+const layerDesktopWindow = (selectedAction: Deferred.Deferred<string>) =>
   Layer.succeed(DesktopWindow.DesktopWindow, {
     createMain: Effect.die("unexpected createMain"),
     ensureMain: Effect.succeed({} as Electron.BrowserWindow),
@@ -114,7 +114,7 @@ const makeDesktopWindowLayer = (selectedAction: Deferred.Deferred<string>) =>
     syncAppearance: Effect.void,
   } satisfies DesktopWindow.DesktopWindow["Service"]);
 
-const makeElectronMenuLayer = (
+const layerElectronMenu = (
   applicationMenuTemplate: Deferred.Deferred<readonly Electron.MenuItemConstructorOptions[]>,
 ) =>
   Layer.succeed(ElectronMenu.ElectronMenu, {
@@ -155,11 +155,11 @@ const configureMenu = (
   }).pipe(
     Effect.provide(
       DesktopApplicationMenu.layer.pipe(
-        Layer.provideMerge(makeElectronMenuLayer(applicationMenuTemplate)),
-        Layer.provideMerge(makeDesktopWindowLayer(selectedAction)),
-        Layer.provideMerge(desktopUpdatesLayer),
-        Layer.provideMerge(electronDialogLayer),
-        Layer.provideMerge(electronAppLayer),
+        Layer.provideMerge(layerElectronMenu(applicationMenuTemplate)),
+        Layer.provideMerge(layerDesktopWindow(selectedAction)),
+        Layer.provideMerge(layerDesktopUpdates),
+        Layer.provideMerge(layerElectronDialog),
+        Layer.provideMerge(layerElectronApp),
         Layer.provideMerge(
           DesktopEnvironment.layer(environmentInput).pipe(
             Layer.provide(Layer.mergeAll(NodeServices.layer, DesktopConfig.layerTest({}))),
@@ -212,8 +212,8 @@ describe("DesktopApplicationMenu", () => {
       };
 
       const menuLayer = DesktopApplicationMenu.layer.pipe(
-        Layer.provideMerge(makeElectronMenuLayer(applicationMenuTemplate)),
-        Layer.provideMerge(makeDesktopWindowLayer(selectedAction)),
+        Layer.provideMerge(layerElectronMenu(applicationMenuTemplate)),
+        Layer.provideMerge(layerDesktopWindow(selectedAction)),
         Layer.provideMerge(
           Layer.succeed(DesktopUpdates.DesktopUpdates, {
             ...desktopUpdatesShape,
@@ -237,7 +237,7 @@ describe("DesktopApplicationMenu", () => {
               }),
           } satisfies ElectronDialog.ElectronDialog["Service"]),
         ),
-        Layer.provideMerge(electronAppLayer),
+        Layer.provideMerge(layerElectronApp),
         Layer.provideMerge(
           DesktopEnvironment.layer(environmentInput).pipe(
             Layer.provide(Layer.mergeAll(NodeServices.layer, DesktopConfig.layerTest({}))),
@@ -283,8 +283,8 @@ describe("DesktopApplicationMenu", () => {
       }).pipe(
         Effect.provide(
           DesktopApplicationMenu.layer.pipe(
-            Layer.provideMerge(makeElectronMenuLayer(applicationMenuTemplate)),
-            Layer.provideMerge(makeDesktopWindowLayer(selectedAction)),
+            Layer.provideMerge(layerElectronMenu(applicationMenuTemplate)),
+            Layer.provideMerge(layerDesktopWindow(selectedAction)),
             Layer.provideMerge(
               Layer.succeed(DesktopUpdates.DesktopUpdates, {
                 ...desktopUpdatesShape,
@@ -302,7 +302,7 @@ describe("DesktopApplicationMenu", () => {
                 showMessageBox: () => Effect.succeed({ response: 1, checkboxChecked: false }),
               } satisfies ElectronDialog.ElectronDialog["Service"]),
             ),
-            Layer.provideMerge(electronAppLayer),
+            Layer.provideMerge(layerElectronApp),
             Layer.provideMerge(
               DesktopEnvironment.layer(environmentInput).pipe(
                 Layer.provide(Layer.mergeAll(NodeServices.layer, DesktopConfig.layerTest({}))),

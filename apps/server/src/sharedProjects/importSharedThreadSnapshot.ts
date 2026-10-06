@@ -19,7 +19,8 @@ import {
   type OrchestrationV2TurnItem,
   type SharedSessionSnapshot,
 } from "@t3tools/contracts";
-import { randomUUID } from "node:crypto";
+// @effect-diagnostics-next-line nodeBuiltinImport:off -- The synchronous snapshot event builder generates IDs before its atomic event append.
+import * as NodeCrypto from "node:crypto";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
@@ -56,7 +57,7 @@ export function sharedSnapshotEvents(input: {
   );
   const events: OrchestrationV2DomainEvent[] = [
     {
-      id: EventId.make(randomUUID()),
+      id: EventId.make(NodeCrypto.randomUUID()),
       type: "thread.created",
       threadId,
       occurredAt: now,
@@ -90,7 +91,7 @@ export function sharedSnapshotEvents(input: {
   ];
   const timeline: Array<{ at: DateTime.Utc; item: OrchestrationV2TurnItem }> = [];
   const base = (at: DateTime.Utc) => ({
-    id: TurnItemId.make(randomUUID()),
+    id: TurnItemId.make(NodeCrypto.randomUUID()),
     threadId,
     runId: null,
     nodeId: null,
@@ -106,7 +107,7 @@ export function sharedSnapshotEvents(input: {
     updatedAt: at,
   });
   for (const message of snapshot.messages) {
-    const id = MessageId.make(randomUUID());
+    const id = MessageId.make(NodeCrypto.randomUUID());
     const at = DateTime.makeUnsafe(message.createdAt);
     const updatedAt = DateTime.makeUnsafe(message.completedAt ?? message.createdAt);
     const attachments = message.attachments.flatMap((attachment) => {
@@ -114,7 +115,7 @@ export function sharedSnapshotEvents(input: {
       return decoded._tag === "Some" ? [decoded.value] : [];
     });
     events.push({
-      id: EventId.make(randomUUID()),
+      id: EventId.make(NodeCrypto.randomUUID()),
       type: "message.updated",
       threadId,
       occurredAt: updatedAt,
@@ -140,7 +141,7 @@ export function sharedSnapshotEvents(input: {
           ...base(at),
           type: "kami_activity",
           activity: {
-            id: EventId.make(randomUUID()),
+            id: EventId.make(NodeCrypto.randomUUID()),
             tone: "info",
             kind: "shared.system_message",
             summary: message.text.trim() || "System message",
@@ -184,7 +185,7 @@ export function sharedSnapshotEvents(input: {
         ...base(at),
         type: "kami_activity",
         activity: {
-          id: EventId.make(randomUUID()),
+          id: EventId.make(NodeCrypto.randomUUID()),
           tone: ["info", "tool", "approval", "error"].includes(activity.tone)
             ? (activity.tone as "info" | "tool" | "approval" | "error")
             : "info",
@@ -200,9 +201,9 @@ export function sharedSnapshotEvents(input: {
   }
   // Historical nodes carry no provider handles, active requests, or runnable work.
   const historyNode = (kind: "plan" | "system", at: DateTime.Utc) => {
-    const nodeId = NodeId.make(randomUUID());
+    const nodeId = NodeId.make(NodeCrypto.randomUUID());
     events.push({
-      id: EventId.make(randomUUID()),
+      id: EventId.make(NodeCrypto.randomUUID()),
       type: "node.updated",
       threadId,
       occurredAt: at,
@@ -231,10 +232,10 @@ export function sharedSnapshotEvents(input: {
     if (decoded._tag === "None") continue;
     const plan = decoded.value;
     const at = DateTime.makeUnsafe(plan.createdAt);
-    const planId = PlanId.make(randomUUID());
+    const planId = PlanId.make(NodeCrypto.randomUUID());
     const nodeId = historyNode("plan", at);
     events.push({
-      id: EventId.make(randomUUID()),
+      id: EventId.make(NodeCrypto.randomUUID()),
       type: "plan.updated",
       threadId,
       occurredAt: at,
@@ -263,8 +264,8 @@ export function sharedSnapshotEvents(input: {
   for (const checkpoint of snapshot.checkpoints) {
     const at = DateTime.makeUnsafe(checkpoint.completedAt ?? snapshot.capturedAt);
     const nodeId = historyNode("system", at);
-    const scopeId = CheckpointScopeId.make(randomUUID());
-    const checkpointId = CheckpointId.make(randomUUID());
+    const scopeId = CheckpointScopeId.make(NodeCrypto.randomUUID());
+    const checkpointId = CheckpointId.make(NodeCrypto.randomUUID());
     const files = checkpoint.files.flatMap((file) => {
       if (
         typeof file !== "object" ||
@@ -292,7 +293,7 @@ export function sharedSnapshotEvents(input: {
       ];
     });
     events.push({
-      id: EventId.make(randomUUID()),
+      id: EventId.make(NodeCrypto.randomUUID()),
       type: "checkpoint-scope.created",
       threadId,
       occurredAt: at,
@@ -311,7 +312,7 @@ export function sharedSnapshotEvents(input: {
       },
     });
     events.push({
-      id: EventId.make(randomUUID()),
+      id: EventId.make(NodeCrypto.randomUUID()),
       type: "checkpoint.captured",
       threadId,
       occurredAt: at,
@@ -339,7 +340,7 @@ export function sharedSnapshotEvents(input: {
   timeline.sort((a, b) => DateTime.toEpochMillis(a.at) - DateTime.toEpochMillis(b.at));
   for (const [index, { at, item }] of timeline.entries()) {
     events.push({
-      id: EventId.make(randomUUID()),
+      id: EventId.make(NodeCrypto.randomUUID()),
       type: "turn-item.updated",
       threadId,
       occurredAt: at,
@@ -363,11 +364,18 @@ export const importSharedThreadSnapshot = (input: {
   Effect.gen(function* () {
     const eventSink = yield* EventSink.EventSinkV2;
     const now = yield* DateTime.now;
-    const importedThreadId = ThreadId.make(randomUUID());
+    const importedThreadId = ThreadId.make(NodeCrypto.randomUUID());
     const importedTitle = `Imported: ${(input.snapshot.title || input.title).trim() || "shared session"}`;
     // Validate before touching the checkout.
     yield* Schema.decodeUnknownEffect(ModelSelection)(input.snapshot.modelSelection).pipe(
-      Effect.mapError((cause) => new SharedProjectsError({ message: "Shared session snapshot has an invalid model selection.", status: 400, cause })),
+      Effect.mapError(
+        (cause) =>
+          new SharedProjectsError({
+            message: "Shared session snapshot has an invalid model selection.",
+            status: 400,
+            cause,
+          }),
+      ),
     );
     const branchName = sharedSessionBranchName({
       title: input.snapshot.title || input.title,

@@ -20,14 +20,14 @@ import {
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
-import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
+import * as SqlClient from "effect/sql/SqlClient";
+import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import { CodexProviderCapabilitiesV2 } from "./Adapters/CodexAdapterV2.ts";
 import * as Orchestrator from "./Orchestrator.ts";
 import * as ProjectionStore from "./ProjectionStore.ts";
 import type { ProviderAdapterV2Shape } from "./ProviderAdapter.ts";
 import * as ProviderAdapterRegistry from "./ProviderAdapterRegistry.ts";
-import { makeOrchestratorV2ReplayLayerWithRegistry } from "./testkit/ProviderReplayHarness.ts";
+import * as ProviderReplayHarness from "./testkit/ProviderReplayHarness.ts";
 
 const instanceId = ProviderInstanceId.make("codex");
 const modelSelection = { instanceId, model: "gpt-5.1-codex" };
@@ -38,14 +38,14 @@ const adapter = {
   planSelectionTransition: () => Effect.succeed({ type: "apply_on_next_turn" as const }),
   openSession: () => Effect.die("No provider process needed for metadata controls"),
 } as ProviderAdapterV2Shape;
-const database = SqlitePersistenceMemory;
-const testLayer = Layer.mergeAll(
-  database,
-  ProjectionStore.layer.pipe(Layer.provide(database)),
-  makeOrchestratorV2ReplayLayerWithRegistry(
+const layerDatabase = SqlitePersistence.layerMemory;
+const layerTest = Layer.mergeAll(
+  layerDatabase,
+  ProjectionStore.layer.pipe(Layer.provide(layerDatabase)),
+  ProviderReplayHarness.layerWithRegistry(
     { name: "control-reads" },
-    ProviderAdapterRegistry.makeLayer([adapter]),
-    { databaseLayer: database, runEffectWorker: false },
+    ProviderAdapterRegistry.layerFromAdapters([adapter]),
+    { databaseLayer: layerDatabase, runEffectWorker: false },
   ),
 );
 
@@ -287,7 +287,7 @@ it.effect(
         threadId,
       });
       assert.isNotNull((yield* projections.getThread(threadId)).deletedAt);
-    }).pipe(Effect.provide(testLayer)),
+    }).pipe(Effect.provide(layerTest)),
 );
 
 it.effect("implements a proposed plan that the command projection leaves out", () =>
@@ -341,7 +341,7 @@ it.effect("implements a proposed plan that the command projection leaves out", (
     });
 
     assert.equal((yield* projections.getPlan(threadId, planId))?.status, "completed");
-  }).pipe(Effect.provide(testLayer)),
+  }).pipe(Effect.provide(layerTest)),
 );
 
 // Stop's settle follow-up runs after the provider interrupt returns, possibly
@@ -542,7 +542,7 @@ it.effect("settles only the stopped run's background work, once", () =>
       `${commandItem(2)}:running`,
       `${commandItem(3)}:running`,
     ]);
-  }).pipe(Effect.provide(testLayer)),
+  }).pipe(Effect.provide(layerTest)),
 );
 
 it.effect("keeps delegated child pull-request links independent of the parent", () =>
@@ -632,28 +632,61 @@ it.effect("keeps delegated child pull-request links independent of the parent", 
     const parentAfterChildLink = yield* projections.getThreadProjection(parentThreadId);
     assert.deepEqual(parentAfterChildLink.thread.linkedPullRequest, parentPullRequest);
     assert.deepEqual(parentAfterChildLink.thread.pullRequests, parent.thread.pullRequests);
-  }).pipe(Effect.provide(testLayer)),
+  }).pipe(Effect.provide(layerTest)),
 );
 
-
-it.effect("persists KamiCode workflow and evidence records in V2 with retry-safe command receipts", () =>
-  Effect.gen(function* () {
-    const orchestrator = yield* Orchestrator.OrchestratorV2;
-    const projections = yield* ProjectionStore.ProjectionStoreV2;
-    const threadId = ThreadId.make("thread:kami-workflow");
-    yield* orchestrator.dispatch({ type: "thread.create", commandId: CommandId.make("create-kami-workflow"), threadId, projectId: ProjectId.make("project:kami-workflow"), title: "Workflow", modelSelection, runtimeMode: "full-access", interactionMode: "workflow", branch: null, worktreePath: null, createdBy: "user", creationSource: "web" });
-    const command = {
-      type: "thread.workflow.record" as const, commandId: CommandId.make("kami-workflow-completed"), threadId,
-      kind: "workflow.completed" as const, summary: "All lanes verified", payload: { status: "completed", verificationStatus: "passed" }, createdAt: "2026-10-06T10:00:00.000Z",
-    };
-    yield* orchestrator.dispatch(command);
-    yield* orchestrator.dispatch(command);
-    yield* orchestrator.dispatch({ type: "thread.activity.append", commandId: CommandId.make("kami-test-evidence"), threadId, createdAt: command.createdAt, activity: { id: EventId.make("test-evidence"), kind: "test.evidence", tone: "info", summary: "Browser checks passed", payload: { runId: "test-run", result: "passed" }, turnId: null, createdAt: command.createdAt } });
-    const projection = yield* projections.getThreadProjection(threadId);
-    const records = projection.turnItems.filter((item) => item.type === "kami_activity");
-    assert.equal(records.length, 2);
-    assert.equal(records[0]?.activity.kind, "workflow.completed");
-    assert.deepEqual(records[0]?.activity.payload, command.payload);
-    assert.equal(records[1]?.activity.kind, "test.evidence");
-  }).pipe(Effect.provide(testLayer)),
+it.effect(
+  "persists KamiCode workflow and evidence records in V2 with retry-safe command receipts",
+  () =>
+    Effect.gen(function* () {
+      const orchestrator = yield* Orchestrator.OrchestratorV2;
+      const projections = yield* ProjectionStore.ProjectionStoreV2;
+      const threadId = ThreadId.make("thread:kami-workflow");
+      yield* orchestrator.dispatch({
+        type: "thread.create",
+        commandId: CommandId.make("create-kami-workflow"),
+        threadId,
+        projectId: ProjectId.make("project:kami-workflow"),
+        title: "Workflow",
+        modelSelection,
+        runtimeMode: "full-access",
+        interactionMode: "workflow",
+        branch: null,
+        worktreePath: null,
+        createdBy: "user",
+        creationSource: "web",
+      });
+      const command = {
+        type: "thread.workflow.record" as const,
+        commandId: CommandId.make("kami-workflow-completed"),
+        threadId,
+        kind: "workflow.completed" as const,
+        summary: "All lanes verified",
+        payload: { status: "completed", verificationStatus: "passed" },
+        createdAt: "2026-10-06T10:00:00.000Z",
+      };
+      yield* orchestrator.dispatch(command);
+      yield* orchestrator.dispatch(command);
+      yield* orchestrator.dispatch({
+        type: "thread.activity.append",
+        commandId: CommandId.make("kami-test-evidence"),
+        threadId,
+        createdAt: command.createdAt,
+        activity: {
+          id: EventId.make("test-evidence"),
+          kind: "test.evidence",
+          tone: "info",
+          summary: "Browser checks passed",
+          payload: { runId: "test-run", result: "passed" },
+          turnId: null,
+          createdAt: command.createdAt,
+        },
+      });
+      const projection = yield* projections.getThreadProjection(threadId);
+      const records = projection.turnItems.filter((item) => item.type === "kami_activity");
+      assert.equal(records.length, 2);
+      assert.equal(records[0]?.activity.kind, "workflow.completed");
+      assert.deepEqual(records[0]?.activity.payload, command.payload);
+      assert.equal(records[1]?.activity.kind, "test.evidence");
+    }).pipe(Effect.provide(layerTest)),
 );

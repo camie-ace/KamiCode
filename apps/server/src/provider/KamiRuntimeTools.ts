@@ -16,7 +16,7 @@ export const makeKamiRuntimeTools = (instanceId: ProviderInstanceId) =>
     const auth = yield* Effect.serviceOption(EnvironmentAuth);
     const service = yield* Effect.serviceOption(ProjectTriggerService);
     const repository = yield* Effect.serviceOption(ProjectTriggerRepository);
-      return {
+    return {
       ...(Option.isNone(auth)
         ? {}
         : {

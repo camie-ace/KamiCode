@@ -68,7 +68,7 @@ export function ComposerAttachmentStrip(props: {
             key={attachment.id}
             className={cn(
               "group relative flex min-h-16 w-full max-w-[260px] overflow-hidden rounded-xl border bg-background/90 text-left shadow-sm sm:w-[220px]",
-              isUnsupported ? "border-amber-500/45" : "border-border/80",
+              isUnsupported ? "border-warning/45" : "border-border/80",
             )}
           >
             <div className="flex size-16 shrink-0 items-center justify-center overflow-hidden border-r border-border/70 bg-muted/60">
@@ -111,7 +111,7 @@ export function ComposerAttachmentStrip(props: {
             </div>
 
             {upload?.status === "uploading" ? (
-              <span className="pointer-events-none absolute bottom-0 left-0 w-16 bg-background/85 px-1 text-center text-[10px] text-foreground">
+              <span className="pointer-events-none absolute bottom-0 left-0 w-16 bg-background/85 px-1 text-center text-3xs text-foreground">
                 {formatAttachmentUploadProgress(upload.progress)}
               </span>
             ) : null}
@@ -124,7 +124,7 @@ export function ComposerAttachmentStrip(props: {
                       type="button"
                       variant="ghost"
                       size="icon-xs"
-                      className="absolute bottom-1 left-1 bg-background/85 hover:bg-background/95"
+                      className="absolute bottom-1 left-1  "
                       onClick={() => {
                         const image = props.images.find((entry) => entry.id === attachment.id);
                         if (image) props.onRetryUpload?.(image);
@@ -135,7 +135,7 @@ export function ComposerAttachmentStrip(props: {
                 >
                   <RotateCcwIcon />
                 </TooltipTrigger>
-                <TooltipPopup side="top" className="max-w-64 whitespace-normal leading-tight">
+                <TooltipPopup side="top" className="max-w-64 whitespace-normal ">
                   {upload.reason}
                 </TooltipPopup>
               </Tooltip>
@@ -147,13 +147,13 @@ export function ComposerAttachmentStrip(props: {
               </div>
               <div
                 className={cn(
-                  "text-[11px] font-medium",
-                  isUnsupported ? "text-amber-600" : "text-muted-foreground",
+                  "text-2xs font-medium",
+                  isUnsupported ? "text-warning" : "text-muted-foreground",
                 )}
               >
                 {attachmentKindLabel(attachment)}
               </div>
-              <div className="truncate text-[11px] text-muted-foreground/75">
+              <div className="truncate text-2xs text-muted-foreground/75">
                 {attachmentDetailLabel(attachment)}
               </div>
             </div>
@@ -165,13 +165,13 @@ export function ComposerAttachmentStrip(props: {
                     <span
                       role="img"
                       aria-label="Draft attachment may not persist"
-                      className="absolute left-1 top-1 inline-flex items-center justify-center rounded bg-background/85 p-0.5 text-amber-600"
+                      className="absolute left-1 top-1 inline-flex items-center justify-center rounded bg-background/85 p-0.5 text-warning"
                     >
                       <CircleAlertIcon className="size-3" />
                     </span>
                   }
                 />
-                <TooltipPopup side="top" className="max-w-64 whitespace-normal leading-tight">
+                <TooltipPopup side="top" className="max-w-64 whitespace-normal ">
                   Draft attachment is kept in memory only and may be lost on navigation.
                 </TooltipPopup>
               </Tooltip>
@@ -181,7 +181,7 @@ export function ComposerAttachmentStrip(props: {
               type="button"
               variant="ghost"
               size="icon-xs"
-              className="absolute right-1 top-1 bg-background/80 hover:bg-background/90"
+              className="absolute right-1 top-1  "
               onClick={() => props.onRemove(attachment.id)}
               aria-label={`Remove ${attachment.name}`}
             >

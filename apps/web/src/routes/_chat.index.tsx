@@ -90,7 +90,7 @@ function IndexDraftLanding() {
 
 function ProjectsLoadingState() {
   return (
-    <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground">
+    <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none  ">
       <div className="flex flex-1 items-center justify-center gap-2 text-sm text-muted-foreground">
         <LoaderCircleIcon className="size-4 animate-spin" />
         Loading your projects…

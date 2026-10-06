@@ -116,12 +116,12 @@ function statusIcon(status: TestHarnessRunStatus) {
 function statusClass(status: TestHarnessRunStatus): string {
   switch (status) {
     case "pass":
-      return "border-emerald-400/35 bg-emerald-500/10 text-emerald-700 dark:text-emerald-200";
+      return "border-success/35 bg-success/10 text-success dark:text-success";
     case "fail":
     case "error":
-      return "border-rose-400/35 bg-rose-500/10 text-rose-700 dark:text-rose-200";
+      return "border-error/35 bg-error/10 text-error dark:text-error";
     case "blocked":
-      return "border-amber-400/35 bg-amber-500/10 text-amber-700 dark:text-amber-200";
+      return "border-warning/35 bg-warning/10 text-warning dark:text-warning";
   }
 }
 
@@ -205,7 +205,7 @@ function ArtifactLink(props: {
             href={testHarnessArtifactUrl(props.path)}
             target="_blank"
             rel="noreferrer"
-            className="inline-flex items-center gap-1.5 rounded-md border border-border/60 bg-background/60 px-2 py-1 text-[11px] text-muted-foreground transition-colors hover:border-border hover:text-foreground"
+            className="inline-flex items-center gap-1.5 rounded-md border border-border/60 bg-background/60 px-2 py-1 text-2xs text-muted-foreground transition-colors hover:border-border hover:text-foreground"
           />
         }
       >
@@ -223,7 +223,7 @@ function StatusPill({ status }: { readonly status: TestHarnessRunStatus }) {
   return (
     <span
       className={cn(
-        "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-medium tracking-[0.12em]",
+        "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-3xs font-medium tracking-caption",
         statusClass(status),
       )}
     >
@@ -325,7 +325,7 @@ function TestHarnessRunCard({
       <div className={cn("space-y-2 p-3", !dense && "sm:p-4")}>
         <div className="flex flex-wrap items-center justify-between gap-2">
           <StatusPill status={run.status} />
-          <span className="text-[10px] text-muted-foreground/70">
+          <span className="text-3xs text-muted-foreground/70">
             {formatRunTime(run.completedAt)}
             {duration ? ` - ${duration}` : ""}
           </span>
@@ -339,12 +339,12 @@ function TestHarnessRunCard({
         {run.finalUrl || run.title ? (
           <div className="flex flex-wrap gap-1.5">
             {run.title ? (
-              <span className="rounded-md border border-border/50 bg-background/45 px-2 py-0.5 text-[10px] text-muted-foreground/75">
+              <span className="rounded-md border border-border/50 bg-background/45 px-2 py-0.5 text-3xs text-muted-foreground/75">
                 {run.title}
               </span>
             ) : null}
             {run.finalUrl ? (
-              <span className="max-w-full truncate rounded-md border border-border/50 bg-background/45 px-2 py-0.5 text-[10px] text-muted-foreground/75">
+              <span className="max-w-full truncate rounded-md border border-border/50 bg-background/45 px-2 py-0.5 text-3xs text-muted-foreground/75">
                 {run.finalUrl}
               </span>
             ) : null}
@@ -367,7 +367,7 @@ function TestHarnessRunCard({
           <ArtifactLink label="Recording" path={latestVideo} icon={VideoIcon} />
         </div>
         {issueSummary ? (
-          <div className="rounded-lg border border-amber-400/30 bg-amber-500/10 px-2 py-1.5 text-[11px] text-amber-700 dark:text-amber-200">
+          <div className="rounded-lg border border-warning/30 bg-warning/10 px-2 py-1.5 text-2xs text-warning dark:text-warning">
             {issueSummary}
           </div>
         ) : null}
@@ -417,13 +417,13 @@ function RunHistoryErrorState({
   readonly onRefresh: () => void;
 }) {
   return (
-    <div className="rounded-xl border border-rose-400/35 bg-rose-500/10 p-3 text-xs text-rose-700 dark:text-rose-200">
+    <div className="rounded-xl border border-error/35 bg-error/10 p-3 text-xs text-error dark:text-error">
       <div className="flex items-start justify-between gap-3">
         <div>
           <div className="font-medium">
             {hasStaleRuns ? "Could not refresh test runs" : "Could not load test runs"}
           </div>
-          <div className="mt-1 text-rose-700/80 dark:text-rose-200/80">{error}</div>
+          <div className="mt-1 text-error/80 dark:text-error/80">{error}</div>
         </div>
         <Button size="xs" variant="outline" onClick={onRefresh} disabled={loading}>
           {loading ? (
@@ -569,18 +569,14 @@ export default function TestHarnessRunsControl({
       <Button
         variant="outline"
         size="xs"
-        className={cn(
-          "gap-1.5",
-          latestRun &&
-            "border-border/80 bg-card/65 text-foreground hover:border-border hover:bg-card",
-        )}
+        className={cn("", latestRun && "    ")}
         disabled={!projectCwd}
         aria-label="Open test runs panel"
         title={latestRun ? `Latest test run: ${statusLabel(latestRun.status)}` : "Test run history"}
         onClick={onOpenPanel}
       >
         <HistoryIcon className="size-3" />
-        <span className="hidden text-[11px] sm:inline">
+        <span className="hidden text-2xs sm:inline">
           {latestRun ? `Test ${statusLabel(latestRun.status)}` : "Test runs"}
         </span>
         {latestRun ? (
@@ -588,10 +584,10 @@ export default function TestHarnessRunsControl({
             className={cn(
               "ml-0.5 size-1.5 rounded-full",
               latestRun.status === "pass"
-                ? "bg-emerald-500"
+                ? "bg-success"
                 : latestRun.status === "blocked"
-                  ? "bg-amber-500"
-                  : "bg-rose-500",
+                  ? "bg-warning"
+                  : "bg-error",
             )}
           />
         ) : null}
@@ -607,11 +603,7 @@ export default function TestHarnessRunsControl({
             <Button
               variant="outline"
               size="xs"
-              className={cn(
-                "gap-1.5",
-                latestRun &&
-                  "border-border/80 bg-card/65 text-foreground hover:border-border hover:bg-card",
-              )}
+              className={cn("", latestRun && "    ")}
               disabled={!projectCwd}
               aria-label="Open test run history"
               title={
@@ -619,7 +611,7 @@ export default function TestHarnessRunsControl({
               }
             >
               <HistoryIcon className="size-3" />
-              <span className="hidden text-[11px] sm:inline">
+              <span className="hidden text-2xs sm:inline">
                 {latestRun ? `Test ${statusLabel(latestRun.status)}` : "Test runs"}
               </span>
               {latestRun ? (
@@ -627,10 +619,10 @@ export default function TestHarnessRunsControl({
                   className={cn(
                     "ml-0.5 size-1.5 rounded-full",
                     latestRun.status === "pass"
-                      ? "bg-emerald-500"
+                      ? "bg-success"
                       : latestRun.status === "blocked"
-                        ? "bg-amber-500"
-                        : "bg-rose-500",
+                        ? "bg-warning"
+                        : "bg-error",
                   )}
                 />
               ) : null}
@@ -650,7 +642,7 @@ export default function TestHarnessRunsControl({
                   {latestRun ? <StatusPill status={latestRun.status} /> : null}
                 </div>
                 <div className="mt-0.5 truncate text-xs text-muted-foreground">{headerMeta}</div>
-                <div className="mt-0.5 text-[10px] text-muted-foreground/70">
+                <div className="mt-0.5 text-3xs text-muted-foreground/70">
                   {formatLastUpdated(lastLoadedAt)}
                 </div>
               </div>
@@ -716,25 +708,27 @@ export default function TestHarnessRunsControl({
               </Button>
             </div>
           </SheetHeader>
-          <SheetPanel className="space-y-3">
-            {error ? (
-              <RunHistoryErrorState
-                error={error}
-                hasStaleRuns={runs.length > 0}
-                loading={loading}
-                onRefresh={refresh}
-              />
-            ) : null}
-            {!loading && !error && runs.length === 0 ? (
-              <RunHistoryEmptyState loading={loading} onRefresh={refresh} />
-            ) : null}
-            {loading && runs.length === 0 ? (
-              <div className="rounded-xl border border-border/70 bg-muted/15 p-5 text-center text-xs text-muted-foreground">
-                <Loader2Icon className="mx-auto mb-2 size-4 animate-spin" />
-                Loading test runs...
-              </div>
-            ) : null}
-            {runs.length > 0 ? <RunHistoryList runs={runs} /> : null}
+          <SheetPanel className="">
+            <div className="space-y-3">
+              {error ? (
+                <RunHistoryErrorState
+                  error={error}
+                  hasStaleRuns={runs.length > 0}
+                  loading={loading}
+                  onRefresh={refresh}
+                />
+              ) : null}
+              {!loading && !error && runs.length === 0 ? (
+                <RunHistoryEmptyState loading={loading} onRefresh={refresh} />
+              ) : null}
+              {loading && runs.length === 0 ? (
+                <div className="rounded-xl border border-border/70 bg-muted/15 p-5 text-center text-xs text-muted-foreground">
+                  <Loader2Icon className="mx-auto mb-2 size-4 animate-spin" />
+                  Loading test runs...
+                </div>
+              ) : null}
+              {runs.length > 0 ? <RunHistoryList runs={runs} /> : null}
+            </div>
           </SheetPanel>
         </SheetPopup>
       </Sheet>
@@ -835,7 +829,7 @@ export function TestHarnessRunsPanel({
               {latestRun ? <StatusPill status={latestRun.status} /> : null}
             </div>
             <div className="mt-1 truncate text-xs text-muted-foreground">{headerMeta}</div>
-            <div className="mt-0.5 text-[10px] text-muted-foreground/70">
+            <div className="mt-0.5 text-3xs text-muted-foreground/70">
               {formatLastUpdated(lastLoadedAt)}
             </div>
           </div>

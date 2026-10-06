@@ -856,8 +856,8 @@ const PlanSidebar = memo(function PlanSidebar({
     (label: string, entries: ReadonlyArray<string>) =>
       entries.length > 0 ? (
         <div className="mt-1.5">
-          <p className="text-[10px] font-semibold text-foreground/60">{label}</p>
-          <ul className="mt-0.5 space-y-0.5 text-[11px] leading-snug text-muted-foreground/60">
+          <p className="text-3xs font-semibold text-foreground/60">{label}</p>
+          <ul className="mt-0.5 space-y-0.5 text-2xs leading-snug text-muted-foreground/60">
             {entries.map((entry) => (
               <li key={entry} className="flex gap-1.5">
                 <span>-</span>
@@ -872,7 +872,7 @@ const PlanSidebar = memo(function PlanSidebar({
 
   const renderWorkflowRecordDetails = useCallback(
     (record: WorkflowRecord) => (
-      <div className="rounded-md border border-border/50 bg-background/60 p-2 text-[11px] leading-snug text-muted-foreground/70">
+      <div className="rounded-md border border-border/50 bg-background/60 p-2 text-2xs leading-snug text-muted-foreground/70">
         <p className="font-medium text-foreground/80">{record.title ?? record.summary}</p>
         <p className="mt-0.5 text-muted-foreground/50">
           {record.kind} | {formatTimestamp(record.createdAt, timestampFormat)}
@@ -941,15 +941,11 @@ const PlanSidebar = memo(function PlanSidebar({
       {/* Header */}
       <div className="flex h-12 shrink-0 items-center justify-between border-b border-border/60 px-3">
         <div className="flex items-center gap-2">
-          <Badge
-            variant="info"
-            size="sm"
-            className="rounded-md px-1.5 py-0 font-semibold tracking-wide uppercase"
-          >
+          <Badge variant="info" size="sm" className="     ">
             {label}
           </Badge>
           {activePlan ? (
-            <span className="text-[11px] text-muted-foreground/60 tabular-nums">
+            <span className="text-2xs text-muted-foreground/60 tabular-nums">
               {formatTimestamp(activePlan.createdAt, timestampFormat)}
             </span>
           ) : null}
@@ -959,12 +955,7 @@ const PlanSidebar = memo(function PlanSidebar({
             <Menu>
               <MenuTrigger
                 render={
-                  <Button
-                    size="icon-xs"
-                    variant="ghost"
-                    className="text-muted-foreground/50 hover:text-foreground/70"
-                    aria-label="Plan actions"
-                  />
+                  <Button size="icon-xs" variant="ghost" className=" " aria-label="Plan actions" />
                 }
               >
                 <EllipsisIcon className="size-3.5" />
@@ -991,7 +982,7 @@ const PlanSidebar = memo(function PlanSidebar({
         <div className="p-3 space-y-4">
           {/* Explanation */}
           {activePlan?.explanation ? (
-            <p className="text-[13px] leading-relaxed text-muted-foreground/80">
+            <p className="text-detail leading-relaxed text-muted-foreground/80">
               {activePlan.explanation}
             </p>
           ) : null}
@@ -1000,38 +991,34 @@ const PlanSidebar = memo(function PlanSidebar({
             <div className="space-y-3">
               <div className="rounded-xl border border-primary/20 bg-gradient-to-b from-primary/8 to-background/70 p-3">
                 <div className="flex items-center justify-between gap-2">
-                  <span className="text-[13px] font-semibold text-foreground/90">
+                  <span className="text-detail font-semibold text-foreground/90">
                     {workflowStarted ? "Workflow runtime" : "Workflow plan"}
                   </span>
-                  <Badge
-                    variant="secondary"
-                    size="sm"
-                    className="rounded-md px-1.5 py-0 text-[10px]"
-                  >
+                  <Badge variant="secondary" size="sm" className="   ">
                     {workflowRuntimeLabel}
                   </Badge>
                 </div>
-                <p className="mt-1 text-[12px] leading-snug text-muted-foreground/75">
+                <p className="mt-1 text-xs leading-snug text-muted-foreground/75">
                   {workflowGoal ??
                     activePlan?.explanation ??
                     "KamiCode is coordinating the workflow."}
                 </p>
                 {workflowInitialLanes.length > 0 ? (
-                  <p className="mt-1 text-[11px] leading-snug text-muted-foreground/50">
+                  <p className="mt-1 text-2xs leading-snug text-muted-foreground/50">
                     Initial lanes: {workflowInitialLanes.join(", ")}
                   </p>
                 ) : null}
                 {workflowPattern ? (
-                  <p className="mt-1 text-[11px] leading-snug text-muted-foreground/50">
+                  <p className="mt-1 text-2xs leading-snug text-muted-foreground/50">
                     Pattern: {workflowPattern}
                   </p>
                 ) : null}
                 {acceptanceCriteria.length > 0 ? (
                   <div className="mt-3 border-t border-primary/10 pt-2">
-                    <p className="text-[10px] font-semibold tracking-widest text-muted-foreground/40 uppercase">
+                    <p className="text-3xs font-semibold tracking-widest text-muted-foreground/40 uppercase">
                       Acceptance criteria
                     </p>
-                    <ul className="mt-1 space-y-1 text-[11px] leading-snug text-muted-foreground/65">
+                    <ul className="mt-1 space-y-1 text-2xs leading-snug text-muted-foreground/65">
                       {acceptanceCriteria.map((criterion) => (
                         <li key={criterion} className="flex gap-1.5">
                           <span className="text-primary/70">-</span>
@@ -1049,14 +1036,14 @@ const PlanSidebar = memo(function PlanSidebar({
                   </div>
                 ) : null}
                 <div className="mt-2 rounded-lg border border-primary/10 bg-background/45 p-2.5">
-                  <p className="text-[10px] font-semibold tracking-widest text-muted-foreground/40 uppercase">
+                  <p className="text-3xs font-semibold tracking-widest text-muted-foreground/40 uppercase">
                     Workflow changes
                   </p>
-                  <p className="mt-1 text-[11px] leading-snug text-muted-foreground/65">
+                  <p className="mt-1 text-2xs leading-snug text-muted-foreground/65">
                     Use the main chat to ask the Lead to change agents, prompts, models, reasoning
                     effort, fast mode, or sequencing before launch.
                   </p>
-                  <p className="mt-1 text-[11px] leading-snug text-muted-foreground/50">
+                  <p className="mt-1 text-2xs leading-snug text-muted-foreground/50">
                     {workflowStarted
                       ? "Lead updates and sub-agent handoffs appear here as runtime events."
                       : "This panel stays read-only; the Lead owns workflow revisions through chat."}
@@ -1064,14 +1051,14 @@ const PlanSidebar = memo(function PlanSidebar({
                 </div>
               </div>
               <div className="flex items-center justify-between gap-2">
-                <p className="text-[10px] font-semibold tracking-widest text-muted-foreground/40 uppercase">
+                <p className="text-3xs font-semibold tracking-widest text-muted-foreground/40 uppercase">
                   Agent cards
                 </p>
-                <Badge variant="secondary" size="sm" className="rounded-md px-1.5 py-0 text-[10px]">
+                <Badge variant="secondary" size="sm" className="   ">
                   {activeWorkflowLaneCount} sub-agents
                 </Badge>
               </div>
-              <div className="flex flex-wrap gap-1.5 text-[10px] text-muted-foreground/60">
+              <div className="flex flex-wrap gap-1.5 text-3xs text-muted-foreground/60">
                 <span className="rounded-full border border-border/50 bg-background/55 px-2 py-0.5">
                   {runningLaneCount} running
                 </span>
@@ -1104,25 +1091,25 @@ const PlanSidebar = memo(function PlanSidebar({
                       aria-expanded={selectedWorkflowLaneId === lane.id}
                     >
                       <div className="flex items-center gap-2">
-                        <span className="text-[13px] font-semibold text-foreground/90">
+                        <span className="text-detail font-semibold text-foreground/90">
                           {lane.role}
                         </span>
-                        <span className="truncate text-[11px] text-muted-foreground/50">
+                        <span className="truncate text-2xs text-muted-foreground/50">
                           {lane.summary}
                         </span>
                       </div>
-                      <p className="mt-1 text-[12px] leading-snug text-muted-foreground/70">
+                      <p className="mt-1 text-xs leading-snug text-muted-foreground/70">
                         {lane.brief}
                       </p>
-                      <p className="mt-1 text-[11px] leading-snug text-muted-foreground/50">
+                      <p className="mt-1 text-2xs leading-snug text-muted-foreground/50">
                         Next: {lane.nextNeed}
                       </p>
                       {(workflowRecordCountByLaneId.get(lane.id) ?? 0) > 0 ? (
-                        <p className="mt-1 text-[10px] leading-snug text-muted-foreground/45">
+                        <p className="mt-1 text-3xs leading-snug text-muted-foreground/45">
                           {workflowRecordCountByLaneId.get(lane.id)} lane activity items
                         </p>
                       ) : null}
-                      <p className="mt-1 text-[10px] leading-snug text-muted-foreground/45">
+                      <p className="mt-1 text-3xs leading-snug text-muted-foreground/45">
                         {selectedWorkflowLaneId === lane.id
                           ? lane.id === "lead"
                             ? "Lead panel open"
@@ -1134,10 +1121,10 @@ const PlanSidebar = memo(function PlanSidebar({
                     </button>
                     <span
                       className={cn(
-                        "mt-2.5 mr-2.5 shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold",
-                        lane.status === "Done" && "bg-emerald-500/10 text-emerald-400",
-                        lane.status === "Running" && "bg-blue-500/10 text-blue-400",
-                        lane.status === "Needs you" && "bg-amber-500/10 text-amber-300",
+                        "mt-2.5 mr-2.5 shrink-0 rounded-full px-2 py-0.5 text-3xs font-semibold",
+                        lane.status === "Done" && "bg-success/10 text-success",
+                        lane.status === "Running" && "bg-info/10 text-info",
+                        lane.status === "Needs you" && "bg-warning/10 text-warning",
                         lane.status === "Waiting" && "bg-muted/40 text-muted-foreground",
                         lane.status === "Stopped" && "bg-destructive/10 text-destructive",
                         lane.status === "Failed" && "bg-destructive/10 text-destructive",
@@ -1152,89 +1139,81 @@ const PlanSidebar = memo(function PlanSidebar({
                 <div className="rounded-xl border border-primary/20 bg-primary/5 p-3">
                   <div className="flex items-center justify-between gap-2">
                     <div>
-                      <p className="text-[10px] font-semibold tracking-widest text-muted-foreground/40 uppercase">
+                      <p className="text-3xs font-semibold tracking-widest text-muted-foreground/40 uppercase">
                         {selectedWorkflowLane.id === "lead" ? "Lead panel" : "Sub-agent panel"}
                       </p>
-                      <p className="mt-1 text-[13px] font-semibold text-foreground/90">
+                      <p className="mt-1 text-detail font-semibold text-foreground/90">
                         {selectedWorkflowLane.role}
                       </p>
                     </div>
-                    <Badge
-                      variant="secondary"
-                      size="sm"
-                      className="rounded-md px-1.5 py-0 text-[10px]"
-                    >
+                    <Badge variant="secondary" size="sm" className="   ">
                       {workflowStarted ? selectedWorkflowLane.status : "Planned"}
                     </Badge>
                   </div>
-                  <p className="mt-2 text-[12px] leading-snug text-muted-foreground/75">
+                  <p className="mt-2 text-xs leading-snug text-muted-foreground/75">
                     {selectedWorkflowLane.brief}
                   </p>
-                  <p className="mt-2 text-[11px] leading-snug text-muted-foreground/70">
+                  <p className="mt-2 text-2xs leading-snug text-muted-foreground/70">
                     <span className="font-medium text-foreground/75">Prompt:</span>{" "}
                     {selectedWorkflowLane.prompt ?? selectedWorkflowLane.brief}
                   </p>
                   <div className="mt-3 grid grid-cols-2 gap-1.5">
                     <div className="rounded-md border border-border/40 bg-background/35 px-2 py-1">
-                      <p className="text-[10px] text-muted-foreground/45">Model</p>
-                      <p className="truncate text-[11px] text-foreground/75">
+                      <p className="text-3xs text-muted-foreground/45">Model</p>
+                      <p className="truncate text-2xs text-foreground/75">
                         {selectedWorkflowLane.model ?? "Use lead default"}
                       </p>
                     </div>
                     <div className="rounded-md border border-border/40 bg-background/35 px-2 py-1">
-                      <p className="text-[10px] text-muted-foreground/45">Reasoning</p>
-                      <p className="truncate text-[11px] text-foreground/75">
+                      <p className="text-3xs text-muted-foreground/45">Reasoning</p>
+                      <p className="truncate text-2xs text-foreground/75">
                         {selectedWorkflowLane.reasoningEffort ?? "Use lead default"}
                       </p>
                     </div>
                     <div className="rounded-md border border-border/40 bg-background/35 px-2 py-1">
-                      <p className="text-[10px] text-muted-foreground/45">Fast mode</p>
-                      <p className="text-[11px] text-foreground/75">
+                      <p className="text-3xs text-muted-foreground/45">Fast mode</p>
+                      <p className="text-2xs text-foreground/75">
                         {selectedWorkflowLane.fastMode ? "On" : "Off"}
                       </p>
                     </div>
                     <div className="rounded-md border border-border/40 bg-background/35 px-2 py-1">
-                      <p className="text-[10px] text-muted-foreground/45">Starts after</p>
-                      <p className="truncate text-[11px] text-foreground/75">
+                      <p className="text-3xs text-muted-foreground/45">Starts after</p>
+                      <p className="truncate text-2xs text-foreground/75">
                         {formatWorkflowLaneRefs(selectedWorkflowLane.startsAfter, workflowLanes)}
                       </p>
                     </div>
                   </div>
-                  <p className="mt-3 text-[11px] leading-snug text-muted-foreground/70">
+                  <p className="mt-3 text-2xs leading-snug text-muted-foreground/70">
                     <span className="font-medium text-foreground/75">Latest output:</span>{" "}
                     {selectedWorkflowLane.latestOutput ?? selectedWorkflowLane.brief}
                   </p>
-                  <p className="mt-1 text-[11px] leading-snug text-muted-foreground/70">
+                  <p className="mt-1 text-2xs leading-snug text-muted-foreground/70">
                     <span className="font-medium text-foreground/75">Open need:</span>{" "}
                     {selectedWorkflowLane.nextNeed}
                   </p>
                   {selectedWorkflowLaneRun ? (
-                    <div className="mt-3 space-y-2 rounded-lg border border-blue-500/20 bg-blue-500/5 p-2.5">
+                    <div className="mt-3 space-y-2 rounded-lg border border-info/20 bg-info/5 p-2.5">
                       <div className="flex items-center justify-between gap-2">
                         <div>
-                          <p className="text-[10px] font-semibold tracking-widest text-blue-300/80 uppercase">
+                          <p className="text-3xs font-semibold tracking-widest text-info/80 uppercase">
                             Live sub-agent run
                           </p>
-                          <p className="mt-0.5 text-[11px] leading-snug text-muted-foreground/60">
+                          <p className="mt-0.5 text-2xs leading-snug text-muted-foreground/60">
                             {selectedWorkflowLaneRun.title}
                           </p>
                         </div>
-                        <Badge
-                          variant="secondary"
-                          size="sm"
-                          className="rounded-md px-1.5 py-0 text-[10px]"
-                        >
+                        <Badge variant="secondary" size="sm" className="   ">
                           {selectedWorkflowLaneRun.status}
                         </Badge>
                       </div>
                       {selectedWorkflowLaneRun.latestSummary ? (
-                        <p className="rounded-md border border-border/40 bg-background/35 px-2 py-1.5 text-[11px] leading-snug text-muted-foreground/75">
+                        <p className="rounded-md border border-border/40 bg-background/35 px-2 py-1.5 text-2xs leading-snug text-muted-foreground/75">
                           {selectedWorkflowLaneRun.latestSummary}
                         </p>
                       ) : null}
                       {selectedWorkflowLaneRun.messages.length ? (
                         <div className="space-y-1.5">
-                          <p className="text-[10px] font-semibold tracking-widest text-muted-foreground/40 uppercase">
+                          <p className="text-3xs font-semibold tracking-widest text-muted-foreground/40 uppercase">
                             Messages
                           </p>
                           {selectedWorkflowLaneRun.messages.map((message) => (
@@ -1242,7 +1221,7 @@ const PlanSidebar = memo(function PlanSidebar({
                               key={message.id}
                               className="rounded-md border border-border/40 bg-background/45 p-2"
                             >
-                              <div className="flex items-center justify-between gap-2 text-[10px] text-muted-foreground/45">
+                              <div className="flex items-center justify-between gap-2 text-3xs text-muted-foreground/45">
                                 <span className="font-semibold uppercase">{message.role}</span>
                                 <span>
                                   {message.streaming
@@ -1250,7 +1229,7 @@ const PlanSidebar = memo(function PlanSidebar({
                                     : formatTimestamp(message.createdAt, timestampFormat)}
                                 </span>
                               </div>
-                              <p className="mt-1 max-h-44 overflow-auto whitespace-pre-wrap text-[11px] leading-snug text-muted-foreground/75">
+                              <p className="mt-1 max-h-44 overflow-auto whitespace-pre-wrap text-2xs leading-snug text-muted-foreground/75">
                                 {message.text}
                               </p>
                             </div>
@@ -1259,13 +1238,13 @@ const PlanSidebar = memo(function PlanSidebar({
                       ) : null}
                       {selectedWorkflowLaneRun.activities.length ? (
                         <div className="space-y-1">
-                          <p className="text-[10px] font-semibold tracking-widest text-muted-foreground/40 uppercase">
+                          <p className="text-3xs font-semibold tracking-widest text-muted-foreground/40 uppercase">
                             Internal activity
                           </p>
                           {selectedWorkflowLaneRun.activities.map((activity) => (
                             <p
                               key={activity.id}
-                              className="text-[11px] leading-snug text-muted-foreground/60"
+                              className="text-2xs leading-snug text-muted-foreground/60"
                             >
                               <span className="font-medium text-foreground/65">
                                 {activity.kind}:
@@ -1283,14 +1262,10 @@ const PlanSidebar = memo(function PlanSidebar({
                   {selectedWorkflowLaneRecords.length > 0 ? (
                     <div className="mt-3 space-y-1.5 rounded-lg border border-border/50 bg-background/35 p-2.5">
                       <div className="flex items-center justify-between gap-2">
-                        <p className="text-[10px] font-semibold tracking-widest text-muted-foreground/40 uppercase">
+                        <p className="text-3xs font-semibold tracking-widest text-muted-foreground/40 uppercase">
                           {selectedWorkflowLane.id === "lead" ? "Lead context" : "Lane activity"}
                         </p>
-                        <Badge
-                          variant="secondary"
-                          size="sm"
-                          className="rounded-md px-1.5 py-0 text-[10px]"
-                        >
+                        <Badge variant="secondary" size="sm" className="   ">
                           {selectedWorkflowLaneRecords.length}
                         </Badge>
                       </div>
@@ -1313,7 +1288,7 @@ const PlanSidebar = memo(function PlanSidebar({
                       {selectedLaneWorkflowRecord ? (
                         renderWorkflowRecordDetails(selectedLaneWorkflowRecord)
                       ) : (
-                        <p className="text-[11px] leading-snug text-muted-foreground/50">
+                        <p className="text-2xs leading-snug text-muted-foreground/50">
                           Select an activity card to inspect the handoff, evidence, or context.
                         </p>
                       )}
@@ -1389,7 +1364,7 @@ const PlanSidebar = memo(function PlanSidebar({
                         value={guidanceText}
                         onChange={(event) => setGuidanceText(event.currentTarget.value)}
                         placeholder={`Guidance to ${selectedWorkflowLane.role}`}
-                        className="min-h-20 text-xs"
+                        className="min-h-20 "
                       />
                       <div className="flex justify-end gap-1.5">
                         <Button
@@ -1417,14 +1392,10 @@ const PlanSidebar = memo(function PlanSidebar({
               {workflowStarted && detailRecords.length > 0 ? (
                 <div className="space-y-1.5 rounded-lg border border-border/50 bg-background/35 p-2.5">
                   <div className="flex items-center justify-between gap-2">
-                    <p className="text-[10px] font-semibold tracking-widest text-muted-foreground/40 uppercase">
+                    <p className="text-3xs font-semibold tracking-widest text-muted-foreground/40 uppercase">
                       Lead inbox
                     </p>
-                    <Badge
-                      variant="secondary"
-                      size="sm"
-                      className="rounded-md px-1.5 py-0 text-[10px]"
-                    >
+                    <Badge variant="secondary" size="sm" className="   ">
                       {detailRecords.length}
                     </Badge>
                   </div>
@@ -1450,15 +1421,12 @@ const PlanSidebar = memo(function PlanSidebar({
                 </div>
               ) : null}
               {workflowStarted && objections.length > 0 ? (
-                <div className="space-y-1.5 rounded-lg border border-amber-500/20 bg-amber-500/5 p-2.5">
-                  <p className="text-[10px] font-semibold tracking-widest text-amber-400/80 uppercase">
+                <div className="space-y-1.5 rounded-lg border border-warning/20 bg-warning/5 p-2.5">
+                  <p className="text-3xs font-semibold tracking-widest text-warning/80 uppercase">
                     Objections
                   </p>
                   {objections.map((record) => (
-                    <div
-                      key={record.id}
-                      className="text-[11px] leading-snug text-muted-foreground/75"
-                    >
+                    <div key={record.id} className="text-2xs leading-snug text-muted-foreground/75">
                       <span className="font-medium text-foreground/75">
                         {record.severity ?? "concern"}:
                       </span>{" "}
@@ -1472,14 +1440,11 @@ const PlanSidebar = memo(function PlanSidebar({
               ) : null}
               {workflowStarted && (laneControls.length > 0 || workflowControls.length > 0) ? (
                 <div className="space-y-1.5 rounded-lg border border-border/50 bg-background/35 p-2.5">
-                  <p className="text-[10px] font-semibold tracking-widest text-muted-foreground/40 uppercase">
+                  <p className="text-3xs font-semibold tracking-widest text-muted-foreground/40 uppercase">
                     Control log
                   </p>
                   {[...workflowControls, ...laneControls].map((record) => (
-                    <div
-                      key={record.id}
-                      className="text-[11px] leading-snug text-muted-foreground/70"
-                    >
+                    <div key={record.id} className="text-2xs leading-snug text-muted-foreground/70">
                       <span className="font-medium text-foreground/75">
                         {record.laneRole ?? "Workflow"}:
                       </span>{" "}
@@ -1491,51 +1456,43 @@ const PlanSidebar = memo(function PlanSidebar({
               {workflowStarted && workflowBlocked ? (
                 <div className="rounded-lg border border-destructive/20 bg-destructive/5 p-2.5">
                   <div className="flex items-center justify-between gap-2">
-                    <span className="text-[13px] font-semibold text-foreground/90">
+                    <span className="text-detail font-semibold text-foreground/90">
                       Workflow blocked
                     </span>
-                    <Badge
-                      variant="secondary"
-                      size="sm"
-                      className="rounded-md px-1.5 py-0 text-[10px] text-destructive"
-                    >
+                    <Badge variant="secondary" size="sm" className="    ">
                       Blocked
                     </Badge>
                   </div>
-                  <p className="mt-1 text-[12px] leading-snug text-muted-foreground/75">
+                  <p className="mt-1 text-xs leading-snug text-muted-foreground/75">
                     {workflowBlocked.summary}
                   </p>
                   {typeof workflowBlockedPayload?.detail === "string" ? (
-                    <p className="mt-1 text-[11px] leading-snug text-muted-foreground/50">
+                    <p className="mt-1 text-2xs leading-snug text-muted-foreground/50">
                       {workflowBlockedPayload.detail}
                     </p>
                   ) : null}
                   {typeof workflowBlockedPayload?.requiredFix === "string" ? (
-                    <p className="mt-1.5 rounded-md border border-destructive/20 bg-destructive/5 px-2 py-1 text-[11px] text-destructive">
+                    <p className="mt-1.5 rounded-md border border-destructive/20 bg-destructive/5 px-2 py-1 text-2xs text-destructive">
                       Required fix: {workflowBlockedPayload.requiredFix}
                     </p>
                   ) : null}
                 </div>
               ) : null}
               {workflowStarted && workflowCompleted ? (
-                <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/5 p-2.5">
+                <div className="rounded-lg border border-success/20 bg-success/5 p-2.5">
                   <div className="flex items-center justify-between gap-2">
-                    <span className="text-[13px] font-semibold text-foreground/90">
+                    <span className="text-detail font-semibold text-foreground/90">
                       Workflow complete
                     </span>
-                    <Badge
-                      variant="secondary"
-                      size="sm"
-                      className="rounded-md px-1.5 py-0 text-[10px] text-emerald-400"
-                    >
+                    <Badge variant="secondary" size="sm" className="    ">
                       Done
                     </Badge>
                   </div>
-                  <p className="mt-1 text-[12px] leading-snug text-muted-foreground/75">
+                  <p className="mt-1 text-xs leading-snug text-muted-foreground/75">
                     {workflowCompleted.summary}
                   </p>
                   {typeof workflowCompletedPayload?.detail === "string" ? (
-                    <p className="mt-1 text-[11px] leading-snug text-muted-foreground/50">
+                    <p className="mt-1 text-2xs leading-snug text-muted-foreground/50">
                       {workflowCompletedPayload.detail}
                     </p>
                   ) : null}
@@ -1547,7 +1504,7 @@ const PlanSidebar = memo(function PlanSidebar({
           {/* Plan Steps */}
           {activePlan && activePlan.steps.length > 0 ? (
             <div className="space-y-1">
-              <p className="mb-2 text-[10px] font-semibold tracking-widest text-muted-foreground/40 uppercase">
+              <p className="mb-2 text-3xs font-semibold tracking-widest text-muted-foreground/40 uppercase">
                 {workflowActive ? "Task checklist" : "Steps"}
               </p>
               {activePlan.steps.map((step) => (
@@ -1555,14 +1512,14 @@ const PlanSidebar = memo(function PlanSidebar({
                   key={`${step.status}:${step.step}`}
                   className={cn(
                     "flex items-center gap-2.5 rounded-lg px-2.5 py-2 transition-colors duration-200",
-                    step.status === "inProgress" && "bg-blue-500/5",
-                    step.status === "completed" && "bg-emerald-500/5",
+                    step.status === "inProgress" && "bg-info/5",
+                    step.status === "completed" && "bg-success/5",
                   )}
                 >
                   {stepStatusIcon(step.status)}
                   <p
                     className={cn(
-                      "text-[13px] leading-snug",
+                      "text-detail leading-snug",
                       step.status === "completed"
                         ? "text-muted-foreground/50 line-through decoration-muted-foreground/20"
                         : step.status === "inProgress"
@@ -1590,7 +1547,7 @@ const PlanSidebar = memo(function PlanSidebar({
                 ) : (
                   <ChevronRightIcon className="size-3 shrink-0 text-muted-foreground/40 transition-transform" />
                 )}
-                <span className="text-[10px] font-semibold tracking-widest text-muted-foreground/40 uppercase group-hover:text-muted-foreground/60">
+                <span className="text-3xs font-semibold tracking-widest text-muted-foreground/40 uppercase group-hover:text-muted-foreground/60">
                   {planTitle ?? "Full Plan"}
                 </span>
               </button>
@@ -1610,8 +1567,8 @@ const PlanSidebar = memo(function PlanSidebar({
           {/* Empty state */}
           {!activePlan && !planMarkdown ? (
             <div className="flex flex-col items-center justify-center py-12 text-center">
-              <p className="text-[13px] text-muted-foreground/40">No active plan yet.</p>
-              <p className="mt-1 text-[11px] text-muted-foreground/30">
+              <p className="text-detail text-muted-foreground/40">No active plan yet.</p>
+              <p className="mt-1 text-2xs text-muted-foreground/30">
                 Plans will appear here when generated.
               </p>
             </div>

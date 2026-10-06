@@ -38,6 +38,7 @@ import {
   type SharedThread,
   type UpsertSharedSshCredentialInput,
 } from "@t3tools/contracts";
+// @effect-diagnostics-next-line nodeBuiltinImport:off -- Effect's Crypto has no AES-GCM cipher API; retain compatibility with encrypted shared credentials.
 import * as NodeCrypto from "node:crypto";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -45,7 +46,7 @@ import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 
 import { ServerSecretStore } from "../../auth/ServerSecretStore.ts";
 import * as ProcessRunner from "../../processRunner.ts";

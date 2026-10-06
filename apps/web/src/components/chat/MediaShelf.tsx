@@ -81,7 +81,7 @@ export const MediaShelf = memo(function MediaShelf({
   return (
     <section
       className={cn(
-        "overflow-hidden rounded-2xl border border-border/60 bg-card/78 shadow-[0_18px_52px_rgba(0,0,0,0.18)] backdrop-blur-xl",
+        "overflow-hidden rounded-2xl border border-border/60 bg-card/78 shadow-media-preview backdrop-blur-xl",
         "supports-[backdrop-filter]:bg-card/62",
         className,
       )}
@@ -94,19 +94,17 @@ export const MediaShelf = memo(function MediaShelf({
           </span>
           <div className="min-w-0">
             <div className="flex min-w-0 flex-wrap items-center gap-2">
-              <h2 className="text-sm font-semibold tracking-[-0.01em] text-foreground">
-                Recent Media
-              </h2>
-              <span className="rounded-full border border-primary/25 bg-primary/10 px-2 py-0.5 text-[11px] font-medium text-primary">
+              <h2 className="text-sm font-semibold tracking-tight text-foreground">Recent Media</h2>
+              <span className="rounded-full border border-primary/25 bg-primary/10 px-2 py-0.5 text-2xs font-medium text-primary">
                 {artifacts.length} {artifacts.length === 1 ? "asset" : "assets"}
               </span>
               {activeArtifact ? (
-                <span className="rounded-full border border-border/55 bg-background/70 px-2 py-0.5 text-[11px] text-muted-foreground">
+                <span className="rounded-full border border-border/55 bg-background/70 px-2 py-0.5 text-2xs text-muted-foreground">
                   Selected
                 </span>
               ) : null}
             </div>
-            <p className="truncate text-[11px] text-muted-foreground/70">
+            <p className="truncate text-2xs text-muted-foreground/70">
               {activeArtifact ? activeArtifact.title : "Preview, use, or copy thread media."}
             </p>
           </div>

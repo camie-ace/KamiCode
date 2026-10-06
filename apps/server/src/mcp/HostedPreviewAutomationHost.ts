@@ -4,7 +4,7 @@ import * as NodeModule from "node:module";
 import * as NodePath from "node:path";
 
 import {
-  PREVIEW_AUTOMATION_OPERATIONS,
+  PREVIEW_AUTOMATION_V1_OPERATIONS,
   FILL_PREVIEW_VIEWPORT,
   type HostedPreviewControlInput,
   type HostedPreviewControlResult,
@@ -66,7 +66,7 @@ const IDLE_SWEEP_INTERVAL_MS = 30_000;
 const HOSTED_FRAME_MAX_AGE_MS = 2_000;
 const HOSTED_BROWSER_PROXY_BYPASS = "localhost,127.0.0.1,[::1]";
 
-export const HOSTED_PREVIEW_AUTOMATION_OPERATIONS = PREVIEW_AUTOMATION_OPERATIONS.filter(
+export const HOSTED_PREVIEW_AUTOMATION_V1_OPERATIONS = PREVIEW_AUTOMATION_V1_OPERATIONS.filter(
   (operation) => operation !== "recordingStart" && operation !== "recordingStop",
 );
 
@@ -1355,7 +1355,7 @@ export const layer = Layer.effectDiscard(
     const host: PreviewAutomationHost = {
       clientId,
       environmentId,
-      supportedOperations: [...HOSTED_PREVIEW_AUTOMATION_OPERATIONS],
+      supportedOperations: [...HOSTED_PREVIEW_AUTOMATION_V1_OPERATIONS],
     };
     const events = yield* broker.connect(host);
     yield* Stream.runForEach(events, (event) => {

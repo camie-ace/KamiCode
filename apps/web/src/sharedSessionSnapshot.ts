@@ -12,7 +12,7 @@ import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell
 import { runAtomCommand } from "@t3tools/client-runtime/state/runtime";
 import * as Schema from "effect/Schema";
 import * as DateTime from "effect/DateTime";
-import { AsyncResult } from "effect/unstable/reactivity";
+import { AsyncResult } from "effect/reactivity";
 import { threadEnvironment } from "./state/threads";
 import { appAtomRegistry } from "./rpc/atomRegistry";
 import { readThreadShell } from "./state/entities";

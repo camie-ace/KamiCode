@@ -38,7 +38,7 @@ import * as DesktopClerk from "./DesktopClerk.ts";
 import * as DesktopEnvironment from "./DesktopEnvironment.ts";
 import * as DesktopPreReadyFileSystem from "./DesktopPreReadyFileSystem.ts";
 
-const makeDesktopClerkLayer = (
+const layerDesktopClerk = (
   isDevelopment = true,
   events: string[] = [],
   platform: NodeJS.Platform = "darwin",
@@ -95,7 +95,7 @@ describe("DesktopClerk", () => {
     });
 
     return Effect.gen(function* () {
-      yield* Effect.scoped(Layer.build(makeDesktopClerkLayer(true, events)));
+      yield* Effect.scoped(Layer.build(layerDesktopClerk(true, events)));
 
       assert.deepEqual(createClerkBridgeMock.mock.calls, [
         [
@@ -110,7 +110,10 @@ describe("DesktopClerk", () => {
       // The bridge acquires Electron's single-instance lock at creation, and
       // the lock both lives in and creates the userData directory — so the
       // real path must be set before the bridge exists.
-      assert.deepEqual(events, ["setPath:userData:/tmp/app-data/kamicode-dev", "createClerkBridge"]);
+      assert.deepEqual(events, [
+        "setPath:userData:/tmp/app-data/kamicode-dev",
+        "createClerkBridge",
+      ]);
       storageMock.mockClear();
       createClerkBridgeMock.mockClear();
     });
@@ -144,7 +147,7 @@ describe("DesktopClerk", () => {
       Effect.runSync(
         Effect.scoped(
           Layer.build(
-            makeDesktopClerkLayer(isDevelopment, events, platform, DesktopPreReadyFileSystem.layer),
+            layerDesktopClerk(isDevelopment, events, platform, DesktopPreReadyFileSystem.layer),
           ),
         ),
       );
@@ -161,7 +164,7 @@ describe("DesktopClerk", () => {
     });
 
     return Effect.gen(function* () {
-      const error = yield* Effect.scoped(Layer.build(makeDesktopClerkLayer())).pipe(Effect.flip);
+      const error = yield* Effect.scoped(Layer.build(layerDesktopClerk())).pipe(Effect.flip);
 
       assert.instanceOf(error, DesktopClerk.DesktopClerkBridgeInitializationError);
       assert.equal(error.stateDir, "/tmp/t3-state");
@@ -184,7 +187,7 @@ describe("DesktopClerk", () => {
     });
 
     return Effect.gen(function* () {
-      const exit = yield* Effect.exit(Effect.scoped(Layer.build(makeDesktopClerkLayer(false))));
+      const exit = yield* Effect.exit(Effect.scoped(Layer.build(layerDesktopClerk(false))));
 
       assert.equal(exit._tag, "Failure");
       if (exit._tag === "Failure") {
@@ -223,7 +226,7 @@ describe("DesktopClerk", () => {
       assert.equal(quit.mock.calls.length, 0);
       assert.deepEqual(registeredEvents, ["open-url", "second-instance"]);
     }).pipe(
-      Effect.provide(makeDesktopClerkLayer()),
+      Effect.provide(layerDesktopClerk()),
       Effect.provideService(ElectronApp.ElectronApp, electronApp),
       Effect.provideService(ElectronWindow.ElectronWindow, electronWindow),
     );
@@ -251,7 +254,7 @@ describe("DesktopClerk", () => {
       assert.equal(quit.mock.calls.length, 1);
       assert.deepEqual(registeredEvents, []);
     }).pipe(
-      Effect.provide(makeDesktopClerkLayer()),
+      Effect.provide(layerDesktopClerk()),
       Effect.provideService(ElectronApp.ElectronApp, electronApp),
       Effect.provideService(ElectronWindow.ElectronWindow, electronWindow),
     );
@@ -297,7 +300,7 @@ it.effect(
       assert.equal(event.preventDefault.mock.calls.length, 1);
     }).pipe(
       Effect.scoped,
-      Effect.provide(makeDesktopClerkLayer()),
+      Effect.provide(layerDesktopClerk()),
       Effect.provideService(ElectronApp.ElectronApp, electronApp),
       Effect.provideService(ElectronWindow.ElectronWindow, electronWindow),
     );
@@ -376,7 +379,7 @@ it.effect.each(["startup", "open-url"] as const)(
         assert.strictEqual(delivery?.flowId, request.flowId);
         assert.strictEqual(delivery?.returnUrl, request.returnUrl);
       }).pipe(
-        Effect.provide(makeDesktopClerkLayer(true, [], "darwin", undefined, shell)),
+        Effect.provide(layerDesktopClerk(true, [], "darwin", undefined, shell)),
         Effect.provideService(HostProcessArguments, entry === "startup" ? ["t3", link] : ["t3"]),
         Effect.provideService(ElectronApp.ElectronApp, electronApp),
         Effect.provideService(

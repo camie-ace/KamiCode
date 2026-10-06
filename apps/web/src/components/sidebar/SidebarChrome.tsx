@@ -116,7 +116,7 @@ function SidebarBrand({ onBackdrop }: { onBackdrop: boolean }) {
             aria-label="Go to threads"
             to="/"
             className={cn(
-              "sidebar-brand relative z-10 ml-[var(--workspace-titlebar-content-left)] hidden h-7 w-fit min-w-0 shrink-0 items-center overflow-hidden rounded-md outline-hidden ring-ring focus-visible:ring-2 md:flex",
+              " relative z-10 ml-[var(--workspace-titlebar-content-left)] hidden h-7 w-fit min-w-0 shrink-0 items-center overflow-hidden rounded-md outline-hidden ring-ring focus-visible:ring-2 md:flex",
               onBackdrop ? "text-white" : "text-foreground",
             )}
           >
@@ -147,7 +147,7 @@ function SidebarBrandMark({ onBackdrop }: { onBackdrop: boolean }) {
       </span>
       <span
         className={cn(
-          "sidebar-brand-stage shrink-0 items-center whitespace-nowrap rounded-full px-1.5 py-0.5 text-[8px] font-medium uppercase tracking-[0.18em]",
+          " shrink-0 items-center whitespace-nowrap rounded-full px-1.5 py-0.5 text-4xs font-medium uppercase tracking-brand",
           onBackdrop ? "bg-white/15 text-white/70" : "bg-muted/50 text-muted-foreground/60",
         )}
       >

@@ -647,7 +647,7 @@ export default function ProjectTriggersControl({
                 <span className="min-w-0 flex-1 truncate">
                   {trigger.enabled ? trigger.name : `${trigger.name} (disabled)`}
                 </span>
-                <MenuShortcut className="tracking-normal">
+                <MenuShortcut className="">
                   {formatCompactFireTime(trigger.nextFireAt)}
                 </MenuShortcut>
               </MenuItem>

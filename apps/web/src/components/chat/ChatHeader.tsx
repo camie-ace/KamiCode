@@ -429,7 +429,7 @@ export const ChatHeader = memo(function ChatHeader({
         <Tooltip>
           <TooltipTrigger
             render={
-              <span className="inline-flex shrink-0 items-center gap-1 rounded-md bg-[#2323FF]/10 px-1.5 py-0.5 text-[11px] font-medium text-[#2323FF] dark:text-[#7777ff]">
+              <span className="inline-flex shrink-0 items-center gap-1 rounded-md bg-kami/10 px-1.5 py-0.5 text-2xs font-medium text-kami dark:text-kami-hover">
                 <ZapIcon className="size-3" />
                 <span className="hidden sm:inline">Triggered</span>
               </span>
@@ -443,7 +443,7 @@ export const ChatHeader = memo(function ChatHeader({
         className={cn(
           "flex shrink-0 items-center justify-end gap-2 @3xl/header-actions:gap-3",
           rightPanelOpen ? "pr-0" : "pr-16",
-          "[[data-panel-animations=true]_&]:motion-safe:transition-[padding-right] [[data-panel-animations=true]_&]:motion-safe:[transition-duration:var(--panel-animation-duration)] [[data-panel-animations=true]_&]:motion-safe:ease-out",
+          "[[data-panel-animations=true]_&]:motion-safe:transition-[padding-right] [[data-panel-animations=true]_&]:motion-safe:duration-(--panel-animation-duration) [[data-panel-animations=true]_&]:motion-safe:ease-out",
         )}
       >
         {activeProjectScripts && (

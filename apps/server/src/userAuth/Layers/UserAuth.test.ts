@@ -3,12 +3,12 @@ import { AuthSessionId } from "@t3tools/contracts";
 import { expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import type * as HttpServerRequest from "effect/unstable/http/HttpServerRequest";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import type * as HttpServerRequest from "effect/http/HttpServerRequest";
+import * as SqlClient from "effect/sql/SqlClient";
 
 import { ServerConfig } from "../../config.ts";
 import * as ServerSecretStore from "../../auth/ServerSecretStore.ts";
-import { SqlitePersistenceMemory } from "../../persistence/Layers/Sqlite.ts";
+import * as SqlitePersistence from "../../persistence/Sqlite.ts";
 import { GitHubOAuthClient } from "../Services/GitHubOAuthClient.ts";
 import type { GitHubOAuthClientShape } from "../Services/GitHubOAuthClient.ts";
 import { UserAuth } from "../Services/UserAuth.ts";
@@ -84,7 +84,7 @@ const makeUserAuthLayer = (
   overrides?: Partial<ServerConfigShape>,
   githubOAuthClient?: Partial<GitHubOAuthClientShape>,
 ) => {
-  const persistence = SqlitePersistenceMemory;
+  const persistence = SqlitePersistence.layerMemory;
   return Layer.merge(
     UserAuthLive.pipe(
       Layer.provide(persistence),

@@ -407,12 +407,12 @@ export const MediaArtifactCard = memo(function MediaArtifactCard({
           </button>
           <div className="grid gap-2 p-2.5">
             <div className="min-w-0">
-              <p className="truncate text-sm font-semibold tracking-[-0.01em] text-foreground">
+              <p className="truncate text-sm font-semibold tracking-tight text-foreground">
                 {artifact.title}
               </p>
               <Tooltip>
                 <TooltipTrigger
-                  render={<p className="mt-0.5 truncate text-[11px] text-muted-foreground/72" />}
+                  render={<p className="mt-0.5 truncate text-2xs text-muted-foreground/72" />}
                 >
                   {compactMetadata}
                 </TooltipTrigger>
@@ -420,7 +420,7 @@ export const MediaArtifactCard = memo(function MediaArtifactCard({
               </Tooltip>
             </div>
             {showPreviewWarning ? (
-              <div className="flex items-start gap-1.5 rounded-lg border border-warning/25 bg-warning/8 px-2 py-1.5 text-[11px] text-muted-foreground/85">
+              <div className="flex items-start gap-1.5 rounded-lg border border-warning/25 bg-warning/8 px-2 py-1.5 text-2xs text-muted-foreground/85">
                 <AlertTriangleIcon className="mt-0.5 size-3 shrink-0 text-warning" aria-hidden />
                 <p>
                   {previewUnavailableMessage} {previewRecoveryMessage}
@@ -439,7 +439,7 @@ export const MediaArtifactCard = memo(function MediaArtifactCard({
                   variant="outline"
                   disabled={!canOpenExternal}
                   onClick={openExternally}
-                  className="bg-background/76"
+                  className=""
                 >
                   <ExternalLinkIcon />
                   Open
@@ -451,7 +451,7 @@ export const MediaArtifactCard = memo(function MediaArtifactCard({
                   variant="outline"
                   disabled={!canOpenViewer}
                   onClick={openViewer}
-                  className="bg-background/76"
+                  className=""
                 >
                   <EyeIcon />
                   {isVideo ? "Play" : "Preview"}
@@ -633,8 +633,8 @@ export const MediaArtifactCard = memo(function MediaArtifactCard({
               render={
                 <p
                   className={cn(
-                    "mt-1 truncate font-mono text-[11px] text-muted-foreground/70",
-                    compact && "text-[10px]",
+                    "mt-1 truncate font-mono text-2xs text-muted-foreground/70",
+                    compact && "text-3xs",
                   )}
                 />
               }
@@ -649,7 +649,7 @@ export const MediaArtifactCard = memo(function MediaArtifactCard({
             <div
               className={cn(
                 "mt-2 flex items-start gap-1.5 rounded-lg border border-warning/25 bg-warning/8 px-2 py-1.5 text-xs text-muted-foreground/85",
-                compact && "mt-1 rounded-md px-1.5 py-1 text-[11px]",
+                compact && "mt-1 rounded-md px-1.5 py-1 text-2xs",
               )}
             >
               <AlertTriangleIcon
@@ -664,20 +664,20 @@ export const MediaArtifactCard = memo(function MediaArtifactCard({
           {compact ? (
             <Tooltip>
               <TooltipTrigger
-                render={<p className="mt-1 truncate text-[11px] text-muted-foreground/70" />}
+                render={<p className="mt-1 truncate text-2xs text-muted-foreground/70" />}
               >
                 {compactMetadata}
               </TooltipTrigger>
               <TooltipPopup side="top">{compactMetadata}</TooltipPopup>
             </Tooltip>
           ) : (
-            <dl className="mt-2 grid gap-1 text-[11px] sm:grid-cols-2">
+            <dl className="mt-2 grid gap-1 text-2xs sm:grid-cols-2">
               {metadataRows.map((row) => (
                 <div
                   key={row.label}
                   className="min-w-0 rounded-md border border-border/45 bg-background/45 px-2 py-1"
                 >
-                  <dt className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground/50">
+                  <dt className="text-3xs uppercase tracking-caption text-muted-foreground/50">
                     {row.label}
                   </dt>
                   <Tooltip>
@@ -845,7 +845,7 @@ export function MediaArtifactViewer(props: {
       />
       <div
         className={cn(
-          "relative z-10 grid max-h-[92vh] w-[min(92rem,96vw)] overflow-hidden rounded-[1.35rem] border border-white/12 bg-[#090a0c] shadow-[0_32px_120px_rgba(0,0,0,0.62)]",
+          "relative z-10 grid max-h-[92vh] w-[min(92rem,96vw)] overflow-hidden rounded-3xl border border-white/12 bg-media-background shadow-media-dialog",
           detailsOpen
             ? "grid-rows-[auto_minmax(0,1fr)_auto] lg:grid-cols-[minmax(0,1fr)_20rem] lg:grid-rows-[auto_minmax(0,1fr)]"
             : "grid-rows-[auto_minmax(0,1fr)]",
@@ -866,12 +866,12 @@ export function MediaArtifactViewer(props: {
               )}
             </span>
             <div className="min-w-0">
-              <p className="truncate text-sm font-semibold tracking-[-0.01em] text-white">
+              <p className="truncate text-sm font-semibold tracking-tight text-white">
                 {props.artifact.title}
               </p>
               <Tooltip>
                 <TooltipTrigger
-                  render={<p className="truncate font-mono text-[11px] text-white/42" />}
+                  render={<p className="truncate font-mono text-2xs text-white/42" />}
                 >
                   {displayPath}
                 </TooltipTrigger>
@@ -887,7 +887,7 @@ export function MediaArtifactViewer(props: {
                 type="button"
                 size="xs"
                 variant={imageMode === "fit" ? "secondary" : "ghost"}
-                className="border-white/10 text-white hover:bg-white/12"
+                className="  "
                 onClick={() => setImageMode("fit")}
               >
                 Fit
@@ -896,7 +896,7 @@ export function MediaArtifactViewer(props: {
                 type="button"
                 size="icon-xs"
                 variant="ghost"
-                className="border-white/10 text-white hover:bg-white/12"
+                className="  "
                 onClick={zoomOut}
                 aria-label="Zoom out"
               >
@@ -906,7 +906,7 @@ export function MediaArtifactViewer(props: {
                 type="button"
                 size="xs"
                 variant={imageMode === "zoom" && zoom === 1 ? "secondary" : "ghost"}
-                className="border-white/10 text-white hover:bg-white/12"
+                className="  "
                 onClick={() => {
                   setImageMode("zoom");
                   setZoom(1);
@@ -918,7 +918,7 @@ export function MediaArtifactViewer(props: {
                 type="button"
                 size="icon-xs"
                 variant="ghost"
-                className="border-white/10 text-white hover:bg-white/12"
+                className="  "
                 onClick={zoomIn}
                 aria-label="Zoom in"
               >
@@ -930,19 +930,13 @@ export function MediaArtifactViewer(props: {
             type="button"
             size="xs"
             variant={detailsOpen ? "secondary" : "ghost"}
-            className="border-white/10 text-white hover:bg-white/12"
+            className="  "
             aria-pressed={detailsOpen}
             onClick={() => setDetailsOpen((value) => !value)}
           >
             {detailsOpen ? "Hide details" : "Details"}
           </Button>
-          <Button
-            type="button"
-            size="xs"
-            variant="ghost"
-            className="border-white/10 text-white hover:bg-white/12"
-            onClick={props.onCopyPath}
-          >
+          <Button type="button" size="xs" variant="ghost" className="  " onClick={props.onCopyPath}>
             <CopyIcon />
             {props.pathCopied ? "Copied path" : "Copy path"}
           </Button>
@@ -952,7 +946,7 @@ export function MediaArtifactViewer(props: {
               size="xs"
               variant="ghost"
               disabled={!props.canCopyImage}
-              className="border-white/10 text-white hover:bg-white/12"
+              className="  "
               onClick={props.onCopyImage}
             >
               <CopyIcon />
@@ -964,7 +958,7 @@ export function MediaArtifactViewer(props: {
               type="button"
               size="xs"
               variant="ghost"
-              className="border-white/10 text-white hover:bg-white/12"
+              className="  "
               onClick={props.onOpenExternal}
             >
               <ExternalLinkIcon />
@@ -972,13 +966,7 @@ export function MediaArtifactViewer(props: {
             </Button>
           ) : null}
           {props.canReveal ? (
-            <Button
-              type="button"
-              size="xs"
-              variant="ghost"
-              className="border-white/10 text-white hover:bg-white/12"
-              onClick={props.onReveal}
-            >
+            <Button type="button" size="xs" variant="ghost" className="  " onClick={props.onReveal}>
               <FolderOpenIcon />
               {props.revealLabel}
             </Button>
@@ -989,7 +977,7 @@ export function MediaArtifactViewer(props: {
               size="xs"
               variant="outline"
               disabled={!props.canUseInChat}
-              className="border-white/20 bg-white/8 text-white hover:bg-white/14"
+              className="   "
               onClick={props.onUseInChat}
             >
               <PlusIcon />
@@ -1000,21 +988,21 @@ export function MediaArtifactViewer(props: {
             type="button"
             size="icon-xs"
             variant="ghost"
-            className="border-white/10 text-white hover:bg-white/12"
+            className="  "
             onClick={props.onClose}
             aria-label="Close media preview"
           >
             <XIcon />
           </Button>
         </div>
-        <div className="min-h-0 overflow-auto bg-[radial-gradient(circle_at_top,_rgba(255,255,255,0.09),_transparent_34%),linear-gradient(135deg,_rgba(255,255,255,0.055),_rgba(255,255,255,0.01))]">
+        <div className="min-h-0 overflow-auto bg-media-surface">
           <div className="flex min-h-full items-center justify-center p-3 sm:p-5">
             {isImageLike ? (
               <img
                 src={props.url}
                 alt={props.artifact.title}
                 className={cn(
-                  "rounded-xl object-contain shadow-[0_24px_80px_rgba(0,0,0,0.55)] ring-1 ring-white/10",
+                  "rounded-xl object-contain shadow-media-card ring-1 ring-white/10",
                   imageMode === "fit" ? "max-h-[calc(92vh-9rem)] max-w-full" : "max-w-none",
                 )}
                 style={imageMode === "zoom" ? { width: `${zoom * 100}%` } : undefined}
@@ -1032,7 +1020,7 @@ export function MediaArtifactViewer(props: {
                 src={props.url}
                 controls
                 autoPlay
-                className="max-h-[calc(92vh-9rem)] max-w-full rounded-xl bg-black shadow-[0_24px_80px_rgba(0,0,0,0.55)] ring-1 ring-white/10"
+                className="max-h-[calc(92vh-9rem)] max-w-full rounded-xl bg-black shadow-media-card ring-1 ring-white/10"
                 onLoadedMetadata={(event) => {
                   const video = event.currentTarget;
                   const durationMs = Number.isFinite(video.duration)
@@ -1053,20 +1041,20 @@ export function MediaArtifactViewer(props: {
         {detailsOpen ? (
           <aside className="min-h-0 overflow-y-auto border-t border-white/10 bg-white/[0.035] p-3 lg:border-l lg:border-t-0">
             <div className="mb-3">
-              <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-white/35">
+              <p className="text-3xs font-semibold uppercase tracking-overline text-white/35">
                 Asset details
               </p>
               <p className="mt-1 text-xs text-white/62">
                 {kindLabel(props.artifact.kind)} from {sourceLabel(props.artifact.source)}
               </p>
             </div>
-            <dl className="grid gap-2 text-[11px]">
+            <dl className="grid gap-2 text-2xs">
               {viewerMetadataRows.map((row) => (
                 <div
                   key={row.label}
                   className="min-w-0 rounded-xl border border-white/8 bg-black/20 px-2.5 py-2"
                 >
-                  <dt className="uppercase tracking-[0.14em] text-white/35">{row.label}</dt>
+                  <dt className="uppercase tracking-label text-white/35">{row.label}</dt>
                   <Tooltip>
                     <TooltipTrigger render={<dd className="mt-0.5 truncate text-white/76" />}>
                       {row.value}
@@ -1100,7 +1088,7 @@ function PreviewUnavailableState(props: {
     <div className="flex flex-col items-center justify-center gap-1.5 px-2 text-center">
       <Icon className={cn("size-7", props.compact && "size-5")} aria-hidden />
       {!props.compact ? (
-        <span className="text-[11px] font-medium text-muted-foreground/75">{props.label}</span>
+        <span className="text-2xs font-medium text-muted-foreground/75">{props.label}</span>
       ) : null}
     </div>
   );
@@ -1110,7 +1098,7 @@ function MediaBadge(props: { children: string; tone?: "muted" | "accent" }) {
   return (
     <span
       className={cn(
-        "rounded-full border px-2 py-0.5 text-[10px] font-medium uppercase tracking-[0.12em]",
+        "rounded-full border px-2 py-0.5 text-3xs font-medium uppercase tracking-caption",
         props.tone === "accent"
           ? "border-primary/35 bg-primary/10 text-primary"
           : "border-border/70 bg-background/70 text-muted-foreground",

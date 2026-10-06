@@ -524,7 +524,7 @@ export function VoiceDictationControl(props: {
             render={
               <Button
                 aria-label={isRecording ? "Discard voice recording" : "Cancel voice transcription"}
-                className="size-7 shrink-0 text-muted-foreground"
+                className="size-7 shrink-0 "
                 onClick={cancelRecording}
                 size="icon-sm"
                 type="button"

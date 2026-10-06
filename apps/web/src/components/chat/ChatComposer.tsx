@@ -1323,13 +1323,13 @@ const ComposerFooterModeControls = memo(function ComposerFooterModeControls(prop
               className={cn(
                 "shrink-0 whitespace-nowrap",
                 props.interactionMode === "plan"
-                  ? "bg-blue-500/10 text-blue-400 hover:bg-blue-500/15 hover:text-blue-300"
+                  ? "bg-info/10 text-info hover:bg-info/15 hover:text-info"
                   : props.interactionMode === "test"
-                    ? "bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/15 hover:text-emerald-300"
+                    ? "bg-success/10 text-success hover:bg-success/15 hover:text-success"
                     : props.interactionMode === "workflow"
-                      ? "bg-amber-500/10 text-amber-400 hover:bg-amber-500/15 hover:text-amber-300"
+                      ? "bg-warning/10 text-warning hover:bg-warning/15 hover:text-warning"
                       : props.interactionMode === "trigger"
-                        ? "bg-[#2323FF]/10 text-[#5d5dff] hover:bg-[#2323FF]/15 hover:text-[#7777ff]"
+                        ? "bg-kami/10 text-kami-light hover:bg-kami/15 hover:text-kami-hover"
                         : "text-secondary-label hover:text-foreground",
               )}
               aria-pressed={props.interactionMode !== "default"}
@@ -1427,7 +1427,7 @@ const ComposerFooterModeControls = memo(function ComposerFooterModeControls(prop
                   className={cn(
                     "shrink-0 whitespace-nowrap",
                     props.planSidebarOpen
-                      ? "bg-blue-500/10 text-blue-400 hover:bg-blue-500/15 hover:text-blue-300"
+                      ? "bg-info/10 text-info hover:bg-info/15 hover:text-info"
                       : "text-secondary-label hover:text-foreground",
                   )}
                   type="button"
@@ -2309,12 +2309,19 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     [selectedProviderEntry],
   );
   const compactCommandAvailable = providerSupportsManualCompaction(selectedProviderEntry);
-  const selectedProviderSkills = selectedProviderStatus
-    ? resolveProviderSkillsForCwd(selectedProviderStatus, gitCwd)
-    : [];
-  const selectedProviderSlashCommands = selectedProviderStatus
-    ? resolveProviderSlashCommandsForCwd(selectedProviderStatus, gitCwd)
-    : [];
+  // Memoized so the composer menu memo below can cache between renders.
+  const selectedProviderSkills = useMemo(
+    () =>
+      selectedProviderStatus ? resolveProviderSkillsForCwd(selectedProviderStatus, gitCwd) : [],
+    [gitCwd, selectedProviderStatus],
+  );
+  const selectedProviderSlashCommands = useMemo(
+    () =>
+      selectedProviderStatus
+        ? resolveProviderSlashCommandsForCwd(selectedProviderStatus, gitCwd)
+        : [],
+    [gitCwd, selectedProviderStatus],
+  );
   const refreshProviders = useAtomCommand(serverEnvironment.refreshProviders, {
     reportFailure: false,
   });
@@ -2668,7 +2675,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const settledPullRequestTextQuery =
     pullRequestTextQuery === debouncedPullRequestTextQuery ? pullRequestTextQuery : null;
   const isPathTrigger = composerTriggerKind === "path";
-  const environmentThreadShells = useThreadShells();
+  // Thread shells only feed `@` thread matches, so skip shell updates otherwise.
+  const environmentThreadShells = useThreadShells(isPathTrigger);
   const workspaceEntries = useComposerPathSearch({
     environmentId,
     cwd: isPathTrigger ? gitCwd : null,
@@ -6967,11 +6975,11 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         : null}
       <ComposerBanner.Dock>
         <ComposerBanner.Column>
-          {props.queuedRunsControl}
           <ComposerBannerStack
             key={activeThreadId}
             className="relative z-0"
             items={bannerStackItems}
+            attachedAbove={props.queuedRunsControl}
           />
           {!activityStackItem && (shownSyncPhase || inlineTasksBadge) ? (
             <ComposerBanner.Attachment>
@@ -7171,7 +7179,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           >
             {isDragOverComposer ? (
               <div
-                className="pointer-events-none absolute inset-0 z-40 flex items-center justify-center rounded-[19px] border border-primary/60 bg-background/90 text-sm font-medium text-foreground backdrop-blur-sm"
+                className="pointer-events-none absolute inset-0 z-40 flex items-center justify-center rounded-2xl border border-primary/60 bg-background/90 text-sm font-medium text-foreground backdrop-blur-sm"
                 data-chat-composer-drop-overlay="true"
               >
                 <span className="inline-flex items-center gap-2">

@@ -1,6 +1,4 @@
-import type {
-  OrchestrationThreadActivity,
-} from "@t3tools/contracts";
+import type { OrchestrationThreadActivity } from "@t3tools/contracts";
 import { isWorkspaceImagePreviewPath } from "@t3tools/shared/filePreview";
 import { extractJsonObject } from "@t3tools/shared/schemaJson";
 
@@ -640,7 +638,6 @@ function dropSupersededToolUpdatedActivities(
     return !indices?.some((completionIndex) => completionIndex > index);
   });
 }
-
 
 function projectQuestionToolInput(data: Record<string, unknown>, title: unknown) {
   const item = asRecord(data.item);

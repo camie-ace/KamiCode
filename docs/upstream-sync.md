@@ -22,12 +22,13 @@ git fetch upstream main
 git merge --no-ff upstream/main
 ```
 
-If conflicts appear, resolve them, then run the normal checks before pushing:
+Before a substantial architecture migration, create a backup branch and verify a Git bundle. Resolve the merge in a separate worktree so the working checkout remains available. Preserve KamiCode's data migrations, authentication, thread locks, schedules, provider behavior, and desktop identity when resolving conflicts.
+
+Install the pinned dependencies, then run targeted typechecks and regression tests for the changed packages before pushing:
 
 ```bash
-bun install
-bun run typecheck
-bun run test
+vp install --frozen-lockfile
+# Run the affected package's typecheck and explicit test files; CI runs the full suite.
 git push origin main
 ```
 

@@ -68,7 +68,7 @@ export const LocalMediaSearchResults = memo(function LocalMediaSearchResults({
               <h3 id={`${display.id}-heading`} className="truncate text-sm font-semibold">
                 {display.title}
               </h3>
-              <span className="rounded-full border border-border/60 bg-background/70 px-2 py-0.5 text-[11px] text-muted-foreground">
+              <span className="rounded-full border border-border/60 bg-background/70 px-2 py-0.5 text-2xs text-muted-foreground">
                 {display.summary}
               </span>
             </div>
@@ -78,7 +78,7 @@ export const LocalMediaSearchResults = memo(function LocalMediaSearchResults({
                 Scope: {display.scopeLabel}
               </span>
               {display.scopeDetail ? (
-                <span className="min-w-0 truncate font-mono text-[11px] text-muted-foreground/75">
+                <span className="min-w-0 truncate font-mono text-2xs text-muted-foreground/75">
                   {display.scopeDetail}
                 </span>
               ) : null}
@@ -117,18 +117,18 @@ export const LocalMediaSearchResults = memo(function LocalMediaSearchResults({
           {display.results.map((result) => (
             <article key={result.key} className="min-w-0" role="listitem">
               <div className="mb-1.5 flex min-w-0 flex-wrap items-center gap-1.5">
-                <span className="rounded-full border border-primary/30 bg-primary/10 px-2 py-0.5 text-[11px] font-semibold text-primary">
+                <span className="rounded-full border border-primary/30 bg-primary/10 px-2 py-0.5 text-2xs font-semibold text-primary">
                   {result.rankLabel}
                 </span>
                 <ConfidenceBadge result={result} />
                 {result.scoreLabel ? (
-                  <span className="inline-flex items-center gap-1 rounded-full border border-border/55 bg-background/65 px-2 py-0.5 text-[11px] text-muted-foreground">
+                  <span className="inline-flex items-center gap-1 rounded-full border border-border/55 bg-background/65 px-2 py-0.5 text-2xs text-muted-foreground">
                     <StarIcon className="size-3" aria-hidden />
                     {result.scoreLabel}
                   </span>
                 ) : null}
                 {result.modifiedLabel ? (
-                  <span className="inline-flex items-center gap-1 rounded-full border border-border/55 bg-background/65 px-2 py-0.5 text-[11px] text-muted-foreground">
+                  <span className="inline-flex items-center gap-1 rounded-full border border-border/55 bg-background/65 px-2 py-0.5 text-2xs text-muted-foreground">
                     <CalendarClockIcon className="size-3" aria-hidden />
                     Modified {result.modifiedLabel}
                   </span>
@@ -166,7 +166,7 @@ function RefinementControls({
 }) {
   return (
     <div className="mt-2 flex min-w-0 flex-wrap items-center gap-1.5">
-      <span className="inline-flex items-center gap-1 text-[11px] font-medium text-muted-foreground">
+      <span className="inline-flex items-center gap-1 text-2xs font-medium text-muted-foreground">
         <FilterIcon className="size-3" aria-hidden />
         {label}
       </span>
@@ -191,11 +191,11 @@ function ConfidenceBadge({ result }: { result: LocalMediaSearchResultDisplayMode
   return (
     <span
       className={cn(
-        "rounded-full border px-2 py-0.5 text-[11px]",
+        "rounded-full border px-2 py-0.5 text-2xs",
         result.confidenceTone === "strong" &&
-          "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300",
+          "border-success/30 bg-success/10 text-success dark:text-success",
         result.confidenceTone === "medium" &&
-          "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300",
+          "border-warning/30 bg-warning/10 text-warning dark:text-warning",
         result.confidenceTone === "muted" &&
           "border-border/60 bg-background/65 text-muted-foreground",
       )}

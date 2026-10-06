@@ -1,7 +1,7 @@
 import { assert, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 
 import { migrationEntries, runMigrations } from "../Migrations.ts";
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
@@ -13,7 +13,7 @@ layer("055_OrchestrationV2", (it) => {
     Effect.sync(() => {
       assert.deepStrictEqual(
         migrationEntries.map(([id]) => id),
-        Array.from({ length: 73 }, (_, index) => index + 1),
+        Array.from({ length: 76 }, (_, index) => index + 1),
       );
     }),
   );
@@ -29,7 +29,8 @@ layer("055_OrchestrationV2", (it) => {
         VALUES ('queue-preserved', 'thread-preserved', 'event-preserved', 'message-preserved',
           'queued', '2026-10-01T00:00:00Z', 'full-access', 'workflow',
           '2026-10-06T00:00:00Z', 3)`;
-      const previousLedger = yield* sql`SELECT migration_id, name FROM effect_sql_migrations ORDER BY migration_id`;
+      const previousLedger =
+        yield* sql`SELECT migration_id, name FROM effect_sql_migrations ORDER BY migration_id`;
       const previousQueue = yield* sql`SELECT * FROM projection_turn_queue`;
       const executed = yield* runMigrations();
       assert.deepStrictEqual(yield* sql`SELECT * FROM projection_turn_queue`, previousQueue);
@@ -41,6 +42,9 @@ layer("055_OrchestrationV2", (it) => {
         [71, "ProjectionThreadsAutoSettleDisabledAt"],
         [72, "OrchestrationV2"],
         [73, "RemoveRedundantProjectionIndexes"],
+        [74, "ImportKamiQueuedMessages"],
+        [75, "ScheduledTaskWebhooks"],
+        [76, "WebhookRelayDeliveries"],
       ]);
       assert.deepStrictEqual(yield* runMigrations(), []);
 
@@ -58,6 +62,9 @@ layer("055_OrchestrationV2", (it) => {
         { migration_id: 71, name: "ProjectionThreadsAutoSettleDisabledAt" },
         { migration_id: 72, name: "OrchestrationV2" },
         { migration_id: 73, name: "RemoveRedundantProjectionIndexes" },
+        { migration_id: 74, name: "ImportKamiQueuedMessages" },
+        { migration_id: 75, name: "ScheduledTaskWebhooks" },
+        { migration_id: 76, name: "WebhookRelayDeliveries" },
       ]);
 
       const tables = yield* sql<{ readonly name: string }>`

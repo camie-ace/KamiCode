@@ -1,7 +1,7 @@
 import { assert, it } from "@effect/vitest";
 import * as Schema from "effect/Schema";
 import * as Effect from "effect/Effect";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 import { runMigrations } from "../Migrations.ts";
 
@@ -26,6 +26,11 @@ it.layer(NodeSqliteClient.layerMemory())("Kami queue migration", (it) => {
           yield* sql`INSERT INTO projection_turn_queue (queue_id, thread_id, event_id, message_id, status, requested_at, runtime_mode, interaction_mode, queue_position, scheduled_for)
         VALUES (${id}, 'thread', ${id}, ${id}, ${status}, '2026-10-01T00:00:00.000Z', 'approval-required', 'test', ${position}, ${scheduled})`;
         }
+        yield* sql`INSERT INTO projection_thread_proposed_plans (plan_id, thread_id, plan_markdown, created_at, updated_at)
+          VALUES ('plan-1', 'thread', 'Keep the customer data intact.', '2026-10-01T00:00:00.000Z', '2026-10-01T00:00:00.000Z')`;
+        yield* sql`UPDATE projection_turn_queue SET source_proposed_plan_id = 'plan-1', source_proposed_plan_thread_id = 'thread' WHERE queue_id = 'later'`;
+        yield* sql`INSERT INTO projection_turn_queue (queue_id, thread_id, event_id, message_id, status, requested_at, runtime_mode, interaction_mode, queue_position)
+          VALUES ('missing', 'thread', 'missing', 'missing', 'queued', '2026-10-01T00:00:00.000Z', 'approval-required', 'default', 5)`;
         yield* runMigrations({ toMigrationInclusive: 74 });
         const rows = yield* sql<{
           prompt: string;
@@ -35,15 +40,20 @@ it.layer(NodeSqliteClient.layerMemory())("Kami queue migration", (it) => {
           runtime_mode: string;
           target_thread_id: string;
         }>`SELECT * FROM project_triggers ORDER BY next_fire_at`;
-        assert.strictEqual(rows.length, 4);
+        assert.strictEqual(rows.length, 5);
         assert.deepEqual(
           rows.slice(0, 2).map((row) => row.prompt),
           ["first", "second"],
         );
         assert.strictEqual(
-          rows.find((row) => row.prompt === "later")?.next_fire_at,
+          rows.find((row) => row.prompt.startsWith("later"))?.next_fire_at,
           "2099-10-06T10:00:00.000Z",
         );
+        assert.include(
+          rows.find((row) => row.prompt.startsWith("later"))!.prompt,
+          "Keep the customer data intact.",
+        );
+        assert.strictEqual(rows.find((row) => row.prompt.startsWith("Continue with"))?.enabled, 0);
         assert.strictEqual(rows.find((row) => row.prompt === "uncertain")?.enabled, 0);
         assert.strictEqual(rows[0]?.runtime_mode, "approval-required");
         assert.strictEqual(rows[0]?.target_thread_id, "thread");
@@ -54,12 +64,12 @@ it.layer(NodeSqliteClient.layerMemory())("Kami queue migration", (it) => {
         const original = yield* sql<{
           count: number;
         }>`SELECT count(*) AS count FROM projection_turn_queue`;
-        assert.strictEqual(original[0]?.count, 5);
+        assert.strictEqual(original[0]?.count, 6);
         yield* runMigrations({ toMigrationInclusive: 74 });
         const repeated = yield* sql<{
           count: number;
         }>`SELECT count(*) AS count FROM project_triggers`;
-        assert.strictEqual(repeated[0]?.count, 4);
+        assert.strictEqual(repeated[0]?.count, 5);
       }),
   );
 });

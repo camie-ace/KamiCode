@@ -97,37 +97,41 @@ function ThreadLockDialog({ request }: { readonly request: Request }) {
                 : `Enter the passcode for "${request.threadTitle}".`}
             </DialogDescription>
           </DialogHeader>
-          <DialogPanel className="space-y-3">
-            <Label htmlFor={`${id}-passcode`} className="space-y-1.5">
-              <span>Passcode</span>
-              <Input
-                nativeInput
-                id={`${id}-passcode`}
-                type="password"
-                autoFocus
-                autoComplete={isLock ? "new-password" : "current-password"}
-                minLength={4}
-                maxLength={128}
-                value={passcode}
-                onChange={(event) => setPasscode(event.target.value)}
-              />
-            </Label>
-            {isLock ? (
-              <Label htmlFor={`${id}-confirm`} className="space-y-1.5">
-                <span>Confirm passcode</span>
+          <DialogPanel className="">
+            <div className="space-y-3">
+              <Label htmlFor={`${id}-passcode`} className="">
+                <span>Passcode</span>
                 <Input
                   nativeInput
-                  id={`${id}-confirm`}
+                  id={`${id}-passcode`}
                   type="password"
-                  autoComplete="new-password"
+                  autoFocus
+                  autoComplete={isLock ? "new-password" : "current-password"}
                   minLength={4}
                   maxLength={128}
-                  value={confirmation}
-                  onChange={(event) => setConfirmation(event.target.value)}
+                  value={passcode}
+                  onChange={(event) => setPasscode(event.target.value)}
                 />
               </Label>
-            ) : null}
-            {mismatch ? <p className="text-sm text-destructive">Passcodes do not match.</p> : null}
+              {isLock ? (
+                <Label htmlFor={`${id}-confirm`} className="">
+                  <span>Confirm passcode</span>
+                  <Input
+                    nativeInput
+                    id={`${id}-confirm`}
+                    type="password"
+                    autoComplete="new-password"
+                    minLength={4}
+                    maxLength={128}
+                    value={confirmation}
+                    onChange={(event) => setConfirmation(event.target.value)}
+                  />
+                </Label>
+              ) : null}
+              {mismatch ? (
+                <p className="text-sm text-destructive">Passcodes do not match.</p>
+              ) : null}
+            </div>
           </DialogPanel>
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => finish(null)}>

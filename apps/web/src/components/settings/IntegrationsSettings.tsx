@@ -53,6 +53,9 @@ import { cn, randomUUID } from "~/lib/utils";
 import { useEnvironments, usePrimaryEnvironment } from "~/state/environments";
 import { deviceEnvironment, useDeviceState } from "~/state/device";
 import { useAtomCommand } from "~/state/use-atom-command";
+import { previewEnvironment } from "~/state/preview";
+import { useServerConfigs } from "~/state/entities";
+import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 import {
   AgentDeviceSetupStatus,
   DeviceHubSetupStatus,
@@ -131,28 +134,39 @@ type BrowserProfileDataBridge = Pick<
   "clearCookies" | "clearCache"
 >;
 
+/** Environments that host server-runtime tabs keep their own copy of each profile. */
+export interface ServerProfileData {
+  readonly environmentIds: ReadonlyArray<EnvironmentId>;
+  readonly clear: (environmentId: EnvironmentId, profileId: string) => Promise<void>;
+}
+
 export async function clearBrowserProfileData(
   bridge: BrowserProfileDataBridge | null,
   environmentIds: ReadonlyArray<EnvironmentId>,
   profileId: string,
+  server?: ServerProfileData,
 ): Promise<void> {
-  if (bridge === null || environmentIds.length === 0) {
+  const desktopEnvironmentIds = bridge === null ? [] : environmentIds;
+  const serverEnvironmentIds = server?.environmentIds ?? [];
+  if (desktopEnvironmentIds.length === 0 && serverEnvironmentIds.length === 0) {
     throw new Error("Browser profile data is not available to clear.");
   }
-  await Promise.all(
-    environmentIds.flatMap((environmentId) => [
-      bridge.clearCookies(environmentId, profileId),
-      bridge.clearCache(environmentId, profileId),
+  await Promise.all([
+    ...desktopEnvironmentIds.flatMap((environmentId) => [
+      bridge!.clearCookies(environmentId, profileId),
+      bridge!.clearCache(environmentId, profileId),
     ]),
-  );
+    ...serverEnvironmentIds.map((environmentId) => server!.clear(environmentId, profileId)),
+  ]);
 }
 
 export function browserProfileRemovalAvailable(
   bridgeAvailable: boolean,
   environmentsReady: boolean,
   environmentCount: number,
+  serverBrowserCount = 0,
 ): boolean {
-  return bridgeAvailable && environmentsReady && environmentCount > 0;
+  return (bridgeAvailable || serverBrowserCount > 0) && environmentsReady && environmentCount > 0;
 }
 
 /**
@@ -638,8 +652,7 @@ function HostedBrowserProxySetting() {
   const serverConfig = useAtomValue(primaryServerConfigAtom);
   const [proxyUrl, setProxyUrl] = useState("");
   const proxy = settings.hostedBrowserProxy;
-  const hostedBrowserAvailable =
-    serverConfig?.environment.capabilities.hostedBrowserPreview === true;
+  const hostedBrowserAvailable = serverConfig?.environment.capabilities.serverBrowser === true;
   const hasStoredProxy = proxy.urlRedacted || proxy.url.length > 0;
   const trimmedProxyUrl = proxyUrl.trim();
   const validReplacement = isHostedBrowserProxyUrl(trimmedProxyUrl);
@@ -731,7 +744,7 @@ function HostedBrowserProxySetting() {
       >
         <div className="mt-3 border-t border-border/50 py-3">
           <Input
-            className="h-8 min-w-0 text-xs"
+            className="h-8 min-w-0 "
             type="password"
             value={proxyUrl}
             disabled={!hostedBrowserAvailable}
@@ -1071,12 +1084,30 @@ function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
     readonly environmentName: string;
   } | null>(null);
   const [profilePendingRemoval, setProfilePendingRemoval] = useState<BrowserProfile | null>(null);
+  const [profilePendingClear, setProfilePendingClear] = useState<BrowserProfile | null>(null);
   const [profileRemovalError, setProfileRemovalError] = useState<string | null>(null);
   const [profileRemovalInFlight, setProfileRemovalInFlight] = useState(false);
+  const serverConfigs = useServerConfigs();
+  const runClearServerProfile = useAtomCommand(previewEnvironment.clearProfile, {
+    reportFailure: false,
+  });
+  const serverProfileData: ServerProfileData = {
+    environmentIds: environments
+      .map((environment) => environment.environmentId)
+      .filter(
+        (environmentId) =>
+          serverConfigs.get(environmentId)?.environment.capabilities.serverBrowser === true,
+      ),
+    clear: async (environmentId, profileId) => {
+      const result = await runClearServerProfile({ environmentId, input: { profileId } });
+      if (result._tag === "Failure") throw squashAtomCommandFailure(result);
+    },
+  };
   const removalAvailable = browserProfileRemovalAvailable(
     previewBridge !== null,
     environmentsReady,
     environments.length,
+    serverProfileData.environmentIds.length,
   );
   const importInFlightRef = useRef(false);
   const [importInFlight, setImportInFlight] = useState(false);
@@ -1120,7 +1151,7 @@ function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
 
   const clearProfileData = (id: string, name: string) => {
     if (!settingsHydrated || importInFlightRef.current) return;
-    if (!previewBridge || !environmentsReady || environments.length === 0) {
+    if (!removalAvailable) {
       toastManager.add({
         type: "error",
         title: `Could not clear ${name}'s data`,
@@ -1132,6 +1163,7 @@ function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
       previewBridge,
       environments.map((environment) => environment.environmentId),
       id,
+      serverProfileData,
     )
       .then(() => {
         toastManager.add({ type: "success", title: `Cleared ${name}'s cookies and cache` });
@@ -1156,6 +1188,7 @@ function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
         previewBridge,
         environmentsReady ? environments.map((environment) => environment.environmentId) : [],
         id,
+        serverProfileData,
       );
     } catch {
       setProfileRemovalError("Profile data could not be deleted. Try again.");
@@ -1464,7 +1497,12 @@ function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
                   </MenuItem>
                   <MenuItem
                     disabled={!settingsHydrated || !removalAvailable}
-                    onClick={() => clearProfileData(profile.id, profile.name)}
+                    onClick={() => {
+                      // Clearing a server copy closes its open tabs, so it asks first.
+                      if (serverProfileData.environmentIds.length > 0) {
+                        setProfilePendingClear(profile);
+                      } else clearProfileData(profile.id, profile.name);
+                    }}
                   >
                     Clear cookies and cache
                   </MenuItem>
@@ -1508,8 +1546,8 @@ function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
           <AlertDialogHeader>
             <AlertDialogTitle>Remove “{profilePendingRemoval?.name}”?</AlertDialogTitle>
             <AlertDialogDescription>
-              Its cookies and logins are deleted. Tabs already open in this profile stay open until
-              you close them.
+              Its cookies and logins are deleted. Desktop tabs already open in this profile stay
+              open until you close them; server browser tabs close now.
             </AlertDialogDescription>
             {profileRemovalError ? (
               <p aria-live="polite" className="text-sm text-destructive">
@@ -1539,6 +1577,36 @@ function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
               }}
             >
               {profileRemovalInFlight ? "Removing…" : "Remove profile"}
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogPopup>
+      </AlertDialog>
+      <AlertDialog
+        open={profilePendingClear !== null}
+        onOpenChange={(open) => {
+          if (!open) setProfilePendingClear(null);
+        }}
+      >
+        <AlertDialogPopup>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              Clear “{profilePendingClear?.name}”’s cookies and cache?
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              You are signed out of its sites. Server browser tabs open in this profile close now.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogClose render={<Button variant="outline" />}>Cancel</AlertDialogClose>
+            <Button
+              variant="destructive"
+              onClick={() => {
+                if (profilePendingClear)
+                  clearProfileData(profilePendingClear.id, profilePendingClear.name);
+                setProfilePendingClear(null);
+              }}
+            >
+              Clear data
             </Button>
           </AlertDialogFooter>
         </AlertDialogPopup>

@@ -334,7 +334,11 @@ export function buildCodexAdditionalContext(
     t3_code_orchestration: { kind: "application", value: T3_CODE_ORCHESTRATION_INSTRUCTIONS },
     t3_code_runtime: {
       kind: "application",
-      value: buildRuntimeInstructions({ harness: "Codex", ...runtime, includeRepositoryContract: false }),
+      value: buildRuntimeInstructions({
+        harness: "Codex",
+        ...runtime,
+        includeRepositoryContract: false,
+      }),
     },
     ...(tools ? { t3_code_tools: { kind: "application", value: tools } } : {}),
   };

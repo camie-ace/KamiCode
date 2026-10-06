@@ -1,13 +1,14 @@
-import { HttpClient } from "effect/unstable/http";
+import { HttpClient } from "effect/http";
 import * as SubscriptionRef from "effect/SubscriptionRef";
 import * as ManagedRelay from "../relay/managedRelay.ts";
 import * as RemoteEnvironmentAuthorization from "../authorization/service.ts";
 import { fetchEnvironmentThreadSnapshot } from "./threadSnapshotHttp.ts";
 import type { ThreadId } from "@t3tools/contracts";
 import * as Crypto from "effect/Crypto";
+import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
-import { Atom } from "effect/unstable/reactivity";
+import { Atom } from "effect/reactivity";
 import {
   WS_METHODS,
   type EnvironmentId,
@@ -103,6 +104,12 @@ import {
 import type { EnvironmentRegistry } from "../connection/registry.ts";
 import * as EnvironmentSupervisor from "../connection/supervisor.ts";
 import * as ThreadHistoryController from "./threadHistoryController.ts";
+
+export class ThreadSnapshotUnavailableError extends Data.TaggedError(
+  "ThreadSnapshotUnavailableError",
+)<{
+  readonly message: string;
+}> {}
 
 export type LoadEarlierThreadHistoryInput = {
   readonly threadId: ThreadId;
@@ -401,10 +408,14 @@ export function createThreadEnvironmentAtoms<R, E>(
           const supervisor = yield* EnvironmentSupervisor.EnvironmentSupervisor;
           const prepared = yield* SubscriptionRef.get(supervisor.prepared);
           if (Option.isNone(prepared))
-            return yield* Effect.fail(new Error("Environment is disconnected."));
+            return yield* Effect.fail(
+              new ThreadSnapshotUnavailableError({ message: "Environment is disconnected." }),
+            );
           const httpClient = yield* Effect.serviceOption(HttpClient.HttpClient);
           if (Option.isNone(httpClient))
-            return yield* Effect.fail(new Error("HTTP transport is unavailable."));
+            return yield* Effect.fail(
+              new ThreadSnapshotUnavailableError({ message: "HTTP transport is unavailable." }),
+            );
           return yield* fetchEnvironmentThreadSnapshot({
             prepared: prepared.value,
             threadId: input.threadId,

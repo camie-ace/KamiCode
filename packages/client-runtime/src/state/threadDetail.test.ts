@@ -11,7 +11,7 @@ import {
   type ScopedThreadRef,
 } from "@t3tools/contracts";
 import * as Option from "effect/Option";
-import { AsyncResult, Atom, AtomRegistry } from "effect/unstable/reactivity";
+import { AsyncResult, Atom, AtomRegistry } from "effect/reactivity";
 import { describe, expect, it } from "vite-plus/test";
 
 import { v2Projection, v2Now, v2ThreadShell } from "./orchestrationV2TestFixtures.ts";
@@ -328,14 +328,18 @@ it("keeps worktree and pending requests stable during output updates, then refle
   registry.dispose();
 });
 
-
 describe("mergeEnvironmentThread", () => {
   it("uses current workspace and lock metadata without replacing transcript collections", () => {
     const detail = { environmentId: ref.environmentId, projection: v2Projection };
     const shell = presentThreadShell(ref.environmentId, {
-      ...v2ThreadShell, branch: "migrated", worktreePath: "/workspace/new", locked: true,
-      interactionMode: "workflow", workflowParentThreadId: ThreadId.make("workflow-parent"),
-      workflowLaneId: "review", workflowLaneRole: "Reviewer",
+      ...v2ThreadShell,
+      branch: "migrated",
+      worktreePath: "/workspace/new",
+      locked: true,
+      interactionMode: "workflow",
+      workflowParentThreadId: ThreadId.make("workflow-parent"),
+      workflowLaneId: "review",
+      workflowLaneRole: "Reviewer",
     });
     const merged = mergeEnvironmentThread(detail, shell)!;
     expect(merged.projection.thread.worktreePath).toBe("/workspace/new");
@@ -345,6 +349,8 @@ describe("mergeEnvironmentThread", () => {
     expect(merged.projection.thread.interactionMode).toBe("workflow");
     expect(merged.projection.messages).toBe(v2Projection.messages);
     expect(merged.projection.plans).toBe(v2Projection.plans);
-    expect(mergeEnvironmentThread(detail, { ...shell, environmentId: EnvironmentId.make("another") })).toBe(detail);
+    expect(
+      mergeEnvironmentThread(detail, { ...shell, environmentId: EnvironmentId.make("another") }),
+    ).toBe(detail);
   });
 });

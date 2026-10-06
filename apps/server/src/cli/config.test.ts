@@ -183,7 +183,7 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
         tailscaleServeEnabled: Option.none<boolean>(),
         tailscaleServePort: Option.none<number>(),
       };
-      const configLayer = ConfigProvider.layer(
+      const layerConfig = ConfigProvider.layer(
         ConfigProvider.fromEnv({
           env: {
             T3CODE_DEV_AUTH_TOKEN: "  reusable-dev-auth-token-that-is-long-enough  ",
@@ -191,12 +191,12 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
         }),
       );
       const web = yield* resolveServerConfig(flags, Option.none()).pipe(
-        Effect.provide(Layer.mergeAll(configLayer, NetService.layer)),
+        Effect.provide(Layer.mergeAll(layerConfig, NetService.layer)),
       );
       const desktop = yield* resolveServerConfig(
         { ...flags, mode: Option.some("desktop" as const) },
         Option.none(),
-      ).pipe(Effect.provide(Layer.mergeAll(configLayer, NetService.layer)));
+      ).pipe(Effect.provide(Layer.mergeAll(layerConfig, NetService.layer)));
 
       expect(web.devAuthToken).toBeDefined();
       if (web.devAuthToken === undefined) {
@@ -227,21 +227,21 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
         tailscaleServeEnabled: Option.none<boolean>(),
         tailscaleServePort: Option.none<number>(),
       };
-      const configLayer = ConfigProvider.layer(
+      const layerConfig = ConfigProvider.layer(
         ConfigProvider.fromEnv({ env: { T3CODE_DEV_AUTH_TOKEN: secret } }),
       );
       const error = yield* resolveServerConfig(flags, Option.none()).pipe(
-        Effect.provide(Layer.mergeAll(configLayer, NetService.layer)),
+        Effect.provide(Layer.mergeAll(layerConfig, NetService.layer)),
         Effect.flip,
       );
       const desktop = yield* resolveServerConfig(
         { ...flags, mode: Option.some("desktop" as const) },
         Option.none(),
-      ).pipe(Effect.provide(Layer.mergeAll(configLayer, NetService.layer)));
+      ).pipe(Effect.provide(Layer.mergeAll(layerConfig, NetService.layer)));
       const staticWeb = yield* resolveServerConfig(
         { ...flags, devUrl: Option.none() },
         Option.none(),
-      ).pipe(Effect.provide(Layer.mergeAll(configLayer, NetService.layer)));
+      ).pipe(Effect.provide(Layer.mergeAll(layerConfig, NetService.layer)));
 
       expect(String(error)).not.toContain(secret);
       const serialized = yield* encodeUnknownJson(error);

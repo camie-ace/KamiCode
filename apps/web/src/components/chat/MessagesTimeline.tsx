@@ -187,6 +187,7 @@ import {
   SnapShotAttachmentDetails,
 } from "./SnapShotAttachmentDetails";
 import { ProposedPlanCard } from "./ProposedPlanCard";
+import { HtmlRenderFrame } from "./HtmlRenderFrame";
 import { ChangedFilesCard } from "./ChangedFilesTree";
 import { useFileContextMenuHandler } from "../../fileContextMenu";
 import { useProject, useThreadShell } from "../../state/entities";
@@ -299,6 +300,7 @@ import {
   V2LifecycleRow,
   type HandoffTimelineRun,
 } from "./V2LifecycleRow";
+import { SecretRequestCard } from "./SecretRequestCard";
 import { TimelineSystemDivider } from "./TimelineSystemDivider";
 
 import { SkillChipIcon, SkillInlineText } from "./SkillInlineText";
@@ -1816,7 +1818,8 @@ const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: Time
                   !row.showAssistantMeta) ||
                 row.kind === "worktree-setup" ||
                 row.kind === "event" ||
-                row.kind === "attempt-fold"
+                row.kind === "attempt-fold" ||
+                row.kind === "html-render"
               ? "pb-2"
               : "pb-4",
         (row.kind === "message" && row.message.role === "assistant") ||
@@ -1864,6 +1867,7 @@ const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: Time
       ) : null}
       {row.kind === "assistant-meta" ? <AssistantMetaTimelineRow row={row} /> : null}
       {row.kind === "proposed-plan" ? <ProposedPlanTimelineRow row={row} /> : null}
+      {row.kind === "html-render" ? <HtmlRenderTimelineRow row={row} /> : null}
       {row.kind === "working" ? <WorkingTimelineRow row={row} /> : null}
       {row.kind === "worktree-setup" ? <WorktreeSetupTimelineRow row={row} /> : null}
       {row.kind === "event" ? <V2EventTimelineRow row={row} /> : null}
@@ -2822,6 +2826,22 @@ function ProposedPlanTimelineRow({
   );
 }
 
+function HtmlRenderTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "html-render" }> }) {
+  const ctx = use(TimelineRowCtx);
+
+  return (
+    <div className="min-w-0 px-1">
+      <HtmlRenderFrame
+        // A recycled row must not keep another page's frozen frame.
+        key={row.htmlRender.attachmentId}
+        environmentId={ctx.activeThreadEnvironmentId}
+        htmlRender={row.htmlRender}
+        onOpen={ctx.onFileOpen}
+      />
+    </div>
+  );
+}
+
 type V2EventTone = "muted" | "warning" | "danger" | "success";
 
 function v2EventPresentation(item: OrchestrationV2TurnItem): {
@@ -2910,6 +2930,15 @@ function V2EventTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "event"
   const { item, visibility, sourceThreadId } = row.projectedItem;
   if (item.type === "subagent" && (row.subagents?.length ?? 1) > 1) {
     return <V2SubagentGroup key={row.id} row={row} />;
+  }
+  if (item.type === "secret_request") {
+    return (
+      <SecretRequestCard
+        environmentId={ctx.activeThreadEnvironmentId}
+        item={item}
+        visibility={visibility}
+      />
+    );
   }
   if (isV2LifecycleItem(item)) {
     return (
@@ -3000,6 +3029,7 @@ function V2EventTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "event"
               onOpenThread={ctx.onOpenThread}
               onOpenTurnDiff={ctx.onOpenTurnDiff}
               onRollbackCheckpoint={ctx.onRollbackCheckpoint}
+              onImageExpand={ctx.onImageExpand}
             />
           </div>
         </div>
@@ -3074,6 +3104,7 @@ function V2EventTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "event"
               onOpenThread={ctx.onOpenThread}
               onOpenTurnDiff={ctx.onOpenTurnDiff}
               onRollbackCheckpoint={ctx.onRollbackCheckpoint}
+              onImageExpand={ctx.onImageExpand}
             />
           </div>
         </div>
@@ -3197,7 +3228,7 @@ const V2SubagentGroup = memo(function V2SubagentGroup({
               {statusSummary}
             </span>
           </span>
-          <span className="shrink-0 font-mono text-3xs text-muted-foreground">
+          <span className="shrink-0 text-xs text-muted-foreground tabular-nums">
             <SubagentElapsed agent={subagentGroupTiming(agents)} />
           </span>
           <ChevronDownIcon
@@ -5042,12 +5073,12 @@ const stopRowToggle = (e: { stopPropagation: () => void }) => e.stopPropagation(
 function evidenceStatusClass(status: EvidenceRunWorkEntry["status"]): string {
   switch (status) {
     case "pass":
-      return "border-emerald-400/35 bg-emerald-500/10 text-emerald-200 dark:text-emerald-200";
+      return "border-success/35 bg-success/10 text-success dark:text-success";
     case "fail":
     case "error":
-      return "border-rose-400/35 bg-rose-500/10 text-rose-200 dark:text-rose-200";
+      return "border-error/35 bg-error/10 text-error dark:text-error";
     case "blocked":
-      return "border-amber-400/35 bg-amber-500/10 text-amber-200 dark:text-amber-200";
+      return "border-warning/35 bg-warning/10 text-warning dark:text-warning";
   }
 }
 
@@ -5068,7 +5099,7 @@ function EvidenceArtifactLink(props: {
             href={testHarnessArtifactUrl(props.path)}
             target="_blank"
             rel="noreferrer"
-            className="inline-flex items-center gap-1.5 rounded-md border border-border/65 bg-background/60 px-2 py-1 text-[11px] text-muted-foreground/80 transition-colors hover:border-border hover:text-foreground"
+            className="inline-flex items-center gap-1.5 rounded-md border border-border/65 bg-background/60 px-2 py-1 text-2xs text-muted-foreground/80 transition-colors hover:border-border hover:text-foreground"
           />
         }
       >
@@ -5128,16 +5159,16 @@ function ProjectTriggerSummaryCard(props: {
   const prompt = trigger.threadTemplate?.prompt?.trim();
 
   return (
-    <div className="rounded-lg border border-[#2323FF]/30 bg-[#2323FF]/5 p-2.5">
+    <div className="rounded-lg border border-kami/30 bg-kami/5 p-2.5">
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div className="min-w-0">
           <div className="flex min-w-0 flex-wrap items-center gap-1.5">
             <span className="truncate text-xs font-medium text-foreground/90">{trigger.name}</span>
             <span
               className={cn(
-                "rounded-full border px-1.5 py-0.5 text-[10px] font-medium",
+                "rounded-full border px-1.5 py-0.5 text-3xs font-medium",
                 trigger.enabled
-                  ? "border-emerald-400/35 bg-emerald-500/10 text-emerald-200 dark:text-emerald-200"
+                  ? "border-success/35 bg-success/10 text-success dark:text-success"
                   : "border-border/70 bg-background/65 text-muted-foreground",
               )}
             >
@@ -5150,12 +5181,12 @@ function ProjectTriggerSummaryCard(props: {
             </p>
           ) : null}
         </div>
-        <span className="shrink-0 rounded-md border border-[#2323FF]/25 bg-background/60 px-2 py-0.5 font-mono text-[10px] text-muted-foreground/75">
+        <span className="shrink-0 rounded-md border border-kami/25 bg-background/60 px-2 py-0.5 font-mono text-3xs text-muted-foreground/75">
           {trigger.id}
         </span>
       </div>
 
-      <div className="mt-2 grid gap-1.5 text-[11px] leading-4 text-muted-foreground/78 sm:grid-cols-2">
+      <div className="mt-2 grid gap-1.5 text-2xs leading-4 text-muted-foreground/78 sm:grid-cols-2">
         <div>
           <span className="text-muted-foreground/55">Schedule: </span>
           <span>{scheduleParts.join(" / ")}</span>
@@ -5177,7 +5208,7 @@ function ProjectTriggerSummaryCard(props: {
       </div>
 
       {prompt ? (
-        <p className="mt-2 line-clamp-3 whitespace-pre-wrap border-t border-[#2323FF]/15 pt-2 text-xs leading-5 text-foreground/78">
+        <p className="mt-2 line-clamp-3 whitespace-pre-wrap border-t border-kami/15 pt-2 text-xs leading-5 text-foreground/78">
           {prompt}
         </p>
       ) : null}
@@ -5187,7 +5218,7 @@ function ProjectTriggerSummaryCard(props: {
           {trigger.warnings.map((warning) => (
             <div
               key={`${trigger.id}:warning:${warning}`}
-              className="flex items-start gap-1.5 rounded-md border border-amber-400/25 bg-amber-500/10 px-2 py-1 text-[11px] leading-4 text-amber-200 dark:text-amber-200"
+              className="flex items-start gap-1.5 rounded-md border border-warning/25 bg-warning/10 px-2 py-1 text-2xs leading-4 text-warning dark:text-warning"
             >
               <CircleAlertIcon className="mt-0.5 size-3 shrink-0" />
               <span>{warning}</span>
@@ -5205,26 +5236,26 @@ function ProjectTriggerToolCard({ result }: { result: ProjectTriggerWorkEntry })
   const errorMessage = result.error?.message;
 
   return (
-    <div className="mt-2 overflow-hidden rounded-lg border border-[#2323FF]/30 bg-background/60">
-      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#2323FF]/20 px-3 py-2">
+    <div className="mt-2 overflow-hidden rounded-lg border border-kami/30 bg-background/60">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-kami/20 px-3 py-2">
         <div className="flex min-w-0 items-center gap-2">
-          <span className="flex size-5 shrink-0 items-center justify-center rounded-md bg-[#2323FF]/12 text-[#2323FF]">
+          <span className="flex size-5 shrink-0 items-center justify-center rounded-md bg-kami/12 text-kami">
             <ClockIcon className="size-3.5" />
           </span>
           <div className="min-w-0">
             <p className="truncate text-xs font-medium text-foreground/90">
               {formatProjectTriggerToolTitle(result.tool)}
             </p>
-            <p className="truncate text-[10px] text-muted-foreground/58">
+            <p className="truncate text-3xs text-muted-foreground/58">
               {result.success ? "Trigger tool completed" : "Trigger tool failed"}
             </p>
           </div>
         </div>
         <span
           className={cn(
-            "rounded-full border px-2 py-0.5 text-[10px] font-medium tracking-[0.12em]",
+            "rounded-full border px-2 py-0.5 text-3xs font-medium tracking-caption",
             result.success
-              ? "border-[#2323FF]/35 bg-[#2323FF]/10 text-[#2323FF]"
+              ? "border-kami/35 bg-kami/10 text-kami"
               : "border-destructive/30 bg-destructive/10 text-destructive",
           )}
         >
@@ -5247,7 +5278,7 @@ function ProjectTriggerToolCard({ result }: { result: ProjectTriggerWorkEntry })
               <ProjectTriggerSummaryCard key={trigger.id} trigger={trigger} />
             ))}
             {hiddenTriggerCount > 0 ? (
-              <p className="px-1 text-[11px] text-muted-foreground/60">
+              <p className="px-1 text-2xs text-muted-foreground/60">
                 +{hiddenTriggerCount} more trigger{hiddenTriggerCount === 1 ? "" : "s"}
               </p>
             ) : null}
@@ -5293,14 +5324,14 @@ function EvidenceRunCard({ evidenceRun }: { evidenceRun: EvidenceRunWorkEntry })
           <div className="flex flex-wrap items-center gap-2">
             <span
               className={cn(
-                "rounded-full border px-2 py-0.5 text-[10px] font-medium tracking-[0.14em]",
+                "rounded-full border px-2 py-0.5 text-3xs font-medium tracking-label",
                 evidenceStatusClass(evidenceRun.status),
               )}
             >
               {evidenceRun.status.toUpperCase()}
             </span>
             <span className="text-xs font-medium text-foreground/85">Evidence run</span>
-            <span className="text-[10px] text-muted-foreground/55">
+            <span className="text-3xs text-muted-foreground/55">
               {evidenceRun.runner}
               {duration ? ` - ${duration}` : ""}
             </span>
@@ -5332,12 +5363,12 @@ function EvidenceRunCard({ evidenceRun }: { evidenceRun: EvidenceRunWorkEntry })
         {evidenceRun.finalUrl || evidenceRun.title ? (
           <div className="flex flex-wrap gap-1.5">
             {evidenceRun.title ? (
-              <span className="rounded-md border border-border/50 bg-card/55 px-2 py-0.5 text-[10px] text-muted-foreground/75">
+              <span className="rounded-md border border-border/50 bg-card/55 px-2 py-0.5 text-3xs text-muted-foreground/75">
                 Title: {evidenceRun.title}
               </span>
             ) : null}
             {evidenceRun.finalUrl ? (
-              <span className="max-w-full truncate rounded-md border border-border/50 bg-card/55 px-2 py-0.5 text-[10px] text-muted-foreground/75">
+              <span className="max-w-full truncate rounded-md border border-border/50 bg-card/55 px-2 py-0.5 text-3xs text-muted-foreground/75">
                 Final URL: {evidenceRun.finalUrl}
               </span>
             ) : null}
@@ -5346,7 +5377,7 @@ function EvidenceRunCard({ evidenceRun }: { evidenceRun: EvidenceRunWorkEntry })
 
         {visibleScreenshots.length > 0 ? (
           <div>
-            <div className="mb-1.5 flex items-center gap-1.5 text-[10px] uppercase tracking-[0.12em] text-muted-foreground/55">
+            <div className="mb-1.5 flex items-center gap-1.5 text-3xs uppercase tracking-caption text-muted-foreground/55">
               <CameraIcon className="size-3" />
               <span>Screenshots</span>
               {hiddenScreenshotCount > 0 ? <span>+{hiddenScreenshotCount} earlier</span> : null}
@@ -5366,7 +5397,7 @@ function EvidenceRunCard({ evidenceRun }: { evidenceRun: EvidenceRunWorkEntry })
                     loading="lazy"
                     className="block max-h-56 w-full object-contain transition-transform duration-200 group-hover:scale-[1.01]"
                   />
-                  <div className="border-t border-border/45 px-2 py-1 text-[10px] text-muted-foreground/70">
+                  <div className="border-t border-border/45 px-2 py-1 text-3xs text-muted-foreground/70">
                     {screenshot.label}
                   </div>
                 </a>
@@ -5377,7 +5408,7 @@ function EvidenceRunCard({ evidenceRun }: { evidenceRun: EvidenceRunWorkEntry })
 
         {evidenceRun.videos.length > 0 ? (
           <div>
-            <div className="mb-1.5 flex items-center gap-1.5 text-[10px] uppercase tracking-[0.12em] text-muted-foreground/55">
+            <div className="mb-1.5 flex items-center gap-1.5 text-3xs uppercase tracking-caption text-muted-foreground/55">
               <VideoIcon className="size-3" />
               <span>Videos</span>
             </div>
@@ -5392,7 +5423,7 @@ function EvidenceRunCard({ evidenceRun }: { evidenceRun: EvidenceRunWorkEntry })
                     src={testHarnessArtifactUrl(video.path)}
                     className="max-h-72 w-full bg-black"
                   />
-                  <div className="border-t border-border/45 px-2 py-1 text-[10px] text-muted-foreground/70">
+                  <div className="border-t border-border/45 px-2 py-1 text-3xs text-muted-foreground/70">
                     {video.label}
                   </div>
                 </div>
@@ -5419,10 +5450,10 @@ function EvidenceRunCard({ evidenceRun }: { evidenceRun: EvidenceRunWorkEntry })
 function EvidenceIssueList(props: { label: string; items: ReadonlyArray<string> }) {
   return (
     <div className="rounded-lg border border-border/55 bg-card/35 p-2">
-      <div className="mb-1 text-[10px] uppercase tracking-[0.12em] text-muted-foreground/55">
+      <div className="mb-1 text-3xs uppercase tracking-caption text-muted-foreground/55">
         {props.label} ({props.items.length})
       </div>
-      <ul className="space-y-1 text-[11px] leading-4 text-muted-foreground/80">
+      <ul className="space-y-1 text-2xs leading-4 text-muted-foreground/80">
         {props.items.slice(0, 3).map((item) => (
           <li key={`${props.label}:${item}`} className="line-clamp-2">
             {item}
@@ -5873,6 +5904,7 @@ function WorkEntryLogRow(props: WorkEntryRowProps) {
               onOpenThread={ctx.onOpenThread}
               onOpenTurnDiff={ctx.onOpenTurnDiff}
               onRollbackCheckpoint={ctx.onRollbackCheckpoint}
+              onImageExpand={ctx.onImageExpand}
             />
           ) : (
             <>
@@ -5883,6 +5915,7 @@ function WorkEntryLogRow(props: WorkEntryRowProps) {
                 <FetchedToolOutput
                   projectedItem={workEntry.projectedItem}
                   environmentId={ctx.activeThreadEnvironmentId}
+                  onImageExpand={onImageExpand}
                 />
               ) : null}
             </>
@@ -5902,7 +5935,7 @@ function WorkEntryLogRow(props: WorkEntryRowProps) {
                 <TooltipTrigger
                   render={
                     <span
-                      className="rounded-md border border-border/55 bg-background/75 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground/75"
+                      className="rounded-md border border-border/55 bg-background/75 px-1.5 py-0.5 font-mono text-3xs text-muted-foreground/75"
                       aria-label={displayPath}
                     />
                   }
@@ -5910,13 +5943,13 @@ function WorkEntryLogRow(props: WorkEntryRowProps) {
                   {displayPath}
                 </TooltipTrigger>
                 <TooltipPopup side="top" className="max-w-[min(40rem,calc(100vw-2rem))]">
-                  <span className="font-mono text-[11px] whitespace-nowrap">{displayPath}</span>
+                  <span className="font-mono text-2xs whitespace-nowrap">{displayPath}</span>
                 </TooltipPopup>
               </Tooltip>
             );
           })}
           {(workEntry.changedFiles?.length ?? 0) > 4 && (
-            <span className="px-1 text-[10px] text-muted-foreground/55">
+            <span className="px-1 text-3xs text-muted-foreground/55">
               +{(workEntry.changedFiles?.length ?? 0) - 4}
             </span>
           )}

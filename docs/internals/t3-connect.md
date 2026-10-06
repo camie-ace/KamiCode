@@ -1,16 +1,93 @@
 # T3 Connect
 
-> For maintainers. Using T3 Code? See [docs/user](../user/).
+T3 Connect uses Clerk for cloud identity. The relay manages environment links,
+credentials for reaching environments, and managed tunnel allocations. After
+bootstrap, clients send application traffic through the environment's tunnel
+hostname; the relay Worker does not proxy their HTTP or WebSocket sessions.
+The one exception is automation webhooks: the relay forwards
+`/v1/hooks/:environmentId/:hookId/:token` to the environment's tunnel so
+senders get a stable URL. It keeps bodies and tokens out of its traces and
+leaves token and signature verification to the environment
+([forwarder](../../infra/relay/src/hooks/HookForwarder.ts)).
 
-T3 Connect uses one Clerk application for web, desktop, and mobile authentication. The relay verifies
-two kinds of bearer credential: template JWTs generated from the `t3-relay` template with the shared
-`t3-code-relay` audience, and Clerk OAuth tokens issued to the CLI. `verifyRelayClientBearerToken` in
-`infra/relay/src/http/Api.ts` tries the template/session path first and falls back to OAuth
-verification (`acceptsToken: "oauth_token"`), so the CLI's OAuth credential works without a JWT
-template.
+By default the forwarder stores nothing. An environment can opt in to having
+the relay hold requests while it is offline
+(`hold_webhooks_while_offline` on its link). Only then does the relay store the
+raw request, including the hook token in the path, in a Durable Object for
+that environment, with SQLite storage. The object pushes held requests back
+through the tunnel from its alarm, oldest first, and backs off while the
+environment stays away. When the tunnel reconnects, the environment asks the
+relay to deliver right away. Requests are deleted once the environment
+answers, after 24 hours, or when no user has the environment linked. The relay
+still never checks the token; delivery goes through the same environment route.
+Every forward carries `x-t3-relay-delivery-id`, so a request that reached the
+environment before a timeout and is delivered again later runs once
+([inbox object](../../infra/relay/src/hooks/HookInboxObject.ts)).
 
-For the wider system diagram, see
-[t3-code-connect-auth-flow.html](./t3-code-connect-auth-flow.html).
+A Durable Object, not Postgres or Queues, because held requests are write-once,
+read-once bodies of up to 1 MiB that need per-environment order, caps, and
+retry timing. Queues cap messages at 128 KB and cannot hold one environment's
+requests back while it is away.
+
+Clerk, deployment, and native authentication setup live in the
+[Connect setup runbook](../operations/connect-setup.md).
+
+## The relay is a trusted broker
+
+An authenticated cloud user still needs an active environment link. The relay
+asks that environment to mint a one-time bootstrap credential bound to the
+client's DPoP key. The client exchanges it directly with the environment for an
+[environment session](./environment-auth.md). The relay never receives that
+session token, and possessing the bootstrap credential alone does not permit
+redeeming it without the client's private key.
+
+Both sides authenticate this exchange. The environment accepts only bounded,
+replay-guarded relay proofs for its own identity, linked user, and requested
+operation. Signed environment responses bind the result to the request nonce;
+mint responses also bind the credential to the client proof key. The relay
+verifies those bindings before returning a credential. This prevents a different
+process behind the tunnel from impersonating the linked environment. The checks
+meet in the
+[environment link service](../../apps/server/src/cloud/CloudLink.ts) and
+[relay connector](../../infra/relay/src/environments/EnvironmentConnector.ts).
+
+The relay holds the signing authority for mint requests. DPoP protects an honest
+exchange from credential reuse; it does not make a compromised relay signing
+key harmless. Keep that trust assumption explicit when changing the protocol.
+
+Managed tunnels expose only a validated loopback HTTP origin. Link proof checks
+reject forwarded authority headers, and the relay resolves endpoints from its
+own managed allocations rather than a caller-supplied URL. Health and mint
+requests must not follow redirects. These restrictions keep endpoint discovery
+from turning into arbitrary relay egress or exposing another service on the
+environment host.
+
+## A link outlives a connector process
+
+CLI authorization, desired exposure, and a running connector have different
+lifetimes. Linking can record intent while the server is stopped. Startup
+reconciles that intent. CLI logout removes the stored cloud credential and
+disables exposure without uninstalling the environment's background service.
+
+Managed allocations belong to a user/environment pair. Provisioning checkpoints
+external tunnel and DNS resources so retries can reconcile partial work. A
+normal shutdown of a CLI-managed link releases its tunnel to avoid paying for
+an idle resource, retaining the hostname reservation for the next startup.
+It also retains the allocation record so the environment remains "offline"
+rather than becoming "not authorized".
+
+Two cases must retain the tunnel across shutdown. A link installed through a
+client has no startup provisioning path and depends on its stored connector
+token. An update handoff immediately starts a replacement server, and replacing
+the tunnel would add routing propagation delay to every update. These exceptions
+belong to [shutdown handling](../../apps/server/src/cloud/CloudLink.ts).
+
+Release and unlink claim the allocation generation before deleting external
+resources. A delayed cleanup must not delete a tunnel reused by a concurrent
+restart or relink. Unlink commits authorization revocation before external
+teardown, because a database failure must leave the active link usable. Failed
+teardown retains enough state to retry. See the
+[managed endpoint lifecycle](../../infra/relay/src/environments/ManagedEndpointProvider.ts).
 
 ## Application Keys
 
@@ -100,15 +177,10 @@ host that reconnects mid-sweep wins.
 
 ## OAuth traps
 
-For a hosted relay deployment, copy `infra/relay/.env.example` to `infra/relay/.env`. The relay
-deployment reads `RELAY_DOMAIN`, `RELAY_API_ZONE_NAME`, `RELAY_TUNNEL_ZONE_NAME`,
-`CLERK_PUBLISHABLE_KEY`, and `CLERK_JWT_AUDIENCE` through Effect `Config`. There are no checked-in
-deployment defaults.
-`vp run --filter t3code-relay deploy` invokes Alchemy from the relay directory, so Alchemy loads
-`infra/relay/.env`. After a successful deployment, the wrapper updates the repository-root `.env`
-with the deployed HTTPS relay URL. The relay still requires
-`CLERK_SECRET_KEY` as an Alchemy secret. Never put `CLERK_SECRET_KEY` in a client application
-environment or commit it to the repository.
+Interactive clients and the headless CLI use the same Clerk application but
+different credentials. The relay accepts both session-template JWTs and CLI
+OAuth tokens; requiring a JWT template for the CLI would reject valid logins.
+The CLI is a public OAuth client using PKCE and stores no client secret.
 
 Loopback CLI authorization starts on the hosted `/connect` page so sign-in
 completes before entering Clerk's authorize endpoint. Sending a signed-out
