@@ -5,7 +5,7 @@ import * as NodePath from "node:path";
 
 import type { OrchestrationThreadActivity } from "@t3tools/contracts";
 
-import { projectActivityPayload } from "../orchestration/ActivityPayloadProjection.ts";
+import { projectActivityPayload } from "./ActivityPayloadProjection.ts";
 
 const BATCH_SIZE = 100;
 const DATABASE_SIDECARS = ["-wal", "-shm"] as const;

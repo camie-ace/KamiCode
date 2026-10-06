@@ -12,8 +12,8 @@ layer("056_RemoveRedundantProjectionIndexes", (it) => {
   it.effect("keeps the covering indexes and removes their prefix indexes", () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient;
-      yield* runMigrations({ toMigrationInclusive: 55 });
-      yield* runMigrations({ toMigrationInclusive: 56 });
+      yield* runMigrations({ toMigrationInclusive: 72 });
+      yield* runMigrations({ toMigrationInclusive: 73 });
 
       const rows = yield* sql<{ readonly name: string }>`
         SELECT name

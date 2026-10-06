@@ -1,3 +1,5 @@
+import { KAMI_TEST_HARNESS_DYNAMIC_TOOL_SPEC } from "../../testing/browserHarnessDynamicTool.ts";
+import { PROJECT_TRIGGER_DYNAMIC_TOOL_SPECS } from "../../projectTriggers/dynamicTools.ts";
 import { buildKamiCodeAdditionalContext } from "../../provider/CodexDeveloperInstructions.ts";
 import { buildProjectMemoryInstructionBlock } from "../../provider/ProjectMemory.ts";
 import type { ProviderInteractionMode } from "@t3tools/contracts";
@@ -207,6 +209,21 @@ export function withKamiCodeReplayContext(
                 name: "KamiCode",
                 title: "KamiCode Desktop",
               },
+            },
+          },
+        };
+      }
+      if (frame.method === "thread/resume") {
+        return {
+          ...entry,
+          frame: {
+            ...frame,
+            params: {
+              ...frame.params,
+              dynamicTools: [
+                KAMI_TEST_HARNESS_DYNAMIC_TOOL_SPEC,
+                ...PROJECT_TRIGGER_DYNAMIC_TOOL_SPECS,
+              ],
             },
           },
         };

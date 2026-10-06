@@ -169,8 +169,9 @@ export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
   { key: "mod+n", command: "chat.new", when: "!terminalFocus" },
   { key: "mod+shift+o", command: "chat.new", when: "!terminalFocus" },
   { key: "mod+shift+n", command: "chat.newLocal", when: "!terminalFocus" },
-  { key: "ctrl+enter", command: "chat.queue", when: "!terminalFocus" },
-  { key: "mod+alt+enter", command: "chat.schedule", when: "!terminalFocus" },
+  // KamiCode handles these explicitly before generic composer submission; avoid shadowing its focused bindings.
+  { key: "ctrl+enter", command: "chat.queue", when: "!terminalFocus && !composerFocus" },
+  { key: "mod+alt+enter", command: "chat.schedule", when: "!terminalFocus && !composerFocus" },
   { key: "mod+alt+n", command: "chat.newWithoutProject", when: "!terminalFocus" },
   { key: "mod+shift+m", command: "modelPicker.toggle", when: "!terminalFocus" },
   { key: "mod+shift+h", command: "composer.host", when: "!terminalFocus" },

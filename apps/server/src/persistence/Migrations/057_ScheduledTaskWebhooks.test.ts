@@ -12,7 +12,7 @@ layer("057_ScheduledTaskWebhooks", (it) => {
   it.effect("keeps existing scheduled tasks and adds webhook storage", () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient;
-      yield* runMigrations({ toMigrationInclusive: 56 });
+      yield* runMigrations({ toMigrationInclusive: 74 });
       yield* sql`INSERT INTO scheduled_tasks ${sql.insert({
         task_id: "existing",
         title: "task",
@@ -35,7 +35,7 @@ layer("057_ScheduledTaskWebhooks", (it) => {
         last_run_error: null,
         run_count: 0,
       })}`;
-      yield* runMigrations({ toMigrationInclusive: 57 });
+      yield* runMigrations({ toMigrationInclusive: 75 });
 
       const rows = yield* sql<{
         task_id: string;

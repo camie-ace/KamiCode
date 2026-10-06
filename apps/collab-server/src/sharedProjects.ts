@@ -33,6 +33,7 @@ import type {
   SharedThreadMessage,
   ThreadId,
 } from "@t3tools/contracts";
+// @effect-diagnostics-next-line nodeBuiltinImport:off - standalone async collaboration service uses native UUIDs without an Effect runtime.
 import * as NodeCrypto from "node:crypto";
 import type { Pool } from "pg";
 

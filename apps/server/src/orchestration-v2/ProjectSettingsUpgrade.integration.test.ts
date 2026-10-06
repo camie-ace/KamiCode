@@ -49,10 +49,10 @@ const readSettings = Effect.gen(function* () {
   return rows[0];
 });
 
-/** A released V1 database at migration 54 whose project carries all four settings. */
+/** A released V1 database at migration 71 whose project carries all four settings. */
 const seedV1Database = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
-  yield* runMigrations({ toMigrationInclusive: 54 });
+  yield* runMigrations({ toMigrationInclusive: 71 });
   const events = [
     {
       type: "project.created",
@@ -182,7 +182,7 @@ it.live("keeps project settings through the V2 migrations and the first V2 boot"
       const stateDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-project-upgrade-" });
       const dbPath = path.join(stateDir, "statev2.sqlite");
 
-      // Seed the released V1 schema, then boot the V2 runtime, which runs 055+, on the same file.
+      // Seed the released V1 schema, then boot the V2 runtime, which runs 072+, on the same file.
       yield* seedV1Database.pipe(Effect.provide(NodeSqliteClient.layer({ filename: dbPath })));
       yield* Effect.gen(function* () {
         yield* (yield* LegacyV1ThreadImporter.LegacyV1ThreadImporter).reconcileShells;

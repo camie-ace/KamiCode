@@ -18,7 +18,7 @@ const config = {
 };
 const json = JSON.stringify(config, null, 2);
 
-function runStep(stdout, exitCode = 0) {
+function runStep(stdout, exitCode = 0, credentials = true) {
   const runnerTemp = mkdtempSync(join(tmpdir(), "t3-relay-state-test-"));
   try {
     const result = spawnSync(
@@ -28,6 +28,12 @@ function runStep(stdout, exitCode = 0) {
         encoding: "utf8",
         env: {
           PATH: process.env.PATH,
+          ...(credentials
+            ? {
+                CLOUDFLARE_ACCOUNT_ID: "fixture-account",
+                CLOUDFLARE_API_TOKEN: "fixture-api-token",
+              }
+            : {}),
           RUNNER_TEMP: runnerTemp,
           FIXTURE_STDOUT: stdout,
           FIXTURE_EXIT: String(exitCode),
@@ -74,3 +80,10 @@ for (const [name, stdout, exitCode] of [
     assert.equal(result.envFile, undefined);
   });
 }
+
+test("allows fork releases without deployed relay credentials", () => {
+  const result = runStep("must not call the deployed relay", 1, false);
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.envFile, "");
+  assert.match(result.stderr, /Skipping relay tracing config lookup/);
+});

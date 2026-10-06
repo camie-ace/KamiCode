@@ -89,7 +89,9 @@ export function isRuntimeExternalCliDependency(id: string): boolean {
  * dependency) stayed external.
  */
 export function isExternalCliDependency(id: string): boolean {
-  return isRuntimeExternalCliDependency(id);
+  // Cursor needs its on-disk Zod dependency, while bundled MCP code must inline
+  // its own Zod imports so the standalone executable has no file-backed ESM import.
+  return isRuntimeExternalCliDependency(id) && id !== "zod" && !id.startsWith("zod/");
 }
 
 /** True when the CLI bundle should inline `id` rather than leave it external. */

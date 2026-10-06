@@ -69,6 +69,10 @@
       // reports an entire component module when nothing imports it.
       "ignoreIssues": { "src/components/ui/*.tsx": ["exports", "nsExports", "duplicates"] },
     },
+    "apps/marketing": {
+      // Maintainer tool for regenerating KamiCode branding assets.
+      "entry": ["scripts/convert-logos.ts"],
+    },
     "apps/mobile": {
       // Expo loads plugins and the fingerprint config by string; Metro embeds the browser entry in the native WebView.
       "entry": [
