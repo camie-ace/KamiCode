@@ -1,6 +1,7 @@
 import type {
   DesktopBridge,
   DesktopPreviewPointerEvent,
+  DesktopPreviewRecordingInputEvent,
   DesktopPreviewRecordingFrame,
   DesktopPreviewTabState,
   DesktopSnapShotEvent,
@@ -9,6 +10,7 @@ import { exposeClerkBridge } from "@clerk/electron/preload";
 import { contextBridge, ipcRenderer, webFrame, webUtils } from "electron";
 
 import * as IpcChannels from "./ipc/channels.ts";
+import { mergeLegacyLocalStorage } from "./legacyLocalStorageMerge.ts";
 
 const SNAP_SHOT_EVENT_TYPES = new Set([
   "requested",
@@ -28,6 +30,18 @@ function isSnapShotEvent(value: unknown): value is DesktopSnapShotEvent {
 }
 
 exposeClerkBridge({ passkeys: true });
+
+// Runs before any app script reads localStorage. See DesktopLegacyLocalStorage.
+try {
+  const legacyItems: unknown = ipcRenderer.sendSync(IpcChannels.TAKE_LEGACY_LOCAL_STORAGE_CHANNEL);
+  if (typeof legacyItems === "object" && legacyItems !== null) {
+    if (mergeLegacyLocalStorage(window.localStorage, legacyItems as Record<string, string>)) {
+      void ipcRenderer.invoke(IpcChannels.COMPLETE_LEGACY_LOCAL_STORAGE_CHANNEL);
+    }
+  }
+} catch {
+  // Best effort: the app still starts on the V2 profile's own storage.
+}
 
 // oxlint-disable-next-line t3code/no-global-process-runtime -- Electron exposes the client platform in its sandboxed preload process.
 const clientPlatform = process.platform;
@@ -77,6 +91,11 @@ contextBridge.exposeInMainWorld("desktopBridge", {
     const handler = () => listener();
     ipcRenderer.on(IpcChannels.SET_NOTIFICATION_BADGE_CHANNEL, handler);
     return () => ipcRenderer.removeListener(IpcChannels.SET_NOTIFICATION_BADGE_CHANNEL, handler);
+  },
+  onTrackpadScrollEnd: (listener) => {
+    const handler = () => listener();
+    ipcRenderer.on(IpcChannels.TRACKPAD_SCROLL_END_CHANNEL, handler);
+    return () => ipcRenderer.removeListener(IpcChannels.TRACKPAD_SCROLL_END_CHANNEL, handler);
   },
   getSystemLocale: () => {
     const result = ipcRenderer.sendSync(IpcChannels.GET_SYSTEM_LOCALE_CHANNEL);
@@ -178,6 +197,10 @@ contextBridge.exposeInMainWorld("desktopBridge", {
       items,
       ...(position === undefined ? {} : { position }),
     }),
+  receiveProviderAuthCallback: (url: string) =>
+    ipcRenderer.invoke(IpcChannels.RECEIVE_PROVIDER_AUTH_CALLBACK_CHANNEL, url),
+  cancelProviderAuthCallback: (url: string) =>
+    ipcRenderer.invoke(IpcChannels.CANCEL_PROVIDER_AUTH_CALLBACK_CHANNEL, url),
   openExternal: (url: string) => ipcRenderer.invoke(IpcChannels.OPEN_EXTERNAL_CHANNEL, url),
   revealLocalMediaFile: (input) =>
     ipcRenderer.invoke(IpcChannels.REVEAL_LOCAL_MEDIA_FILE_CHANNEL, input),
@@ -331,6 +354,15 @@ contextBridge.exposeInMainWorld("desktopBridge", {
         ipcRenderer.invoke(IpcChannels.PREVIEW_PICTURE_IN_PICTURE_CLOSE_CHANNEL, { tabId }),
     },
     recording: {
+      onInput: (listener) => {
+        const wrappedListener = (_event: Electron.IpcRendererEvent, event: unknown) => {
+          if (typeof event !== "object" || event === null) return;
+          listener(event as DesktopPreviewRecordingInputEvent);
+        };
+        ipcRenderer.on(IpcChannels.PREVIEW_RECORDING_INPUT_CHANNEL, wrappedListener);
+        return () =>
+          ipcRenderer.removeListener(IpcChannels.PREVIEW_RECORDING_INPUT_CHANNEL, wrappedListener);
+      },
       startScreencast: (tabId) =>
         ipcRenderer.invoke(IpcChannels.PREVIEW_RECORDING_START_CHANNEL, { tabId }),
       stopScreencast: (tabId) =>

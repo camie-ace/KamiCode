@@ -9,18 +9,18 @@ import { LATEST_WINDOWS_DOWNLOAD_URL, REPOSITORY_URL } from "../lib/releases";
     <div class="hero-grid" aria-hidden="true"></div>
 
     <div class="hero-float" aria-hidden="true">
-      <span class="hero-float-mark hf-claude" title="Claude Code">
-        <img src="/harnesses/claude-ai-icon.svg" alt="" />
-      </span>
-      <span class="hero-float-mark hf-codex" title="Codex">
-        <img src="/harnesses/openai_dark.svg" alt="" />
-      </span>
-      <span class="hero-float-mark hf-opencode" title="OpenCode">
-        <img src="/harnesses/opencode-dark.svg" alt="" />
-      </span>
-      <span class="hero-float-mark hf-cursor" title="Cursor">
-        <img src="/harnesses/cursor_light.svg" alt="" />
-      </span>
+      {[
+        { key: "opencode", icon: "/harnesses/opencode-dark.svg", cls: "hf-opencode" },
+        { key: "antigravity", icon: "/harnesses/antigravity.svg", cls: "hf-antigravity" },
+        { key: "claude", icon: "/harnesses/claude-ai-icon.svg", cls: "hf-claude" },
+        { key: "codex", icon: "/harnesses/openai_dark.svg", cls: "hf-codex" },
+        { key: "grok", icon: "/harnesses/grok-dark.svg", cls: "hf-grok" },
+        { key: "cursor", icon: "/harnesses/cursor_light.svg", cls: "hf-cursor" },
+      ].map((m) => (
+        <span class:list={["hero-float-mark", m.cls]}>
+          <span class="hero-float-card"><img src={m.icon} alt="" /></span>
+        </span>
+      ))}
     </div>
 
     <div class="container hero-inner">
@@ -405,7 +405,21 @@ import { LATEST_WINDOWS_DOWNLOAD_URL, REPOSITORY_URL } from "../lib/releases";
           <div class="harness-mark"><img src="/harnesses/cursor_light.svg" alt="" /></div>
           <div class="harness-meta">
             <div class="harness-name">Cursor</div>
-            <div class="harness-tag">cursor-agent</div>
+            <div class="harness-tag">@cursor/sdk</div>
+          </div>
+        </div>
+        <div class="harness">
+          <div class="harness-mark"><img src="/harnesses/grok-dark.svg" alt="" /></div>
+          <div class="harness-meta">
+            <div class="harness-name">Grok CLI</div>
+            <div class="harness-tag">grok login</div>
+          </div>
+        </div>
+        <div class="harness">
+          <div class="harness-mark"><img src="/harnesses/antigravity.svg" alt="" /></div>
+          <div class="harness-meta">
+            <div class="harness-name">Antigravity</div>
+            <div class="harness-tag">Google sign-in</div>
           </div>
         </div>
       </div>
@@ -724,10 +738,26 @@ import { LATEST_WINDOWS_DOWNLOAD_URL, REPOSITORY_URL } from "../lib/releases";
     object-fit: contain;
   }
 
-  .hero-float-mark.hf-claude   { background: radial-gradient(circle at 30% 25%, rgba(217, 119, 87, 0.22), rgba(20, 20, 24, 0.92) 65%); top: 8%;  left: 7%;  animation-delay: 0s;    transform: rotate(-8deg); }
-  .hero-float-mark.hf-codex    { background: radial-gradient(circle at 30% 25%, rgba(255, 255, 255, 0.08), rgba(20, 20, 24, 0.92) 65%); top: 6%;  right: 7%; animation-delay: -2.5s; transform: rotate(6deg); }
-  .hero-float-mark.hf-opencode { background: radial-gradient(circle at 30% 25%, rgba(255, 255, 255, 0.06), rgba(20, 20, 24, 0.92) 65%); top: 32%; left: 5%;  animation-delay: -5s;   transform: rotate(4deg); }
-  .hero-float-mark.hf-cursor   { background: radial-gradient(circle at 30% 25%, rgba(255, 255, 255, 0.08), rgba(20, 20, 24, 0.92) 65%); top: 30%; right: 5%; animation-delay: -7s;   transform: rotate(-5deg); }
+  @keyframes mark-in {
+    from { opacity: 0; transform: translate(var(--fx), var(--fy)) rotate(calc(var(--rot) + 24deg)) scale(0.6); }
+    to { opacity: 1; transform: translate(0, 0) rotate(var(--rot)) scale(1); }
+  }
+  @keyframes mark-drift {
+    0%, 100% { transform: translate(0, 0) rotate(var(--rot)); }
+    50% { transform: translate(var(--dx), var(--dy)) rotate(calc(var(--rot) + var(--wob))); }
+  }
+
+  .hf-opencode    { --x: max(-300px, -19vw); --y: 20px; --s: 64px; --rot: 6deg; --depth: 0.6; --d: 620ms; --dur: 8.5s; --dx: 2px; --dy: -8px; --wob: 3deg; --fx: -40px; --fy: -80px; }
+  .hf-antigravity { --x: min(300px, 19vw); --y: 20px; --s: 64px; --rot: -5deg; --depth: 0.6; --d: 580ms; --dur: 9.8s; --dx: -2px; --dy: -9px; --wob: -3deg; --fx: 40px; --fy: -80px; }
+  .hf-claude   { --x: max(-560px, -38vw); --y: 128px; --s: 96px; --rot: -8deg; --depth: 1.2; --d: 380ms; --dur: 10.5s; --dx: 4px; --dy: -12px; --wob: -2deg; --fx: -160px; --fy: -40px; --tint: rgba(217, 119, 87, 0.22); }
+  .hf-codex    { --x: min(560px, 38vw); --y: 128px; --s: 96px; --rot: 7deg; --depth: 1.2; --d: 460ms; --dur: 9.2s; --dx: -4px; --dy: -10px; --wob: 2deg; --fx: 160px; --fy: -40px; }
+  .hf-grok     { --x: max(-440px, -30vw); --y: 440px; --s: 80px; --rot: 4deg; --depth: 0.9; --d: 540ms; --dur: 11.5s; --dx: 3px; --dy: -9px; --wob: -3deg; --fx: -120px; --fy: 80px; }
+  .hf-cursor   { --x: min(440px, 30vw); --y: 440px; --s: 80px; --rot: -5deg; --depth: 0.9; --d: 700ms; --dur: 7.8s; --dx: -3px; --dy: -11px; --wob: 3deg; --fx: 120px; --fy: 80px; }
+
+  @media (prefers-reduced-motion: reduce) {
+    .hero-float-card { animation: none; transform: rotate(var(--rot)); }
+    .hero-float-mark { translate: none; transition: none; }
+  }
 
   @media (max-width: 1180px) {
     .hero-float-mark { width: 76px; height: 76px; border-radius: 20px; }
@@ -859,7 +889,7 @@ import { LATEST_WINDOWS_DOWNLOAD_URL, REPOSITORY_URL } from "../lib/releases";
     flex-shrink: 0; width: 28px; height: 28px;
     display: grid; place-items: center;
   }
-  .harness-mark img { width: 22px; height: 22px; object-fit: contain; border-radius: 5px; }
+  .harness-mark img { width: 22px; height: 22px; object-fit: contain; }
 
   .harness-meta { flex: 1; min-width: 0; }
   .harness-name {

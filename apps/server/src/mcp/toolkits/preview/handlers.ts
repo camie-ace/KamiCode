@@ -60,7 +60,7 @@ const invoke = Effect.fn("PreviewToolkit.invoke")(function* <A>(
   import("@t3tools/contracts").PreviewAutomationError,
   McpInvocationContext.McpInvocationContext | PreviewAutomationBroker.PreviewAutomationBroker
 > {
-  const scope = yield* McpInvocationContext.requireMcpCapability("preview");
+  const scope = yield* McpInvocationContext.requireThreadMcpCapability("preview");
   const broker = yield* PreviewAutomationBroker.PreviewAutomationBroker;
   let targetTabId = tabId;
   const result = yield* broker.invoke<A>({
@@ -87,7 +87,7 @@ const invoke = Effect.fn("PreviewToolkit.invoke")(function* <A>(
       updateCurrentTab: false,
       ...(statusTabId === undefined ? {} : { tabId: statusTabId }),
     })
-    .pipe(Effect.catch(() => Effect.succeed(null)));
+    .pipe(Effect.orElseSucceed(() => null));
   return {
     result,
     ...(page?.url && /^https?:\/\//i.test(page.url) && page.url.length <= 4096
@@ -175,10 +175,11 @@ export const claimPreviewRecording = Effect.fn("PreviewToolkit.claimRecording")(
     yield* fileSystem.rename(currentPath, finalPath);
   }).pipe(
     // Another stop may already have claimed this exact upload for this thread.
-    Effect.catch((cause) =>
-      cause._tag !== "PreviewAutomationRecordingTransferError" && cause.reason._tag === "NotFound"
-        ? validateFile(finalPath)
-        : Effect.fail(cause),
+    Effect.catchIf(
+      (cause) =>
+        cause._tag !== "PreviewAutomationRecordingTransferError" &&
+        cause.reason._tag === "NotFound",
+      () => validateFile(finalPath),
     ),
     Effect.mapError((cause) => new PreviewAutomationRecordingTransferError({ threadId, cause })),
   );
@@ -217,7 +218,7 @@ const handlers = {
     invokeTargeted<PreviewAutomationRecordingStatus>("recordingStart", input ?? {}),
   preview_recording_stop: (input) =>
     Effect.gen(function* () {
-      const scope = yield* McpInvocationContext.requireMcpCapability("preview");
+      const scope = yield* McpInvocationContext.requireThreadMcpCapability("preview");
       const { tabId, ...operationInput } = input;
       const response = yield* invoke<unknown>(
         "recordingStop",
@@ -225,7 +226,7 @@ const handlers = {
         PREVIEW_RECORDING_STOP_TIMEOUT_MS,
         tabId,
       );
-      const artifact = yield* claimPreviewRecording(scope.threadId, response.result);
+      const artifact = yield* claimPreviewRecording(scope.thread.threadId, response.result);
       return { ...artifact, ...(response.toolIcon ? { toolIcon: response.toolIcon } : {}) };
     }),
 } satisfies Parameters<typeof PreviewToolkit.toLayer>[0];

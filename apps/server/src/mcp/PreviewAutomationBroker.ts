@@ -40,7 +40,8 @@ import * as SynchronizedRef from "effect/SynchronizedRef";
 import * as McpInvocationContext from "./McpInvocationContext.ts";
 
 export interface PreviewAutomationInvokeInput {
-  readonly scope: McpInvocationContext.McpInvocationScope;
+  /** Preview tabs belong to a thread, so only thread callers reach the broker. */
+  readonly scope: McpInvocationContext.McpThreadInvocationScope;
   readonly operation: PreviewAutomationOperation;
   readonly input: unknown;
   readonly tabId?: PreviewTabId;
@@ -73,6 +74,7 @@ interface ClientConnection {
   readonly environmentId: PreviewAutomationHost["environmentId"];
   readonly supportedOperations: ReadonlySet<PreviewAutomationOperation>;
   readonly focused: boolean;
+  readonly liveTabs: NonNullable<PreviewAutomationHostFocus["liveTabs"]>;
   readonly focusOrder: number;
   readonly queue: Queue.Queue<PreviewAutomationStreamEvent, Cause.Done>;
 }
@@ -102,9 +104,9 @@ interface HostAssignment {
 interface PreviewAutomationRequestErrorContext {
   readonly operation: PreviewAutomationOperation;
   readonly environmentId: McpInvocationContext.McpInvocationScope["environmentId"];
-  readonly threadId: McpInvocationContext.McpInvocationScope["threadId"];
+  readonly threadId: McpInvocationContext.McpThreadCaller["threadId"];
   readonly providerSessionId: string;
-  readonly providerInstanceId: McpInvocationContext.McpInvocationScope["providerInstanceId"];
+  readonly providerInstanceId: McpInvocationContext.McpThreadCaller["providerInstanceId"];
   readonly clientId: string;
   readonly connectionId: ClientConnection["connectionId"];
   readonly requestId: string;
@@ -159,8 +161,8 @@ const selectorDiagnosticsFromInput = (
   return {};
 };
 
-const hostAssignmentKey = (scope: McpInvocationContext.McpInvocationScope): string =>
-  `${scope.environmentId}\u0000${scope.providerSessionId}`;
+const hostAssignmentKey = (scope: McpInvocationContext.McpThreadInvocationScope): string =>
+  `${scope.environmentId}\u0000${scope.thread.providerSessionId}`;
 
 const isPreviewTabId = Schema.is(PreviewTabId);
 
@@ -376,6 +378,7 @@ export const make = Effect.gen(function* PreviewAutomationBrokerMake() {
       environmentId: host.environmentId,
       supportedOperations: new Set(host.supportedOperations ?? PREVIEW_AUTOMATION_V1_OPERATIONS),
       focused: false,
+      liveTabs: [],
       focusOrder: 0,
       queue,
     };
@@ -432,6 +435,7 @@ export const make = Effect.gen(function* PreviewAutomationBrokerMake() {
       clients.set(host.clientId, {
         ...currentHost,
         focused: host.focused,
+        liveTabs: host.liveTabs ?? currentHost.liveTabs,
         focusOrder: host.focused ? focusSequence : currentHost.focusOrder,
       });
       return { ...current, clients, focusSequence };
@@ -492,6 +496,13 @@ export const make = Effect.gen(function* PreviewAutomationBrokerMake() {
       // operation is not silently moved to a newer client: the caller gets a
       // capability failure and can deliberately start a fresh provider
       // session. A dead lease is pruned above and may fail over.
+      const ownsTargetTab = (host: ClientConnection, visibleOnly = false) =>
+        host.liveTabs.some(
+          (tab) =>
+            tab.threadId === input.scope.thread.threadId &&
+            (!visibleOnly || tab.visible === true) &&
+            (input.tabId === undefined || tab.tabId === input.tabId),
+        );
       const connection =
         hasLiveAssignment && supportsOperation(assignedConnection, input.operation)
           ? assignedConnection
@@ -505,7 +516,8 @@ export const make = Effect.gen(function* PreviewAutomationBrokerMake() {
                 )
                 .sort(
                   (left, right) =>
-                    right.supportedOperations.size - left.supportedOperations.size ||
+                    Number(ownsTargetTab(right, true)) - Number(ownsTargetTab(left, true)) ||
+                    Number(ownsTargetTab(right)) - Number(ownsTargetTab(left)) ||
                     Number(right.focused) - Number(left.focused) ||
                     right.focusOrder - left.focusOrder,
                 )[0];
@@ -534,9 +546,9 @@ export const make = Effect.gen(function* PreviewAutomationBrokerMake() {
       const context: PreviewAutomationRequestErrorContext = {
         operation: input.operation,
         environmentId: input.scope.environmentId,
-        threadId: input.scope.threadId,
-        providerSessionId: input.scope.providerSessionId,
-        providerInstanceId: input.scope.providerInstanceId,
+        threadId: input.scope.thread.threadId,
+        providerSessionId: input.scope.thread.providerSessionId,
+        providerInstanceId: input.scope.thread.providerInstanceId,
         clientId: connection.clientId,
         connectionId: connection.connectionId,
         requestId,
@@ -555,9 +567,9 @@ export const make = Effect.gen(function* PreviewAutomationBrokerMake() {
       return yield* new PreviewAutomationNoAvailableHostError({
         operation: input.operation,
         environmentId: input.scope.environmentId,
-        threadId: input.scope.threadId,
-        providerSessionId: input.scope.providerSessionId,
-        providerInstanceId: input.scope.providerInstanceId,
+        threadId: input.scope.thread.threadId,
+        providerSessionId: input.scope.thread.providerSessionId,
+        providerInstanceId: input.scope.thread.providerInstanceId,
       });
     }
     const { connection, requestId, requestContext, requestSequence } = route;
@@ -583,7 +595,7 @@ export const make = Effect.gen(function* PreviewAutomationBrokerMake() {
           connectionId: connection.connectionId,
           request: {
             requestId,
-            threadId: input.scope.threadId,
+            threadId: input.scope.thread.threadId,
             tabId: requestContext.tabId,
             tabIdExplicit: input.tabId !== undefined,
             operation: input.operation,

@@ -1,4 +1,4 @@
-import { type ApprovalRequestId } from "@t3tools/contracts";
+import { type RuntimeRequestId } from "@t3tools/contracts";
 import { memo, useCallback, useEffect, useRef, useState } from "react";
 import { type PendingUserInput } from "../../session-logic";
 import {
@@ -19,15 +19,17 @@ import { ComposerBanner } from "./ComposerBanner";
 
 interface PendingUserInputPanelProps {
   pendingUserInputs: PendingUserInput[];
-  respondingRequestIds: ApprovalRequestId[];
+  respondingRequestIds: RuntimeRequestId[];
   answers: Record<string, PendingUserInputDraftAnswer>;
   questionIndex: number;
   onToggleOption: (questionId: string, optionValue: string) => void;
   onAdvance: () => void;
-  onDismiss: (requestId: ApprovalRequestId) => void;
+  onDismiss: (requestId: RuntimeRequestId) => void;
 }
 
-function isAuthStrategyQuestion(question: PendingUserInput["questions"][number]): boolean {
+function isAuthStrategyQuestion(
+  question: Pick<PendingUserInput["questions"][number], "id" | "header" | "options">,
+): boolean {
   const id = question.id.toLowerCase();
   const header = question.header.toLowerCase();
   const labels = question.options.map((option) => option.label.toLowerCase());
@@ -96,8 +98,11 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
   questionIndex: number;
   onToggleOption: (questionId: string, optionValue: string) => void;
   onAdvance: () => void;
-  onDismiss: (requestId: ApprovalRequestId) => void;
+  onDismiss: (requestId: RuntimeRequestId) => void;
 }) {
+  // Message-mode requests remain answerable after their provider turn ends.
+  const canRespond = prompt.responseCapability !== "not_resumable";
+  const responseDisabled = isResponding || !canRespond;
   const progress = derivePendingUserInputProgress(prompt.questions, answers, questionIndex);
   const activeQuestion = progress.activeQuestion;
   const autoAdvanceTimerRef = useRef<number | null>(null);
@@ -173,7 +178,7 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
   // select prompts keep the existing auto-advance behavior. Collapsed prompts opt
   // out, since the numbers they refer to are not on screen.
   useEffect(() => {
-    if (!activeQuestion || isResponding || isCollapsed) return;
+    if (!activeQuestion || responseDisabled || isCollapsed) return;
     const handler = (event: globalThis.KeyboardEvent) => {
       if (event.metaKey || event.ctrlKey || event.altKey) return;
       const target = event.target;
@@ -197,7 +202,7 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
     };
     document.addEventListener("keydown", handler);
     return () => document.removeEventListener("keydown", handler);
-  }, [activeQuestion, handleOptionSelection, isCollapsed, isResponding]);
+  }, [activeQuestion, handleOptionSelection, isCollapsed, responseDisabled]);
 
   if (!activeQuestion) {
     return null;
@@ -243,7 +248,7 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
             </span>
           )}
           {prompt.questions.length > 1 ? (
-            <span className="text-[10px] font-medium text-muted-foreground tabular-nums">
+            <span className="text-3xs font-medium text-muted-foreground tabular-nums">
               {questionIndex + 1}/{prompt.questions.length}
             </span>
           ) : null}
@@ -339,7 +344,7 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
                   <div className="min-w-0 flex-1 flex flex-col gap-0.5">
                     <span className="text-sm font-medium">{option.label}</span>
                     {option.description && option.description !== option.label ? (
-                      <span className="text-secondary-label text-[11px]">{option.description}</span>
+                      <span className="text-secondary-label text-2xs">{option.description}</span>
                     ) : null}
                   </div>
                   {isSelected ? (

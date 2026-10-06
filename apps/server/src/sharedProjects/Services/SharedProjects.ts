@@ -37,7 +37,7 @@ import * as Context from "effect/Context";
 import * as Data from "effect/Data";
 import type * as Effect from "effect/Effect";
 
-import type { OrchestrationEngineService } from "../../orchestration/Services/OrchestrationEngine.ts";
+import type { EventSinkV2 } from "../../orchestration-v2/EventSink.ts";
 import type * as ProcessRunner from "../../processRunner.ts";
 import type { AuthenticatedUser } from "../../userAuth/Services/UserAuth.ts";
 
@@ -101,7 +101,7 @@ export interface SharedProjectsShape {
   ) => Effect.Effect<
     ImportSharedThreadResult,
     SharedProjectsError,
-    OrchestrationEngineService | ProcessRunner.ProcessRunner
+    EventSinkV2 | ProcessRunner.ProcessRunner
   >;
   readonly importThreadFromLink: (
     user: AuthenticatedUser,
@@ -109,7 +109,7 @@ export interface SharedProjectsShape {
   ) => Effect.Effect<
     ImportSharedThreadResult,
     SharedProjectsError,
-    OrchestrationEngineService | ProcessRunner.ProcessRunner
+    EventSinkV2 | ProcessRunner.ProcessRunner
   >;
   readonly resolveSharedThreadShare: (
     user: AuthenticatedUser,

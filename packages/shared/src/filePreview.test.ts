@@ -15,7 +15,7 @@ import {
 } from "./filePreview.ts";
 
 describe("workspace file previews", () => {
-  it.each(["report.html", "report.HTM", "document.pdf?download=1"])(
+  it.each(["report.html", "report.HTM", "document#draft.pdf", "reports?old/document.pdf"])(
     "recognizes browser preview path %s",
     (path) => {
       expect(isWorkspaceBrowserPreviewPath(path)).toBe(true);
@@ -27,7 +27,9 @@ describe("workspace file previews", () => {
     "icon.png",
     "photo.JPEG",
     "animation.gif",
-    "vector.svg#mark",
+    "vector#mark.svg",
+    "photo?edited.JPEG",
+    "images#archive/icon.png",
     "texture.webp",
     "image.avif",
   ])("recognizes image preview path %s", (path) => {
@@ -44,6 +46,18 @@ describe("workspace file previews", () => {
       expect(isWorkspacePreviewEntryPath(path)).toBe(true);
     },
   );
+  it.each([
+    "src/index.ts",
+    "image.png.ts",
+    "png",
+    "image.png#notes.exe",
+    "image.svg?notes.exe",
+    "document.pdf?download=1",
+    "report.html#notes.exe",
+    "image%2Epng",
+  ])("rejects non-preview path %s", (path) => {
+    expect(isWorkspacePreviewEntryPath(path)).toBe(false);
+  });
 
   it.each(["clip.mp4", "recording.webm"])(
     "does not classify video preview path %s as image",
@@ -52,16 +66,21 @@ describe("workspace file previews", () => {
     },
   );
 
-  it.each(["README.md", "data.csv", "paper.tex", "notes.TXT", "spreadsheet.xlsx?download=1"])(
-    "recognizes document preview path %s",
-    (path) => {
-      expect(isWorkspaceExactFilePreviewPath(path)).toBe(true);
-      expect(isWorkspacePreviewEntryPath(path)).toBe(true);
-      expect(isWorkspaceImagePreviewPath(path)).toBe(false);
-      expect(isWorkspaceVideoPreviewPath(path)).toBe(false);
-      expect(isWorkspaceBrowserPreviewPath(path)).toBe(false);
-    },
-  );
+  it.each([
+    "README.md",
+    "data.csv",
+    "paper.tex",
+    "notes.TXT",
+    "spreadsheet?draft.xlsx",
+    "image.png#notes.txt",
+    "image.svg?notes.txt",
+  ])("recognizes document preview path %s", (path) => {
+    expect(isWorkspaceExactFilePreviewPath(path)).toBe(true);
+    expect(isWorkspacePreviewEntryPath(path)).toBe(true);
+    expect(isWorkspaceImagePreviewPath(path)).toBe(false);
+    expect(isWorkspaceVideoPreviewPath(path)).toBe(false);
+    expect(isWorkspaceBrowserPreviewPath(path)).toBe(false);
+  });
 
   it.each(["src/index.ts", "image.png.ts", "png"])("rejects non-preview path %s", (path) => {
     expect(isWorkspacePreviewEntryPath(path)).toBe(false);

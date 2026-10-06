@@ -60,6 +60,9 @@ const baselineFor = (filename: string): number => {
   return 0;
 };
 
+// The lint config can set `maxOccurrences` per file to track existing manual
+// runners as debt. The rule permits no net-new occurrences in those files,
+// while every other test file must have zero.
 const readMaxOccurrences = (options: ReadonlyArray<unknown>): number => {
   const [first] = options;
   return typeof first === "object" &&

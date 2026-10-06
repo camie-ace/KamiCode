@@ -11,11 +11,11 @@ import {
   ProviderInteractionMode,
   RuntimeMode,
   ThreadId,
-  ThreadTurnStartCommand,
+  ThreadStartedBy,
+  OrchestrationMessageContext,
   TrimmedNonEmptyString,
   TurnDispatchPolicy,
   PositiveInt,
-  type OrchestrationCommand,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import type * as Effect from "effect/Effect";
@@ -51,12 +51,14 @@ export const ProjectTriggerBootstrapCreateThread = Schema.Struct({
   branch: Schema.NullOr(TrimmedNonEmptyString),
   worktreePath: Schema.NullOr(TrimmedNonEmptyString),
   createdAt: IsoDateTime,
+  startedBy: Schema.optional(ThreadStartedBy),
 });
 export type ProjectTriggerBootstrapCreateThread = typeof ProjectTriggerBootstrapCreateThread.Type;
 
 export const ProjectTriggerBootstrapPrepareWorktree = Schema.Struct({
   projectCwd: TrimmedNonEmptyString,
   baseBranch: TrimmedNonEmptyString,
+  startFromOrigin: Schema.optional(Schema.Boolean),
   branch: Schema.optional(TrimmedNonEmptyString),
 });
 export type ProjectTriggerBootstrapPrepareWorktree =
@@ -69,10 +71,27 @@ export const ProjectTriggerBootstrap = Schema.Struct({
 });
 export type ProjectTriggerBootstrap = typeof ProjectTriggerBootstrap.Type;
 
-export type ProjectTriggerTurnStartCommand = Extract<
-  OrchestrationCommand,
-  { readonly type: "thread.turn.start" }
->;
+// Keep the durable V1 job format readable; dispatch translates it to the V2 engine.
+export const ProjectTriggerTurnStartCommand = Schema.Struct({
+  type: Schema.Literal("thread.turn.start"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  message: Schema.Struct({
+    messageId: MessageId,
+    role: Schema.Literal("user"),
+    text: Schema.String,
+    attachments: Schema.Array(ChatAttachment),
+    context: Schema.optional(OrchestrationMessageContext),
+  }),
+  modelSelection: Schema.optional(ModelSelection),
+  titleSeed: Schema.optional(TrimmedNonEmptyString),
+  runtimeMode: RuntimeMode,
+  interactionMode: ProviderInteractionMode,
+  dispatchPolicy: Schema.optional(TurnDispatchPolicy),
+  bootstrap: Schema.optional(ProjectTriggerBootstrap),
+  createdAt: IsoDateTime,
+});
+export type ProjectTriggerTurnStartCommand = typeof ProjectTriggerTurnStartCommand.Type;
 
 export const ProjectTriggerRow = Schema.Struct({
   triggerId: ProjectTriggerId,
@@ -120,7 +139,7 @@ export const ProjectTriggerRunRow = Schema.Struct({
   commandId: CommandId,
   threadId: ThreadId,
   messageId: MessageId,
-  command: ThreadTurnStartCommand,
+  command: ProjectTriggerTurnStartCommand,
   resultSequence: Schema.NullOr(Schema.Number),
   failureDetail: Schema.NullOr(TrimmedNonEmptyString),
   skipReason: Schema.NullOr(TrimmedNonEmptyString),

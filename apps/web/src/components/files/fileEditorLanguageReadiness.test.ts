@@ -40,6 +40,7 @@ const source = "export const View = () => <div>Ready</div>;";
 let pool: WorkerPoolManager;
 let renderer: FileRenderer;
 let terminationPromises: Promise<number>[];
+const pendingAnimationFrames = new Set<ReturnType<typeof setImmediate>>();
 
 class WorkerTransport {
   private readonly worker = new NodeWorkerThreads.Worker(
@@ -96,10 +97,18 @@ function firstEnter(highlighter: DiffsHighlighter, file: FileContents, language:
 
 beforeEach(async () => {
   terminationPromises = [];
-  vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) =>
-    setImmediate(() => callback(0)),
-  );
-  vi.stubGlobal("cancelAnimationFrame", clearImmediate);
+  vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+    const handle = setImmediate(() => {
+      pendingAnimationFrames.delete(handle);
+      callback(0);
+    });
+    pendingAnimationFrames.add(handle);
+    return handle;
+  });
+  vi.stubGlobal("cancelAnimationFrame", (handle: ReturnType<typeof setImmediate>) => {
+    pendingAnimationFrames.delete(handle);
+    clearImmediate(handle);
+  });
   vi.stubGlobal("window", { matchMedia: () => ({ matches: true }) });
   await disposeHighlighter();
   pool = new WorkerPoolManager(
@@ -121,6 +130,8 @@ afterEach(async () => {
   // installed, otherwise the full parallel suite can observe a late callback
   // after vi.unstubAllGlobals() and report an unhandled exception.
   await new Promise<void>((resolve) => setImmediate(resolve));
+  for (const handle of pendingAnimationFrames) clearImmediate(handle);
+  pendingAnimationFrames.clear();
   vi.unstubAllGlobals();
 });
 

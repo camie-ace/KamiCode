@@ -61,6 +61,7 @@ interface TriggerFormState {
   readonly name: string;
   readonly description: string;
   readonly schedule: string;
+  readonly onceAt?: string;
   readonly prompt: string;
   readonly enabled: boolean;
   readonly timezone: string;
@@ -107,6 +108,7 @@ function triggerFormFromTrigger(
     name: trigger.name,
     description: trigger.description ?? "",
     schedule: trigger.schedule,
+    ...(trigger.onceAt ? { onceAt: trigger.onceAt } : {}),
     prompt: trigger.prompt ?? "",
     enabled: trigger.enabled,
     timezone: trigger.timezone ?? defaultTimezone(),
@@ -119,6 +121,7 @@ function mutationFromForm(form: TriggerFormState): ProjectTriggerMutationInput {
     name: form.name.trim(),
     description: form.description.trim() ? form.description.trim() : null,
     schedule: form.schedule.trim(),
+    ...(form.onceAt ? { onceAt: form.onceAt.trim() } : {}),
     prompt: form.prompt.trim(),
     enabled: form.enabled,
     timezone: form.timezone.trim() ? form.timezone.trim() : null,
@@ -135,6 +138,7 @@ function mutationFromTrigger(
     name: trigger.name,
     description: trigger.description ?? null,
     schedule: trigger.schedule,
+    ...(trigger.onceAt ? { onceAt: trigger.onceAt } : {}),
     prompt: trigger.prompt ?? "",
     enabled,
     timezone: trigger.timezone ?? null,
@@ -317,8 +321,12 @@ export default function ProjectTriggersSection({
         setValidationError("Name is required.");
         return;
       }
-      if (!mutation.schedule) {
+      if (!mutation.schedule && !mutation.onceAt) {
         setValidationError("Schedule is required.");
+        return;
+      }
+      if (mutation.onceAt && !Number.isFinite(Date.parse(mutation.onceAt))) {
+        setValidationError("Enter a valid date and time with timezone.");
         return;
       }
       if (!mutation.prompt) {
@@ -710,13 +718,20 @@ export default function ProjectTriggersSection({
               </div>
               <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_11rem]">
                 <div className="space-y-1.5">
-                  <Label htmlFor="project-trigger-schedule">Schedule</Label>
+                  <Label htmlFor="project-trigger-schedule">
+                    {form.onceAt !== undefined ? "Scheduled date and time (ISO 8601)" : "Schedule"}
+                  </Label>
                   <Input
                     id="project-trigger-schedule"
                     placeholder="0 9 * * 1-5"
-                    value={form.schedule}
+                    value={form.onceAt ?? form.schedule}
                     onChange={(event) =>
-                      setForm((current) => ({ ...current, schedule: event.currentTarget.value }))
+                      setForm((current) => ({
+                        ...current,
+                        ...(current.onceAt !== undefined
+                          ? { onceAt: event.currentTarget.value }
+                          : { schedule: event.currentTarget.value }),
+                      }))
                     }
                   />
                 </div>

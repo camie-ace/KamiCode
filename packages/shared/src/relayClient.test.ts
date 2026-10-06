@@ -14,11 +14,7 @@ import { HttpClient, HttpClientResponse } from "effect/unstable/http";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import { HostProcessArchitecture, HostProcessPlatform } from "./hostProcess.ts";
 
-import {
-  RelayClientInstallError,
-  CLOUDFLARED_VERSION,
-  makeCloudflaredRelayClient,
-} from "./relayClient.ts";
+import * as RelayClient from "./relayClient.ts";
 
 const testArch = "x64";
 
@@ -86,7 +82,7 @@ describe("RelayClient", () => {
       const overridePath = NodePath.join(baseDir, "override-cloudflared");
       yield* fileSystem.writeFileString(overridePath, "override");
       yield* fileSystem.chmod(overridePath, 0o755);
-      const manager = yield* makeCloudflaredRelayClient({
+      const manager = yield* RelayClient.makeCloudflaredRelayClient({
         baseDir,
       });
 
@@ -103,7 +99,7 @@ describe("RelayClient", () => {
         status: "available",
         executablePath: overridePath,
         source: "override",
-        version: CLOUDFLARED_VERSION,
+        version: RelayClient.CLOUDFLARED_VERSION,
       });
     }).pipe(
       Effect.scoped,
@@ -126,7 +122,7 @@ describe("RelayClient", () => {
         prefix: "t3-cloudflared-test-",
       });
       const bytes = new TextEncoder().encode("test-cloudflared-binary");
-      const manager = yield* makeCloudflaredRelayClient({
+      const manager = yield* RelayClient.makeCloudflaredRelayClient({
         baseDir,
         releaseAsset: {
           url: "https://example.test/cloudflared",
@@ -147,7 +143,7 @@ describe("RelayClient", () => {
         baseDir,
         "tools",
         "cloudflared",
-        CLOUDFLARED_VERSION,
+        RelayClient.CLOUDFLARED_VERSION,
         `${platform}-${testArch}`,
         cloudflaredExecutableName(platform),
       );
@@ -155,7 +151,7 @@ describe("RelayClient", () => {
         status: "available",
         executablePath: managedPath,
         source: "managed",
-        version: CLOUDFLARED_VERSION,
+        version: RelayClient.CLOUDFLARED_VERSION,
       });
       expect(new TextDecoder().decode(yield* fileSystem.readFile(managedPath))).toBe(
         "test-cloudflared-binary",
@@ -189,7 +185,7 @@ describe("RelayClient", () => {
       const baseDir = yield* fileSystem.makeTempDirectoryScoped({
         prefix: "t3-cloudflared-test-",
       });
-      const manager = yield* makeCloudflaredRelayClient({
+      const manager = yield* RelayClient.makeCloudflaredRelayClient({
         baseDir,
         releaseAsset: {
           url: "https://example.test/cloudflared",
@@ -199,7 +195,7 @@ describe("RelayClient", () => {
       });
 
       const error = yield* manager.install.pipe(Effect.flip);
-      expect(error).toBeInstanceOf(RelayClientInstallError);
+      expect(error).toBeInstanceOf(RelayClient.RelayClientInstallError);
       expect(error.reason).toBe("invalid_checksum");
     }).pipe(
       Effect.scoped,
@@ -222,7 +218,7 @@ describe("RelayClient", () => {
       const baseDir = yield* fileSystem.makeTempDirectoryScoped({
         prefix: "t3-cloudflared-test-",
       });
-      const manager = yield* makeCloudflaredRelayClient({
+      const manager = yield* RelayClient.makeCloudflaredRelayClient({
         baseDir,
         releaseAsset: {
           url: "https://example.test/cloudflared",
@@ -259,13 +255,13 @@ describe("RelayClient", () => {
       });
       const binDir = NodePath.join(baseDir, "bin");
       const executablePath = NodePath.join(binDir, cloudflaredExecutableName(platform));
-      const manager = yield* makeCloudflaredRelayClient({
+      const manager = yield* RelayClient.makeCloudflaredRelayClient({
         baseDir,
       });
 
       expect(yield* manager.resolve).toEqual({
         status: "missing",
-        version: CLOUDFLARED_VERSION,
+        version: RelayClient.CLOUDFLARED_VERSION,
       });
 
       yield* fileSystem.makeDirectory(binDir);
@@ -277,7 +273,7 @@ describe("RelayClient", () => {
         status: "available",
         executablePath,
         source: "path",
-        version: CLOUDFLARED_VERSION,
+        version: RelayClient.CLOUDFLARED_VERSION,
       });
     }).pipe(
       Effect.scoped,

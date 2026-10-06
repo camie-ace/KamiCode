@@ -1,8 +1,5 @@
-import { projectQuestionToolInput } from "@t3tools/shared/toolActivity";
 import type {
-  OrchestrationEvent,
   OrchestrationThreadActivity,
-  OrchestrationThreadDetailSnapshot,
 } from "@t3tools/contracts";
 import { isWorkspaceImagePreviewPath } from "@t3tools/shared/filePreview";
 import { extractJsonObject } from "@t3tools/shared/schemaJson";
@@ -644,47 +641,36 @@ function dropSupersededToolUpdatedActivities(
   });
 }
 
-export function projectThreadDetailSnapshot(
-  snapshot: OrchestrationThreadDetailSnapshot,
-  reasoningMessages = true,
-): OrchestrationThreadDetailSnapshot {
-  return {
-    ...snapshot,
-    thread: {
-      ...snapshot.thread,
-      messages: reasoningMessages
-        ? snapshot.thread.messages
-        : snapshot.thread.messages.map((message) =>
-            message.role === "reasoning" ? { ...message, role: "system" as const } : message,
-          ),
-      activities: dropSupersededToolUpdatedActivities(
-        dropStaleContextWindowActivities(snapshot.thread.activities),
-      ).map(projectActivityPayload),
-    },
-  };
-}
 
-export function projectActivityEvent(
-  event: OrchestrationEvent,
-  reasoningMessages = true,
-): OrchestrationEvent {
-  // Preserve sequence watermarks and message identities for clients whose role
-  // decoder predates reasoning. Filtering would strand their history pages.
-  if (
-    !reasoningMessages &&
-    event.type === "thread.message-sent" &&
-    event.payload.role === "reasoning"
-  ) {
-    return { ...event, payload: { ...event.payload, role: "system" } };
-  }
-  if (event.type !== "thread.activity-appended") {
-    return event;
-  }
+function projectQuestionToolInput(data: Record<string, unknown>, title: unknown) {
+  const item = asRecord(data.item);
+  const toolName = data.toolName ?? data.tool ?? item?.tool ?? title;
+  if (typeof toolName !== "string") return {};
+  const name = toolName
+    .split(/__|[./]/)
+    .at(-1)
+    ?.replace(/[_\s]/g, "")
+    .toLowerCase();
+  if (!name || !/^(askuserquestion|requestuserinput(?:async)?|askquestion|question)$/.test(name))
+    return {};
+  const input = asRecord(
+    data.input ?? data.rawInput ?? asRecord(data.state)?.input ?? item?.arguments,
+  );
+  const questions = input?.questions ?? asRecord(input?.params)?.questions;
+  if (!Array.isArray(questions)) return {};
+  // Clients match native tools to the canonical question; choices and answers
+  // already live on the user-input activities and need not cross the wire twice.
   return {
-    ...event,
-    payload: {
-      ...event.payload,
-      activity: projectActivityPayload(event.payload.activity),
+    toolName,
+    input: {
+      questions: questions.map((value) => {
+        const question = asRecord(value);
+        return {
+          question: asTrimmedString(
+            question?.question ?? question?.question_text ?? question?.prompt ?? question?.title,
+          ),
+        };
+      }),
     },
   };
 }

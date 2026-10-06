@@ -33,24 +33,23 @@ function makeThread(input: {
   return {
     environmentId: "env-1" as CompletionAlertThread["environmentId"],
     id: threadId,
-    latestTurn: input.turn
+    latestRun: input.turn
       ? {
-          turnId: input.turn.turnId as never,
-          state: input.turn.state,
+          runId: input.turn.turnId as never,
+          status: input.turn.state === "error" ? "failed" : input.turn.state,
           requestedAt: "2026-06-03T10:00:00.000Z",
           startedAt: "2026-06-03T10:00:01.000Z",
           completedAt: input.turn.completedAt,
           assistantMessageId: null,
         }
       : null,
-    session: session
+    runtime: session
       ? {
-          threadId,
-          status: session.status ?? "ready",
+          status:
+            session.status === "starting" || session.status === "running" ? session.status : "idle",
           providerName: "codex",
           providerInstanceId: "codex" as never,
-          runtimeMode: "full-access",
-          activeTurnId: session.activeTurnId as never,
+          activeRunId: (session.activeTurnId ?? null) as never,
           lastError: null,
           updatedAt: "2026-06-03T10:01:00.000Z",
         }

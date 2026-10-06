@@ -143,6 +143,7 @@ function triggerSummary(row: ProjectTriggerRow): unknown {
     schedule: {
       kind: row.scheduleKind,
       expression: row.scheduleCron,
+      ...(row.scheduleKind === "once" ? { at: row.scheduleOnceAt } : {}),
       timezone: row.timezone,
       runtime: row.runtimeTarget,
     },

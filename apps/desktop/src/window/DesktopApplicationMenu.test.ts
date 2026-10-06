@@ -3,7 +3,6 @@ import { assert, describe, it } from "@effect/vitest";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import * as Option from "effect/Option";
 
 import type * as Electron from "electron";
 import type { DesktopUpdateState } from "@t3tools/contracts";
@@ -52,7 +51,7 @@ const electronAppLayer = Layer.succeed(ElectronApp.ElectronApp, {
 } satisfies ElectronApp.ElectronApp["Service"]);
 
 const electronDialogShape = {
-  pickFolder: () => Effect.succeed(Option.none()),
+  pickFolder: () => Effect.succeedNone,
   pickFiles: () => Effect.succeed([]),
   showMessageBox: () => Effect.succeed({ response: 0, checkboxChecked: false }),
   showErrorBox: () => Effect.void,
@@ -85,7 +84,7 @@ const desktopUpdatesShape = {
   isInstallActive: Effect.succeed(false),
   subscribe: Effect.die("unexpected subscribe"),
   emitState: Effect.void,
-  disabledReason: Effect.succeed(Option.none()),
+  disabledReason: Effect.succeedNone,
   configure: Effect.void,
   setChannel: () => Effect.die("unexpected setChannel"),
   check: () => Effect.die("unexpected check"),
@@ -122,7 +121,7 @@ const makeElectronMenuLayer = (
     setApplicationMenu: (template) =>
       Deferred.succeed(applicationMenuTemplate, template).pipe(Effect.asVoid),
     popupTemplate: () => Effect.void,
-    showContextMenu: () => Effect.succeed(Option.none()),
+    showContextMenu: () => Effect.succeedNone,
   } satisfies ElectronMenu.ElectronMenu["Service"]);
 
 const findMenuItem = (

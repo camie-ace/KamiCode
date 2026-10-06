@@ -56,7 +56,7 @@ export const ThreadRecurringSchedulesPanel = memo(function ThreadRecurringSchedu
         const next = await listProjectTriggers({ environmentId, projectId });
         setTriggers(next.filter((trigger) => trigger.targetThreadId === threadId));
       } catch (error) {
-        if (reportFailure) reportError("Recurring schedules unavailable", error);
+        if (reportFailure) reportError("Scheduled messages unavailable", error);
       } finally {
         setLoaded(true);
       }
@@ -92,6 +92,7 @@ export const ThreadRecurringSchedulesPanel = memo(function ThreadRecurringSchedu
               name: trigger.name,
               description: trigger.description ?? null,
               schedule: trigger.schedule,
+              ...(trigger.onceAt ? { onceAt: trigger.onceAt } : {}),
               prompt: trigger.prompt ?? "",
               enabled: !trigger.enabled,
               timezone: trigger.timezone ?? null,
@@ -120,7 +121,7 @@ export const ThreadRecurringSchedulesPanel = memo(function ThreadRecurringSchedu
           environmentId,
           trigger: { projectId, triggerId: trigger.id },
         });
-        toastManager.add({ type: "success", title: "Recurring message queued" });
+        toastManager.add({ type: "success", title: "Scheduled message queued" });
         await reload();
       } catch (error) {
         reportError("Could not run schedule", error);
@@ -155,7 +156,7 @@ export const ThreadRecurringSchedulesPanel = memo(function ThreadRecurringSchedu
     <div className="relative z-10 mb-1.5 overflow-hidden rounded-xl border border-border/70 bg-background/96 shadow-sm backdrop-blur-sm">
       <div className="flex items-center gap-2 border-b border-border/60 px-3 py-2 text-xs">
         <AlarmClockIcon className="size-3.5 text-muted-foreground" aria-hidden="true" />
-        <span className="font-medium text-foreground">Recurring schedules</span>
+        <span className="font-medium text-foreground">Scheduled messages</span>
         <span className="text-muted-foreground">{triggers.length}</span>
       </div>
       <div className="divide-y divide-border/50">
@@ -167,9 +168,11 @@ export const ThreadRecurringSchedulesPanel = memo(function ThreadRecurringSchedu
               <div className="min-w-0 flex-1">
                 <div className="truncate font-medium text-foreground/90">{trigger.prompt}</div>
                 <div className="mt-0.5 truncate text-muted-foreground">
-                  {trigger.enabled
-                    ? `Next: ${formatProjectTriggerFireTime(trigger.nextFireAt)}`
-                    : (lifecycleReason ?? "Paused")}
+                  {trigger.onceAt && trigger.lastFiredAt && !trigger.nextFireAt
+                    ? "Completed"
+                    : trigger.enabled
+                      ? `Next: ${formatProjectTriggerFireTime(trigger.nextFireAt)}`
+                      : (lifecycleReason ?? "Paused")}
                   {trigger.createdBy ? ` · @${trigger.createdBy.githubLogin}` : ""}
                 </div>
               </div>
@@ -177,9 +180,7 @@ export const ThreadRecurringSchedulesPanel = memo(function ThreadRecurringSchedu
                 size="icon-xs"
                 variant="ghost-muted"
                 disabled={pendingId !== null}
-                aria-label={
-                  trigger.enabled ? "Pause recurring schedule" : "Resume recurring schedule"
-                }
+                aria-label={trigger.enabled ? "Pause schedule" : "Resume schedule"}
                 onClick={() => void toggle(trigger)}
               >
                 {trigger.enabled ? <PauseIcon /> : <PlayIcon />}
@@ -188,7 +189,7 @@ export const ThreadRecurringSchedulesPanel = memo(function ThreadRecurringSchedu
                 size="icon-xs"
                 variant="ghost-muted"
                 disabled={pendingId !== null}
-                aria-label="Run recurring message now"
+                aria-label="Run scheduled message now"
                 onClick={() => void runNow(trigger)}
               >
                 <AlarmClockIcon className={isPending ? "animate-pulse" : undefined} />
@@ -197,7 +198,7 @@ export const ThreadRecurringSchedulesPanel = memo(function ThreadRecurringSchedu
                 size="icon-xs"
                 variant="ghost-muted"
                 disabled={pendingId !== null}
-                aria-label="Delete recurring schedule"
+                aria-label="Delete schedule"
                 onClick={() => void remove(trigger)}
               >
                 <Trash2Icon />

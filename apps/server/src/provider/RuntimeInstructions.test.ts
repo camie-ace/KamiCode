@@ -20,9 +20,25 @@ describe("buildRuntimeInstructions", () => {
     ).toContain("through the Codex harness, as custom model with high reasoning effort.");
   });
 
+  it("names the model by display name and slug when they differ", () => {
+    expect(
+      buildRuntimeInstructions({ harness: "Codex", model: "gpt-5.4", modelName: "GPT-5.4" }),
+    ).toContain("through the Codex harness, as GPT-5.4 (model slug: gpt-5.4).");
+    expect(
+      buildRuntimeInstructions({ harness: "Codex", model: "my-model", modelName: "my-model" }),
+    ).toContain("through the Codex harness, as my-model.");
+  });
+
   it.each([undefined, "", "auto", "default"])("omits unresolved model %s", (model) => {
     const instructions = buildRuntimeInstructions({ harness: "Cursor", model });
     expect(instructions).toContain("through the Cursor harness.");
     expect(instructions).not.toContain("reasoning effort");
   });
+});
+
+it.each(["Claude Code", "Cursor", "Grok", "Antigravity", "OpenCode"])("preserves KamiCode repository rules in %s", (harness) => {
+  const instructions = buildRuntimeInstructions({ harness });
+  expect(instructions).toContain("running in KamiCode");
+  expect(instructions).toContain("<repository_operating_contract");
+  expect(instructions).toContain(".camie/");
 });

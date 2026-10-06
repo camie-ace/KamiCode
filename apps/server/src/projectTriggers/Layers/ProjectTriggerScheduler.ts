@@ -6,7 +6,7 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Schedule from "effect/Schedule";
 
-import { ServerOrchestrationDispatcher } from "../../orchestration/Services/ServerOrchestrationDispatcher.ts";
+import { ServerOrchestrationDispatcher } from "../../orchestration-v2/Services/ServerOrchestrationDispatcher.ts";
 import { makeProjectTriggerRunRow } from "../commands.ts";
 import { ProjectTriggerRepository } from "../Services/ProjectTriggerRepository.ts";
 import type {
@@ -188,11 +188,19 @@ const makeProjectTriggerScheduler = (options?: ProjectTriggerSchedulerLiveOption
         claimExpiresAt,
         limit: runBatchSize,
       });
-      const dispatchOutcomes = yield* Effect.forEach(
-        claimedRuns,
-        (run) => dispatchClaimedRun(run, now),
+      // A restored queue can have several overdue jobs for one thread. Keep
+      // their claim order while allowing unrelated conversations to proceed.
+      const runsByThread = new Map<string, ProjectTriggerRunRow[]>();
+      for (const run of claimedRuns) {
+        const group = runsByThread.get(run.threadId) ?? [];
+        group.push(run);
+        runsByThread.set(run.threadId, group);
+      }
+      const dispatchOutcomes = (yield* Effect.forEach(
+        [...runsByThread.values()],
+        (runs) => Effect.forEach(runs, (run) => dispatchClaimedRun(run, now), { concurrency: 1 }),
         { concurrency: dispatchConcurrency },
-      );
+      )).flat();
 
       return {
         recoveredTriggerClaims,

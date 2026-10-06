@@ -12,12 +12,11 @@ import {
 } from "./baseSchemas.ts";
 import {
   ChatAttachment,
-  ModelSelection,
-  PROVIDER_SEND_TURN_MAX_ATTACHMENTS,
-  ProviderInteractionMode,
-  RuntimeMode,
   UploadChatAttachment,
-} from "./orchestration.ts";
+  PROVIDER_SEND_TURN_MAX_ATTACHMENTS,
+} from "./chatAttachment.ts";
+import { ModelSelection } from "./modelSelection.ts";
+import { ProviderInteractionMode, RuntimeMode } from "./providerPolicy.ts";
 import { KamiUser } from "./userAuth.ts";
 
 const PROJECT_TRIGGER_NAME_MAX_LENGTH = 160;
@@ -47,7 +46,17 @@ export const ProjectTriggerCronSchedule = Schema.Struct({
 });
 export type ProjectTriggerCronSchedule = typeof ProjectTriggerCronSchedule.Type;
 
-export const ProjectTriggerSchedule = Schema.Union([ProjectTriggerCronSchedule]);
+export const ProjectTriggerOnceSchedule = Schema.Struct({
+  kind: Schema.Literal("once"),
+  at: IsoDateTime,
+  runtime: ProjectTriggerRuntimeTarget,
+});
+export type ProjectTriggerOnceSchedule = typeof ProjectTriggerOnceSchedule.Type;
+
+export const ProjectTriggerSchedule = Schema.Union([
+  ProjectTriggerCronSchedule,
+  ProjectTriggerOnceSchedule,
+]);
 export type ProjectTriggerSchedule = typeof ProjectTriggerSchedule.Type;
 
 /** Whether an automation opens a fresh thread or queues each run in an existing one. */
@@ -79,6 +88,14 @@ export const ProjectTriggerThreadTemplate = Schema.Struct({
   modelSelection: Schema.optionalKey(ModelSelection),
   runtimeMode: Schema.optionalKey(RuntimeMode),
   interactionMode: Schema.optionalKey(ProviderInteractionMode),
+  prepareWorktree: Schema.optionalKey(
+    Schema.Struct({
+      projectCwd: TrimmedNonEmptyString,
+      baseBranch: TrimmedNonEmptyString,
+      branch: Schema.optional(TrimmedNonEmptyString),
+      startFromOrigin: Schema.optional(Schema.Boolean),
+    }),
+  ),
   branch: Schema.optionalKey(Schema.NullOr(TrimmedNonEmptyString)),
   worktreePath: Schema.optionalKey(Schema.NullOr(TrimmedNonEmptyString)),
 });

@@ -35,6 +35,7 @@ import {
   type VcsRemoveWorktreeInput,
   type VcsStatusInput,
   type VcsStatusResult,
+  type WorktreeSubmodules,
 } from "@t3tools/contracts";
 import * as ServerConfig from "../config.ts";
 import {
@@ -81,10 +82,18 @@ export interface GitStatusDetails {
   upstreamRef: string | null;
   hasWorkingTreeChanges: boolean;
   workingTree: VcsStatusResult["workingTree"];
+  branchChanges?: VcsStatusResult["branchChanges"];
   hasUpstream: boolean;
   aheadCount: number;
   behindCount: number;
   aheadOfDefaultCount: number;
+}
+
+export interface GitLocalStatusOptions {
+  /** Skip revision walks and return zero divergence counts for local-only consumers. */
+  readonly includeDivergence?: boolean;
+  /** Also read the diff panel's Changes totals. Failures leave them out. */
+  readonly includeBranchChanges?: boolean;
 }
 
 export interface GitRemoteStatusDetails {
@@ -134,6 +143,10 @@ export interface CreateWorktreeProgress {
     total: number;
   }) => Effect.Effect<void, never>;
   readonly onSubmodulesStarted?: () => Effect.Effect<void, never>;
+  /** Fires when `.gitmodules` exists but the resolved submodule mode is `"none"`. */
+  readonly onSubmodulesDisabled?: (input: {
+    source: "settings" | "t3.json";
+  }) => Effect.Effect<void, never>;
   readonly onSubmoduleLine?: (line: string) => Effect.Effect<void, never>;
   readonly onSubmodulesFinished?: (input: {
     ok: boolean;
@@ -143,6 +156,12 @@ export interface CreateWorktreeProgress {
 
 export interface CreateWorktreeOptions {
   readonly progress?: CreateWorktreeProgress;
+  /**
+   * The project-over-environment `worktreeSubmodules` setting. Null (or
+   * omitted, for callers without settings access) defers to the checkout's
+   * own t3.json.
+   */
+  readonly submodules?: WorktreeSubmodules | null;
 }
 
 export interface GitCommitProgress {
@@ -161,6 +180,14 @@ export interface GitCommitProgress {
 export interface GitCommitOptions {
   readonly timeoutMs?: number;
   readonly progress?: GitCommitProgress;
+  /** Stage the current working tree immediately before committing. */
+  readonly stage?: { readonly filePaths?: readonly string[] };
+}
+
+export interface GitDeleteLocalBranchInput {
+  readonly cwd: string;
+  readonly refName: string;
+  readonly force?: boolean;
 }
 
 export interface GitPushResult {
@@ -294,6 +321,8 @@ export interface GitRangeContext {
 }
 
 export interface GitRenameBranchInput {
+  /** Fail on a name collision instead of appending a numeric suffix. */
+  exactName?: boolean;
   cwd: string;
   oldBranch: string;
   newBranch: string;
@@ -401,7 +430,10 @@ export class GitVcsDriver extends Context.Service<
     readonly execute: (input: ExecuteGitInput) => Effect.Effect<ExecuteGitResult, GitCommandError>;
     readonly status: (input: VcsStatusInput) => Effect.Effect<VcsStatusResult, GitCommandError>;
     readonly statusDetails: (cwd: string) => Effect.Effect<GitStatusDetails, GitCommandError>;
-    readonly statusDetailsLocal: (cwd: string) => Effect.Effect<GitStatusDetails, GitCommandError>;
+    readonly statusDetailsLocal: (
+      cwd: string,
+      options?: GitLocalStatusOptions,
+    ) => Effect.Effect<GitStatusDetails, GitCommandError>;
     readonly statusDetailsRemote: (
       cwd: string,
       options?: GitRemoteStatusOptions,
@@ -487,6 +519,9 @@ export class GitVcsDriver extends Context.Service<
     readonly pruneWorktrees: (input: {
       readonly cwd: string;
     }) => Effect.Effect<void, GitCommandError>;
+    readonly deleteLocalBranch: (
+      input: GitDeleteLocalBranchInput,
+    ) => Effect.Effect<void, GitCommandError>;
     readonly renameBranch: (
       input: GitRenameBranchInput,
     ) => Effect.Effect<GitRenameBranchResult, GitCommandError>;
@@ -1205,7 +1240,7 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
           /^warning: failed to remove \.\/: [^\n]+$/.test(cleaned.stderr.trim()) &&
           (yield* fileSystem.readDirectory(input.cwd).pipe(
             Effect.map((entries) => entries.length === 0),
-            Effect.catch(() => Effect.succeed(false)),
+            Effect.orElseSucceed(() => false),
           ));
         if (!emptiedWorkspace)
           return yield* new VcsProcessExitError({

@@ -47,6 +47,7 @@ export interface ProjectTrigger {
   readonly name: string;
   readonly description?: string | null;
   readonly schedule: string;
+  readonly onceAt?: string;
   readonly enabled: boolean;
   readonly targetThreadId: ThreadId | null;
   readonly createdBy: KamiUser | null;
@@ -79,6 +80,7 @@ export interface ProjectTriggerMutationInput {
   readonly name: string;
   readonly description: string | null;
   readonly schedule: string;
+  readonly onceAt?: string;
   readonly prompt: string;
   readonly enabled: boolean;
   readonly timezone: string | null;
@@ -196,7 +198,7 @@ function toProjectTrigger(record: ContractProjectTriggerRecord): ProjectTrigger 
       : {
           expression: "",
           timezone: null,
-          executionLocation: null,
+          executionLocation: fromRuntimeTarget(record.schedule.runtime),
         };
 
   return {
@@ -205,6 +207,7 @@ function toProjectTrigger(record: ContractProjectTriggerRecord): ProjectTrigger 
     name: record.name,
     description: record.description,
     schedule: schedule.expression,
+    ...(record.schedule.kind === "once" ? { onceAt: record.schedule.at } : {}),
     enabled: record.enabled,
     targetThreadId: record.target?.kind === "thread" ? record.target.threadId : null,
     createdBy: record.createdBy ?? null,
@@ -219,6 +222,12 @@ function toProjectTrigger(record: ContractProjectTriggerRecord): ProjectTrigger 
 }
 
 function toContractSchedule(input: ProjectTriggerMutationInput) {
+  if (input.onceAt)
+    return {
+      kind: "once" as const,
+      at: input.onceAt,
+      runtime: toRuntimeTarget(input.executionLocation),
+    };
   return {
     kind: "cron" as const,
     expression: input.schedule,

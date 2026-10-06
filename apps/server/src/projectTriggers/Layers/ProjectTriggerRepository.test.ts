@@ -1,3 +1,4 @@
+import * as Schema from "effect/Schema";
 import { MessageId, ProjectId, ProviderInstanceId, ThreadId } from "@t3tools/contracts";
 import { assert, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
@@ -266,17 +267,17 @@ layer("ProjectTriggerRepository", (it) => {
       const deletedThreadId = ThreadId.make("thread-deleted");
       const missingThreadId = ThreadId.make("thread-missing");
 
-      yield* sql`
-        INSERT INTO projection_threads (
-          thread_id, project_id, title, model_selection_json, created_at, updated_at,
-          deleted_at, archived_at, settled_override, settled_at
-        ) VALUES
-          (${activeThreadId}, ${projectId}, 'Active', NULL, '2026-09-11T09:00:00.000Z', '2026-09-11T09:00:00.000Z', NULL, NULL, NULL, NULL),
-          (${settledThreadId}, ${projectId}, 'Settled', NULL, '2026-09-11T09:00:00.000Z', '2026-09-11T09:00:00.000Z', NULL, NULL, 'settled', '2026-09-11T10:00:00.000Z'),
-          (${autoSettledThreadId}, ${projectId}, 'Auto settled', NULL, '2026-09-11T09:00:00.000Z', '2026-09-11T09:00:00.000Z', NULL, NULL, NULL, '2026-09-11T10:00:00.000Z'),
-          (${archivedThreadId}, ${projectId}, 'Archived', NULL, '2026-09-11T09:00:00.000Z', '2026-09-11T09:00:00.000Z', NULL, '2026-09-11T10:00:00.000Z', NULL, NULL),
-          (${deletedThreadId}, ${projectId}, 'Deleted', NULL, '2026-09-11T09:00:00.000Z', '2026-09-11T09:00:00.000Z', '2026-09-11T10:00:00.000Z', NULL, NULL, NULL)
-      `;
+      for (const [threadId, lifecycle] of [
+        [activeThreadId, {}],
+        [settledThreadId, { settledOverride: "settled", settledAt: "2026-09-11T10:00:00.000Z" }],
+        [autoSettledThreadId, { settledAt: "2026-09-11T10:00:00.000Z" }],
+        [archivedThreadId, { archivedAt: "2026-09-11T10:00:00.000Z" }],
+        [deletedThreadId, { deletedAt: "2026-09-11T10:00:00.000Z" }],
+      ] as const) {
+        yield* sql`INSERT INTO orchestration_v2_projection_threads
+          (thread_id, project_id, title, default_provider, runtime_mode, interaction_mode, created_at, updated_at, archived_at, deleted_at, payload_json)
+          VALUES (${threadId}, ${projectId}, 'Scheduled thread', 'codex', 'full-access', 'default', '2026-09-11T09:00:00.000Z', '2026-09-11T09:00:00.000Z', ${"archivedAt" in lifecycle ? lifecycle.archivedAt : null}, ${"deletedAt" in lifecycle ? lifecycle.deletedAt : null}, ${yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(lifecycle)})`;
+      }
 
       const makeTrigger = (name: string, targetThreadId: ThreadId) => ({
         triggerId: ProjectTriggerId.make(`trigger-${name}`),

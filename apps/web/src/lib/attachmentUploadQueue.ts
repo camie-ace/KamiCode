@@ -12,15 +12,19 @@ import {
   type PersistedAttachmentVerification,
 } from "@t3tools/client-runtime/state/attachments";
 import { create } from "zustand";
+import * as Option from "effect/Option";
+import { AsyncResult } from "effect/unstable/reactivity";
 
 import {
   DraftId,
   useComposerDraftStore,
   type ComposerFileAttachment,
   type ComposerImageAttachment,
+  type ComposerVideoAttachment,
   type ComposerThreadTarget,
 } from "../composerDraftStore";
 import { appAtomRegistry } from "../rpc/atomRegistry";
+import { environmentCatalog } from "../connection/catalog";
 import { assetEnvironment } from "../state/assets";
 import { attachmentEnvironment } from "../state/attachments";
 import { readPreparedConnection } from "../state/session";
@@ -38,7 +42,7 @@ export const useAttachmentUploadStore = create<AttachmentUploadStore>(() => ({
 }));
 
 interface UploadJob {
-  readonly image: ComposerImageAttachment | ComposerFileAttachment;
+  readonly image: ComposerImageAttachment | ComposerVideoAttachment | ComposerFileAttachment;
   readonly environmentId: EnvironmentId;
   /**
    * The draft that owned this file when the job started. Completion resolves
@@ -58,8 +62,10 @@ interface UploadJob {
   attachmentId: string | null;
   cancelled: boolean;
   abort: (() => void) | null;
+  stopWatchingConnection: () => void;
 }
 
+// Failed jobs retain their source and connection subscription until retry or release.
 const jobsByImageId = new Map<string, UploadJob>();
 const queue: UploadJob[] = [];
 const activeUploadsByEnvironment = new Map<EnvironmentId, number>();
@@ -229,7 +235,7 @@ async function runUpload(job: UploadJob): Promise<void> {
   }
 
   const mimeType =
-    job.image.type === "file"
+    job.image.type !== "image"
       ? job.image.mimeType.toLowerCase()
       : PROVIDER_SEND_TURN_SUPPORTED_IMAGE_MIME_TYPES.find(
           (supportedMimeType) => supportedMimeType === job.image.mimeType.toLowerCase(),
@@ -261,7 +267,7 @@ async function runUpload(job: UploadJob): Promise<void> {
     remove: attachmentEnvironment.remove,
     environmentId: job.environmentId,
     upload: {
-      ...(job.image.type === "file" ? { type: "file" as const } : {}),
+      ...(job.image.type !== "image" ? { type: "file" as const } : {}),
       name: job.image.name,
       mimeType,
       sizeBytes: file.size,
@@ -358,7 +364,11 @@ function pumpUploads(): void {
         }
       })
       .finally(() => {
-        if (jobsByImageId.get(job.image.id) === job) {
+        if (
+          jobsByImageId.get(job.image.id) === job &&
+          readAttachmentUpload(job.image.id)?.status !== "failed"
+        ) {
+          job.stopWatchingConnection();
           jobsByImageId.delete(job.image.id);
         }
         const remaining = (activeUploadsByEnvironment.get(job.environmentId) ?? 1) - 1;
@@ -375,7 +385,7 @@ function pumpUploads(): void {
 
 export function startAttachmentUpload(input: {
   readonly environmentId: EnvironmentId;
-  readonly image: ComposerImageAttachment | ComposerFileAttachment;
+  readonly image: ComposerImageAttachment | ComposerVideoAttachment | ComposerFileAttachment;
   /** Draft that owns the file; lets a background completion persist its ids. */
   readonly draftTarget?: ComposerThreadTarget;
 }): void {
@@ -427,9 +437,34 @@ export function startAttachmentUpload(input: {
     attachmentId: null,
     cancelled: false,
     abort: null,
+    stopWatchingConnection: () => {},
   };
 
   jobsByImageId.set(input.image.id, job);
+  const connectionAtom = environmentCatalog.stateAtom(job.environmentId);
+  const isConnected = () =>
+    Option.exists(
+      AsyncResult.value(appAtomRegistry.get(connectionAtom)),
+      (state) => state.phase === "connected",
+    );
+  let wasConnected = isConnected();
+  job.stopWatchingConnection = appAtomRegistry.subscribe(connectionAtom, () => {
+    const connected = isConnected();
+    const reconnected = connected && !wasConnected;
+    wasConnected = connected;
+    if (!reconnected) return;
+    // The HTTP failure can arrive after the socket has already reconnected.
+    // Wait for that attempt, then retry only if this job still owns the file.
+    void job.settled.then(() => {
+      if (
+        jobsByImageId.get(job.image.id) === job &&
+        readAttachmentUpload(job.image.id)?.status === "failed" &&
+        isConnected()
+      ) {
+        retryAttachmentUpload(input);
+      }
+    });
+  });
   queue.push(job);
   setUploadState(input.image.id, {
     status: "uploading",
@@ -451,6 +486,7 @@ function cancelAttachmentUpload(imageId: string): void {
     return;
   }
   job.cancelled = true;
+  job.stopWatchingConnection();
   jobsByImageId.delete(imageId);
   const queuedIndex = queue.indexOf(job);
   if (queuedIndex !== -1) {
@@ -507,7 +543,7 @@ export function releasePersistedAttachmentUpload(input: {
 
 export function retryAttachmentUpload(input: {
   readonly environmentId: EnvironmentId;
-  readonly image: ComposerImageAttachment | ComposerFileAttachment;
+  readonly image: ComposerImageAttachment | ComposerVideoAttachment | ComposerFileAttachment;
   readonly draftTarget?: ComposerThreadTarget;
 }): void {
   const previous = readAttachmentUpload(input.image.id);
@@ -549,7 +585,9 @@ export async function awaitAttachmentUploads(imageIds: ReadonlyArray<string>): P
 
 export function getUploadedAttachments(input: {
   readonly environmentId: EnvironmentId;
-  readonly images: ReadonlyArray<ComposerImageAttachment | ComposerFileAttachment>;
+  readonly images: ReadonlyArray<
+    ComposerImageAttachment | ComposerVideoAttachment | ComposerFileAttachment
+  >;
 }): ChatAttachment[] | null {
   const attachments: ChatAttachment[] = [];
   for (const image of input.images) {
@@ -563,7 +601,7 @@ export function getUploadedAttachments(input: {
       name: image.name,
       mimeType: image.mimeType,
       sizeBytes: image.sizeBytes,
-      ...(image.source ? { source: image.source } : {}),
+      ...("source" in image && image.source ? { source: image.source } : {}),
     });
   }
   return attachments;
@@ -578,7 +616,7 @@ export function getUploadedAttachments(input: {
  * attachment. Every draft discard path must funnel through here.
  */
 export function releaseDraftAttachment(
-  attachment: ComposerImageAttachment | ComposerFileAttachment,
+  attachment: ComposerImageAttachment | ComposerVideoAttachment | ComposerFileAttachment,
 ): void {
   if (
     attachment.type === "file" &&
@@ -602,7 +640,9 @@ export function releaseDraftAttachment(
 }
 
 export function releaseDraftAttachments(
-  attachments: ReadonlyArray<ComposerImageAttachment | ComposerFileAttachment>,
+  attachments: ReadonlyArray<
+    ComposerImageAttachment | ComposerVideoAttachment | ComposerFileAttachment
+  >,
 ): void {
   for (const attachment of attachments) {
     releaseDraftAttachment(attachment);

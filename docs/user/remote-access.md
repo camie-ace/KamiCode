@@ -61,6 +61,35 @@ created in Settings can only be copied from the client that created them while
 its Connections page stays open. If you leave or reload that page, create
 another link to share.
 
+### Reach one machine several ways
+
+A machine can have more than one route: LAN, Tailscale, a public URL, SSH, or
+T3 Connect. To add one, choose **Add route** in the machine's route list, or
+next to it in the T3 Connect list. Pairing the same machine again over another
+address also adds a route instead of a second machine. A new route is placed by
+speed, in that order, and you can reorder routes at any time.
+
+While connected through T3 Connect or a paired address, T3 Code also learns the
+machine's current LAN and Tailscale addresses and adds them as routes, so
+pairing once through T3 Connect is enough to use the LAN at home. When the
+machine's LAN address changes, for example after it joins another Wi-Fi network,
+the learned route follows it. The machine must allow network access for its LAN
+address to be learned. You can reorder a learned route, but not remove it; it
+goes away with the route it was learned through, or when the machine stops
+reporting that address.
+
+T3 Code connects over the first route that answers. Away from home, a LAN
+address that does not answer is checked briefly and skipped. It is only tried
+again, after the other routes, if none of them connect. While connected over a
+later route, T3 Code checks the earlier ones when your network changes, when you
+return to the app, and every minute, and moves back as soon as one works.
+
+On web and desktop, select the route count under the machine's name in
+**Settings → Connections** to see its routes. Drag a route to change the order,
+or remove it. On mobile, open the machine under **Settings → Environments** and
+choose **Edit**. Signing out of T3 Connect removes only that route; a machine
+you can still reach another way stays saved.
+
 ### Balance new threads across machines
 
 Auto balance is off by default. On web and desktop, enable it in
@@ -232,7 +261,14 @@ expires.
 To remove an environment from T3 Connect, open your account menu's **T3 Connect**
 page, or **Settings → T3 Connect** on mobile, and choose **Deregister**. This
 revokes its cloud access and frees its host space even when the environment is
-offline or has been wiped.
+offline or has been wiped. Removing an environment from a device's connection
+settings only forgets it on that device; it stays registered to your account.
+
+When idle tunnel cleanup is enabled, T3 Connect removes a linked environment's
+tunnel after it stays offline for several minutes. The environment stays linked
+and keeps the same address. When the host starts again or wakes, T3 Connect
+creates a replacement tunnel on its own. You do not need to pair again. Cleanup
+usually runs five to ten minutes after the tunnel goes down.
 
 On a command-line host, `t3 connect unlink` disables exposure while retaining
 your login; `t3 connect logout` also clears that login. Background-service

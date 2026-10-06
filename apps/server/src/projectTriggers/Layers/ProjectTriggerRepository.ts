@@ -2,7 +2,6 @@ import {
   ChatAttachment,
   KamiUser,
   ModelSelection,
-  ThreadTurnStartCommand,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -30,6 +29,7 @@ import {
   ProjectTriggerRow,
   ProjectTriggerRunIdInput,
   ProjectTriggerRunRow,
+  ProjectTriggerTurnStartCommand,
   RecoverExpiredProjectTriggerClaimsInput,
   ScheduleProjectTriggerRunInput,
   UpsertProjectTriggerInput,
@@ -48,7 +48,7 @@ const ProjectTriggerDbRow = ProjectTriggerRow.mapFields(
 
 const ProjectTriggerRunDbRow = ProjectTriggerRunRow.mapFields(
   Struct.assign({
-    command: Schema.fromJsonString(ThreadTurnStartCommand),
+    command: Schema.fromJsonString(ProjectTriggerTurnStartCommand),
   }),
 );
 
@@ -303,16 +303,16 @@ const makeProjectTriggerRepository = Effect.gen(function* () {
             schedule_claim_expires_at = NULL,
             disabled_reason = CASE
               WHEN NOT EXISTS (
-                SELECT 1 FROM projection_threads thread
+                SELECT 1 FROM orchestration_v2_projection_threads thread
                 WHERE thread.thread_id = project_triggers.target_thread_id
               ) THEN 'thread-missing'
               WHEN EXISTS (
-                SELECT 1 FROM projection_threads thread
+                SELECT 1 FROM orchestration_v2_projection_threads thread
                 WHERE thread.thread_id = project_triggers.target_thread_id
                   AND thread.deleted_at IS NOT NULL
               ) THEN 'thread-deleted'
               WHEN EXISTS (
-                SELECT 1 FROM projection_threads thread
+                SELECT 1 FROM orchestration_v2_projection_threads thread
                 WHERE thread.thread_id = project_triggers.target_thread_id
                   AND thread.archived_at IS NOT NULL
               ) THEN 'thread-archived'
@@ -326,17 +326,17 @@ const makeProjectTriggerRepository = Effect.gen(function* () {
           AND (enabled = 1 OR disabled_reason IS NULL)
           AND (
             NOT EXISTS (
-              SELECT 1 FROM projection_threads thread
+              SELECT 1 FROM orchestration_v2_projection_threads thread
               WHERE thread.thread_id = project_triggers.target_thread_id
             )
             OR EXISTS (
-              SELECT 1 FROM projection_threads thread
+              SELECT 1 FROM orchestration_v2_projection_threads thread
               WHERE thread.thread_id = project_triggers.target_thread_id
                 AND (
                   thread.deleted_at IS NOT NULL
                   OR thread.archived_at IS NOT NULL
-                  OR thread.settled_override = 'settled'
-                  OR thread.settled_at IS NOT NULL
+                  OR json_extract(thread.payload_json, '$.settledOverride') = 'settled'
+                  OR json_extract(thread.payload_json, '$.settledAt') IS NOT NULL
                 )
             )
           )

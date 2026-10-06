@@ -1,10 +1,5 @@
-import type {
-  EnvironmentId,
-  OrchestrationLatestTurn,
-  OrchestrationSession,
-  ThreadId,
-  TurnId,
-} from "@t3tools/contracts";
+import type { EnvironmentId, ThreadId, RunId } from "@t3tools/contracts";
+import type { ThreadRunSummary, ThreadRuntimeSummary } from "@t3tools/client-runtime/state/models";
 
 export const TURN_COMPLETION_ALERT_DURATION_MS = 1_500;
 export const TURN_COMPLETION_ALERT_VOLUME = 0.2;
@@ -12,7 +7,7 @@ export const TURN_COMPLETION_ALERT_VOLUME = 0.2;
 export interface CompletedTurnAlert {
   readonly environmentId: EnvironmentId;
   readonly threadId: ThreadId;
-  readonly turnId: TurnId;
+  readonly turnId: RunId;
   readonly completedAt: string;
 }
 
@@ -20,73 +15,27 @@ interface CollectSettledCompletedTurnOptions {
   readonly completedAfterEpochMs?: number;
 }
 
-type ComparableLatestTurn = {
-  readonly turnId: TurnId;
-  readonly state: "running" | "interrupted" | "completed" | "error";
-  readonly completedAt: string | null;
-} | null;
-
-type ComparableThreadSession = Pick<OrchestrationSession, "status" | "activeTurnId"> | null;
-
 export interface CompletionAlertThread {
   readonly environmentId: EnvironmentId;
   readonly id: ThreadId;
-  readonly latestTurn: OrchestrationLatestTurn | null;
-  readonly session: OrchestrationSession | null;
-}
-
-function getComparableLatestTurn(thread: CompletionAlertThread): ComparableLatestTurn {
-  const latestTurn = thread.latestTurn;
-  if (!latestTurn) {
-    return null;
-  }
-  return {
-    turnId: latestTurn.turnId,
-    state: latestTurn.state,
-    completedAt: latestTurn.completedAt,
-  };
-}
-
-function getComparableThreadSession(thread: CompletionAlertThread): ComparableThreadSession {
-  const session = thread.session ?? null;
-  if (!session) {
-    return null;
-  }
-  return {
-    status: session.status,
-    activeTurnId: session.activeTurnId,
-  };
-}
-
-function isCompletedLatestTurn(
-  turn: ComparableLatestTurn,
-): turn is NonNullable<ComparableLatestTurn> & {
-  readonly state: "completed";
-  readonly completedAt: string;
-} {
-  return turn?.state === "completed" && typeof turn.completedAt === "string";
-}
-
-function isThreadSessionWorking(session: ComparableThreadSession): boolean {
-  if (!session) {
-    return false;
-  }
-  return (
-    (session.activeTurnId !== null && session.activeTurnId !== undefined) ||
-    session.status === "starting" ||
-    session.status === "running"
-  );
+  readonly latestRun: ThreadRunSummary | null;
+  readonly runtime: ThreadRuntimeSummary | null;
 }
 
 function getSettledCompletedLatestTurn(thread: CompletionAlertThread) {
-  const turn = getComparableLatestTurn(thread);
-  if (!isCompletedLatestTurn(turn)) {
+  const run = thread.latestRun;
+  if (run?.status !== "completed" || run.completedAt === null) return null;
+  const runtime = thread.runtime;
+  if (
+    runtime &&
+    (runtime.activeRunId !== null ||
+      runtime.status === "preparing" ||
+      runtime.status === "starting" ||
+      runtime.status === "running" ||
+      runtime.status === "waiting")
+  )
     return null;
-  }
-  if (isThreadSessionWorking(getComparableThreadSession(thread))) {
-    return null;
-  }
-  return turn;
+  return { turnId: run.runId, completedAt: run.completedAt };
 }
 
 function isCompletedAfterThreshold(

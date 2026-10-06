@@ -23,6 +23,7 @@ import {
   MENU_ACTION_CHANNEL,
   QUIT_SHORTCUT_CHANNEL,
   SNAP_SHOT_EVENT_CHANNEL,
+  TRACKPAD_SCROLL_END_CHANNEL,
   WINDOW_FULLSCREEN_STATE_CHANNEL,
 } from "../ipc/channels.ts";
 import * as PreviewManager from "../preview/Manager.ts";
@@ -647,6 +648,7 @@ export const make = Effect.gen(function* () {
     installContextMenu(window, window.webContents);
     window.webContents.on("did-attach-webview", (_event, contents) => {
       installContextMenu(window, contents);
+      void runPromise(previewManager.prepareWebview(contents));
     });
 
     const handleWindowOpen = ({
@@ -743,6 +745,9 @@ export const make = Effect.gen(function* () {
       if (modifier && !input.alt && !input.shift && input.key.toLowerCase() === "w") {
         event.preventDefault();
       }
+    });
+    window.webContents.on("input-event", (_event, input) => {
+      if (input.type === "gestureScrollEnd") window.webContents.send(TRACKPAD_SCROLL_END_CHANNEL);
     });
 
     window.on("page-title-updated", (event) => {

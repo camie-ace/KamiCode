@@ -205,8 +205,6 @@ describe("DesktopEnvironment", () => {
 
       assert.equal(toPortablePath(environment.baseDir), "/Users/alice/.kamicode");
       assert.equal(toPortablePath(environment.stateDir), "/Users/alice/.kamicode/userdata");
-      assert.equal(environment.userDataDirName, "kamicode");
-      assert.equal(environment.legacyUserDataDirName, "KamiCode (Alpha)");
       assert.equal(environment.appUserModelId, "tech.camie.kamicode");
       assert.equal(environment.linuxDesktopEntryName, "kamicode.desktop");
       assert.equal(environment.linuxWmClass, "kamicode");

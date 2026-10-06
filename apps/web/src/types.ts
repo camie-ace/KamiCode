@@ -5,22 +5,27 @@ import type {
   ChatGifAttachment as ContractChatGifAttachment,
   ChatImageAttachment as ContractChatImageAttachment,
   ChatVideoAttachment as ContractChatVideoAttachment,
-  OrchestrationCheckpointFile,
-  OrchestrationCheckpointSummary,
-  OrchestrationLatestTurn,
   ProjectTestEnvironment as ContractProjectTestEnvironment,
-  OrchestrationMessage,
-  OrchestrationProposedPlan,
-  OrchestrationSession,
+  MessageId,
+  OrchestrationV2Actor,
+  OrchestrationV2CreationSource,
+  OrchestrationV2PlanArtifact,
+  OrchestrationV2UserMessageInputIntent,
+  PlanId,
   ProjectScript as ContractProjectScript,
   ProviderInteractionMode,
+  RunId,
   RuntimeMode,
+  ScheduledTaskId,
+  ThreadId,
 } from "@t3tools/contracts";
 import type {
   EnvironmentProject,
-  EnvironmentThread,
   EnvironmentThreadShell,
+  ThreadRunSummary,
+  ThreadRuntimeSummary,
 } from "@t3tools/client-runtime/state/shell";
+import type { ThreadCheckpointSummary } from "@t3tools/client-runtime/state/thread-checkpoints";
 import { videoMimeType } from "@t3tools/shared/video";
 
 export { videoMimeType } from "@t3tools/shared/video";
@@ -91,6 +96,7 @@ export function isFileAttachment(attachment: ChatAttachment): attachment is Chat
   return attachment.type === "file" && !isImageAttachment(attachment);
 }
 
+
 export function isBrowserPreviewAttachment(attachment: ChatFileAttachment): boolean {
   const mimeType = attachment.mimeType.split(";", 1)[0]?.trim().toLowerCase();
   return (
@@ -100,17 +106,37 @@ export function isBrowserPreviewAttachment(attachment: ChatFileAttachment): bool
   );
 }
 
-export interface ChatMessage extends Omit<OrchestrationMessage, "attachments"> {
+export interface ChatMessage {
+  readonly context?: import("@t3tools/contracts").OrchestrationMessageContext | undefined;
+  readonly id: MessageId;
+  readonly role: "user" | "assistant" | "system";
+  readonly text: string;
   readonly attachments?: ReadonlyArray<ChatAttachment> | undefined;
+  readonly runId: RunId | null;
+  readonly streaming: boolean;
+  readonly createdBy?: OrchestrationV2Actor;
+  readonly creationSource?: OrchestrationV2CreationSource;
+  readonly scheduledTaskId?: ScheduledTaskId;
+  readonly senderThreadId?: ThreadId;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+  readonly inputIntent?: OrchestrationV2UserMessageInputIntent | undefined;
 }
 
-export type ProposedPlan = OrchestrationProposedPlan;
-export type TurnDiffFileChange = OrchestrationCheckpointFile;
-export type TurnDiffSummary = OrchestrationCheckpointSummary;
+export interface ProposedPlan {
+  readonly id: PlanId;
+  readonly runId: RunId | null;
+  readonly planMarkdown: string;
+  readonly status: OrchestrationV2PlanArtifact["status"];
+  readonly createdAt: string;
+  readonly updatedAt: string;
+}
+export type TurnDiffFileChange = ThreadCheckpointSummary["files"][number];
+export type TurnDiffSummary = ThreadCheckpointSummary;
 
 export type Project = EnvironmentProject;
-export type Thread = EnvironmentThread;
+export type Thread = EnvironmentThreadShell;
 export type ThreadShell = EnvironmentThreadShell;
 
 export type SidebarThreadSummary = EnvironmentThreadShell;
-export type ThreadSession = OrchestrationSession;
+export type ThreadSession = ThreadRuntimeSummary;

@@ -6,9 +6,17 @@ import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
-import * as Option from "effect/Option";
 import * as PlatformError from "effect/PlatformError";
 import * as Schema from "effect/Schema";
+
+import { DEFAULT_SIGNAL_EXPORT } from "@t3tools/shared/observability";
+import {
+  HostProcessArguments,
+  HostProcessEnvironment,
+  HostProcessIsExecutable,
+  HostProcessPlatform,
+} from "@t3tools/shared/hostProcess";
+import * as OtelEnvironment from "@t3tools/shared/otelEnvironment";
 
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import {
@@ -32,7 +40,7 @@ const makeServerEnvironmentLayer = (baseDir: string) =>
 const emptySecretStoreLayer = Layer.succeed(
   ServerSecretStore.ServerSecretStore,
   ServerSecretStore.ServerSecretStore.of({
-    get: () => Effect.succeed(Option.none()),
+    get: () => Effect.succeedNone,
     set: () => Effect.void,
     create: () => Effect.void,
     getOrCreateRandom: () => Effect.succeed(new Uint8Array()),
@@ -54,10 +62,10 @@ const makeServerConfig = Effect.fn(function* (baseDir: string) {
     otlpTracesUrl: undefined,
     otlpMetricsUrl: undefined,
     otlpLogsUrl: undefined,
-    otlpExportIntervalMs: 10_000,
-    otlpServiceName: "t3-server",
-    otlpHeaders: undefined,
-    otlpProtocol: "http/json",
+    otlpTracesExport: DEFAULT_SIGNAL_EXPORT,
+    otlpMetricsExport: DEFAULT_SIGNAL_EXPORT,
+    otlpLogsExport: DEFAULT_SIGNAL_EXPORT,
+    otelEnvironment: OtelEnvironment.none,
     cwd: process.cwd(),
     baseDir,
     mode: "web",
@@ -81,6 +89,47 @@ const makeServerConfig = Effect.fn(function* (baseDir: string) {
 });
 
 it.layer(NodeServices.layer)("ServerEnvironmentLive", (it) => {
+  it.effect("publishes proven install ownership only for manually updated servers", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const baseDir = yield* fs.makeTempDirectoryScoped();
+      const prefix = `${baseDir}/node`;
+      const entry = `${prefix}/lib/node_modules/t3/dist/bin.mjs`;
+      yield* fs.makeDirectory(`${prefix}/lib/node_modules/t3/dist`, { recursive: true });
+      yield* fs.makeDirectory(`${prefix}/bin`, { recursive: true });
+      yield* fs.writeFileString(entry, "");
+      yield* fs.writeFileString(
+        `${prefix}/lib/node_modules/t3/package.json`,
+        '{"name":"t3","version":"0.0.45","bin":{"t3":"./dist/bin.mjs"}}',
+      );
+      yield* fs.symlink(entry, `${prefix}/bin/t3`);
+      const config = yield* makeServerConfig(baseDir);
+      yield* fs.makeDirectory(config.stateDir, { recursive: true });
+      for (const mode of ["web", "desktop"] as const) {
+        const descriptor = yield* Effect.gen(function* () {
+          const environment = yield* ServerEnvironment.ServerEnvironment;
+          return yield* environment.getDescriptor;
+        }).pipe(
+          Effect.provide(
+            ServerEnvironment.layer.pipe(
+              Layer.provide(emptySecretStoreLayer),
+              Layer.provide(ServerConfig.layer({ ...config, mode })),
+            ),
+          ),
+          Effect.provideService(HostProcessArguments, ["node", entry]),
+          Effect.provideService(HostProcessIsExecutable, false),
+          Effect.provideService(HostProcessPlatform, "linux"),
+          Effect.provideService(HostProcessEnvironment, {}),
+        );
+        expect(descriptor.capabilities.serverInstallation).toEqual(
+          mode === "web" ? { kind: "npm-global", prefix } : undefined,
+        );
+        expect(descriptor.capabilities.serverSelfUpdate).toBe(
+          mode === "web" ? undefined : "desktop-managed",
+        );
+      }
+    }),
+  );
   it.effect.each([
     { name: "missing", content: undefined },
     { name: "empty", content: "" },
@@ -183,6 +232,7 @@ it.layer(NodeServices.layer)("ServerEnvironmentLive", (it) => {
       expect(second.capabilities.threadPullRequestLinking).toBe(true);
       expect(second.capabilities.threadRecurringSchedules).toBe(true);
       expect(second.capabilities.speechTranscription).toBe(true);
+      expect(second.capabilities.serverResolvedCommandContext).toBe(true);
       expect(second.capabilities.agentActivityPublishing).toBe(false);
     }),
   );
@@ -284,7 +334,9 @@ it.layer(NodeServices.layer)("ServerEnvironmentLive", (it) => {
       expect(withFd.capabilities.serverSelfUpdate).toBe("desktop-managed");
       expect(withFd.capabilities.desktopAppUpdate).toBe(true);
       expect(withFd.capabilities.serverSelfUpdateProgress).toBe(true);
-      expect(withFd.capabilities.serverUpdateThreadContinuation).toBe(true);
+      // v2 recovery terminalizes running runs on restart, so continuation
+      // stays unadvertised until the v2 runtime carries the markers.
+      expect(withFd.capabilities.serverUpdateThreadContinuation).toBeUndefined();
 
       const withoutFd = yield* describeWith({ mode: "desktop" });
       expect(withoutFd.capabilities.serverSelfUpdate).toBe("desktop-managed");
