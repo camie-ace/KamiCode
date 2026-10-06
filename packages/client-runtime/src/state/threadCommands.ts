@@ -105,7 +105,10 @@ import type { EnvironmentRegistry } from "../connection/registry.ts";
 import * as EnvironmentSupervisor from "../connection/supervisor.ts";
 import * as ThreadHistoryController from "./threadHistoryController.ts";
 
-class ThreadSnapshotUnavailableError extends Data.TaggedError("ThreadSnapshotUnavailableError")<{
+/** @public Named error type carried by exported client operations and atoms. */
+export class ThreadSnapshotUnavailableError extends Data.TaggedError(
+  "ThreadSnapshotUnavailableError",
+)<{
   readonly message: string;
 }> {}
 
