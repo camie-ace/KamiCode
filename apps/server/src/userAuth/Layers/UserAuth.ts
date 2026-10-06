@@ -168,7 +168,7 @@ function resolveRequestUrl(request: HttpServerRequest.HttpServerRequest): Option
   return HttpServerRequest.toURL(request);
 }
 
-export const makeUserAuth = Effect.gen(function* () {
+const makeUserAuth = Effect.gen(function* () {
   const crypto = yield* Crypto.Crypto;
   const config = yield* ServerConfig;
   const secretStore = yield* ServerSecretStore;

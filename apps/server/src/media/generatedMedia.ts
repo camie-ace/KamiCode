@@ -8,10 +8,10 @@ import {
 } from "./localMediaSearch.ts";
 import { createMediaArtifact, type MediaArtifact } from "./MediaArtifacts.ts";
 
-export const GENERATED_MEDIA_SAFE_ROOT_FOLDER = ".kamicode";
-export const GENERATED_MEDIA_FOLDER = "generated-media";
+const GENERATED_MEDIA_SAFE_ROOT_FOLDER = ".kamicode";
+const GENERATED_MEDIA_FOLDER = "generated-media";
 export const GENERATED_MEDIA_ROOT_RELATIVE_PATH = `${GENERATED_MEDIA_SAFE_ROOT_FOLDER}/${GENERATED_MEDIA_FOLDER}`;
-export const DEFAULT_GENERATED_MEDIA_EXTENSION: CommonLocalMediaExtension = "png";
+const DEFAULT_GENERATED_MEDIA_EXTENSION: CommonLocalMediaExtension = "png";
 
 const SEGMENT_MAX_LENGTH = 80;
 
@@ -68,7 +68,7 @@ export function resolveGeneratedMediaPath(input: {
   };
 }
 
-export function representGeneratedMediaArtifact(input: {
+function representGeneratedMediaArtifact(input: {
   readonly projectRoot: string;
   readonly threadId: string;
   readonly fileName: string;
@@ -110,7 +110,7 @@ export function sanitizeGeneratedMediaFileName(fileName: string): string {
   return `${safeStem}.${extension}`;
 }
 
-export function normalizeGeneratedMediaExtension(
+function normalizeGeneratedMediaExtension(
   extension: string | undefined,
 ): CommonLocalMediaExtension {
   const normalized = extension === undefined ? null : normalizeLocalMediaExtension(extension);
@@ -120,7 +120,7 @@ export function normalizeGeneratedMediaExtension(
   return DEFAULT_GENERATED_MEDIA_EXTENSION;
 }
 
-export function toSafeGeneratedMediaPathSegment(input: string, fallback: string): string {
+function toSafeGeneratedMediaPathSegment(input: string, fallback: string): string {
   const segment = input
     .trim()
     .toLowerCase()

@@ -106,7 +106,7 @@ async function sharedProjectPost<T>(
   return decodeSharedProjectResponse<T>(response);
 }
 
-export function fetchSharedProjectCurrentUser(): Promise<SharedProjectCurrentUser> {
+function fetchSharedProjectCurrentUser(): Promise<SharedProjectCurrentUser> {
   return sharedProjectGet("/api/shared-projects/current-user");
 }
 
@@ -130,7 +130,7 @@ export function fetchSharedProjectDetail(
   return sharedProjectGet("/api/shared-projects/detail", { projectId }, options);
 }
 
-export function fetchSharedProjectBootstrap(
+function fetchSharedProjectBootstrap(
   projectId: SharedProjectId,
 ): Promise<SharedProjectBootstrapManifest> {
   return sharedProjectGet("/api/shared-projects/bootstrap", { projectId });
@@ -206,9 +206,7 @@ export function importSharedThreadLink(
   return sharedProjectPost("/api/shared-projects/threads/import-link", input, options);
 }
 
-export function appendSharedThreadMessage(
-  input: AppendSharedThreadMessageInput,
-): Promise<SharedThread> {
+function appendSharedThreadMessage(input: AppendSharedThreadMessageInput): Promise<SharedThread> {
   return sharedProjectPost("/api/shared-projects/threads/messages", input);
 }
 

@@ -22,7 +22,7 @@ import {
 } from "./Services/ProjectTriggerRepository.ts";
 import { ProjectTriggerService } from "./Services/ProjectTriggerService.ts";
 
-export const PROJECT_TRIGGER_TOOL_NAMESPACE = "kamicode";
+const PROJECT_TRIGGER_TOOL_NAMESPACE = "kamicode";
 export const PROJECT_TRIGGER_TOOL_NAMES = [
   "create_trigger",
   "update_trigger",

@@ -16,15 +16,15 @@ import { Input } from "./ui/input";
 import { Label } from "./ui/label";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 
-export const DEFAULT_LOCAL_TEST_ENVIRONMENT_ID = "default-local";
+const DEFAULT_LOCAL_TEST_ENVIRONMENT_ID = "default-local";
 
-export function resolveDefaultTestEnvironment(
+function resolveDefaultTestEnvironment(
   testEnvironments: ReadonlyArray<ProjectTestEnvironment>,
 ): ProjectTestEnvironment | null {
   return testEnvironments.find((environment) => environment.isDefault) ?? null;
 }
 
-export function buildProjectTestEnvironmentsWithDefaultBaseUrl(
+function buildProjectTestEnvironmentsWithDefaultBaseUrl(
   testEnvironments: ReadonlyArray<ProjectTestEnvironment>,
   baseUrl: string,
 ): ProjectTestEnvironment[] {

@@ -198,7 +198,7 @@ function RootRouteView() {
     };
   }, [pathname]);
 
-  if (pathname === "/pair" || pathname === "/connect") {
+  if (pathname === "/pair" || pathname === "/connect" || pathname === "/connect-agent") {
     return (
       <>
         <DocumentTitleSync />
@@ -538,7 +538,7 @@ function errorMessage(error: unknown): string {
   return "An unexpected router error occurred.";
 }
 
-export function isLikelyBackendFetchFailure(error: unknown): boolean {
+function isLikelyBackendFetchFailure(error: unknown): boolean {
   const message = errorMessage(error).toLowerCase();
   return (
     message.includes("failed to fetch") ||
@@ -548,7 +548,7 @@ export function isLikelyBackendFetchFailure(error: unknown): boolean {
   );
 }
 
-export function rootRouteErrorMessage(error: unknown): string {
+function rootRouteErrorMessage(error: unknown): string {
   if (isLikelyBackendFetchFailure(error)) {
     return "KamiCode could not reach its local backend.";
   }
@@ -556,7 +556,7 @@ export function rootRouteErrorMessage(error: unknown): string {
   return errorMessage(error);
 }
 
-export function rootRouteErrorHint(error: unknown): string | null {
+function rootRouteErrorHint(error: unknown): string | null {
   if (isLikelyBackendFetchFailure(error)) {
     return "This usually means the desktop/server process is not running, restarted mid-load, or the browser is pointed at a stale dev URL. Restart KamiCode or run the local dev server, then reload.";
   }

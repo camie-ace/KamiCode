@@ -778,7 +778,7 @@ export const MediaArtifactCard = memo(function MediaArtifactCard({
   );
 });
 
-export function MediaArtifactViewer(props: {
+function MediaArtifactViewer(props: {
   artifact: MediaArtifact;
   url: string;
   canUseInChat: boolean;

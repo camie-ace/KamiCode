@@ -55,7 +55,7 @@ function bytesEqual(bytes: Uint8Array, offset: number, expected: ReadonlyArray<n
   return expected.every((value, index) => bytes[offset + index] === value);
 }
 
-export function hasSupportedAudioSignature(bytes: Uint8Array, contentType: string): boolean {
+function hasSupportedAudioSignature(bytes: Uint8Array, contentType: string): boolean {
   switch (baseContentType(contentType)) {
     case "audio/webm":
       return bytesEqual(bytes, 0, [0x1a, 0x45, 0xdf, 0xa3]);
@@ -209,7 +209,7 @@ export const makeWithEndpoint = (
     });
   });
 
-export const make = Effect.gen(function* () {
+const make = Effect.gen(function* () {
   const config = yield* ServerConfig.ServerConfig;
   const secrets = yield* ServerSecretStore.ServerSecretStore;
   return yield* makeWithEndpoint(

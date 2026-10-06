@@ -87,9 +87,7 @@ export function canPreloadBrowsePath(
 
 const WORKSPACE_UPLOAD_TIMEOUT_MS = 15 * 60 * 1000;
 
-export class WorkspaceUploadValidationError extends Data.TaggedError(
-  "WorkspaceUploadValidationError",
-)<{
+class WorkspaceUploadValidationError extends Data.TaggedError("WorkspaceUploadValidationError")<{
   readonly message: string;
 }> {}
 

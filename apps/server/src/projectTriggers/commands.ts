@@ -28,7 +28,7 @@ export function makeProjectTriggerRunIds(
   };
 }
 
-export function makeProjectTriggerRunCommand(input: {
+function makeProjectTriggerRunCommand(input: {
   readonly trigger: ProjectTriggerRow;
   readonly fireAt: string;
   readonly ids: ProjectTriggerRunIds;

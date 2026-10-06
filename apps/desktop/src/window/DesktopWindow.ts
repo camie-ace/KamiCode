@@ -318,7 +318,7 @@ function isSameUrlOrigin(left: URL, right: URL): boolean {
   return left.origin === right.origin;
 }
 
-export function isDesktopAppWindowUrl(input: {
+function isDesktopAppWindowUrl(input: {
   readonly rawUrl: string;
   readonly backendHttpUrl: URL;
   readonly devServerUrl: Option.Option<URL>;

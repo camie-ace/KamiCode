@@ -48,7 +48,7 @@ import {
 
 // Matches KamiCode's DEFAULT_PORT (upstream T3 Code uses 3773). Keep distinct
 // from upstream on future merges so remote KamiCode servers resolve correctly.
-export const DEFAULT_REMOTE_PORT = 3873;
+const DEFAULT_REMOTE_PORT = 3873;
 const REMOTE_PORT_SCAN_WINDOW = 200;
 const SSH_READY_TIMEOUT_MS = 20_000;
 const SSH_READY_PROBE_TIMEOUT_MS = 1_000;

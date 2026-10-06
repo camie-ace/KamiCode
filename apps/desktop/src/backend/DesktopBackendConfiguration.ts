@@ -106,6 +106,7 @@ const DEFAULT_DESKTOP_GITHUB_OAUTH_CLIENT_ID = "Ov23liguksmbhHst10WL";
 const WSL_FORWARDED_ENV_NAMES = [
   "OPENAI_API_KEY",
   "ANTHROPIC_API_KEY",
+  "T3CODE_TELEMETRY_ENABLED",
   // Otherwise the WSL server keeps exporting to endpoints from the bootstrap.
   "T3CODE_OTEL_SDK_DISABLED",
   "OTEL_SDK_DISABLED",

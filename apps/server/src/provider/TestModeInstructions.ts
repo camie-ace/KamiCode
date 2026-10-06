@@ -29,7 +29,7 @@ Rules:
 - Do not claim visual or browser validation unless you actually performed it.
 - If the browser harness cannot run, say that plainly and use the best available deterministic checks without overstating coverage.`;
 
-export function applyTestModePromptPrefix(input: {
+function applyTestModePromptPrefix(input: {
   readonly interactionMode?: ProviderInteractionMode | undefined;
   readonly prompt: string;
 }): string {

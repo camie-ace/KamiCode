@@ -18,6 +18,6 @@ Apply these rules to all repository work, including resumed turns, triggers, and
 - For commits, inspect status, stage explicit intended paths, review the staged diff, and exclude generated caches, credentials, logs, recordings, and temporary artifacts unless they are deliberate deliverables. Never force-add or commit .camie/ project memory or its archives; they are local user data.
 </repository_operating_contract>`;
 
-export function appendRepositoryOperatingContract(instructions: string): string {
+function appendRepositoryOperatingContract(instructions: string): string {
   return `${instructions}\n\n${REPOSITORY_OPERATING_CONTRACT}`;
 }

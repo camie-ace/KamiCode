@@ -4,7 +4,7 @@ import * as Redacted from "effect/Redacted";
 
 import type { ServerSecretStore } from "../auth/ServerSecretStore.ts";
 
-export const SPEECH_TRANSCRIPTION_API_KEY_SECRET = "speech-transcription-api-key";
+const SPEECH_TRANSCRIPTION_API_KEY_SECRET = "speech-transcription-api-key";
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();

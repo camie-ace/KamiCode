@@ -654,8 +654,10 @@ describe("terminatePosixOwnedProcessTree", () => {
 
   it.live("rotates more than 64 live parents without scanning retained tombstones", () =>
     Effect.gen(function* () {
+      // Fake descendants must never collide with the real test worker PID.
+      const parentPidBase = process.pid + 1_000;
       const parents = Array.from({ length: 130 }, (_, index) =>
-        identity(1_000 + index, 100, 1_000 + index, 1_000 + index),
+        identity(parentPidBase + index, 100, parentPidBase + index, parentPidBase + index),
       );
       let childListReads = 0;
       let identityCalls = 0;

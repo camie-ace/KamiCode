@@ -117,7 +117,7 @@ const BROWSER_MIME_TYPE_BY_EXTENSION = new Map([
   [".pdf", "application/pdf"],
 ]);
 
-export const WORKSPACE_VIDEO_PREVIEW_EXTENSIONS = [
+const WORKSPACE_VIDEO_PREVIEW_EXTENSIONS = [
   ".m4v",
   ".mov",
   ".mp4",

@@ -15,8 +15,8 @@ const repoRoot = NodePath.resolve(desktopDir, "..", "..");
 const devBundleIdSuffix = NodePath.basename(repoRoot)
   .toLowerCase()
   .replaceAll(/[^a-z0-9]+/g, "");
-export const APP_DISPLAY_NAME = isDevelopment ? "KamiCode (Dev)" : "KamiCode (Alpha)";
-export const APP_BUNDLE_ID = isDevelopment
+const APP_DISPLAY_NAME = isDevelopment ? "KamiCode (Dev)" : "KamiCode (Alpha)";
+const APP_BUNDLE_ID = isDevelopment
   ? `tech.camie.kamicode.dev.${devBundleIdSuffix || "local"}`
   : "tech.camie.kamicode";
 const APP_PROTOCOL_SCHEMES = isDevelopment ? ["t3code-dev"] : ["t3code"];

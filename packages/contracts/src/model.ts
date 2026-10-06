@@ -192,12 +192,6 @@ export const DEFAULT_TEXT_GENERATION_MODEL_BY_PROVIDER: Partial<
   [OPENCODE_DRIVER_KIND]: "openai/gpt-5",
 };
 
-// Compatibility aliases for KamiCode clients and tests that predate the
-// upstream rename from "git text generation" to general text generation.
-export const DEFAULT_GIT_TEXT_GENERATION_MODEL = DEFAULT_TEXT_GENERATION_MODEL;
-export const DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER =
-  DEFAULT_TEXT_GENERATION_MODEL_BY_PROVIDER;
-
 export const MODEL_SLUG_ALIASES_BY_PROVIDER: Partial<
   Record<ProviderDriverKind, Record<string, string>>
 > = {

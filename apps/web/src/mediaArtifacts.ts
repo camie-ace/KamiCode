@@ -173,11 +173,11 @@ export function mediaKindForExtension(extension: string): MediaArtifactKind {
   return "unknown";
 }
 
-export function normalizeMediaExtension(extension: string): string {
+function normalizeMediaExtension(extension: string): string {
   return extension.toLowerCase().replace(/^\./, "");
 }
 
-export function isSupportedMediaExtension(extension: string): boolean {
+function isSupportedMediaExtension(extension: string): boolean {
   return MEDIA_EXTENSIONS.has(normalizeMediaExtension(extension));
 }
 
@@ -193,7 +193,7 @@ export function isImageMediaArtifactKind(kind: MediaArtifactKind): boolean {
   return kind === "image" || kind === "gif";
 }
 
-export function basenameFromMediaTarget(target: string): string {
+function basenameFromMediaTarget(target: string): string {
   const withoutQuery = target.split(/[?#]/, 1)[0] ?? target;
   const normalized = withoutQuery.replace(/\\/g, "/");
   const name = normalized.slice(normalized.lastIndexOf("/") + 1);
@@ -204,13 +204,13 @@ export function basenameFromMediaTarget(target: string): string {
   }
 }
 
-export function extensionFromMediaTarget(target: string): string | null {
+function extensionFromMediaTarget(target: string): string | null {
   const withoutQuery = target.split(/[?#]/, 1)[0] ?? target;
   const match = /\.([a-z0-9]{1,8})$/i.exec(withoutQuery);
   return match?.[1]?.toLowerCase() ?? null;
 }
 
-export function createMediaArtifact(input: {
+function createMediaArtifact(input: {
   readonly id: string;
   readonly target: string;
   readonly source?: MediaArtifactSource;
@@ -305,7 +305,7 @@ export function extractMediaArtifactsFromText(text: string): MediaArtifact[] {
   return artifacts;
 }
 
-export function normalizeMediaArtifact(value: unknown): MediaArtifact | null {
+function normalizeMediaArtifact(value: unknown): MediaArtifact | null {
   const record = asRecord(value);
   if (!record) return null;
 
@@ -348,7 +348,7 @@ export function normalizeMediaArtifact(value: unknown): MediaArtifact | null {
   };
 }
 
-export function normalizeMediaArtifacts(value: unknown): MediaArtifact[] {
+function normalizeMediaArtifacts(value: unknown): MediaArtifact[] {
   if (!Array.isArray(value)) return [];
   return value
     .map((entry) => normalizeMediaArtifact(entry))
@@ -415,7 +415,7 @@ export function normalizeLocalMediaSearchResultSet(
   };
 }
 
-export function normalizeLocalMediaSearchResultSets(value: unknown): LocalMediaSearchResultSet[] {
+function normalizeLocalMediaSearchResultSets(value: unknown): LocalMediaSearchResultSet[] {
   const resultSets: LocalMediaSearchResultSet[] = [];
   const seenObjects = new Set<object>();
 
@@ -556,7 +556,7 @@ export function buildLocalMediaSearchResultSetDisplayModel(
   };
 }
 
-export function localMediaSearchConfidenceLabel(confidence: LocalMediaSearchConfidence): string {
+function localMediaSearchConfidenceLabel(confidence: LocalMediaSearchConfidence): string {
   switch (confidence) {
     case "high":
       return "High confidence";
@@ -567,7 +567,7 @@ export function localMediaSearchConfidenceLabel(confidence: LocalMediaSearchConf
   }
 }
 
-export function localMediaSearchConfidenceTone(
+function localMediaSearchConfidenceTone(
   confidence: LocalMediaSearchConfidence,
 ): LocalMediaSearchConfidenceTone {
   switch (confidence) {
@@ -580,7 +580,7 @@ export function localMediaSearchConfidenceTone(
   }
 }
 
-export function formatLocalMediaSearchModifiedAt(value: string | undefined): string | null {
+function formatLocalMediaSearchModifiedAt(value: string | undefined): string | null {
   if (!value) return null;
   const parsed = Date.parse(value);
   if (Number.isNaN(parsed)) {
@@ -606,7 +606,7 @@ function pluralize(label: string, count: number): string {
   return count === 1 ? label : `${label}s`;
 }
 
-export function normalizeLocalMediaSearchScope(
+function normalizeLocalMediaSearchScope(
   value: unknown,
   fallback: {
     readonly rootHints?: readonly string[] | undefined;
@@ -698,16 +698,16 @@ export function mediaArtifactReference(artifact: MediaArtifact): string {
   return artifact.path ?? artifact.url ?? artifact.previewUrl ?? artifact.title;
 }
 
-export function isImageLikeMediaArtifact(artifact: Pick<MediaArtifact, "kind">): boolean {
+function isImageLikeMediaArtifact(artifact: Pick<MediaArtifact, "kind">): boolean {
   return artifact.kind === "image" || artifact.kind === "gif";
 }
 
-export function isGeneratedMediaTarget(target: string): boolean {
+function isGeneratedMediaTarget(target: string): boolean {
   const normalized = target.replace(/\\/g, "/").toLowerCase();
   return /(?:^|\/)\.kamicode\/generated-media(?:\/|$)/u.test(normalized);
 }
 
-export function isLocalFilesystemMediaPath(target: string): boolean {
+function isLocalFilesystemMediaPath(target: string): boolean {
   return /^(?:file:\/\/\/|[A-Za-z]:[\\/]|[/\\])/i.test(target.trim());
 }
 
@@ -738,7 +738,7 @@ export function mediaArtifactExternalTarget(
   return null;
 }
 
-export function localFilesystemPathToFileUrl(target: string): string {
+function localFilesystemPathToFileUrl(target: string): string {
   const trimmed = target.trim();
   if (/^file:\/\//i.test(trimmed)) {
     return trimmed;

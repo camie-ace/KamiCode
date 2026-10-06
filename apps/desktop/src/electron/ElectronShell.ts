@@ -81,7 +81,7 @@ export function parseSafeExternalUrl(rawUrl: unknown): Option.Option<string> {
   }
 }
 
-export function parseSafeLocalMediaPath(rawPath: unknown): Option.Option<string> {
+function parseSafeLocalMediaPath(rawPath: unknown): Option.Option<string> {
   if (typeof rawPath !== "string") {
     return Option.none();
   }

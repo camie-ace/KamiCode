@@ -384,9 +384,7 @@ export function formatEvidenceDynamicToolResult(
   });
 }
 
-export const formatBrowserHarnessDynamicToolResult = formatEvidenceDynamicToolResult;
-
-export function formatBrowserHarnessDynamicToolError(input: {
+function formatBrowserHarnessDynamicToolError(input: {
   readonly message: string;
   readonly details?: unknown;
 }): EffectCodexSchema.DynamicToolCallResponse {

@@ -28,7 +28,7 @@ export function canEditSharedWork(role: SharedProjectRole): boolean {
   return roleAtLeast(role, "member");
 }
 
-export function canReadSharedProject(role: SharedProjectRole | null | undefined): boolean {
+function canReadSharedProject(role: SharedProjectRole | null | undefined): boolean {
   return role !== null && role !== undefined;
 }
 

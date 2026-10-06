@@ -41,9 +41,9 @@ export function randomUUID(): string {
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
-export const newCommandId = (): CommandId => CommandId.make(randomUUID());
+const newCommandId = (): CommandId => CommandId.make(randomUUID());
 
-export const newEventId = (): EventId => EventId.make(randomUUID());
+const newEventId = (): EventId => EventId.make(randomUUID());
 
 export const newProjectId = (): ProjectId => ProjectId.make(randomUUID());
 

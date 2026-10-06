@@ -823,7 +823,7 @@ const resolveRepositoryState = Effect.fn("SharedProjects.resolveRepositoryState"
   } satisfies SharedRepositoryState;
 });
 
-export const makeSharedProjects = Effect.fn("makeSharedProjects")(function* () {
+const makeSharedProjects = Effect.fn("makeSharedProjects")(function* () {
   const sql = yield* SqlClient.SqlClient;
   const processRunner = yield* ProcessRunner.ProcessRunner;
   const repositoryIdentityResolver = yield* RepositoryIdentityResolver;

@@ -1,15 +1,11 @@
 export {
   getPrimaryKnownEnvironment,
-  readPrimaryEnvironmentDescriptor,
   resetPrimaryEnvironmentDescriptorForTests,
   resolveInitialPrimaryEnvironmentDescriptor,
   writePrimaryEnvironmentDescriptor,
 } from "./context";
 
-export {
-  resolveInitialPrimaryEnvironmentDescriptor as ensurePrimaryEnvironmentReady,
-  writePrimaryEnvironmentDescriptor as updatePrimaryEnvironmentDescriptor,
-} from "./context";
+export { resolveInitialPrimaryEnvironmentDescriptor as ensurePrimaryEnvironmentReady } from "./context";
 
 export {
   createServerPairingCredential,
@@ -30,17 +26,12 @@ export {
 } from "./auth";
 
 export {
-  fetchUserAuthSessionState,
-  logoutGitHubUser,
   resolveInitialUserAuthGateState,
   startGitHubUserLogin,
   type UserAuthGateState,
-  __resetUserAuthBootstrapForTests,
 } from "./userAuth";
 
-export { refreshPrimarySessionState, usePrimarySessionState } from "./sessionState";
-
-export { PrimaryEnvironmentHttpClient } from "./httpClient";
+export { usePrimarySessionState } from "./sessionState";
 
 export {
   DesktopEnvironmentBootstrapIncompleteError,

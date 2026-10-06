@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 import {
-  DEFAULT_GIT_TEXT_GENERATION_MODEL,
+  DEFAULT_TEXT_GENERATION_MODEL,
   DEFAULT_MODEL,
   DEFAULT_MODEL_BY_PROVIDER,
   ProviderDriverKind,
@@ -110,7 +110,7 @@ const claudeCaps: ModelCapabilities = createModelCapabilities({
 describe("descriptor helpers", () => {
   it("uses the nightly Codex and text-generation defaults", () => {
     expect(DEFAULT_MODEL).toBe("gpt-6-astra");
-    expect(DEFAULT_GIT_TEXT_GENERATION_MODEL).toBe("gpt-6-luna");
+    expect(DEFAULT_TEXT_GENERATION_MODEL).toBe("gpt-6-luna");
     expect(DEFAULT_MODEL_BY_PROVIDER[ProviderDriverKind.make("codex")]).toBe("gpt-6-astra");
   });
 

@@ -66,7 +66,7 @@ const IDLE_SWEEP_INTERVAL_MS = 30_000;
 const HOSTED_FRAME_MAX_AGE_MS = 2_000;
 const HOSTED_BROWSER_PROXY_BYPASS = "localhost,127.0.0.1,[::1]";
 
-export const HOSTED_PREVIEW_AUTOMATION_V1_OPERATIONS = PREVIEW_AUTOMATION_V1_OPERATIONS.filter(
+const HOSTED_PREVIEW_AUTOMATION_V1_OPERATIONS = PREVIEW_AUTOMATION_V1_OPERATIONS.filter(
   (operation) => operation !== "recordingStart" && operation !== "recordingStop",
 );
 
@@ -1284,7 +1284,7 @@ export class HostedPreviewBrowser extends Context.Service<
   }
 >()("t3/mcp/HostedPreviewAutomationHost/HostedPreviewBrowser") {}
 
-export const runtimeLayer = Layer.effect(
+const runtimeLayer = Layer.effect(
   HostedPreviewBrowser,
   Effect.gen(function* HostedPreviewBrowserRuntimeLayer() {
     const config = yield* ServerConfig.ServerConfig;
@@ -1341,7 +1341,7 @@ export const runtimeLayer = Layer.effect(
   }),
 );
 
-export const layer = Layer.effectDiscard(
+const layer = Layer.effectDiscard(
   Effect.gen(function* HostedPreviewAutomationHostLayer() {
     const config = yield* ServerConfig.ServerConfig;
     const hostedBrowser = yield* HostedPreviewBrowser;

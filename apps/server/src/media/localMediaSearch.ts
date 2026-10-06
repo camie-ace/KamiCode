@@ -3,7 +3,7 @@ import * as Option from "effect/Option";
 
 export type LocalMediaKind = "image" | "video" | "audio";
 
-export const IMAGE_LOCAL_MEDIA_EXTENSIONS = [
+const IMAGE_LOCAL_MEDIA_EXTENSIONS = [
   "avif",
   "bmp",
   "gif",
@@ -19,9 +19,9 @@ export const IMAGE_LOCAL_MEDIA_EXTENSIONS = [
   "webp",
 ] as const;
 
-export const VIDEO_LOCAL_MEDIA_EXTENSIONS = ["m4v", "mkv", "mov", "mp4", "ogv", "webm"] as const;
+const VIDEO_LOCAL_MEDIA_EXTENSIONS = ["m4v", "mkv", "mov", "mp4", "ogv", "webm"] as const;
 
-export const AUDIO_LOCAL_MEDIA_EXTENSIONS = [
+const AUDIO_LOCAL_MEDIA_EXTENSIONS = [
   "aac",
   "flac",
   "m4a",
@@ -33,7 +33,7 @@ export const AUDIO_LOCAL_MEDIA_EXTENSIONS = [
   "weba",
 ] as const;
 
-export const COMMON_LOCAL_MEDIA_EXTENSIONS = [
+const COMMON_LOCAL_MEDIA_EXTENSIONS = [
   ...IMAGE_LOCAL_MEDIA_EXTENSIONS,
   ...VIDEO_LOCAL_MEDIA_EXTENSIONS,
   ...AUDIO_LOCAL_MEDIA_EXTENSIONS,
@@ -188,11 +188,11 @@ export function extensionFromLocalMediaPath(path: string): CommonLocalMediaExten
   return extension !== null && isCommonLocalMediaExtension(extension) ? extension : null;
 }
 
-export function isLocalMediaCandidatePath(path: string): boolean {
+function isLocalMediaCandidatePath(path: string): boolean {
   return extensionFromLocalMediaPath(path) !== null;
 }
 
-export function tokenizeLocalMediaQuery(query: string): readonly string[] {
+function tokenizeLocalMediaQuery(query: string): readonly string[] {
   const normalized = normalizeSearchText(query);
   return normalized.length > 0 ? normalized.split(" ") : [];
 }

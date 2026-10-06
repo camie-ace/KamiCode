@@ -44,15 +44,15 @@ const MEDIA_EXTENSIONS = new Set([
   ...DOCUMENT_EXTENSIONS,
 ]);
 
-export function normalizeMediaExtension(extension: string): string {
+function normalizeMediaExtension(extension: string): string {
   return extension.toLowerCase().replace(/^\./, "");
 }
 
-export function isSupportedMediaExtension(extension: string): boolean {
+function isSupportedMediaExtension(extension: string): boolean {
   return MEDIA_EXTENSIONS.has(normalizeMediaExtension(extension));
 }
 
-export function mediaKindForExtension(extension: string): MediaArtifactKind {
+function mediaKindForExtension(extension: string): MediaArtifactKind {
   const normalized = normalizeMediaExtension(extension);
   if (GIF_EXTENSIONS.has(normalized)) return "gif";
   if (IMAGE_EXTENSIONS.has(normalized)) return "image";
@@ -63,7 +63,7 @@ export function mediaKindForExtension(extension: string): MediaArtifactKind {
   return "unknown";
 }
 
-export function extensionFromMediaTarget(target: string): string | null {
+function extensionFromMediaTarget(target: string): string | null {
   const withoutQuery = target.split(/[?#]/, 1)[0] ?? target;
   const match = /\.([a-z0-9]{1,8})$/i.exec(withoutQuery);
   return match?.[1]?.toLowerCase() ?? null;

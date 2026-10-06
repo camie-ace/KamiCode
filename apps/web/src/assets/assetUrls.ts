@@ -39,7 +39,7 @@ export function useAssetUrlState(
   );
 }
 
-export function useAssetUrl(
+function useAssetUrl(
   environmentId: EnvironmentId | null,
   resource: AssetResource | null,
 ): string | null {

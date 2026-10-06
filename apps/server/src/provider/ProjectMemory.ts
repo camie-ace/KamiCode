@@ -3,12 +3,12 @@ import * as NodeCrypto from "node:crypto";
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
 
-export const PROJECT_MEMORY_DIRECTORY = ".camie";
-export const PROJECT_MEMORY_FILENAME = "project-memory.md";
+const PROJECT_MEMORY_DIRECTORY = ".camie";
+const PROJECT_MEMORY_FILENAME = "project-memory.md";
 export const PROJECT_MEMORY_RELATIVE_PATH = `${PROJECT_MEMORY_DIRECTORY}/${PROJECT_MEMORY_FILENAME}`;
 
 const PROJECT_MEMORY_FILE = NodePath.join(PROJECT_MEMORY_DIRECTORY, PROJECT_MEMORY_FILENAME);
-export const PROJECT_MEMORY_MAX_CHARS = 40_000;
+const PROJECT_MEMORY_MAX_CHARS = 40_000;
 
 export function resolveProjectMemoryMaxChars(
   value = process.env.KAMICODE_PROJECT_MEMORY_MAX_CHARS,
@@ -24,7 +24,7 @@ export interface ProjectMemorySnapshot {
   readonly notices: ReadonlyArray<string>;
 }
 
-export function findProjectMemoryPath(cwd: string | undefined): string | undefined {
+function findProjectMemoryPath(cwd: string | undefined): string | undefined {
   if (!cwd?.trim()) {
     return undefined;
   }

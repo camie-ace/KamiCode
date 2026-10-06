@@ -1208,49 +1208,49 @@ const WsProjectsWriteFileRpc = Rpc.make(WS_METHODS.projectsWriteFile, {
 
 const ProjectTriggerRpcError = Schema.Union([ProjectTriggerError, EnvironmentAuthorizationError]);
 
-export const WsProjectTriggersListRpc = Rpc.make(WS_METHODS.projectTriggersList, {
+const WsProjectTriggersListRpc = Rpc.make(WS_METHODS.projectTriggersList, {
   payload: ProjectTriggerListInput,
   success: ProjectTriggerListResult,
   error: ProjectTriggerRpcError,
 });
 
-export const WsProjectTriggersGetRpc = Rpc.make(WS_METHODS.projectTriggersGet, {
+const WsProjectTriggersGetRpc = Rpc.make(WS_METHODS.projectTriggersGet, {
   payload: ProjectTriggerGetInput,
   success: ProjectTriggerGetResult,
   error: ProjectTriggerRpcError,
 });
 
-export const WsProjectTriggersCreateRpc = Rpc.make(WS_METHODS.projectTriggersCreate, {
+const WsProjectTriggersCreateRpc = Rpc.make(WS_METHODS.projectTriggersCreate, {
   payload: ProjectTriggerCreateInput,
   success: ProjectTriggerCreateResult,
   error: ProjectTriggerRpcError,
 });
 
-export const WsProjectTriggersUpdateRpc = Rpc.make(WS_METHODS.projectTriggersUpdate, {
+const WsProjectTriggersUpdateRpc = Rpc.make(WS_METHODS.projectTriggersUpdate, {
   payload: ProjectTriggerUpdateInput,
   success: ProjectTriggerUpdateResult,
   error: ProjectTriggerRpcError,
 });
 
-export const WsProjectTriggersDeleteRpc = Rpc.make(WS_METHODS.projectTriggersDelete, {
+const WsProjectTriggersDeleteRpc = Rpc.make(WS_METHODS.projectTriggersDelete, {
   payload: ProjectTriggerDeleteInput,
   success: ProjectTriggerDeleteResult,
   error: ProjectTriggerRpcError,
 });
 
-export const WsProjectTriggersFireRpc = Rpc.make(WS_METHODS.projectTriggersFire, {
+const WsProjectTriggersFireRpc = Rpc.make(WS_METHODS.projectTriggersFire, {
   payload: ProjectTriggerFireInput,
   success: ProjectTriggerFireResult,
   error: ProjectTriggerRpcError,
 });
 
-export const WsProjectTriggersListRunsRpc = Rpc.make(WS_METHODS.projectTriggersListRuns, {
+const WsProjectTriggersListRunsRpc = Rpc.make(WS_METHODS.projectTriggersListRuns, {
   payload: ProjectTriggerListRunsInput,
   success: ProjectTriggerListRunsResult,
   error: ProjectTriggerRpcError,
 });
 
-export const WsProjectTriggersSubscribeRpc = Rpc.make(WS_METHODS.projectTriggersSubscribe, {
+const WsProjectTriggersSubscribeRpc = Rpc.make(WS_METHODS.projectTriggersSubscribe, {
   payload: ProjectTriggerSubscribeInput,
   success: ProjectTriggerStreamEvent,
   error: ProjectTriggerRpcError,
@@ -1525,19 +1525,19 @@ const WsPreviewReportStatusRpc = Rpc.make(WS_METHODS.previewReportStatus, {
   error: Schema.Union([PreviewError, EnvironmentAuthorizationError]),
 });
 
-export const WsHostedPreviewFrameRpc = Rpc.make(WS_METHODS.hostedPreviewFrame, {
+const WsHostedPreviewFrameRpc = Rpc.make(WS_METHODS.hostedPreviewFrame, {
   payload: HostedPreviewFrameInput,
   success: HostedPreviewFrameResult,
   error: EnvironmentAuthorizationError,
 });
 
-export const WsHostedPreviewControlRpc = Rpc.make(WS_METHODS.hostedPreviewControl, {
+const WsHostedPreviewControlRpc = Rpc.make(WS_METHODS.hostedPreviewControl, {
   payload: HostedPreviewControlInput,
   success: HostedPreviewControlResult,
   error: EnvironmentAuthorizationError,
 });
 
-export const WsPreviewAutomationConnectRpc = Rpc.make(WS_METHODS.previewAutomationConnect, {
+const WsPreviewAutomationConnectRpc = Rpc.make(WS_METHODS.previewAutomationConnect, {
   payload: PreviewAutomationHost,
   success: PreviewAutomationStreamEvent,
   error: Schema.Union([PreviewAutomationError, EnvironmentAuthorizationError]),

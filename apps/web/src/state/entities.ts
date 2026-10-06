@@ -303,7 +303,7 @@ export function readThreadShells(): ReadonlyArray<EnvironmentThreadShell> {
   return appAtomRegistry.get(environmentThreadShells.threadShellsAtom);
 }
 
-export function readThreadDetail(ref: ScopedThreadRef): EnvironmentThread | null {
+function readThreadDetail(ref: ScopedThreadRef): EnvironmentThread | null {
   return appAtomRegistry.get(environmentThreadDetails.threadAtom(ref));
 }
 

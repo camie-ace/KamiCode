@@ -155,9 +155,9 @@ export function resolveHttpByteRange(
     contentRange: `bytes ${start}-${end}/${sizeBytes}`,
   };
 }
-export const TEST_HARNESS_ARTIFACT_ROUTE_PATH = "/api/test-harness/artifact";
-export const TEST_HARNESS_RUNS_ROUTE_PATH = "/api/test-harness/runs";
-export const TEST_HARNESS_TRACE_VIEWER_ROUTE_PREFIX = "/api/test-harness/trace-viewer";
+const TEST_HARNESS_ARTIFACT_ROUTE_PATH = "/api/test-harness/artifact";
+const TEST_HARNESS_RUNS_ROUTE_PATH = "/api/test-harness/runs";
+const TEST_HARNESS_TRACE_VIEWER_ROUTE_PREFIX = "/api/test-harness/trace-viewer";
 const LOOPBACK_HOSTNAMES = new Set(["127.0.0.1", "::1", "localhost"]);
 const DEFAULT_TEST_HARNESS_RUN_LIMIT = 12;
 const MAX_TEST_HARNESS_RUN_LIMIT = 50;

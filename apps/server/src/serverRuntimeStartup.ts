@@ -174,7 +174,7 @@ const recordStartupHeartbeat = Effect.gen(function* () {
   });
 });
 
-export const launchStartupHeartbeat = recordStartupHeartbeat.pipe(
+const launchStartupHeartbeat = recordStartupHeartbeat.pipe(
   Effect.annotateSpans({ "startup.phase": "heartbeat.record" }),
   Effect.withSpan("server.startup.heartbeat.record"),
   Effect.ignoreCause({ log: true }),

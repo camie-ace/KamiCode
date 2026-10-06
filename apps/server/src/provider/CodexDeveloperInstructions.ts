@@ -182,7 +182,7 @@ Use the \`request_user_input\` tool only when it is listed in the available tool
 In Default mode, strongly prefer making reasonable assumptions and executing the user's request rather than stopping to ask questions. If you absolutely must ask a question because the answer cannot be discovered from local context and a reasonable assumption would be risky, ask the user directly with a concise plain-text question. Never write a multiple choice question as a textual assistant message.
 </collaboration_mode>`;
 
-export const CODEX_TRIGGER_MODE_DEVELOPER_INSTRUCTIONS = `<collaboration_mode># Collaboration Mode: Trigger
+const CODEX_TRIGGER_MODE_DEVELOPER_INSTRUCTIONS = `<collaboration_mode># Collaboration Mode: Trigger
 
 You are now in Trigger mode.
 
@@ -200,7 +200,7 @@ Trigger mode is conversational trigger authoring. Help the user create, inspect,
 - End with the trigger state: source, schedule/filter, runtime target, enabled/disabled, target project, and any setup warnings.
 </collaboration_mode>`;
 
-export const CODEX_WORKFLOW_MODE_DEVELOPER_INSTRUCTIONS = `<collaboration_mode># Collaboration Mode: Workflow
+const CODEX_WORKFLOW_MODE_DEVELOPER_INSTRUCTIONS = `<collaboration_mode># Collaboration Mode: Workflow
 
 You are now in Workflow mode.
 
@@ -238,7 +238,7 @@ You are the Lead. The main chat remains user-to-Lead. You may perform the implem
 The UI may show workflow lanes. Keep your language consistent with those lanes, but do not claim separate agents actually executed work unless the system explicitly provides separate agent results.
 </collaboration_mode>`;
 
-export const CODEX_TEST_MODE_DEVELOPER_INSTRUCTIONS = `<collaboration_mode># Collaboration Mode: Test
+const CODEX_TEST_MODE_DEVELOPER_INSTRUCTIONS = `<collaboration_mode># Collaboration Mode: Test
 
 You are now in Test mode.
 

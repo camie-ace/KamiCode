@@ -4,7 +4,7 @@ import * as Effect from "effect/Effect";
 import { describe, it } from "vite-plus/test";
 
 import {
-  formatBrowserHarnessDynamicToolResult,
+  formatEvidenceDynamicToolResult,
   runBrowserHarnessDynamicTool,
   shouldAutoUseKamiCodePairingAuth,
   type BrowserHarnessRunner,
@@ -82,7 +82,7 @@ function makeRunResult(input: BrowserHarnessRunInput): BrowserHarnessRunResult {
   };
 }
 
-function readInputText(response: ReturnType<typeof formatBrowserHarnessDynamicToolResult>): string {
+function readInputText(response: ReturnType<typeof formatEvidenceDynamicToolResult>): string {
   const item = response.contentItems[0];
   NodeAssert.ok(item);
   NodeAssert.equal(item.type, "inputText");
