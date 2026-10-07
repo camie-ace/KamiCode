@@ -1311,9 +1311,12 @@ jobs:
     needs: [preflight, release]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
+    permissions:
+      contents: write
     steps:
       - id: app_token
         name: Mint release app token
+        if: github.repository == 'pingdotgg/t3code'
         uses: actions/create-github-app-token@v2
         with:
           app-id: ${{ secrets.RELEASE_APP_ID }}
@@ -1325,7 +1328,7 @@ jobs:
         with:
           ref: main
           fetch-depth: 0
-          token: ${{ steps.app_token.outputs.token }}
+          token: ${{ steps.app_token.outputs.token || github.token }}
           persist-credentials: true
           sparse-checkout: |
             /*
@@ -1334,6 +1337,7 @@ jobs:
 
       - id: app_bot
         name: Resolve GitHub App bot identity
+        if: steps.app_token.outputs.token != ''
         env:
           GH_TOKEN: ${{ steps.app_token.outputs.token }}
           APP_SLUG: ${{ steps.app_token.outputs.app-slug }}
@@ -1377,10 +1381,11 @@ jobs:
             exit 0
           fi
 
-          git config user.name "${{ steps.app_bot.outputs.name }}"
-          git config user.email "${{ steps.app_bot.outputs.email }}"
+          git config user.name "${{ steps.app_bot.outputs.name || 'github-actions[bot]' }}"
+          git config user.email "${{ steps.app_bot.outputs.email || '41898282+github-actions[bot]@users.noreply.github.com' }}"
 
           git add apps/server/package.json apps/desktop/package.json apps/web/package.json packages/contracts/package.json pnpm-lock.yaml
+          git diff --cached --name-only
           git commit -m "chore(release): prepare $RELEASE_TAG"
           git push origin HEAD:main
 
