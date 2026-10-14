@@ -105,7 +105,10 @@ jobs:
             sha512.set(name, h512.digest('base64'));
           }
           for (const name of ['latest.yml', 'latest-mac.yml', 'latest-linux.yml', 'latest-linux-arm64.yml']) {
-            const m = parseUpdateManifest(fs.readFileSync(dir + name,'utf8'),name,'release');
+            const raw = fs.readFileSync(dir + name,'utf8');
+            // Linux AppImages add an embedded blockmap size; preserve the published manifest.
+            const commonFields = raw.replace(/^    blockMapSize: \d+\r?\n/gm, '');
+            const m = parseUpdateManifest(commonFields,name,'release');
             assert.equal(m.version,'0.1.10');
             for (const entry of m.files) {
               assert(files.includes(entry.url),entry.url);
