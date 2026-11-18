@@ -14,6 +14,7 @@ import {
   setDefaultAdvertisedEndpointKey,
   setProjectExpanded,
   setSidebarProjectScopeKey,
+  setSidebarCreatorLogins,
   setThreadChangedFilesExpanded,
   type UiState,
 } from "./uiStateStore";
@@ -23,6 +24,7 @@ function makeUiState(overrides: Partial<UiState> = {}): UiState {
     projectExpandedById: {},
     projectOrder: [],
     sidebarProjectScopeKey: null,
+    sidebarCreatorLogins: [],
     threadLastVisitedAtById: {},
     threadChangedFilesExpandedById: {},
     defaultAdvertisedEndpointKey: null,
@@ -148,6 +150,20 @@ describe("uiStateStore pure functions", () => {
     });
   });
 
+  it("keeps multiple creators independent of project scope and clears only people", () => {
+    const project = setSidebarProjectScopeKey(makeUiState(), "project-a");
+    const selected = setSidebarCreatorLogins(project, ["Alice", "bob", "alice", ""]);
+    expect(selected.sidebarCreatorLogins).toEqual(["alice", "bob"]);
+    expect(setSidebarCreatorLogins(selected, ["alice", "bob"])).toBe(selected);
+    const cleared = setSidebarCreatorLogins(selected, []);
+    expect(cleared.sidebarCreatorLogins).toEqual([]);
+    expect(cleared.sidebarProjectScopeKey).toBe("project-a");
+    expect(setSidebarProjectScopeKey(selected, null).sidebarCreatorLogins).toEqual([
+      "alice",
+      "bob",
+    ]);
+  });
+
   it("stores the sidebar project scope and resets it to all projects", () => {
     const scoped = setSidebarProjectScopeKey(makeUiState(), "github.com/pingdotgg/t3code");
 
@@ -159,6 +175,18 @@ describe("uiStateStore pure functions", () => {
 });
 
 describe("parsePersistedState", () => {
+  it("loads saved creators and defaults older or malformed state to all people", () => {
+    expect(
+      parsePersistedState({ sidebarCreatorLogins: ["alice", "bob", "alice", ""] })
+        .sidebarCreatorLogins,
+    ).toEqual(["alice", "bob"]);
+    expect(parsePersistedState({}).sidebarCreatorLogins).toEqual([]);
+    expect(
+      parsePersistedState({ sidebarCreatorLogins: "bad" as unknown as string[] })
+        .sidebarCreatorLogins,
+    ).toEqual([]);
+  });
+
   it("hydrates the last selected pull request merge method", () => {
     const parsed = parsePersistedState({
       pullRequestMergeMethod: "squash",
@@ -202,6 +230,7 @@ describe("parsePersistedState", () => {
       },
       defaultAdvertisedEndpointKey: "desktop-core:lan:http",
       sidebarProjectScopeKey: null,
+      sidebarCreatorLogins: [],
       pullRequestMergeMethod: "merge",
       threadChangedFilesExpandedById: {
         "environment:thread-1": {
@@ -324,6 +353,7 @@ describe("uiStateStore persistence", () => {
       },
       defaultAdvertisedEndpointKey: "desktop-core:lan:http",
       sidebarProjectScopeKey: null,
+      sidebarCreatorLogins: [],
       threadChangedFilesExpansionVersion: 2,
       threadChangedFilesExpandedById: {
         "environment:thread-1": {
@@ -339,7 +369,12 @@ describe("uiStateStore persistence", () => {
   });
 
   it("restores the sidebar project scope across reloads", () => {
-    persistState(makeUiState({ sidebarProjectScopeKey: "github.com/pingdotgg/t3code" }));
+    persistState(
+      makeUiState({
+        sidebarProjectScopeKey: "github.com/pingdotgg/t3code",
+        sidebarCreatorLogins: ["alice", "bob"],
+      }),
+    );
 
     const persisted = JSON.parse(
       localStorageStub.getItem(PERSISTED_STATE_KEY) ?? "{}",

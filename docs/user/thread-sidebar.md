@@ -25,6 +25,15 @@ in a new thread's model picker to add or remove them. A regular click returns to
 single model. Choose a base branch and send. Each selection starts a separate thread
 and worktree while you stay in the new thread composer. This requires a Git project.
 
+## Filter by creator
+
+On web and desktop, open the people picker beside the project filter and select
+one or more people under **Created by**. Threads created by any selected person
+appear within your current project scope and search results. Selections survive
+reloads. Use **Clear people filter** to show everyone again without changing your
+project filter. Threads and unsent drafts without creator details are hidden
+while a people filter is active.
+
 ## Pin and reorder threads
 
 Pin a thread from its menu to keep it above your active work.

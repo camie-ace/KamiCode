@@ -12,6 +12,8 @@ import {
   createThreadJumpHintVisibilityController,
   deleteSelectedThreadEntries,
   filterSidebarProjectScopeItems,
+  filterSidebarVisibleThreads,
+  buildSidebarCreatorItems,
   getSidebarThreadIdsToPrewarm,
   resolveAdjacentThreadId,
   reduceSidebarProjectScopeMenuState,
@@ -55,6 +57,7 @@ import { threadSearchMatchKey } from "@t3tools/client-runtime/state/thread-searc
 import {
   EnvironmentId,
   OrchestrationLatestTurn,
+  KamiUserId,
   ProjectId,
   ProviderInstanceId,
   ThreadId,
@@ -2618,4 +2621,90 @@ describe("navigation after parking a thread", () => {
       ).toBe(expected);
     },
   );
+});
+
+function makeCreatorThread(overrides: Partial<SidebarThreadSummary> = {}): SidebarThreadSummary {
+  return { ...makeThread(), latestUserMessageAt: null, hasPendingApprovals: false,
+    hasPendingUserInput: false, hasActionableProposedPlan: false, ...overrides };
+}
+
+describe("thread creator filters", () => {
+  it("combines multiple creators with project scope and title/message search", () => {
+    const creator = (login: string) => ({
+      userId: KamiUserId.make(login),
+      githubLogin: login,
+      displayName: "Same Name",
+      avatarUrl: null,
+    });
+    const environmentId = EnvironmentId.make("env-a");
+    const make = (id: string, project: string, login?: string) =>
+      makeCreatorThread({
+        id: ThreadId.make(id),
+        environmentId,
+        projectId: ProjectId.make(project),
+        title: `${id} task`,
+        ...(login ? { createdBy: creator(login) } : {}),
+      });
+    const alice = make("alice", "p1", "Alice");
+    const bob = make("bob", "p1", "bob");
+    const otherProject = make("alice-other", "p2", "Alice");
+    const carol = make("carol", "p1", "carol");
+    const unknown = make("unknown", "p1");
+    const archived = {
+      ...alice,
+      id: ThreadId.make("archived"),
+      archivedAt: "2026-01-01T00:00:00Z",
+    };
+    const threads = [alice, bob, otherProject, carol, unknown, archived];
+    const people = new Set(["alice", "bob"]);
+    expect(filterSidebarVisibleThreads(threads, null, people)).toEqual([alice, bob, otherProject]);
+    expect(filterSidebarVisibleThreads(threads, null, new Set(["bob"]))).toEqual([bob]);
+    const scoped = filterSidebarVisibleThreads(threads, new Set(["env-a:p1"]), people);
+    expect(scoped).toEqual([alice, bob]);
+    expect(searchSidebarThreads(scoped, "alice", new Set())).toEqual([alice]);
+    expect(
+      searchSidebarThreads(
+        scoped,
+        "message match",
+        new Set([
+          threadSearchMatchKey({ environmentId, threadId: bob.id }),
+          threadSearchMatchKey({ environmentId, threadId: carol.id }),
+        ]),
+      ),
+    ).toEqual([bob]);
+    expect(filterSidebarVisibleThreads(threads, new Set(["env-a:p2"]), new Set(["bob"]))).toEqual(
+      [],
+    );
+    expect(filterSidebarVisibleThreads(threads, null, new Set())).toEqual([
+      alice,
+      bob,
+      otherProject,
+      carol,
+      unknown,
+    ]);
+  });
+
+  it("lists creators once across environments and keeps same-named people distinct", () => {
+    const creator = {
+      userId: KamiUserId.make("local-id"),
+      githubLogin: "Alice",
+      displayName: "Same Name",
+      avatarUrl: null,
+    };
+    const alice = makeCreatorThread({ createdBy: creator });
+    const aliceRemote = makeCreatorThread({
+      environmentId: EnvironmentId.make("remote"),
+      createdBy: { ...creator, userId: KamiUserId.make("remote-id"), githubLogin: "alice" },
+    });
+    const bob = makeCreatorThread({ createdBy: { ...creator, githubLogin: "bob" } });
+    const archived = makeCreatorThread({
+      archivedAt: "2026-01-01T00:00:00Z",
+      createdBy: { ...creator, githubLogin: "archived" },
+    });
+    expect(
+      buildSidebarCreatorItems([alice, aliceRemote, bob, archived, makeCreatorThread()]).map(
+        (item) => item.value,
+      ),
+    ).toEqual(["alice", "bob"]);
+  });
 });

@@ -1307,3 +1307,42 @@ export function sortScopedProjectsForSidebar<
       left.id.localeCompare(right.id),
   );
 }
+
+export function filterSidebarVisibleThreads<
+  T extends Pick<SidebarThreadSummary, "archivedAt"> & {
+    environmentId: string;
+    projectId: string;
+    createdBy?: SidebarThreadSummary["createdBy"];
+  },
+>(
+  threads: readonly T[],
+  scopedProjectKeys: ReadonlySet<string> | null,
+  creatorLogins: ReadonlySet<string> = new Set(),
+): T[] {
+  return threads.filter(
+    (thread) =>
+      thread.archivedAt === null &&
+      (scopedProjectKeys === null ||
+        scopedProjectKeys.has(`${thread.environmentId}:${thread.projectId}`)) &&
+      (creatorLogins.size === 0 ||
+        (thread.createdBy != null &&
+          creatorLogins.has(thread.createdBy.githubLogin.toLowerCase()))),
+  );
+}
+
+export function buildSidebarCreatorItems(threads: readonly SidebarThreadSummary[]) {
+  const people = new Map<string, { value: string; label: string; avatarUrl: string | null }>();
+  for (const thread of filterSidebarVisibleThreads(threads, null)) {
+    const creator = thread.createdBy;
+    if (!creator) continue;
+    const value = creator.githubLogin.toLowerCase();
+    people.set(value, {
+      value,
+      label: creator.displayName
+        ? `${creator.displayName} (@${creator.githubLogin})`
+        : `@${creator.githubLogin}`,
+      avatarUrl: creator.avatarUrl,
+    });
+  }
+  return [...people.values()].sort((a, b) => a.label.localeCompare(b.label));
+}
