@@ -1,3 +1,4 @@
+import { SidebarCreatorFilter } from "./sidebar/SidebarCreatorFilter";
 import { ThreadHoverCard, ThreadHoverCardPopup } from "./ThreadHoverCard";
 import { CollapsibleSectionHeader } from "./ui/collapsible-section-header";
 import { setThreadChangeRequestSnapshot } from "./ThreadStatusIndicators";
@@ -186,6 +187,7 @@ import {
   animateSidebarLayoutChanges,
   applySidebarThreadDrop,
   filterSidebarV2VisibleThreads,
+  buildSidebarCreatorItems,
   buildBulkTitleRegenerationContextMenuItem,
   buildBulkUnpinContextMenuItem,
   deleteSelectedThreadEntries,
@@ -2578,6 +2580,24 @@ export default function Sidebar() {
   // app restarts keep it.
   const projectScopeKey = useUiStateStore((store) => store.sidebarProjectScopeKey);
   const setProjectScopeKey = useUiStateStore((store) => store.setSidebarProjectScopeKey);
+  const creatorLogins = useUiStateStore((store) => store.sidebarCreatorLogins);
+  const setCreatorLogins = useUiStateStore((store) => store.setSidebarCreatorLogins);
+  const selectedCreatorLogins = useMemo(() => new Set(creatorLogins), [creatorLogins]);
+  const creatorItems = useMemo(() => {
+    const items = buildSidebarCreatorItems(threads);
+    // Keep unavailable selections removable while environments are disconnected.
+    const available = new Set(items.map((item) => item.value));
+    return [
+      ...items,
+      ...creatorLogins
+        .filter((login) => !available.has(login))
+        .map((login) => ({
+          value: login,
+          label: `@${login}`,
+          avatarUrl: null,
+        })),
+    ];
+  }, [threads, creatorLogins]);
   // {value, label} items let Base UI drive the combobox selection contract
   // while the popup search filters the same collection.
   const projectScopeItems = useMemo(
@@ -2663,6 +2683,7 @@ export default function Sidebar() {
   // an open never-left draft, which only softens the empty state.
   const routeDraftIdForRows = routeTarget?.kind === "draft" ? routeTarget.draftId : null;
   const visibleDraftSessionCount = useComposerDraftStore((store) => {
+    if (creatorLogins.length > 0) return 0;
     let count = 0;
     for (const [draftKey, session] of Object.entries(store.draftThreadsByThreadKey)) {
       if (session.promotedTo != null) {
@@ -2685,7 +2706,7 @@ export default function Sidebar() {
   // hidden now, and bulk actions must never count or touch invisible rows.
   useEffect(() => {
     clearSelection();
-  }, [clearSelection, projectScopeKey]);
+  }, [clearSelection, projectScopeKey, creatorLogins]);
 
   const openProjectSettings = useCallback(
     (projectGroup: SidebarProjectSnapshot, hash?: string) => {
@@ -2772,7 +2793,11 @@ export default function Sidebar() {
     const preciseNow = new Date().toISOString();
     // Subagent child threads live in the parent's Agents surface, not the
     // sidebar roster (v2 models them as real threads with lineage).
-    const visible = filterSidebarV2VisibleThreads(threads, scopedProjectKeys);
+    const visible = filterSidebarV2VisibleThreads(
+      threads,
+      scopedProjectKeys,
+      selectedCreatorLogins,
+    );
     inboxReturns.observe(workingShelfEnabled ? threads : null);
     const pinned: EnvironmentThreadShell[] = [];
     const active: EnvironmentThreadShell[] = [];
@@ -2876,6 +2901,7 @@ export default function Sidebar() {
     nowMinute,
     optimisticDrop,
     scopedProjectKeys,
+    selectedCreatorLogins,
     serverConfigs,
     snoozeWakeTick,
     threads,
@@ -2951,7 +2977,7 @@ export default function Sidebar() {
   // filter context changes so a scope/search flip never inherits a deep
   // page state.
   const [settledVisibleCount, setSettledVisibleCount] = useState(SETTLED_TAIL_INITIAL_COUNT);
-  const settledResetKey = projectScopeKey ?? "all";
+  const settledResetKey = JSON.stringify([projectScopeKey, creatorLogins]);
   const lastSettledResetKeyRef = useRef(settledResetKey);
   if (lastSettledResetKeyRef.current !== settledResetKey) {
     lastSettledResetKeyRef.current = settledResetKey;
@@ -5113,6 +5139,14 @@ export default function Sidebar() {
                   </ComboboxPopup>
                 </Combobox>
               }
+              creatorScope={
+                <SidebarCreatorFilter
+                  creatorItems={creatorItems}
+                  creatorLogins={creatorLogins}
+                  setCreatorLogins={setCreatorLogins}
+                  headerSearchRef={headerSearchRef}
+                />
+              }
               onNewProject={openAddProjectCommandPalette}
               onNewThread={handleNewThreadClick}
               newThreadDisabled={projects.length === 0}
@@ -5384,15 +5418,17 @@ export default function Sidebar() {
                       };
                       const from = isContextDrag ? null : (dragState?.activeSection ?? null);
                       const items: ReactNode[] = [
-                        <SidebarDraftBlock
-                          key="draft-sessions"
-                          projectByKey={projectByKey}
-                          projectDisplayNameByKey={projectDisplayNameByKey}
-                          scopedProjectKeys={scopedProjectKeys}
-                          routeDraftId={routeDraftIdForRows}
-                          onNavigateToDraft={navigateToDraft}
-                          onDraftContextMenu={handleDraftContextMenu}
-                        />,
+                        creatorLogins.length === 0 ? (
+                          <SidebarDraftBlock
+                            key="draft-sessions"
+                            projectByKey={projectByKey}
+                            projectDisplayNameByKey={projectDisplayNameByKey}
+                            scopedProjectKeys={scopedProjectKeys}
+                            routeDraftId={routeDraftIdForRows}
+                            onNavigateToDraft={navigateToDraft}
+                            onDraftContextMenu={handleDraftContextMenu}
+                          />
+                        ) : null,
                       ];
                       for (const item of sidebarListItems) {
                         if (item.kind === "thread") {
@@ -5558,6 +5594,8 @@ export default function Sidebar() {
                     Add project
                   </button>
                 </>
+              ) : creatorLogins.length > 0 ? (
+                "No threads match the selected people and project filters"
               ) : scopedProjectGroup ? (
                 `No threads in ${scopedProjectGroup.displayName} yet`
               ) : (

@@ -15,6 +15,7 @@ import {
   deleteSelectedThreadEntries,
   filterSidebarProjectScopeItems,
   filterSidebarV2VisibleThreads,
+  buildSidebarCreatorItems,
   formatWorkingDurationLabel,
   getFallbackThreadIdAfterDelete,
   getProjectSortTimestamp,
@@ -62,7 +63,14 @@ import {
 } from "./Sidebar.logic";
 import { threadSearchMatchKey } from "@t3tools/client-runtime/state/thread-search";
 import { sortSettledThreads } from "@t3tools/client-runtime/state/thread-sort";
-import { EnvironmentId, ProjectId, ProviderInstanceId, RunId, ThreadId } from "@t3tools/contracts";
+import {
+  KamiUserId,
+  EnvironmentId,
+  ProjectId,
+  ProviderInstanceId,
+  RunId,
+  ThreadId,
+} from "@t3tools/contracts";
 
 import {
   DEFAULT_INTERACTION_MODE,
@@ -444,6 +452,94 @@ describe("sidebar thread lineage helpers", () => {
         new Set([`${environmentId}:${projectId}`]),
       ).map((thread) => thread.id),
     ).toEqual([parentId, fork.id]);
+  });
+
+  it("combines multiple creators with project scope and title/message search", () => {
+    const creator = (login: string) => ({
+      userId: KamiUserId.make(login),
+      githubLogin: login,
+      displayName: "Same Name",
+      avatarUrl: null,
+    });
+    const environmentId = EnvironmentId.make("env-a");
+    const make = (id: string, project: string, login?: string) =>
+      makeThreadFixture({
+        id: ThreadId.make(id),
+        environmentId,
+        projectId: ProjectId.make(project),
+        title: `${id} task`,
+        ...(login ? { createdBy: creator(login) } : {}),
+      });
+    const alice = make("alice", "p1", "Alice");
+    const bob = make("bob", "p1", "bob");
+    const otherProject = make("alice-other", "p2", "Alice");
+    const carol = make("carol", "p1", "carol");
+    const unknown = make("unknown", "p1");
+    const archived = {
+      ...alice,
+      id: ThreadId.make("archived"),
+      archivedAt: "2026-01-01T00:00:00Z",
+    };
+    const child = {
+      ...alice,
+      id: ThreadId.make("child"),
+      lineage: { ...alice.lineage, relationshipToParent: "subagent" as const },
+    };
+    const threads = [alice, bob, otherProject, carol, unknown, archived, child];
+    const people = new Set(["alice", "bob"]);
+    expect(filterSidebarV2VisibleThreads(threads, null, people)).toEqual([
+      alice,
+      bob,
+      otherProject,
+    ]);
+    expect(filterSidebarV2VisibleThreads(threads, null, new Set(["bob"]))).toEqual([bob]);
+    const scoped = filterSidebarV2VisibleThreads(threads, new Set(["env-a:p1"]), people);
+    expect(scoped).toEqual([alice, bob]);
+    expect(searchSidebarThreads(scoped, "alice", new Set())).toEqual([alice]);
+    expect(
+      searchSidebarThreads(
+        scoped,
+        "message match",
+        new Set([
+          threadSearchMatchKey({ environmentId, threadId: bob.id }),
+          threadSearchMatchKey({ environmentId, threadId: carol.id }),
+        ]),
+      ),
+    ).toEqual([bob]);
+    expect(filterSidebarV2VisibleThreads(threads, new Set(["env-a:p2"]), new Set(["bob"]))).toEqual(
+      [],
+    );
+    expect(filterSidebarV2VisibleThreads(threads, null, new Set())).toEqual([
+      alice,
+      bob,
+      otherProject,
+      carol,
+      unknown,
+    ]);
+  });
+
+  it("lists creators once across environments and keeps same-named people distinct", () => {
+    const creator = {
+      userId: KamiUserId.make("local-id"),
+      githubLogin: "Alice",
+      displayName: "Same Name",
+      avatarUrl: null,
+    };
+    const alice = makeThreadFixture({ createdBy: creator });
+    const aliceRemote = makeThreadFixture({
+      environmentId: EnvironmentId.make("remote"),
+      createdBy: { ...creator, userId: KamiUserId.make("remote-id"), githubLogin: "alice" },
+    });
+    const bob = makeThreadFixture({ createdBy: { ...creator, githubLogin: "bob" } });
+    const archived = makeThreadFixture({
+      archivedAt: "2026-01-01T00:00:00Z",
+      createdBy: { ...creator, githubLogin: "archived" },
+    });
+    expect(
+      buildSidebarCreatorItems([alice, aliceRemote, bob, archived, makeThreadFixture()]).map(
+        (item) => item.value,
+      ),
+    ).toEqual(["alice", "bob"]);
   });
 
   it("identifies subagent threads so the sidebar can hide them", () => {
