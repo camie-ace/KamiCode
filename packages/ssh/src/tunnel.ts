@@ -829,6 +829,8 @@ if [ "$T3_ARCHIVE_MODE" = "1" ]; then
 elif ! ensure_remote_node_path; then
   if ! command -v node >/dev/null 2>&1; then
     printf 'Remote host is missing node on PATH. Install Node or configure a supported version manager for non-interactive shells.\\n' >&2
+  else
+    remote_node_satisfies_engine || true
   fi
   exit 1
 fi

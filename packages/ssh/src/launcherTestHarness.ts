@@ -159,6 +159,14 @@ if [ -n "$TEST_CLOCK_JUMP" ] && [ ! -e "$HOME/jumped" ]; then
   touch "$HOME/jumped"
 fi`,
     );
+    executable(
+      "date",
+      `if [ "$1" = +%s ]; then
+  awk '{ printf "%.0f\\n", $1 / 1000 }' "$HOME/clock"
+else
+  PATH=/usr/bin:/bin exec date "$@"
+fi`,
+    );
     executable("nohup", 'printf "%s" "$$" > "$HOME/started-server"');
     // The test process stands in for a recorded server; report the serve command it would run.
     executable(

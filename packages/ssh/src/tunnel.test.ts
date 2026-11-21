@@ -186,7 +186,12 @@ describe("ssh tunnel scripts", () => {
           return spawner.spawn(
             ChildProcess.make(
               "sh",
-              ["-c", `${nodeFixture}eval "$(cat)"`, "sh", ...commandArgs(command).slice(-1)],
+              [
+                "-c",
+                `${nodeFixture}curl() { return 1; }; wget() { return 1; }; eval "$(cat)"`,
+                "sh",
+                ...commandArgs(command).slice(-1),
+              ],
               {
                 ...command.options,
                 env: {
@@ -897,7 +902,7 @@ describe("ssh tunnel scripts", () => {
           ),
         );
         yield* Deferred.await(tunnelSpawned);
-        yield* TestClock.adjust(Duration.minutes(2));
+        yield* TestClock.adjust(Duration.minutes(3));
         const result = yield* Fiber.join(ensure);
         assert.isTrue(Result.isFailure(result));
         if (Result.isFailure(result)) {
@@ -1740,11 +1745,12 @@ describe("SSH launch during desktop update", () => {
     Effect.gen(function* () {
       const result = runLauncher(yield* captureLauncher, {
         serviceServing: true,
+        clockJump: 119_000,
         allowFailure: true,
       });
       assert.equal(result.status, 1);
       assert.include(result.stderr, "no second server was started");
-      assert.equal(result.now, 60_000);
+      assert.equal(result.now, 120_000);
       assert.isFalse(result.events.some((event) => event.startsWith("start ")));
     }),
   );
