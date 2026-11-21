@@ -372,102 +372,110 @@ export default function ProjectTriggersSection({
 
     setPendingAction(editingTrigger ? `update:${editingTrigger.id}` : "create");
     setValidationError(null);
-    try {
-      if (editingTrigger) {
-        await updateProjectTrigger({
-          environmentId: selectedProject.environmentId,
-          trigger: {
-            projectId: selectedProject.id,
-            triggerId: editingTrigger.id,
-            patch: mutation,
-          },
-        });
-      } else {
-        await createProjectTrigger({
-          environmentId: selectedProject.environmentId,
-          trigger: {
-            projectId: selectedProject.id,
-            ...mutation,
-          },
-        });
+    await (async () => {
+      try {
+        if (editingTrigger) {
+          await updateProjectTrigger({
+            environmentId: selectedProject.environmentId,
+            trigger: {
+              projectId: selectedProject.id,
+              triggerId: editingTrigger.id,
+              patch: mutation,
+            },
+          });
+        } else {
+          await createProjectTrigger({
+            environmentId: selectedProject.environmentId,
+            trigger: {
+              projectId: selectedProject.id,
+              ...mutation,
+            },
+          });
+        }
+        setDialogOpen(false);
+        await reloadTriggers();
+      } catch (error) {
+        setValidationError(error instanceof Error ? error.message : "Failed to save trigger.");
       }
-      setDialogOpen(false);
-      await reloadTriggers();
-    } catch (error) {
-      setValidationError(error instanceof Error ? error.message : "Failed to save trigger.");
-    } finally {
+    })().finally(() => {
       setPendingAction(null);
-    }
+    });
   };
 
   const toggleTriggerEnabled = async (trigger: ProjectTrigger, enabled: boolean) => {
     if (!selectedProject || pendingAction !== null) return;
     setPendingAction(`toggle:${trigger.id}`);
-    try {
-      await updateProjectTrigger({
-        environmentId: selectedProject.environmentId,
-        trigger: {
-          projectId: selectedProject.id,
-          triggerId: trigger.id,
-          patch: mutationFromTrigger(
-            trigger,
-            trigger.executionLocation ?? selectedExecutionLocation,
-            enabled,
-          ),
-        },
-      });
-      await reloadTriggers();
-    } catch (error) {
-      toastTriggerError("Failed to update trigger", error);
-    } finally {
+    await (async () => {
+      try {
+        await updateProjectTrigger({
+          environmentId: selectedProject.environmentId,
+          trigger: {
+            projectId: selectedProject.id,
+            triggerId: trigger.id,
+            patch: mutationFromTrigger(
+              trigger,
+              trigger.executionLocation ?? selectedExecutionLocation,
+              enabled,
+            ),
+          },
+        });
+        await reloadTriggers();
+      } catch (error) {
+        toastTriggerError("Failed to update trigger", error);
+      }
+    })().finally(() => {
       setPendingAction(null);
-    }
+    });
   };
 
   const runTrigger = async (trigger: ProjectTrigger) => {
     if (!selectedProject || pendingAction !== null) return;
     setPendingAction(`run:${trigger.id}`);
-    try {
-      await runProjectTriggerNow({
-        environmentId: selectedProject.environmentId,
-        trigger: {
-          projectId: selectedProject.id,
-          triggerId: trigger.id,
-        },
-      });
-      toastManager.add({
-        type: "success",
-        title: "Trigger started",
-        description: `${trigger.name} was sent to ${projectTriggerExecutionLocationLabel(
-          trigger.executionLocation ?? selectedExecutionLocation,
-        )}.`,
-      });
-      await reloadTriggers();
-    } catch (error) {
-      toastTriggerError("Failed to run trigger", error);
-    } finally {
+    await (async () => {
+      try {
+        await runProjectTriggerNow({
+          environmentId: selectedProject.environmentId,
+          trigger: {
+            projectId: selectedProject.id,
+            triggerId: trigger.id,
+          },
+        });
+        toastManager.add({
+          type: "success",
+          title: "Trigger started",
+          description: `${trigger.name} was sent to ${projectTriggerExecutionLocationLabel(
+            trigger.executionLocation ?? selectedExecutionLocation,
+          )}.`,
+        });
+        await reloadTriggers();
+      } catch (error) {
+        toastTriggerError("Failed to run trigger", error);
+      }
+    })().finally(() => {
       setPendingAction(null);
-    }
+    });
   };
 
   const confirmDelete = async () => {
     if (!selectedProject || !deleteTarget || pendingAction !== null) return;
     setPendingAction(`delete:${deleteTarget.id}`);
-    try {
-      await deleteProjectTrigger({
-        environmentId: selectedProject.environmentId,
-        trigger: {
-          projectId: selectedProject.id,
-          triggerId: deleteTarget.id,
-        },
-      });
-      setDeleteTarget(null);
-      await reloadTriggers();
-    } catch (error) {
-      toastTriggerError("Failed to delete trigger", error);
-    } finally {
+    await (async () => {
+      try {
+        await deleteProjectTrigger({
+          environmentId: selectedProject.environmentId,
+          trigger: {
+            projectId: selectedProject.id,
+            triggerId: deleteTarget.id,
+          },
+        });
+        setDeleteTarget(null);
+        await reloadTriggers();
+      } catch (error) {
+        toastTriggerError("Failed to delete trigger", error);
+      }
+    })().finally(() => {
       setPendingAction(null);
-    }
+    });
   };
 
   const loadHistory = async (trigger: ProjectTrigger) => {

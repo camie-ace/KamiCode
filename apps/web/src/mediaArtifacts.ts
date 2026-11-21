@@ -155,7 +155,7 @@ const MARKDOWN_ANGLE_LINK_RE =
 const MARKDOWN_LINK_RE =
   /\[[^\]]*?\]\((?<target>[^)\s]+?\.(?<ext>[a-z0-9]{2,5})(?:[#?][^)]*)?)\)/giu;
 const RAW_MEDIA_RE =
-  /(?<target>(?:file:\/\/\/|https?:\/\/|[A-Za-z]:[\\/]|\.{1,2}[\\/]|[/\\]|[\w .@()[\]-]+[\\/])[^"'`<>\]\s]+?\.(?<ext>[a-z0-9]{2,5})(?:[#?][^\s"'`<>\]]*)?)/giu;
+  /(?<target>(?:file:\/\/\/|https?:\/\/|[A-Za-z]:[\\/]|\.{1,2}[\\/]|[/\\]|(?<![\w.@()[\]-])[\w.@()[\]-]+[\\/])[^"'`<>\]\s]+?\.(?<ext>[a-z0-9]{2,5})(?:[#?][^\s"'`<>\]]*)?)/giu;
 const LOCAL_MEDIA_SEARCH_TAG_RE =
   /<local_media_search_results\b[^>]*>(?<payload>[\s\S]*?)<\/local_media_search_results>/giu;
 const LOCAL_MEDIA_SEARCH_FENCE_RE =

@@ -661,6 +661,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
           "playwright-core": "1.60.0",
         },
         arch: "arm64",
+        ffiRsVersion: "1.3.2",
         fffNodeVersion: "0.9.4",
       }),
       {
@@ -670,6 +671,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
         "@napi-rs/keyring": "1.3.0",
         "playwright-core": "1.60.0",
         "@ff-labs/fff-bin-darwin-arm64": "0.9.4",
+        "@yuuang/ffi-rs-darwin-arm64": "1.3.2",
       },
     );
 
@@ -679,6 +681,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
         serverDependencies: { "@ff-labs/fff-node": "0.9.4", "node-pty": "1.1.0", effect: "4.0.0" },
         desktopDependencies: { "@crowecawcaw/xa11y": "0.13.0" },
         arch: "x64",
+        ffiRsVersion: "1.3.2",
         fffNodeVersion: "0.9.4",
       }),
       {
@@ -687,6 +690,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
         "@crowecawcaw/xa11y": "0.13.0",
         "@ff-labs/fff-bin-linux-x64-gnu": "0.9.4",
         "@ff-labs/fff-bin-linux-x64-musl": "0.9.4",
+        "@yuuang/ffi-rs-linux-x64-gnu": "1.3.2",
       },
     );
   });
@@ -1570,7 +1574,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
     });
 
     assert.deepStrictEqual(configuration, {
-      appId: "com.t3tools.t3code",
+      appId: "tech.camie.kamicode",
       teamId: "ABC1234567",
       rpDomains: ["example.clerk.accounts.dev"],
       provisioningProfilePath: "/tmp/t3code.provisionprofile",
@@ -1593,7 +1597,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
       "clerk.example.com",
       "example.clerk.accounts.dev",
     ]);
-    assert.include(entitlements, "<string>ABC1234567.com.t3tools.t3code</string>");
+    assert.include(entitlements, "<string>ABC1234567.tech.camie.kamicode</string>");
     assert.include(entitlements, "<string>webcredentials:clerk.example.com</string>");
     assert.include(entitlements, "<string>webcredentials:example.clerk.accounts.dev</string>");
     assert.include(entitlements, "<key>com.apple.security.cs.allow-jit</key>");

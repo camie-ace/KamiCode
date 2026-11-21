@@ -128,6 +128,11 @@ const createFixtureSource = Effect.fn("createMigrateDevDbFixtureSource")(functio
       yield* sql`INSERT INTO orchestration_v2_projection_context_transfers
         (context_transfer_id, source_thread_id, target_thread_id, type, status, updated_at, payload_json)
         VALUES ('transfer-1', 'archived-thread', 'stopped-thread', 'provider_handoff', 'completed', '2026-08-01', '{}')`;
+      yield* sql`INSERT INTO project_triggers
+        (trigger_id, project_id, name, enabled, schedule_kind, timezone, prompt,
+          attachments_json, model_selection_json, runtime_mode, interaction_mode, created_at, updated_at)
+        VALUES ('trigger-1', 'project-kept', 'Copied trigger', 1, 'manual', 'UTC', 'Run it',
+          '[]', '{}', 'full-access', 'default', '2026-08-01', '2026-08-01')`;
       yield* sql`INSERT INTO scheduled_tasks
         (task_id, title, prompt, enabled, schedule_json, project_id, workspace_strategy_json,
           model_selection_json, runtime_mode, interaction_mode, created_by, creation_source,
@@ -183,6 +188,7 @@ it.layer(NodeServices.layer)("migrate-dev-db", (it) => {
           const [leftovers] = yield* sql<{
             auth: number;
             tasks: number;
+            triggers: number;
             webhooks: number;
             transfers: number;
             links: number;
@@ -190,6 +196,7 @@ it.layer(NodeServices.layer)("migrate-dev-db", (it) => {
             SELECT
               (SELECT COUNT(*) FROM auth_sessions) AS auth,
               (SELECT COUNT(*) FROM scheduled_tasks) AS tasks,
+              (SELECT COUNT(*) FROM project_triggers) AS triggers,
               (SELECT COUNT(*) FROM scheduled_task_webhook_replay_keys) +
                 (SELECT COUNT(*) FROM scheduled_task_webhook_pending) AS webhooks,
               (SELECT COUNT(*) FROM orchestration_v2_projection_context_transfers) AS transfers,
@@ -237,6 +244,7 @@ it.layer(NodeServices.layer)("migrate-dev-db", (it) => {
       assert.deepStrictEqual(kept.leftovers, {
         auth: 0,
         tasks: 0,
+        triggers: 0,
         webhooks: 0,
         transfers: 0,
         links: 0,
@@ -319,13 +327,13 @@ it.layer(NodeServices.layer)("migrate-dev-db", (it) => {
       const stateDir = path.join(sourceDir, "userdata");
       const source = path.join(stateDir, "statev2.sqlite");
       yield* fs.makeDirectory(stateDir, { recursive: true });
-      yield* withDatabase(source, runMigrations({ toMigrationInclusive: 54 }));
+      yield* withDatabase(source, runMigrations({ toMigrationInclusive: 71 }));
 
       const result = yield* runMigrateDevDb(
         { baseDir: destDir, source, projects: 5, threadsPerProject: 10 },
         { sharedHome: sourceDir },
       );
-      assert.include(result.executedMigrations, "55_OrchestrationV2");
+      assert.include(result.executedMigrations, "72_OrchestrationV2");
     }),
   );
 
@@ -349,7 +357,7 @@ it.layer(NodeServices.layer)("migrate-dev-db", (it) => {
         source,
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient;
-          yield* runMigrations({ toMigrationInclusive: 54 });
+          yield* runMigrations({ toMigrationInclusive: 71 });
           yield* sql`INSERT INTO projection_projects
             (project_id, title, workspace_root, scripts_json, created_at, updated_at)
             VALUES ('project-legacy', 'Legacy', '/tmp/legacy', '[]', '2026-08-01', '2026-08-01')`;
@@ -429,7 +437,7 @@ it.layer(NodeServices.layer)("migrate-dev-db", (it) => {
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient;
           yield* sql`UPDATE effect_sql_migrations SET name = 'OtherBuildMigration'
-            WHERE migration_id = 60`;
+            WHERE migration_id = 78`;
         }),
       );
 
@@ -444,74 +452,42 @@ it.layer(NodeServices.layer)("migrate-dev-db", (it) => {
       assert.equal(error._tag, "MigrateDevDbPhaseError");
       if (error._tag === "MigrateDevDbPhaseError") {
         assert.equal(error.phase, "migrate");
-        assert.include(String(error.cause), "60_ThreadSnapshotWindowIndexes");
+        assert.include(String(error.cause), "78_ThreadSnapshotWindowIndexes");
       }
       assert.deepStrictEqual(yield* fs.readFile(source), sourceBefore);
       assert.deepStrictEqual(yield* fs.readFile(destination), destinationBefore);
     }),
   );
 
-  it.effect("imports a dev seed whose ids after 67 came from the peer links branch", () =>
+  it.effect("refuses an upstream V2 ledger without changing either database", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
-      const sourceDir = yield* fs.makeTempDirectoryScoped({ prefix: "migrate-dev-db-peer-" });
-      const destDir = yield* fs.makeTempDirectoryScoped({ prefix: "migrate-dev-db-peer-dest-" });
-      const source = yield* createFixtureSource(sourceDir, 67);
-      // Mirrors a real ~/.t3 seed written by a build whose 68-70 differ from main's.
+      const sourceDir = yield* fs.makeTempDirectoryScoped({ prefix: "migrate-dev-db-upstream-" });
+      const destDir = yield* fs.makeTempDirectoryScoped({
+        prefix: "migrate-dev-db-upstream-dest-",
+      });
+      const source = yield* createFixtureSource(sourceDir);
       yield* withDatabase(
         source,
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient;
-          yield* sql`CREATE TABLE peer_environment_links (
-            environment_id TEXT PRIMARY KEY,
-            secret_name TEXT NOT NULL,
-            label TEXT NOT NULL,
-            urls_json TEXT NOT NULL,
-            access TEXT NOT NULL,
-            linked_at TEXT NOT NULL,
-            expires_at TEXT NOT NULL,
-            last_reached_at TEXT,
-            last_error TEXT,
-            fenced INTEGER NOT NULL DEFAULT 0)`;
-          yield* sql`CREATE INDEX orchestration_v2_projection_turn_items_waiting_link_idx
-            ON orchestration_v2_projection_turn_items(thread_id, updated_at DESC, turn_item_id DESC)
-            WHERE type = 'link_request' AND status = 'waiting'`;
-          yield* insertPeerLink(sql);
-          yield* sql`INSERT INTO effect_sql_migrations (migration_id, name) VALUES
-            (68, 'PeerLinks'), (69, 'PeerLinkFence'), (70, 'WaitingLinkRequestIndex')`;
+          yield* sql`UPDATE effect_sql_migrations SET name = 'OrchestrationV2' WHERE migration_id = 55`;
         }),
       );
-
-      const result = yield* runMigrateDevDb(
+      const destination = yield* createFixtureSource(destDir);
+      const sourceBefore = yield* fs.readFile(source);
+      const destinationBefore = yield* fs.readFile(destination);
+      const error = yield* runMigrateDevDb(
         { baseDir: destDir, source, projects: 5, threadsPerProject: 2 },
         { sharedHome: sourceDir },
-      );
-
-      const imported = yield* withDatabase(
-        result.databasePath,
-        Effect.gen(function* () {
-          const sql = yield* SqlClient.SqlClient;
-          const threads = yield* sql<{ thread_id: string }>`
-            SELECT thread_id FROM orchestration_v2_projection_threads ORDER BY thread_id`;
-          const schema = yield* sql<{ name: string }>`
-            SELECT name FROM sqlite_master WHERE name IN (
-              'orchestration_v2_projection_turn_items_stop_request_idx',
-              'orchestration_v2_message_search')
-            ORDER BY name`;
-          return { threads, schema };
-        }),
-      );
-      assert.deepStrictEqual(
-        imported.threads.map((row) => row.thread_id),
-        ["fork-thread", "settled-thread", "stopped-thread"],
-      );
-      assert.deepStrictEqual(
-        imported.schema.map((row) => row.name),
-        [
-          "orchestration_v2_message_search",
-          "orchestration_v2_projection_turn_items_stop_request_idx",
-        ],
-      );
+      ).pipe(Effect.flip);
+      assert.equal(error._tag, "MigrateDevDbPhaseError");
+      if (error._tag === "MigrateDevDbPhaseError") {
+        assert.equal(error.phase, "migrate");
+        assert.include(String(error.cause), "KamiCode requires its own data directory");
+      }
+      assert.deepStrictEqual(yield* fs.readFile(source), sourceBefore);
+      assert.deepStrictEqual(yield* fs.readFile(destination), destinationBefore);
     }),
   );
 

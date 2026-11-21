@@ -256,8 +256,8 @@ describe("DesktopEnvironment", () => {
 
       assert.deepEqual(environment.branding, {
         baseName: "KamiCode",
-        stageLabel: "Alpha",
-        displayName: "KamiCode (Alpha)",
+        stageLabel: "Beta",
+        displayName: "KamiCode (Beta)",
       });
       assert.equal(environment.defaultDesktopSettings.updateChannel, "latest");
     }),

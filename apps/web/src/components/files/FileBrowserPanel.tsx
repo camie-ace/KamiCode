@@ -577,39 +577,41 @@ export default function FileBrowserPanel({
     }
 
     setIsUploading(true);
-    try {
-      const result = await runtime.runPromise(
-        uploadEnvironmentWorkspaceFiles({
-          prepared: preparedConnection.value,
-          cwd,
-          directory: uploadDirectory,
-          conflict: "keep-both",
-          files,
-        }),
-      );
-      refresh();
-      const uploaded = result.files.filter((file) => file.status !== "skipped");
-      const renamed = result.files.filter((file) => file.status === "renamed");
-      toastManager.add({
-        type: "success",
-        title: `Uploaded ${uploaded.length} ${uploaded.length === 1 ? "file" : "files"}`,
-        description:
-          renamed.length > 0
-            ? `${renamed.length} existing ${renamed.length === 1 ? "name was" : "names were"} kept; the new ${renamed.length === 1 ? "file was" : "files were"} renamed.`
-            : `Saved to ${uploadDestinationLabel(uploadDirectory)}.`,
-      });
-      if (uploaded.length === 1 && uploaded[0]) {
-        onOpenFile(uploaded[0].relativePath);
+    await (async () => {
+      try {
+        const result = await runtime.runPromise(
+          uploadEnvironmentWorkspaceFiles({
+            prepared: preparedConnection.value,
+            cwd,
+            directory: uploadDirectory,
+            conflict: "keep-both",
+            files,
+          }),
+        );
+        refresh();
+        const uploaded = result.files.filter((file) => file.status !== "skipped");
+        const renamed = result.files.filter((file) => file.status === "renamed");
+        toastManager.add({
+          type: "success",
+          title: `Uploaded ${uploaded.length} ${uploaded.length === 1 ? "file" : "files"}`,
+          description:
+            renamed.length > 0
+              ? `${renamed.length} existing ${renamed.length === 1 ? "name was" : "names were"} kept; the new ${renamed.length === 1 ? "file was" : "files were"} renamed.`
+              : `Saved to ${uploadDestinationLabel(uploadDirectory)}.`,
+        });
+        if (uploaded.length === 1 && uploaded[0]) {
+          onOpenFile(uploaded[0].relativePath);
+        }
+      } catch (cause) {
+        toastManager.add({
+          type: "error",
+          title: "Could not upload files",
+          description: cause instanceof Error ? cause.message : String(cause),
+        });
       }
-    } catch (cause) {
-      toastManager.add({
-        type: "error",
-        title: "Could not upload files",
-        description: cause instanceof Error ? cause.message : String(cause),
-      });
-    } finally {
+    })().finally(() => {
       setIsUploading(false);
-    }
+    });
   };
 
   const onUploadInputChange = (event: React.ChangeEvent<HTMLInputElement>) => {

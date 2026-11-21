@@ -1075,6 +1075,7 @@ function isComposerImageAttachment(
 }
 
 function composerAttachmentDedupKey(attachment: ComposerAttachment): string {
+  if (attachment.type === "image") return composerImageDedupKey(attachment);
   // Keep this independent from File.lastModified so dedupe is stable for hydrated
   // images reconstructed from localStorage (which get a fresh lastModified value).
   return `${attachment.type}\u0000${attachment.mimeType}\u0000${attachment.sizeBytes}\u0000${attachment.name}`;

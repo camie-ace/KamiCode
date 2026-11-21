@@ -481,19 +481,21 @@ function ProjectTriggersControlContent({
 
     setIsLoading(true);
     setLoadError(null);
-    try {
-      const nextTriggers = await listProjectTriggers({ environmentId, projectId });
-      setTriggers(
-        [...nextTriggers]
-          .filter((trigger) => trigger.targetThreadId === null)
-          .sort(compareNextFire),
-      );
-    } catch (error) {
-      setTriggers([]);
-      setLoadError(projectTriggerLoadFailure(error));
-    } finally {
+    await (async () => {
+      try {
+        const nextTriggers = await listProjectTriggers({ environmentId, projectId });
+        setTriggers(
+          [...nextTriggers]
+            .filter((trigger) => trigger.targetThreadId === null)
+            .sort(compareNextFire),
+        );
+      } catch (error) {
+        setTriggers([]);
+        setLoadError(projectTriggerLoadFailure(error));
+      }
+    })().finally(() => {
       setIsLoading(false);
-    }
+    });
   };
 
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- Fetch this destination's triggers and discard responses after its keyed control unmounts.
@@ -539,27 +541,29 @@ function ProjectTriggersControlContent({
   const runTrigger = async (trigger: ProjectTrigger) => {
     if (!projectId || pendingTriggerId) return;
     setPendingTriggerId(trigger.id);
-    try {
-      await runProjectTriggerNow({
-        environmentId,
-        trigger: {
-          projectId,
-          triggerId: trigger.id,
-        },
-      });
-      toastManager.add({
-        type: "success",
-        title: "Trigger started",
-        description: `${trigger.name} was sent to ${projectTriggerExecutionLocationLabel(
-          trigger.executionLocation ?? executionLocation,
-        )}.`,
-      });
-      void refreshTriggers();
-    } catch (error) {
-      toastTriggerError("Failed to run trigger", error);
-    } finally {
+    await (async () => {
+      try {
+        await runProjectTriggerNow({
+          environmentId,
+          trigger: {
+            projectId,
+            triggerId: trigger.id,
+          },
+        });
+        toastManager.add({
+          type: "success",
+          title: "Trigger started",
+          description: `${trigger.name} was sent to ${projectTriggerExecutionLocationLabel(
+            trigger.executionLocation ?? executionLocation,
+          )}.`,
+        });
+        void refreshTriggers();
+      } catch (error) {
+        toastTriggerError("Failed to run trigger", error);
+      }
+    })().finally(() => {
       setPendingTriggerId(null);
-    }
+    });
   };
 
   if (!projectId) {

@@ -651,37 +651,38 @@ export function SharedProjectsSettings() {
   const runAction = async (key: string, action: () => Promise<void>) => {
     setPendingAction(key);
     setLoadState({ status: "loaded" });
-    try {
-      await action();
-      if (key === "deploy-collab-server") {
-        setCollabDeployRecoveryAction(null);
-        setLastCollabDeployFailure(null);
-        setCollabDeployRepairPromptCopied(false);
-      }
-    } catch (error) {
-      const mode = collabDeployPendingModeRef.current;
-      const displayMessage =
-        key === "deploy-collab-server" && mode === "install-docker"
-          ? normalizeInstallDockerDeployError(error)
-          : formatActionError(key, error);
-      if (key === "deploy-collab-server") {
-        setCollabDeployRecoveryAction(collabDeployRecovery(error));
-        setLastCollabDeployFailure({
-          rawMessage: rawErrorMessage(error),
-          displayMessage,
-          mode,
-          // oxlint-disable-next-line react/purity -- Timestamp the async deployment failure when it occurs, never during render.
-          occurredAt: new Date().toISOString(),
+    await (async () => {
+      try {
+        await action();
+        if (key === "deploy-collab-server") {
+          setCollabDeployRecoveryAction(null);
+          setLastCollabDeployFailure(null);
+          setCollabDeployRepairPromptCopied(false);
+        }
+      } catch (error) {
+        const mode = collabDeployPendingModeRef.current;
+        const displayMessage =
+          key === "deploy-collab-server" && mode === "install-docker"
+            ? normalizeInstallDockerDeployError(error)
+            : formatActionError(key, error);
+        if (key === "deploy-collab-server") {
+          setCollabDeployRecoveryAction(collabDeployRecovery(error));
+          setLastCollabDeployFailure({
+            rawMessage: rawErrorMessage(error),
+            displayMessage,
+            mode,
+            occurredAt: new Date().toISOString(),
+          });
+          setCollabDeployRepairPromptCopied(false);
+        }
+        setLoadState({
+          status: "error",
+          message: displayMessage,
         });
-        setCollabDeployRepairPromptCopied(false);
       }
-      setLoadState({
-        status: "error",
-        message: displayMessage,
-      });
-    } finally {
+    })().finally(() => {
       setPendingAction(null);
-    }
+    });
   };
 
   const updateHostedCollaborationSettings = async (

@@ -54,14 +54,16 @@ export const ThreadRecurringSchedulesPanel = memo(function ThreadRecurringSchedu
   const reportLoadError = (error: unknown) => reportError("Scheduled messages unavailable", error);
 
   const reload = async (reportFailure = true) => {
-    try {
-      const next = await listProjectTriggers({ environmentId, projectId });
-      setTriggers(next.filter((trigger) => trigger.targetThreadId === threadId));
-    } catch (error) {
-      if (reportFailure) reportLoadError(error);
-    } finally {
+    await (async () => {
+      try {
+        const next = await listProjectTriggers({ environmentId, projectId });
+        setTriggers(next.filter((trigger) => trigger.targetThreadId === threadId));
+      } catch (error) {
+        if (reportFailure) reportLoadError(error);
+      }
+    })().finally(() => {
       setLoaded(true);
-    }
+    });
   };
 
   const refreshKey = props.refreshKey;
@@ -98,64 +100,70 @@ export const ThreadRecurringSchedulesPanel = memo(function ThreadRecurringSchedu
 
   const toggle = async (trigger: ProjectTrigger) => {
     setPendingId(trigger.id);
-    try {
-      await updateProjectTrigger({
-        environmentId,
-        trigger: {
-          projectId,
-          triggerId: trigger.id,
-          patch: {
-            name: trigger.name,
-            description: trigger.description ?? null,
-            schedule: trigger.schedule,
-            ...(trigger.onceAt ? { onceAt: trigger.onceAt } : {}),
-            prompt: trigger.prompt ?? "",
-            enabled: !trigger.enabled,
-            timezone: trigger.timezone ?? null,
-            executionLocation: trigger.executionLocation ?? executionLocation,
+    await (async () => {
+      try {
+        await updateProjectTrigger({
+          environmentId,
+          trigger: {
+            projectId,
+            triggerId: trigger.id,
+            patch: {
+              name: trigger.name,
+              description: trigger.description ?? null,
+              schedule: trigger.schedule,
+              ...(trigger.onceAt ? { onceAt: trigger.onceAt } : {}),
+              prompt: trigger.prompt ?? "",
+              enabled: !trigger.enabled,
+              timezone: trigger.timezone ?? null,
+              executionLocation: trigger.executionLocation ?? executionLocation,
+            },
           },
-        },
-      });
-      await reload();
-    } catch (error) {
-      reportError(
-        trigger.enabled ? "Could not pause schedule" : "Could not resume schedule",
-        error,
-      );
-    } finally {
+        });
+        await reload();
+      } catch (error) {
+        reportError(
+          trigger.enabled ? "Could not pause schedule" : "Could not resume schedule",
+          error,
+        );
+      }
+    })().finally(() => {
       setPendingId(null);
-    }
+    });
   };
 
   const runNow = async (trigger: ProjectTrigger) => {
     setPendingId(trigger.id);
-    try {
-      await runProjectTriggerNow({
-        environmentId,
-        trigger: { projectId, triggerId: trigger.id },
-      });
-      toastManager.add({ type: "success", title: "Scheduled message queued" });
-      await reload();
-    } catch (error) {
-      reportError("Could not run schedule", error);
-    } finally {
+    await (async () => {
+      try {
+        await runProjectTriggerNow({
+          environmentId,
+          trigger: { projectId, triggerId: trigger.id },
+        });
+        toastManager.add({ type: "success", title: "Scheduled message queued" });
+        await reload();
+      } catch (error) {
+        reportError("Could not run schedule", error);
+      }
+    })().finally(() => {
       setPendingId(null);
-    }
+    });
   };
 
   const remove = async (trigger: ProjectTrigger) => {
     setPendingId(trigger.id);
-    try {
-      await deleteProjectTrigger({
-        environmentId,
-        trigger: { projectId, triggerId: trigger.id },
-      });
-      await reload();
-    } catch (error) {
-      reportError("Could not delete schedule", error);
-    } finally {
+    await (async () => {
+      try {
+        await deleteProjectTrigger({
+          environmentId,
+          trigger: { projectId, triggerId: trigger.id },
+        });
+        await reload();
+      } catch (error) {
+        reportError("Could not delete schedule", error);
+      }
+    })().finally(() => {
       setPendingId(null);
-    }
+    });
   };
 
   if (!loaded || triggers.length === 0) return null;

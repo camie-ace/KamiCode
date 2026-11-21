@@ -156,6 +156,7 @@ const runStubbedDesktop = (stub: StubbedDesktop) =>
       .pipe(
         Effect.provideService(ElectronProtocol.ElectronProtocol, {
           registerDesktopProtocol: () => Effect.void,
+          setLocalBackendOrigin: () => Effect.void,
         } as unknown as ElectronProtocol.ElectronProtocol["Service"]),
         Effect.provideService(DesktopLegacyLocalStorage.DesktopLegacyLocalStorage, {
           load: () => Effect.void,

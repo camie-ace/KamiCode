@@ -1,3 +1,5 @@
+import * as Schema from "effect/Schema";
+
 const SUPPORTED_PROXY_PROTOCOLS = new Set(["http:", "https:", "socks4:", "socks5:"]);
 
 export interface HostedBrowserProxyConfig {
@@ -6,10 +8,12 @@ export interface HostedBrowserProxyConfig {
   readonly password?: string;
 }
 
-export class HostedBrowserProxyUrlError extends Error {
-  constructor() {
-    super("Enter an HTTP, HTTPS, SOCKS4, or SOCKS5 proxy URL with no path, query, or fragment.");
-    this.name = "HostedBrowserProxyUrlError";
+export class HostedBrowserProxyUrlError extends Schema.TaggedError<HostedBrowserProxyUrlError>()(
+  "HostedBrowserProxyUrlError",
+  {},
+) {
+  override get message(): string {
+    return "Enter an HTTP, HTTPS, SOCKS4, or SOCKS5 proxy URL with no path, query, or fragment.";
   }
 }
 

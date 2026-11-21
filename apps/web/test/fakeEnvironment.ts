@@ -219,6 +219,8 @@ function run(
 }
 
 export interface FakeThread {
+  readonly projectId?: ProjectId;
+  readonly createdByUser?: OrchestrationV2ThreadShell["createdByUser"];
   /** Makes this a side chat of that thread. */
   readonly sideChatOf?: ThreadId;
   /** Makes this an older settled thread the shell leaves out; only its family read returns it. */
@@ -307,7 +309,8 @@ function shellOf(thread: FakeThread): OrchestrationV2ThreadShell {
   const modelSelection = thread.modelSelection ?? MODEL;
   return {
     id: thread.id,
-    projectId: PROJECT_ID,
+    projectId: thread.projectId ?? PROJECT_ID,
+    createdByUser: thread.createdByUser ?? null,
     title: thread.title,
     providerInstanceId: modelSelection.instanceId,
     modelSelection,
@@ -360,6 +363,7 @@ function projectionOf(thread: FakeThread): OrchestrationV2ThreadProjection {
     thread: {
       id: shell.id,
       projectId: shell.projectId,
+      createdByUser: shell.createdByUser ?? null,
       title: shell.title,
       providerInstanceId: shell.providerInstanceId,
       modelSelection: shell.modelSelection,
@@ -591,6 +595,21 @@ export function installFakeEnvironment(
     const url = new URL(input instanceof Request ? input.url : String(input), window.location.href);
     if (url.origin !== window.location.origin) return realFetch(input, init);
     if (url.pathname === "/.well-known/t3/environment") return json(encodedDescriptor);
+    if (url.pathname === "/api/user/session") {
+      return json({
+        enabled: true,
+        authenticated: true,
+        provider: "github",
+        user: {
+          userId: "test-user",
+          githubId: "1",
+          githubLogin: "test-user",
+          displayName: "Test User",
+          avatarUrl: null,
+        },
+        expiresAt: "2099-01-01T00:00:00.000Z",
+      });
+    }
     if (url.pathname === "/api/auth/session") {
       return json({
         authenticated: true,

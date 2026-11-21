@@ -123,13 +123,13 @@ describe("DesktopClerk", () => {
       name: "packaged macOS",
       isDevelopment: false,
       platform: "darwin" as const,
-      userData: "/tmp/app-data/t3code-v2",
+      userData: "/tmp/app-data/kamicode-v2",
     },
     {
       name: "packaged Linux",
       isDevelopment: false,
       platform: "linux" as const,
-      userData: "/tmp/app-data/t3code-v2",
+      userData: "/tmp/app-data/kamicode-v2",
     },
     {
       name: "packaged Windows",
@@ -285,7 +285,7 @@ describe("DesktopClerk", () => {
 
         assert.isTrue(Exit.hasInterrupts(exit));
         assert.deepEqual(events, [
-          "setPath:userData:/tmp/app-data/t3code-v2",
+          "setPath:userData:/tmp/app-data/kamicode-v2",
           "requestSingleInstanceLock",
           "quit",
         ]);

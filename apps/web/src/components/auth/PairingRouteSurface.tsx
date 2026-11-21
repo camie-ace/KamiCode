@@ -55,14 +55,16 @@ export function PairingRouteSurface({
     setIsSubmitting(true);
     setErrorMessage("");
 
-    try {
-      await submitServerAuthCredential(nextCredential);
-      await onAuthenticated();
-    } catch (error) {
-      setErrorMessage(errorMessageFromUnknown(error));
-    } finally {
+    await (async () => {
+      try {
+        await submitServerAuthCredential(nextCredential);
+        await onAuthenticated();
+      } catch (error) {
+        setErrorMessage(errorMessageFromUnknown(error));
+      }
+    })().finally(() => {
       setIsSubmitting(false);
-    }
+    });
   };
 
   const handleSubmit = async (event?: React.SubmitEvent<HTMLFormElement>) => {

@@ -1,3 +1,4 @@
+/** Runs homepage motion (marquee, mark drift, caret, parallax) only while its content is visible. */
 export function startHomeMotion({
   hero,
   field,

@@ -2394,7 +2394,7 @@ it("renders KamiCode local media search results without exposing the raw payload
     />,
     { container },
   );
-  await expect.element(screen.getByText("Broad PC search")).toBeVisible();
+  await expect.element(screen.getByText("Scope: Broad PC search", { exact: true })).toBeVisible();
   await expect.element(screen.getByText("hero.png")).toBeVisible();
   await expect.element(screen.getByText("Found candidates.")).toBeVisible();
   expect(container.textContent).not.toContain('"kind"');

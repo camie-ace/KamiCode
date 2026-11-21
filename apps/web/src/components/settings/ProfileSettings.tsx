@@ -174,11 +174,11 @@ export function ProfileSettingsPanel() {
 
   const refreshSession = async () => {
     setPendingAction("refresh");
-    try {
+    await (async () => {
       await loadSession();
-    } finally {
+    })().finally(() => {
       setPendingAction(null);
-    }
+    });
   };
 
   const connectGitHub = async () => {

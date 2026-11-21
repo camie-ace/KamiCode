@@ -244,7 +244,7 @@ describe("DesktopPreReadyPlatform", () => {
         const entry = writeFileSyncMock.mock.calls.find(
           ([path]) => path === "/xdg/applications/kamicode.desktop",
         )?.[1];
-        assert.include(entry, 'Exec="/opt/KamiCode/t3code" %U');
+        assert.include(entry, "Exec=/opt/KamiCode/t3code %U");
       }),
     ).pipe(Effect.ensuring(Effect.sync(() => vi.unstubAllEnvs())));
   });

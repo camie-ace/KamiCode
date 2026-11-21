@@ -670,7 +670,7 @@ import { orchestrationV2WorktreePending } from "@t3tools/shared/orchestrationV2T
 import { resolveThreadReferenceCopyTarget } from "@t3tools/client-runtime/thread-reference";
 import { resolveTerminalSessionLabel } from "@t3tools/shared/terminalLabelsCopy";
 import { useAtomValue } from "@effect/atom-react";
-import { use, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { use, useEffect, useEffectEvent, useLayoutEffect, useRef, useState } from "react";
 import { BackgroundThreadContext } from "./chat/backgroundThread";
 import { WorkspaceMutationIdContext } from "./chat/ChatMarkdownMedia";
 import { useLocation, useNavigate } from "@tanstack/react-router";
@@ -3745,6 +3745,7 @@ export default function ChatView(props: ChatViewProps) {
 
     const childThreadId = input.existingChildThreadId ?? newThreadId();
     const childTurnMessageId = newMessageId();
+    // oxlint-disable-next-line react/purity -- Timestamp the child launch inside this async handler, never during render.
     const childTurnRequestedAt = new Date().toISOString();
     const title = workflowLaneThreadTitle({
       parentTitle: activeThread.title,
@@ -3892,16 +3893,16 @@ export default function ChatView(props: ChatViewProps) {
       const laneLaunchKey = workflowLaneLaunchKey(activeThread.id, lane.id);
       if (workflowLaneLaunchInFlightRef.current.has(laneLaunchKey)) return;
       workflowLaneLaunchInFlightRef.current.add(laneLaunchKey);
-      try {
+      await (async () => {
         await launchWorkflowChildLane({
           lane: plannedLane,
           workflowGoal: goal,
           guidance,
           existingChildThreadId,
         });
-      } finally {
+      })().finally(() => {
         workflowLaneLaunchInFlightRef.current.delete(laneLaunchKey);
-      }
+      });
     })();
   };
 
@@ -3941,7 +3942,7 @@ export default function ChatView(props: ChatViewProps) {
           continue;
         }
         workflowLaneLaunchInFlightRef.current.add(laneLaunchKey);
-        try {
+        await (async () => {
           const childThreadId = await launchWorkflowChildLane({
             lane,
             workflowGoal: goal,
@@ -3949,9 +3950,9 @@ export default function ChatView(props: ChatViewProps) {
           if (childThreadId) {
             workflowLaneLaunchRecordedRef.current.add(laneLaunchKey);
           }
-        } finally {
+        })().finally(() => {
           workflowLaneLaunchInFlightRef.current.delete(laneLaunchKey);
-        }
+        });
       }
     })();
   };
@@ -4263,6 +4264,8 @@ export default function ChatView(props: ChatViewProps) {
     resetLocalDispatch();
     return false;
   }
+  const appendWorkflowActivityFromEffect = useEffectEvent(appendWorkflowActivity);
+  const launchWorkflowChildLaneFromEffect = useEffectEvent(launchWorkflowChildLane);
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- Persist handoff observations from independently running child threads.
   useEffect(() => {
     if (!activeThread || workflowChildCompletions.length === 0) return;
@@ -4279,8 +4282,8 @@ export default function ChatView(props: ChatViewProps) {
             !workflowCompletionInFlightRef.current.has(key)
           ) {
             workflowCompletionInFlightRef.current.add(key);
-            try {
-              const result = await appendWorkflowActivity({
+            await (async () => {
+              const result = await appendWorkflowActivityFromEffect({
                 threadId: activeThread.id,
                 kind: "workflow.handoff",
                 summary: `${observation.laneRole} handed results to Lead`,
@@ -4298,9 +4301,9 @@ export default function ChatView(props: ChatViewProps) {
               if (result && result._tag !== "Failure") {
                 workflowCompletionRecordedRef.current.add(key);
               }
-            } finally {
+            })().finally(() => {
               workflowCompletionInFlightRef.current.delete(key);
-            }
+            });
           }
         }
 
@@ -4314,8 +4317,8 @@ export default function ChatView(props: ChatViewProps) {
             !workflowCompletionInFlightRef.current.has(key)
           ) {
             workflowCompletionInFlightRef.current.add(key);
-            try {
-              const result = await appendWorkflowActivity({
+            await (async () => {
+              const result = await appendWorkflowActivityFromEffect({
                 threadId: activeThread.id,
                 kind: "workflow.lane.completed",
                 summary: `${observation.laneRole} lane completed`,
@@ -4333,9 +4336,9 @@ export default function ChatView(props: ChatViewProps) {
               if (result && result._tag !== "Failure") {
                 workflowCompletionRecordedRef.current.add(key);
               }
-            } finally {
+            })().finally(() => {
               workflowCompletionInFlightRef.current.delete(key);
-            }
+            });
           }
         }
       }
@@ -4384,14 +4387,17 @@ export default function ChatView(props: ChatViewProps) {
           continue;
         }
         workflowLaneLaunchInFlightRef.current.add(laneLaunchKey);
-        try {
-          const childThreadId = await launchWorkflowChildLane({ lane, workflowGoal: goal });
+        await (async () => {
+          const childThreadId = await launchWorkflowChildLaneFromEffect({
+            lane,
+            workflowGoal: goal,
+          });
           if (childThreadId) {
             workflowLaneLaunchRecordedRef.current.add(laneLaunchKey);
           }
-        } finally {
+        })().finally(() => {
           workflowLaneLaunchInFlightRef.current.delete(laneLaunchKey);
-        }
+        });
       }
     })();
 

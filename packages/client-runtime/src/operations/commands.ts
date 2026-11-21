@@ -330,7 +330,7 @@ const dispatchMessage = Effect.fn("EnvironmentCommands.dispatchMessage")(functio
   resendAfterSocketLoss: boolean,
 ) {
   const supervisor = yield* EnvironmentSupervisor.EnvironmentSupervisor;
-  const attempt = dispatch(command).pipe(
+  const attempt = request(ORCHESTRATION_V2_WS_METHODS.dispatchCommand, command).pipe(
     Effect.timeoutOrElse({
       duration: MESSAGE_DISPATCH_TIMEOUT,
       orElse: () =>

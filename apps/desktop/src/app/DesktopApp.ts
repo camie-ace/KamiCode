@@ -18,6 +18,7 @@ import * as DesktopClerk from "./DesktopClerk.ts";
 import * as DesktopCliShim from "./DesktopCliShim.ts";
 import * as DesktopCliCommand from "./DesktopCliCommand.ts";
 import * as DesktopApplicationMenu from "../window/DesktopApplicationMenu.ts";
+import * as DesktopWindow from "../window/DesktopWindow.ts";
 
 import * as PreviewPasskeys from "../preview/Passkeys.ts";
 import * as DesktopBackendManager from "../backend/DesktopBackendManager.ts";
@@ -181,6 +182,7 @@ const startLocalBackend = Effect.gen(function* () {
   const state = yield* DesktopState.DesktopState;
   const environment = yield* DesktopEnvironment.DesktopEnvironment;
   const desktopSettings = yield* DesktopAppSettings.DesktopAppSettings;
+  const desktopWindow = yield* DesktopWindow.DesktopWindow;
 
   yield* logBootstrapInfo("bootstrap start");
 
@@ -286,6 +288,7 @@ const bootstrap = Effect.fn("desktop.bootstrap")(function* (backendStarted: bool
   const state = yield* DesktopState.DesktopState;
   const environment = yield* DesktopEnvironment.DesktopEnvironment;
   const desktopSettings = yield* DesktopAppSettings.DesktopAppSettings;
+  const desktopWindow = yield* DesktopWindow.DesktopWindow;
 
   const snapShot = yield* DesktopSnapShot.DesktopSnapShot;
   const appActivation = yield* DesktopAppActivation.DesktopAppActivation;

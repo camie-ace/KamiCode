@@ -140,6 +140,8 @@ const browserTestProject = {
     browser: {
       enabled: true,
       headless: true,
+      // Cold document/media dependency transforms can exceed Vitest's 60s connection budget.
+      connectTimeout: 180_000,
       provider: playwright(),
       instances: [{ browser: "chromium" }],
       screenshotFailures: false,
