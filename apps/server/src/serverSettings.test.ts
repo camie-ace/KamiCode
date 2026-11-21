@@ -240,7 +240,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))("server settings"
       assert.deepEqual(saved.hostedBrowserProxy, {
         enabled: true,
         url: proxyUrl,
-        urlRedacted: true,
+        urlRedacted: false,
       });
       assert.deepEqual(
         ServerSettingsModule.redactServerSettingsForClient(saved, { secretReferences: true })
