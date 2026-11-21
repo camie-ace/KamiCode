@@ -3,6 +3,11 @@
 // messages render. Release jobs run it so a build whose backend or bundle cannot start fails
 // before it is published.
 import * as NodeFS from "node:fs";
+import * as Clock from "effect/Clock";
+import * as DateTime from "effect/DateTime";
+import * as Effect from "effect/Effect";
+import * as NodeCrypto from "node:crypto";
+import * as NodeSqlite from "node:sqlite";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import * as NodeTimersPromises from "node:timers/promises";
@@ -36,6 +41,47 @@ const t3Home = NodePath.join(home, "t3");
 NodeFS.mkdirSync(NodePath.join(t3Home, "userdata"), { recursive: true });
 NodeFS.copyFileSync(FIXTURE_DB, NodePath.join(t3Home, "userdata/state.sqlite"));
 
+// Seed a synthetic signed-in profile in this disposable home. The normal user-session
+// verifier and Electron cookie proxy still run; the smoke check never contacts GitHub.
+const issuedAt = Effect.runSync(Clock.currentTimeMillis);
+const expiresAt = issuedAt + 60 * 60 * 1_000;
+const userId = "release-smoke-user";
+const sessionId = NodeCrypto.randomUUID();
+const signingKey = NodeCrypto.randomBytes(32);
+const secretsDir = NodePath.join(t3Home, "userdata/secrets");
+NodeFS.mkdirSync(secretsDir, { recursive: true, mode: 0o700 });
+NodeFS.writeFileSync(NodePath.join(secretsDir, "user-auth-signing-key.bin"), signingKey, {
+  mode: 0o600,
+});
+const fixture = new NodeSqlite.DatabaseSync(NodePath.join(t3Home, "userdata/state.sqlite"));
+try {
+  const now = DateTime.formatIso(DateTime.makeUnsafe(issuedAt));
+  // Keep the old fixture visible while the normal idle-settlement worker runs.
+  fixture.exec("UPDATE projection_threads SET settled_override = 'active'");
+  fixture
+    .prepare(`INSERT INTO user_auth_users
+    (user_id, github_id, github_login, display_name, created_at, updated_at, last_login_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?)`)
+    .run(userId, "release-smoke", "release-smoke", "Release check", now, now, now);
+  fixture
+    .prepare(`INSERT INTO user_auth_sessions (session_id, user_id, issued_at, expires_at)
+    VALUES (?, ?, ?, ?)`)
+    .run(sessionId, userId, now, DateTime.formatIso(DateTime.makeUnsafe(expiresAt)));
+} finally {
+  fixture.close();
+}
+const encodedClaims = Buffer.from(
+  JSON.stringify({
+    v: 1,
+    kind: "user-session",
+    sid: sessionId,
+    uid: userId,
+    iat: issuedAt,
+    exp: expiresAt,
+  }),
+).toString("base64url");
+const userSessionToken = `${encodedClaims}.${NodeCrypto.createHmac("sha256", signingKey).update(encodedClaims).digest("base64url")}`;
+
 let step = "launching the app";
 let app: ElectronApplication | undefined;
 try {
@@ -49,7 +95,7 @@ try {
       ...process.env,
       XDG_CONFIG_HOME: NodePath.join(home, ".config"),
       XDG_DATA_HOME: NodePath.join(home, ".local/share"),
-      T3CODE_HOME: t3Home,
+      KAMICODE_HOME: t3Home,
       T3CODE_TELEMETRY_ENABLED: "false",
       T3CODE_DISABLE_AUTO_UPDATE: "true",
     },
@@ -60,6 +106,28 @@ try {
   step = "waiting for the first window";
   const page = await app.firstWindow({ timeout: STEP_TIMEOUT_MS });
   try {
+    step = "waiting for the backend runtime";
+    const runtimePath = NodePath.join(t3Home, "userdata/server-runtime.json");
+    const runtimeDeadline = Effect.runSync(Clock.currentTimeMillis) + STEP_TIMEOUT_MS;
+    while (!NodeFS.existsSync(runtimePath)) {
+      if (Effect.runSync(Clock.currentTimeMillis) >= runtimeDeadline)
+        throw new Error("The backend did not publish its runtime.");
+      await NodeTimersPromises.setTimeout(100);
+    }
+    const runtime = JSON.parse(NodeFS.readFileSync(runtimePath, "utf8")) as { port: number };
+    await app.evaluate(
+      async ({ session }, input) => {
+        await session.defaultSession.cookies.set({
+          url: `http://127.0.0.1:${input.port}`,
+          name: `t3_user_session_${input.port}`,
+          value: input.token,
+          httpOnly: true,
+          expirationDate: input.expiresAt / 1_000,
+        });
+      },
+      { port: runtime.port, token: userSessionToken, expiresAt },
+    );
+    await page.reload();
     step = `finding "${THREAD_TITLE}" in the sidebar`;
     const thread = page.locator("li[data-thread-item]", { hasText: THREAD_TITLE });
     await thread.waitFor({ timeout: STEP_TIMEOUT_MS });

@@ -1328,6 +1328,7 @@ describe("AssetAccess", () => {
       expect(yield* resolveAsset(token, "report.css")).toEqual({
         kind: "file",
         path: canonicalCssPath,
+        renderIntent: "file-preview",
       });
       expect(yield* resolveAsset(token, "../secret.txt")).toBeNull();
     }).pipe(Effect.provide(layerTest)),

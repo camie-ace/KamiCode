@@ -684,8 +684,6 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
           t3Home: "/tmp/t3-bootstrap-home",
           noBrowser: true,
           desktopBootstrapToken: "desktop-token",
-          desktopBrowserFd: undefined,
-          desktopBrowserControlFd: undefined,
           desktopTelemetryFd: 4,
           desktopTelemetryControlFd: 5,
           tailscaleServeEnabled: false,

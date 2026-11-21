@@ -3631,7 +3631,7 @@ export default function ChatView(props: ChatViewProps) {
     reportFailure: false,
   });
 
-  const threadActivities = (() => workflowActivities(serverProjection))();
+  const threadActivities = workflowActivities(serverProjection);
 
   const composerInteractionMode = useComposerDraftStore(
     (store) => store.getComposerDraft(composerDraftTarget)?.interactionMode ?? null,
@@ -3655,18 +3655,18 @@ export default function ChatView(props: ChatViewProps) {
 
   const planSidebarOpen = activeRightPanelSurface?.kind === "plan";
 
-  const activePlan = (() => deriveActivePlanState(serverProjection, activeActivityRun?.runId))();
+  const activePlan = deriveActivePlanState(serverProjection, activeActivityRun?.runId);
 
   const supportsThreadRecurringSchedules =
     attachmentEnvironmentConfig?.environment.capabilities.threadRecurringSchedules === true;
 
-  const sidebarProposedPlan = (() => findLatestProposedPlan(serverProjection, null))();
+  const sidebarProposedPlan = findLatestProposedPlan(serverProjection, null);
 
   const workflowChildCompletions = useAtomValue(
-    makeWorkflowChildCompletionsAtom(environmentId, activeThread, threadActivities),
+    makeWorkflowChildCompletionsAtom(environmentId, activeThread ?? null, threadActivities),
   );
   const workflowLaneRunDetailsForSidebar = useAtomValue(
-    makeWorkflowLaneRunDetailsAtom(environmentId, activeThread, threadActivities),
+    makeWorkflowLaneRunDetailsAtom(environmentId, activeThread ?? null, threadActivities),
   );
 
   const workflowSidebarActive = interactionMode === "workflow";
@@ -3697,7 +3697,7 @@ export default function ChatView(props: ChatViewProps) {
     scheduleComposerFocusStable();
   };
 
-  const togglePlanSidebar = () => {
+  const togglePlanSidebar = useStableCallback(() => {
     if (!activeThreadRef) return;
     if (planSidebarOpen) {
       planSidebarDismissedForTurnRef.current =
@@ -3706,17 +3706,17 @@ export default function ChatView(props: ChatViewProps) {
       planSidebarDismissedForTurnRef.current = null;
     }
     useRightPanelStore.getState().toggle(activeThreadRef, "plan");
-  };
+  });
 
-  const openMediaPanel = () => {
+  const openMediaPanel = useStableCallback(() => {
     if (!activeThreadRef) return;
     useRightPanelStore.getState().open(activeThreadRef, "media");
-  };
+  });
 
-  const openTestsPanel = () => {
+  const openTestsPanel = useStableCallback(() => {
     if (!activeThreadRef || !activeProject?.workspaceRoot) return;
     useRightPanelStore.getState().open(activeThreadRef, "tests");
-  };
+  });
 
   const appendWorkflowActivity = async (input: {
     threadId: ThreadId;

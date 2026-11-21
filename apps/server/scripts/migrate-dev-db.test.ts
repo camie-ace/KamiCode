@@ -147,6 +147,11 @@ const createFixtureSource = Effect.fn("createMigrateDevDbFixtureSource")(functio
         VALUES ('delivery-1', 'task-1', 'key-1', 1900000000000, '{}', '{}', '[]')`;
       yield* sql`INSERT INTO auth_sessions (session_id, subject, scopes, method, issued_at, expires_at)
         VALUES ('session-1', 'user', '[]', 'pairing', '2026-08-01', '2027-08-01')`;
+      yield* sql`INSERT INTO user_auth_users
+        (user_id, github_id, github_login, created_at, updated_at, last_login_at)
+        VALUES ('user-1', '123', 'fixture-user', '2026-08-01', '2026-08-01', '2026-08-01')`;
+      yield* sql`INSERT INTO user_auth_sessions (session_id, user_id, issued_at, expires_at)
+        VALUES ('user-session-1', 'user-1', '2026-08-01', '2027-08-01')`;
       if (toMigrationInclusive === undefined) yield* insertPeerLink(sql);
     }),
   );
@@ -187,6 +192,7 @@ it.layer(NodeServices.layer)("migrate-dev-db", (it) => {
             SELECT scripts_json FROM projection_projects WHERE project_id = 'project-kept'`;
           const [leftovers] = yield* sql<{
             auth: number;
+            userAuth: number;
             tasks: number;
             triggers: number;
             webhooks: number;
@@ -195,6 +201,7 @@ it.layer(NodeServices.layer)("migrate-dev-db", (it) => {
           }>`
             SELECT
               (SELECT COUNT(*) FROM auth_sessions) AS auth,
+              (SELECT COUNT(*) FROM user_auth_sessions) AS userAuth,
               (SELECT COUNT(*) FROM scheduled_tasks) AS tasks,
               (SELECT COUNT(*) FROM project_triggers) AS triggers,
               (SELECT COUNT(*) FROM scheduled_task_webhook_replay_keys) +
@@ -243,6 +250,7 @@ it.layer(NodeServices.layer)("migrate-dev-db", (it) => {
       );
       assert.deepStrictEqual(kept.leftovers, {
         auth: 0,
+        userAuth: 0,
         tasks: 0,
         triggers: 0,
         webhooks: 0,

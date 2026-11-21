@@ -211,6 +211,7 @@ const CLEARED_TABLES: ReadonlyArray<string> = [
   "orchestration_command_receipts",
   "provider_session_runtime",
   "auth_sessions",
+  "user_auth_sessions",
   "auth_pairing_links",
   "peer_environment_links",
 ];
