@@ -1,3 +1,4 @@
+import * as Schema from "effect/Schema";
 import * as Effect from "effect/Effect";
 import * as DateTime from "effect/DateTime";
 
@@ -52,20 +53,14 @@ async function runGit(
   return result.stdout.trim();
 }
 
-export const prepareSharedThreadImportBranch = (input: {
-  readonly cwd: string;
-  readonly branchName: string;
-  readonly stashLabel: string;
-}): Effect.Effect<
-  {
-    readonly branch: string;
-    readonly stashedChanges: boolean;
-    readonly stashName: string | null;
-  },
-  SharedProjectsError,
-  ProcessRunner.ProcessRunner
-> =>
-  Effect.gen(function* () {
+const isSharedProjectsError = Schema.is(SharedProjectsError);
+
+export const prepareSharedThreadImportBranch = Effect.fn("prepareSharedThreadImportBranch")(
+  function* (input: {
+    readonly cwd: string;
+    readonly branchName: string;
+    readonly stashLabel: string;
+  }) {
     const processRunner = yield* ProcessRunner.ProcessRunner;
     const statusResult = yield* processRunner
       .run({
@@ -106,7 +101,7 @@ export const prepareSharedThreadImportBranch = (input: {
             input.stashLabel,
           ]),
         catch: (cause) =>
-          cause instanceof SharedProjectsError
+          isSharedProjectsError(cause)
             ? cause
             : new SharedProjectsError({
                 message: "Failed to stash local changes before importing the shared session.",
@@ -141,7 +136,7 @@ export const prepareSharedThreadImportBranch = (input: {
           ? runGit(processRunner, input.cwd, ["switch", input.branchName])
           : runGit(processRunner, input.cwd, ["switch", "-c", input.branchName]),
       catch: (cause) =>
-        cause instanceof SharedProjectsError
+        isSharedProjectsError(cause)
           ? cause
           : new SharedProjectsError({
               message: "Failed to switch to the imported shared session branch.",
@@ -155,7 +150,8 @@ export const prepareSharedThreadImportBranch = (input: {
       stashedChanges: hasDirtyChanges,
       stashName,
     } as const;
-  });
+  },
+);
 
 export async function sharedImportStashLabel(title: string): Promise<string> {
   return `kamicode-shared-import:${sanitizeBranchSegment(title) || "session"}:${DateTime.formatIso(DateTime.nowUnsafe())}`;

@@ -1,3 +1,5 @@
+import { msg } from "gt-react";
+
 export type WizardNavigation =
   | { readonly kind: "navigate"; readonly step: number }
   | { readonly kind: "blocked"; readonly step: number; readonly error: string };
@@ -5,9 +7,20 @@ export type WizardNavigation =
 const IDENTITY_STEP = 1;
 const ACP_REGISTRY_IDENTITY_STEP = 1;
 
-export const ADD_PROVIDER_WIZARD_STEPS = ["Provider", "Identity", "Config"] as const;
-export const ACP_REGISTRY_WIZARD_STEPS = ["Provider", "Identity", "Sign in"] as const;
-export const LOCAL_ACP_WIZARD_STEPS = ["Provider", "Identity"] as const;
+const PROVIDER_STEP = msg("Provider", { $context: "wizard step" });
+const IDENTITY_STEP_LABEL = msg("Identity", { $context: "wizard step" });
+
+export const ADD_PROVIDER_WIZARD_STEPS = [
+  PROVIDER_STEP,
+  IDENTITY_STEP_LABEL,
+  msg("Config", { $context: "wizard step" }),
+] as const;
+export const ACP_REGISTRY_WIZARD_STEPS = [
+  PROVIDER_STEP,
+  IDENTITY_STEP_LABEL,
+  msg("Sign in", { $context: "wizard step" }),
+] as const;
+export const LOCAL_ACP_WIZARD_STEPS = [PROVIDER_STEP, IDENTITY_STEP_LABEL] as const;
 
 export interface ProviderIdentityDraft {
   readonly label: string;
@@ -39,21 +52,6 @@ export function updateProviderIdentityDraft(
   };
 }
 
-export function deriveAvailableInstanceId(
-  derive: (label: string) => string,
-  label: string,
-  existing: ReadonlySet<string>,
-): string {
-  const base = derive(label);
-  if (!base || !existing.has(base)) return base;
-
-  for (let suffix = 2; ; suffix += 1) {
-    const suffixText = `_${suffix}`;
-    const candidate = `${base.slice(0, 64 - suffixText.length)}${suffixText}`;
-    if (!existing.has(candidate)) return candidate;
-  }
-}
-
 export function isConfiguredAcpRegistryAgent(
   instances: Readonly<Record<string, { readonly driver: string; readonly config?: unknown }>>,
   agentId: string,
@@ -71,14 +69,6 @@ export function isConfiguredAcpRegistryAgent(
   });
 }
 
-/**
- * Resolve navigation within the add-provider wizard.
- *
- * Moving forward past Identity requires a valid instance id, whether the user
- * advances one step at a time or skips directly to Config from a step header.
- * A blocked skip lands on Identity so its existing inline validation is
- * visible. Backward navigation is always preserved.
- */
 export function resolveWizardNavigation(
   currentStep: number,
   requestedStep: number,

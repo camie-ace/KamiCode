@@ -1,4 +1,6 @@
-import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
+import { T, useGT } from "gt-react";
+
+import { type ClipboardTarget, useCopyToClipboard } from "~/hooks/useCopyToClipboard";
 import { cn } from "~/lib/utils";
 
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
@@ -13,13 +15,14 @@ export function PullRequestCopyableCode({
   onError,
 }: {
   readonly value: string;
-  readonly target: string;
+  readonly target: ClipboardTarget;
   readonly copyLabel: string;
   readonly copiedLabel: string;
   readonly className?: string;
   readonly tooltipSide?: "top" | "bottom";
   readonly onError?: (error: Error) => void;
 }) {
+  const gt = useGT();
   const { copyToClipboard, isCopied } = useCopyToClipboard({
     target,
     timeout: 1600,
@@ -32,7 +35,7 @@ export function PullRequestCopyableCode({
           <button
             type="button"
             className={cn(
-              "relative grid w-fit min-w-0 max-w-full shrink cursor-pointer rounded px-1 py-0.5 text-left outline-none transition-colors pointer-coarse:after:absolute pointer-coarse:after:size-full pointer-coarse:after:min-h-11 pointer-coarse:after:min-w-11 hover:bg-accent/45 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background",
+              "relative grid w-fit min-w-0 max-w-full shrink cursor-pointer rounded px-1 py-0.5 text-left outline-none transition-colors pointer-coarse:after:absolute pointer-coarse:after:size-full pointer-coarse:after:min-h-11 pointer-coarse:after:min-w-11 hover:bg-accent/45 hover:text-foreground focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background",
               className,
             )}
             aria-label={isCopied ? copiedLabel : copyLabel}
@@ -55,11 +58,11 @@ export function PullRequestCopyableCode({
             isCopied ? "opacity-100" : "opacity-0",
           )}
         >
-          Copied
+          <T>Copied</T>
         </span>
       </TooltipTrigger>
       <TooltipPopup variant="code" side={tooltipSide}>
-        {`${isCopied ? "Copied" : copyLabel}: ${value}`}
+        {`${isCopied ? gt("Copied") : copyLabel}: ${value}`}
       </TooltipPopup>
     </Tooltip>
   );

@@ -1,22 +1,8 @@
 export {
-  getPrimaryKnownEnvironment,
-  resetPrimaryEnvironmentDescriptorForTests,
-  resolveInitialPrimaryEnvironmentDescriptor,
-  writePrimaryEnvironmentDescriptor,
-} from "./context";
-
-export { resolveInitialPrimaryEnvironmentDescriptor as ensurePrimaryEnvironmentReady } from "./context";
-
-export {
-  createServerPairingCredential,
-  isPrimaryEnvironmentPairingCredentialRejectedError,
   peekPairingTokenFromUrl,
   PrimaryEnvironmentPairingCredentialRejectedError,
   PrimaryEnvironmentRequestError,
   resolveInitialServerAuthGateState,
-  revokeOtherServerClientSessions,
-  revokeServerClientSession,
-  revokeServerPairingLink,
   stripPairingTokenFromUrl,
   submitServerAuthCredential,
   takePairingTokenFromUrl,
@@ -26,18 +12,7 @@ export {
 } from "./auth";
 
 export {
-  resolveInitialUserAuthGateState,
-  startGitHubUserLogin,
-  type UserAuthGateState,
-} from "./userAuth";
-
-export { usePrimarySessionState } from "./sessionState";
-
-export {
   DesktopEnvironmentBootstrapIncompleteError,
-  isDesktopEnvironmentBootstrapIncompleteError,
-  isPrimaryEnvironmentProtocolUnsupportedError,
-  isPrimaryEnvironmentUrlInvalidError,
   PrimaryEnvironmentProtocolUnsupportedError,
   PrimaryEnvironmentUrlInvalidError,
   readPrimaryEnvironmentTarget,
@@ -45,3 +20,9 @@ export {
   isLoopbackHostname,
   type PrimaryEnvironmentTarget,
 } from "./target";
+
+export {
+  resolveInitialUserAuthGateState,
+  startGitHubUserLogin,
+  type UserAuthGateState,
+} from "./userAuth";

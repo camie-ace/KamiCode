@@ -1,11 +1,16 @@
-import { ScreenScrollView as ScrollView } from "../../components/ScreenScrollView";
+import { T, useGT } from "gt-react-native";
+import * as Dialog from "../../components/ui/Dialog";
+import { ScreenScrollView as ScrollView } from "../../components/ui/ScreenScrollView";
+import * as Application from "expo-application";
 import Constants from "expo-constants";
-import { useCallback, useEffect, useRef, useState } from "react";
-import { Alert, Pressable, View } from "react-native";
+import { settlePromise } from "@t3tools/client-runtime/state/runtime";
+import { useRef, useState } from "react";
+import { Pressable, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { AppText as Text } from "../../components/AppText";
-import { SymbolView } from "../../components/AppSymbol";
+import { AppText as Text } from "../../components/ui/AppText";
+import { SymbolView } from "../../components/ui/AppSymbol";
+import { useDeadlinePassed } from "../../lib/clock";
 import {
   type AppUpdateCheckState,
   isAppUpdateCheckAvailable,
@@ -17,10 +22,11 @@ import { SettingsSection } from "./components/SettingsSection";
 import { SettingsScreen } from "./components/SettingsScreen";
 
 export function SettingsAboutRouteScreen() {
+  const gt = useGT();
   const insets = useSafeAreaInsets();
 
   return (
-    <SettingsScreen title="About T3 Code">
+    <SettingsScreen title={gt("About")}>
       <ScrollView
         contentInsetAdjustmentBehavior="automatic"
         showsVerticalScrollIndicator={false}
@@ -35,68 +41,69 @@ export function SettingsAboutRouteScreen() {
 }
 
 function AppSettingsSection() {
-  const [updateState, setUpdateState] = useState<AppUpdateCheckState>("idle");
+  const gt = useGT();
+  const [checkState, setCheckState] = useState<{
+    readonly state: AppUpdateCheckState;
+    // "Up to date" is a confirmation that fades back to idle.
+    readonly settledUntil: number | null;
+  }>({ state: "idle", settledUntil: null });
+  const confirmationExpired = useDeadlinePassed(checkState.settledUntil);
+  const updateState =
+    checkState.state === "current" && confirmationExpired ? "idle" : checkState.state;
   const updateInFlight = useRef(false);
   const hiddenUpdateTapCount = useRef(0);
 
   const version = Constants.expoConfig?.version ?? "0.0.0";
-  // Fall back to "production" to match resolveAppVariant in app.config.ts, so a
-  // missing variant never mislabels a production build as development.
+  // Match app.config.ts's production fallback to avoid mislabeling builds as development.
   const variant = (Constants.expoConfig?.extra?.appVariant as string | undefined) ?? "production";
   const variantLabel = variant === "production" ? "" : capitalize(variant);
-  const versionLabel = variantLabel ? `${version} · ${variantLabel}` : version;
+  // EAS assigns build numbers remotely; only the installed binary knows its own.
+  const build = Application.nativeBuildVersion;
+  const versionWithBuild = build ? `${version} (${build})` : version;
+  const versionLabel = variantLabel ? `${versionWithBuild} · ${variantLabel}` : versionWithBuild;
   const updateCheckAvailable = isAppUpdateCheckAvailable();
   const busy =
     updateState === "checking" || updateState === "downloading" || updateState === "restarting";
 
-  // "Up to date" is a transient acknowledgement, not a state worth persisting —
-  // return the version row to its normal, deliberately quiet state.
-  useEffect(() => {
-    if (updateState !== "current") return;
-    const timer = setTimeout(() => setUpdateState("idle"), 3000);
-    return () => clearTimeout(timer);
-  }, [updateState]);
-
-  const checkForUpdate = useCallback(async () => {
-    // `disabled={busy}` only takes effect on the next render, so two taps in the
-    // same frame would both get through. The ref closes that window.
+  async function checkForUpdate() {
+    // disabled updates next render; the ref blocks same-frame double taps.
     if (updateInFlight.current) return;
     updateInFlight.current = true;
-    try {
-      // The user asked for this restart by tapping the version row, so it may
-      // apply immediately instead of prompting.
-      await runAppUpdateCheck({
+    // Failures arrive through onFailure; the settled result only matters for unlocking.
+    await settlePromise(() =>
+      runAppUpdateCheck({
         applyMode: "immediate",
-        onFailure: (message) => Alert.alert("Update failed", message),
-        onStateChange: setUpdateState,
-      });
-    } finally {
-      updateInFlight.current = false;
-    }
-  }, []);
+        onFailure: (message) => Dialog.alert(gt("Update failed"), message),
+        onStateChange: (state) =>
+          setCheckState({
+            state,
+            settledUntil: state === "current" ? Date.now() + 3000 : null,
+          }),
+      }),
+    );
+    updateInFlight.current = false;
+  }
 
-  const handleVersionPress = useCallback(() => {
+  function handleVersionPress() {
     if (!updateCheckAvailable || updateInFlight.current) return;
     const tap = registerHiddenUpdateTap(hiddenUpdateTapCount.current);
     hiddenUpdateTapCount.current = tap.nextCount;
     if (tap.shouldCheck) {
       void checkForUpdate();
     }
-  }, [checkForUpdate, updateCheckAvailable]);
+  }
 
   const statusLabel =
     updateState === "checking"
-      ? "Checking…"
+      ? gt("Checking…")
       : updateState === "downloading"
-        ? "Downloading…"
-        : // "ready" appears only when this check joined an in-flight background-mode
-          // check; that download installs at the next backgrounding.
-          updateState === "ready"
-          ? "Update ready"
+        ? gt("Downloading…")
+        : updateState === "ready"
+          ? gt("Update ready")
           : updateState === "restarting"
-            ? "Restarting…"
+            ? gt("Restarting…")
             : updateState === "current"
-              ? "Up to date"
+              ? gt("Up to date")
               : null;
 
   const versionRow = (
@@ -108,7 +115,9 @@ function AppSettingsSection() {
         type="monochrome"
         weight="regular"
       />
-      <Text className="flex-1 text-lg text-foreground">Version</Text>
+      <Text className="flex-1 text-lg text-foreground">
+        <T>Version</T>
+      </Text>
       <View className="items-end">
         <Text className="text-lg text-foreground-muted">{versionLabel}</Text>
         {statusLabel ? (
@@ -119,18 +128,22 @@ function AppSettingsSection() {
   );
 
   return (
-    <SettingsSection title="App">
-      <SettingsRow icon="internaldrive" label="Client Storage" target="SettingsClientStorage" />
-      <SettingsRow icon="stethoscope" label="Diagnostics" target="SettingsDiagnostics" />
+    <SettingsSection title={gt("App", { $context: "settings section about this mobile app" })}>
+      <SettingsRow
+        icon="internaldrive"
+        label={gt("Client Storage")}
+        target="SettingsClientStorage"
+      />
+      <SettingsRow icon="stethoscope" label={gt("Diagnostics")} target="SettingsDiagnostics" />
       <SettingsRow
         icon="doc.on.doc"
-        label="Open source licenses"
+        label={gt("Open source licenses")}
         target="SettingsOpenSourceLicenses"
       />
-      <SettingsRow icon="doc.text" label="Legal" fullScreenTarget="SettingsLegal" />
+      <SettingsRow icon="doc.text" label={gt("Legal")} fullScreenTarget="SettingsLegal" />
       {updateCheckAvailable ? (
         <Pressable
-          accessibilityLabel={`Version ${versionLabel}`}
+          accessibilityLabel={gt("Version {version}", { version: versionLabel })}
           accessibilityRole="text"
           disabled={busy}
           onPress={handleVersionPress}

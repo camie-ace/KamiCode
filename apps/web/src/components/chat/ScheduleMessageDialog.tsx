@@ -1,5 +1,5 @@
 import { CalendarClockIcon } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useState } from "react";
 
 import { Button } from "../ui/button";
 import {
@@ -21,7 +21,7 @@ import {
   toLocalDateTimeInputValue,
 } from "./scheduleMessage";
 
-export function ScheduleMessageDialog(props: {
+function ScheduleMessageDialogContent(props: {
   readonly open: boolean;
   readonly shortcutLabel?: string | null;
   readonly allowRecurring?: boolean;
@@ -41,15 +41,10 @@ export function ScheduleMessageDialog(props: {
   const [repeat, setRepeat] = useState<ScheduledMessageRepeat>("never");
   const [customExpression, setCustomExpression] = useState("");
   const [error, setError] = useState<string | null>(null);
-  const timeZone = useMemo(() => Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC", []);
-
-  useEffect(() => {
-    if (!open) return;
-    setLocalDateTime(defaultScheduledMessageInputValue());
-    setRepeat("never");
-    setCustomExpression("");
-    setError(null);
-  }, [open]);
+  const [timeZone] = useState(() => new Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC");
+  const [minimumDateTime] = useState(() =>
+    toLocalDateTimeInputValue(new Date(Date.now() + 60_000)),
+  );
 
   const submit = () => {
     const result = resolveScheduledMessageInstant(localDateTime);
@@ -92,7 +87,7 @@ export function ScheduleMessageDialog(props: {
               id="scheduled-message-time"
               nativeInput
               type="datetime-local"
-              min={toLocalDateTimeInputValue(new Date(Date.now() + 60_000))}
+              min={minimumDateTime}
               value={localDateTime}
               onChange={(event) => {
                 setLocalDateTime(event.target.value);
@@ -111,7 +106,7 @@ export function ScheduleMessageDialog(props: {
             Repeat
             <select
               id="scheduled-message-repeat"
-              className="h-9 rounded-md border border-input bg-background px-3 text-sm text-foreground outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/24 disabled:opacity-50"
+              className="h-9 rounded-md border border-input bg-background px-3 text-sm text-foreground outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/24 disabled:opacity-50"
               value={allowRecurring ? repeat : "never"}
               disabled={!allowRecurring}
               onChange={(event) => {
@@ -169,4 +164,8 @@ export function ScheduleMessageDialog(props: {
       </DialogPopup>
     </Dialog>
   );
+}
+
+export function ScheduleMessageDialog(props: Parameters<typeof ScheduleMessageDialogContent>[0]) {
+  return props.open ? <ScheduleMessageDialogContent {...props} /> : null;
 }

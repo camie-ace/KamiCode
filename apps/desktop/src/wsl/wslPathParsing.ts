@@ -8,9 +8,9 @@ export interface WslConfig {
   readonly distro: string | null;
 }
 
-// Literal space — \s would also match \n/\t/\r and corrupt UNC paths like \\wsl.localhost\<distro>\...
-// Trailing char must also be \w so hand-edited config like "Ubuntu " / "Ubuntu-" / "Ubuntu." rejects.
-const DISTRO_NAME_PATTERN = /^\w(?:[\w \-.]*\w)?$/;
+// Literal spaces only; \s would accept controls and corrupt UNC distro paths.
+// "." and ".." would be path segments in a UNC path, not distro names.
+const DISTRO_NAME_PATTERN = /^(?!\.{1,2}$)[\w.-](?:[\w .-]*[\w.-])?$/;
 
 export function parseWslDistroList(stdout: Buffer): readonly WslDistro[] {
   const hasUtf16Bom = stdout.length >= 2 && stdout[0] === 0xff && stdout[1] === 0xfe;
@@ -38,9 +38,7 @@ export function parseWslDistroList(stdout: Buffer): readonly WslDistro[] {
   return distros;
 }
 
-// Recognizes \\wsl.localhost\<distro>\... and the legacy \\wsl$\<distro>\... so
-// `wslpath` can be invoked inside the distro that actually owns the path,
-// rather than whichever distro is configured for the desktop backend.
+// Resolve UNC paths in their owning distro, which can differ from the configured desktop backend.
 export function extractDistroFromUncPath(windowsPath: string): string | null {
   const match = /^\\\\(?:wsl\.localhost|wsl\$)\\([^\\]+)/i.exec(windowsPath);
   if (!match) return null;
@@ -70,10 +68,6 @@ export function resolveWslPickFolderDefaultPath(
   rawOptions: unknown,
   config: WslConfig,
   distros: readonly WslDistro[],
-  // Absolute Linux path of the user's home dir inside the chosen distro
-  // (e.g. "/home/josh"). When known, `~` and `~/...` expand against this so
-  // we don't open the picker at a non-existent `/home/<rest>`. When null we
-  // fall back to the `/home` parent — wrong directory but at least it exists.
   userHome: string | null = null,
 ): string | null {
   const homePath = resolveWslHomeUncPath(config, distros);

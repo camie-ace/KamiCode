@@ -12,11 +12,7 @@ import {
 } from "../shared.ts";
 import { GROK_BACKGROUND_BASH_PROMPT, GROK_BACKGROUND_BASH_TICKS } from "./input.ts";
 
-// Grok completes a background shell command's tool call with a
-// `BackgroundTaskStarted` acknowledgement while the process keeps running,
-// streams its output afterwards, and ends it only with `x.ai/task_completed`.
-// Like a monitor, the command stays in the run that started it and holds that
-// run open; Grok's own reply to the finished command is a continuation run.
+// Grok ACKs background shells with BackgroundTaskStarted, then streams output until x.ai/task_completed.
 export function assertGrokBackgroundBashOutput(
   result: OrchestratorV2ScenarioResult,
   transcript: ProviderReplayTranscript,
@@ -41,8 +37,6 @@ export function assertGrokBackgroundBashOutput(
   assert.equal(command?.status, "completed");
   assert.equal(command?.output, GROK_BACKGROUND_BASH_TICKS.map((tick) => `${tick}\n`).join(""));
 
-  // The start acknowledgement does not finish the command: every tick before
-  // the end is shown running.
   const commandUpdates = result.domainEvents.flatMap((event) =>
     event.type === "turn-item.updated" &&
     event.payload.id === command?.id &&
@@ -58,28 +52,27 @@ export function assertGrokBackgroundBashOutput(
     assert.equal(commandUpdates[tickUpdate]?.status, "running", `${tick} must show running`);
   }
 
-  // Run 1 settles only after the command's structured end.
   const commandCompletedAt = result.domainEvents.findIndex(
     (event) =>
       event.type === "turn-item.updated" &&
       event.payload.id === command?.id &&
       event.payload.status === "completed",
   );
-  const rootCompletedAt = result.domainEvents.findIndex(
+  // The root turn ends with the prompt; a background shell may be a dev server that never exits.
+  const rootTurnEndedAt = result.domainEvents.findIndex(
     (event) =>
       event.type === "run.updated" &&
       event.payload.id === rootRun?.id &&
-      event.payload.status === "completed",
+      (event.payload.status === "waiting" || event.payload.status === "completed"),
   );
-  assert.isAtLeast(commandCompletedAt, 0);
-  assert.isAbove(rootCompletedAt, commandCompletedAt, "run 1 completed before the command ended");
+  assert.isAtLeast(rootTurnEndedAt, 0);
+  assert.isBelow(rootTurnEndedAt, commandCompletedAt, "run 1 waited for the command to end");
 
   const rootTexts = projection.turnItems.flatMap((item) =>
     item.runId === rootRun?.id && item.type === "assistant_message" ? [item.text.trim()] : [],
   );
   assert.include(rootTexts, "ROOT_DONE");
 
-  // The timeline names the command from Grok's task_completed snapshot.
   assert.deepEqual(backgroundNotifications(projection), [
     {
       summary: `Command "${commandDescription}" finished (exit 0)`,
@@ -88,7 +81,6 @@ export function assertGrokBackgroundBashOutput(
     },
   ]);
 
-  // Grok's own wake reply is a provider continuation, not more of run 1.
   const wakeMessage = projection.messages.find((message) => message.id === wakeRun?.userMessageId);
   assert.equal(`${wakeMessage?.createdBy}:${wakeMessage?.creationSource}`, "agent:provider");
   assert.isNotEmpty(

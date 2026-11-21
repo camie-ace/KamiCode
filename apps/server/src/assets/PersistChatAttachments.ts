@@ -9,7 +9,11 @@ import * as Base64 from "effect/encoding/Base64";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
 import * as ServerConfig from "../config.ts";
-import { attachmentRelativePath, createDeterministicAttachmentId } from "../attachmentStore.ts";
+import {
+  attachmentRelativePath,
+  chatAttachmentStableKey,
+  createDeterministicAttachmentId,
+} from "../attachmentStore.ts";
 import { parseBase64DataUrl } from "../imageMime.ts";
 
 export const persistChatAttachments = Effect.fn("ws.assets.persistChatAttachments")(function* (
@@ -41,7 +45,10 @@ export const persistChatAttachments = Effect.fn("ws.assets.persistChatAttachment
           message: `Attachment ${attachment.name} size does not match its payload.`,
         });
       }
-      const rawId = createDeterministicAttachmentId(input.threadId, `${input.messageId}:${index}`);
+      const rawId = createDeterministicAttachmentId(
+        input.threadId,
+        chatAttachmentStableKey(input.messageId, index, bytes),
+      );
       if (rawId === null) {
         return yield* new PersistChatAttachmentsError({
           message: "Could not allocate an attachment identifier.",

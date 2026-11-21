@@ -500,9 +500,11 @@ function toDeploy(row: DeployRow): SharedDeployAssociation {
   };
 }
 
+const isSharedProjectsError = Schema.is(SharedProjectsError);
+
 function asSharedProjectsError(operation: string) {
   return (cause: unknown): SharedProjectsError =>
-    cause instanceof SharedProjectsError
+    isSharedProjectsError(cause)
       ? cause
       : new SharedProjectsError({
           message: `Failed to ${operation}.`,
@@ -664,7 +666,10 @@ function fileExists(fileSystem: FileSystem.FileSystem, filePath: string) {
   return fileSystem.exists(filePath).pipe(Effect.orElseSucceed(() => false));
 }
 
-function safeReadText(fileSystem: FileSystem.FileSystem, filePath: string) {
+const safeReadText = Effect.fn("safeReadText")(function (
+  fileSystem: FileSystem.FileSystem,
+  filePath: string,
+) {
   return Effect.gen(function* () {
     const exists = yield* fileExists(fileSystem, filePath);
     if (!exists) return null;
@@ -674,9 +679,13 @@ function safeReadText(fileSystem: FileSystem.FileSystem, filePath: string) {
     if (content === null || content.length > MAX_CONTEXT_FILE_BYTES) return null;
     return content;
   });
-}
+});
 
-function detectPackageManager(fileSystem: FileSystem.FileSystem, path: Path.Path, cwd: string) {
+const detectPackageManager = Effect.fn("detectPackageManager")(function (
+  fileSystem: FileSystem.FileSystem,
+  path: Path.Path,
+  cwd: string,
+) {
   return Effect.gen(function* () {
     if (yield* fileExists(fileSystem, path.join(cwd, "bun.lock"))) return "bun";
     if (yield* fileExists(fileSystem, path.join(cwd, "pnpm-lock.yaml"))) return "pnpm";
@@ -685,9 +694,9 @@ function detectPackageManager(fileSystem: FileSystem.FileSystem, path: Path.Path
     if (yield* fileExists(fileSystem, path.join(cwd, "package.json"))) return "npm";
     return null;
   });
-}
+});
 
-function readPackageScripts(
+const readPackageScripts = Effect.fn("readPackageScripts")(function readPackageScripts(
   fileSystem: FileSystem.FileSystem,
   path: Path.Path,
   cwd: string,
@@ -701,38 +710,44 @@ function readPackageScripts(
       .slice(0, MAX_CONTEXT_ITEMS)
       .map(([name, command]) => ({ name, command: command as string }));
   });
-}
+});
 
-function readEnvironmentVariableNames(
+const readEnvironmentVariableNames = Effect.fn("readEnvironmentVariableNames")(
+  function readEnvironmentVariableNames(
+    fileSystem: FileSystem.FileSystem,
+    path: Path.Path,
+    cwd: string,
+  ): Effect.Effect<SharedContextBundle["environmentVariables"]> {
+    return Effect.gen(function* () {
+      const entries = yield* fileSystem
+        .readDirectory(cwd, { recursive: false })
+        .pipe(Effect.orElseSucceed((): ReadonlyArray<string> => []));
+
+      const envFiles = entries
+        .filter((entry) => /^\.env(?:\.|$)/u.test(entry))
+        .filter((entry) => !entry.endsWith(".local"))
+        .slice(0, 8);
+      const variables: Array<SharedContextBundle["environmentVariables"][number]> = [];
+      for (const file of envFiles) {
+        const content = yield* safeReadText(fileSystem, path.join(cwd, file));
+        if (!content) continue;
+        for (const line of content.split(/\r?\n/u)) {
+          const match = /^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=/u.exec(line);
+          if (!match?.[1]) continue;
+          variables.push({ file, name: match[1] });
+          if (variables.length >= MAX_CONTEXT_ITEMS) return variables;
+        }
+      }
+      return variables;
+    });
+  },
+);
+
+const buildContextBundle = Effect.fn("buildContextBundle")(function (
   fileSystem: FileSystem.FileSystem,
   path: Path.Path,
   cwd: string,
-): Effect.Effect<SharedContextBundle["environmentVariables"]> {
-  return Effect.gen(function* () {
-    const entries = yield* fileSystem
-      .readDirectory(cwd, { recursive: false })
-      .pipe(Effect.orElseSucceed((): ReadonlyArray<string> => []));
-
-    const envFiles = entries
-      .filter((entry) => /^\.env(?:\.|$)/u.test(entry))
-      .filter((entry) => !entry.endsWith(".local"))
-      .slice(0, 8);
-    const variables: Array<SharedContextBundle["environmentVariables"][number]> = [];
-    for (const file of envFiles) {
-      const content = yield* safeReadText(fileSystem, path.join(cwd, file));
-      if (!content) continue;
-      for (const line of content.split(/\r?\n/u)) {
-        const match = /^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=/u.exec(line);
-        if (!match?.[1]) continue;
-        variables.push({ file, name: match[1] });
-        if (variables.length >= MAX_CONTEXT_ITEMS) return variables;
-      }
-    }
-    return variables;
-  });
-}
-
-function buildContextBundle(fileSystem: FileSystem.FileSystem, path: Path.Path, cwd: string) {
+) {
   return Effect.gen(function* () {
     const syncedAt = yield* nowIso;
     const [projectMemory, packageManager, scripts, environmentVariables] = yield* Effect.all([
@@ -741,12 +756,12 @@ function buildContextBundle(fileSystem: FileSystem.FileSystem, path: Path.Path, 
       readPackageScripts(fileSystem, path, cwd),
       readEnvironmentVariableNames(fileSystem, path, cwd),
     ]);
-    const instructionCandidates = yield* Effect.all(
-      ["AGENTS.md", ".kami/BOOTSTRAP.md"].map((relativePath) =>
+    const instructionCandidates = yield* Effect.forEach(
+      ["AGENTS.md", ".kami/BOOTSTRAP.md"],
+      (relativePath) =>
         safeReadText(fileSystem, path.join(cwd, relativePath)).pipe(
           Effect.map((content) => (content ? { path: relativePath, content } : null)),
         ),
-      ),
     );
     const instructions = instructionCandidates.filter(
       (entry): entry is SharedContextBundle["instructions"][number] => entry !== null,
@@ -775,7 +790,7 @@ function buildContextBundle(fileSystem: FileSystem.FileSystem, path: Path.Path, 
       environmentVariables,
     } satisfies SharedContextBundle;
   });
-}
+});
 
 const runGit = Effect.fn("SharedProjects.runGit")(function* (
   processRunner: ProcessRunner.ProcessRunner["Service"],
@@ -1139,7 +1154,7 @@ const makeSharedProjects = Effect.fn("makeSharedProjects")(function* () {
     `;
   });
 
-  const listForUser: SharedProjectsShape["listForUser"] = (user) =>
+  const listForUser: SharedProjectsShape["listForUser"] = Effect.fn("listForUser")((user) =>
     Effect.gen(function* () {
       const rows = yield* sql<ProjectAccessRow>`
         SELECT
@@ -1168,9 +1183,12 @@ const makeSharedProjects = Effect.fn("makeSharedProjects")(function* () {
         ORDER BY p.updated_at DESC
       `;
       return { projects: rows.map(toProjectSummary) } satisfies SharedProjectListResult;
-    }).pipe(Effect.mapError(asSharedProjectsError("list shared projects")));
+    }).pipe(Effect.mapError(asSharedProjectsError("list shared projects"))),
+  );
 
-  const publishLocalProject: SharedProjectsShape["publishLocalProject"] = (user, input) =>
+  const publishLocalProject: SharedProjectsShape["publishLocalProject"] = Effect.fn(
+    "publishLocalProject",
+  )((user, input) =>
     Effect.gen(function* () {
       const createdAt = yield* nowIso;
       const repository = yield* resolveRepositoryState(
@@ -1291,12 +1309,15 @@ const makeSharedProjects = Effect.fn("makeSharedProjects")(function* () {
       );
 
       return yield* loadDetail(user, projectId);
-    }).pipe(Effect.mapError(asSharedProjectsError("publish shared project")));
+    }).pipe(Effect.mapError(asSharedProjectsError("publish shared project"))),
+  );
 
   const getDetail: SharedProjectsShape["getDetail"] = (user, projectId) =>
     loadDetail(user, projectId).pipe(Effect.mapError(asSharedProjectsError("load shared project")));
 
-  const getBootstrapManifest: SharedProjectsShape["getBootstrapManifest"] = (user, projectId) =>
+  const getBootstrapManifest: SharedProjectsShape["getBootstrapManifest"] = Effect.fn(
+    "getBootstrapManifest",
+  )((user, projectId) =>
     Effect.gen(function* () {
       const detail = yield* loadDetail(user, projectId);
       return {
@@ -1308,9 +1329,10 @@ const makeSharedProjects = Effect.fn("makeSharedProjects")(function* () {
         environments: detail.environments,
         deploys: detail.deploys,
       } satisfies SharedProjectBootstrapManifest;
-    }).pipe(Effect.mapError(asSharedProjectsError("load shared project bootstrap")));
+    }).pipe(Effect.mapError(asSharedProjectsError("load shared project bootstrap"))),
+  );
 
-  const syncContext: SharedProjectsShape["syncContext"] = (user, input) =>
+  const syncContext: SharedProjectsShape["syncContext"] = Effect.fn("syncContext")((user, input) =>
     Effect.gen(function* () {
       yield* requireRole(
         user,
@@ -1340,27 +1362,29 @@ const makeSharedProjects = Effect.fn("makeSharedProjects")(function* () {
         WHERE shared_project_id = ${input.projectId}
       `;
       return yield* loadDetail(user, input.projectId);
-    }).pipe(Effect.mapError(asSharedProjectsError("sync shared project context")));
+    }).pipe(Effect.mapError(asSharedProjectsError("sync shared project context"))),
+  );
 
-  const createInvite: SharedProjectsShape["createInvite"] = (user, input) =>
-    Effect.gen(function* () {
-      if (input.role === "owner") {
-        return yield* new SharedProjectsError({
-          message: "Invitees cannot be granted owner access with an invite code.",
-          status: 400,
-        });
-      }
-      yield* requireRole(
-        user,
-        input.projectId,
-        canManageSharedProject,
-        "Only owners and admins can invite project members.",
-      );
-      const createdAt = yield* nowIso;
-      const expiresAt = yield* futureIso(INVITE_TTL_MS);
-      const code = newInviteCode();
-      const githubLogin = normalizeGitHubLogin(input.githubLogin);
-      yield* sql`
+  const createInvite: SharedProjectsShape["createInvite"] = Effect.fn("createInvite")(
+    (user, input) =>
+      Effect.gen(function* () {
+        if (input.role === "owner") {
+          return yield* new SharedProjectsError({
+            message: "Invitees cannot be granted owner access with an invite code.",
+            status: 400,
+          });
+        }
+        yield* requireRole(
+          user,
+          input.projectId,
+          canManageSharedProject,
+          "Only owners and admins can invite project members.",
+        );
+        const createdAt = yield* nowIso;
+        const expiresAt = yield* futureIso(INVITE_TTL_MS);
+        const code = newInviteCode();
+        const githubLogin = normalizeGitHubLogin(input.githubLogin);
+        yield* sql`
         INSERT INTO shared_project_invites (
           invite_code,
           shared_project_id,
@@ -1388,7 +1412,7 @@ const makeSharedProjects = Effect.fn("makeSharedProjects")(function* () {
           NULL
         )
       `;
-      const rows = yield* sql<InviteRow>`
+        const rows = yield* sql<InviteRow>`
         SELECT
           invite_code AS "inviteCode",
           shared_project_id AS "sharedProjectId",
@@ -1404,10 +1428,11 @@ const makeSharedProjects = Effect.fn("makeSharedProjects")(function* () {
         FROM shared_project_invites
         WHERE invite_code = ${code}
       `;
-      return toInvite(rows[0]!, createdAt);
-    }).pipe(Effect.mapError(asSharedProjectsError("create shared project invite")));
+        return toInvite(rows[0]!, createdAt);
+      }).pipe(Effect.mapError(asSharedProjectsError("create shared project invite"))),
+  );
 
-  const claimInvite: SharedProjectsShape["claimInvite"] = (user, input) =>
+  const claimInvite: SharedProjectsShape["claimInvite"] = Effect.fn("claimInvite")((user, input) =>
     Effect.gen(function* () {
       const rows = yield* sql<InviteRow>`
         SELECT
@@ -1525,23 +1550,25 @@ const makeSharedProjects = Effect.fn("makeSharedProjects")(function* () {
           deploys: detail.deploys,
         },
       } satisfies SharedProjectClaimResult;
-    }).pipe(Effect.mapError(asSharedProjectsError("claim shared project invite")));
+    }).pipe(Effect.mapError(asSharedProjectsError("claim shared project invite"))),
+  );
 
-  const updateMemberRole: SharedProjectsShape["updateMemberRole"] = (user, input) =>
-    Effect.gen(function* () {
-      if (input.role === "owner") {
-        return yield* new SharedProjectsError({
-          message: "Project ownership transfer is not available here.",
-          status: 400,
-        });
-      }
-      yield* requireRole(
-        user,
-        input.projectId,
-        canManageSharedProject,
-        "Only owners and admins can change project roles.",
-      );
-      const targetRows = yield* sql<{ readonly role: string }>`
+  const updateMemberRole: SharedProjectsShape["updateMemberRole"] = Effect.fn("updateMemberRole")(
+    (user, input) =>
+      Effect.gen(function* () {
+        if (input.role === "owner") {
+          return yield* new SharedProjectsError({
+            message: "Project ownership transfer is not available here.",
+            status: 400,
+          });
+        }
+        yield* requireRole(
+          user,
+          input.projectId,
+          canManageSharedProject,
+          "Only owners and admins can change project roles.",
+        );
+        const targetRows = yield* sql<{ readonly role: string }>`
         SELECT role
         FROM shared_project_members
         WHERE shared_project_id = ${input.projectId}
@@ -1549,33 +1576,35 @@ const makeSharedProjects = Effect.fn("makeSharedProjects")(function* () {
           AND removed_at IS NULL
         LIMIT 1
       `;
-      if (!targetRows[0]) {
-        return yield* new SharedProjectsError({ message: "Member was not found.", status: 404 });
-      }
-      if (targetRows[0].role === "owner") {
-        return yield* new SharedProjectsError({
-          message: "The owner role cannot be changed.",
-          status: 400,
-        });
-      }
-      yield* sql`
+        if (!targetRows[0]) {
+          return yield* new SharedProjectsError({ message: "Member was not found.", status: 404 });
+        }
+        if (targetRows[0].role === "owner") {
+          return yield* new SharedProjectsError({
+            message: "The owner role cannot be changed.",
+            status: 400,
+          });
+        }
+        yield* sql`
         UPDATE shared_project_members
         SET role = ${input.role}
         WHERE shared_project_id = ${input.projectId}
           AND user_id = ${input.userId}
       `;
-      return yield* loadDetail(user, input.projectId);
-    }).pipe(Effect.mapError(asSharedProjectsError("update shared project member role")));
+        return yield* loadDetail(user, input.projectId);
+      }).pipe(Effect.mapError(asSharedProjectsError("update shared project member role"))),
+  );
 
-  const removeMember: SharedProjectsShape["removeMember"] = (user, input) =>
-    Effect.gen(function* () {
-      yield* requireRole(
-        user,
-        input.projectId,
-        canManageSharedProject,
-        "Only owners and admins can remove project members.",
-      );
-      const targetRows = yield* sql<{ readonly role: string }>`
+  const removeMember: SharedProjectsShape["removeMember"] = Effect.fn("removeMember")(
+    (user, input) =>
+      Effect.gen(function* () {
+        yield* requireRole(
+          user,
+          input.projectId,
+          canManageSharedProject,
+          "Only owners and admins can remove project members.",
+        );
+        const targetRows = yield* sql<{ readonly role: string }>`
         SELECT role
         FROM shared_project_members
         WHERE shared_project_id = ${input.projectId}
@@ -1583,62 +1612,66 @@ const makeSharedProjects = Effect.fn("makeSharedProjects")(function* () {
           AND removed_at IS NULL
         LIMIT 1
       `;
-      if (!targetRows[0]) {
-        return yield* new SharedProjectsError({ message: "Member was not found.", status: 404 });
-      }
-      if (targetRows[0].role === "owner") {
-        return yield* new SharedProjectsError({
-          message: "The project owner cannot be removed.",
-          status: 400,
-        });
-      }
-      const removedAt = yield* nowIso;
-      yield* sql.withTransaction(
-        Effect.gen(function* () {
-          yield* sql`
+        if (!targetRows[0]) {
+          return yield* new SharedProjectsError({ message: "Member was not found.", status: 404 });
+        }
+        if (targetRows[0].role === "owner") {
+          return yield* new SharedProjectsError({
+            message: "The project owner cannot be removed.",
+            status: 400,
+          });
+        }
+        const removedAt = yield* nowIso;
+        yield* sql.withTransaction(
+          Effect.gen(function* () {
+            yield* sql`
             UPDATE shared_project_members
             SET removed_at = ${removedAt}
             WHERE shared_project_id = ${input.projectId}
               AND user_id = ${input.userId}
           `;
-          yield* sql`
+            yield* sql`
             UPDATE shared_project_invites
             SET revoked_at = ${removedAt}
             WHERE shared_project_id = ${input.projectId}
               AND claimed_by_user_id = ${input.userId}
               AND revoked_at IS NULL
           `;
-        }),
-      );
-      return yield* loadDetail(user, input.projectId);
-    }).pipe(Effect.mapError(asSharedProjectsError("remove shared project member")));
+          }),
+        );
+        return yield* loadDetail(user, input.projectId);
+      }).pipe(Effect.mapError(asSharedProjectsError("remove shared project member"))),
+  );
 
-  const deleteProject: SharedProjectsShape["deleteProject"] = (user, input) =>
-    Effect.gen(function* () {
-      yield* requireRole(
-        user,
-        input.projectId,
-        (role) => role === "owner",
-        "Only the project owner can stop sharing this project.",
-      );
-      yield* sql`
+  const deleteProject: SharedProjectsShape["deleteProject"] = Effect.fn("deleteProject")(
+    (user, input) =>
+      Effect.gen(function* () {
+        yield* requireRole(
+          user,
+          input.projectId,
+          (role) => role === "owner",
+          "Only the project owner can stop sharing this project.",
+        );
+        yield* sql`
         DELETE FROM shared_projects
         WHERE shared_project_id = ${input.projectId}
           AND owner_user_id = ${user.user.userId}
       `;
-      return { ok: true } as const;
-    }).pipe(Effect.mapError(asSharedProjectsError("delete shared project")));
+        return { ok: true } as const;
+      }).pipe(Effect.mapError(asSharedProjectsError("delete shared project"))),
+  );
 
-  const publishThread: SharedProjectsShape["publishThread"] = (user, input) =>
-    Effect.gen(function* () {
-      yield* requireRole(
-        user,
-        input.projectId,
-        canEditSharedWork,
-        "Viewers cannot publish shared session snapshots.",
-      );
-      const updatedAt = yield* nowIso;
-      const existingRows = yield* sql<ThreadRow>`
+  const publishThread: SharedProjectsShape["publishThread"] = Effect.fn("publishThread")(
+    (user, input) =>
+      Effect.gen(function* () {
+        yield* requireRole(
+          user,
+          input.projectId,
+          canEditSharedWork,
+          "Viewers cannot publish shared session snapshots.",
+        );
+        const updatedAt = yield* nowIso;
+        const existingRows = yield* sql<ThreadRow>`
         SELECT
           shared_thread_id AS "sharedThreadId",
           shared_project_id AS "sharedProjectId",
@@ -1659,17 +1692,17 @@ const makeSharedProjects = Effect.fn("makeSharedProjects")(function* () {
           AND local_thread_id = ${input.localThreadId}
         LIMIT 1
       `;
-      const existingThread = existingRows[0] ?? null;
-      const threadId = existingThread
-        ? SharedThreadId.make(existingThread.sharedThreadId)
-        : SharedThreadId.make(newId("st"));
-      const messages = input.messages ?? [];
-      const sessionSnapshot = input.sessionSnapshot ?? null;
-      const normalizedGithubLogins = Array.from(
-        new Set((input.allowedGithubLogins ?? []).map((login) => normalizeGitHubLogin(login))),
-      );
-      if (existingThread) {
-        yield* sql`
+        const existingThread = existingRows[0] ?? null;
+        const threadId = existingThread
+          ? SharedThreadId.make(existingThread.sharedThreadId)
+          : SharedThreadId.make(newId("st"));
+        const messages = input.messages ?? [];
+        const sessionSnapshot = input.sessionSnapshot ?? null;
+        const normalizedGithubLogins = Array.from(
+          new Set((input.allowedGithubLogins ?? []).map((login) => normalizeGitHubLogin(login))),
+        );
+        if (existingThread) {
+          yield* sql`
           UPDATE shared_threads
           SET title = ${input.title},
               visibility = ${input.visibility},
@@ -1680,8 +1713,8 @@ const makeSharedProjects = Effect.fn("makeSharedProjects")(function* () {
               updated_at = ${updatedAt}
           WHERE shared_thread_id = ${threadId}
         `;
-      } else {
-        yield* sql`
+        } else {
+          yield* sql`
           INSERT INTO shared_threads (
             shared_thread_id,
             shared_project_id,
@@ -1715,8 +1748,8 @@ const makeSharedProjects = Effect.fn("makeSharedProjects")(function* () {
             ${updatedAt}
           )
         `;
-      }
-      const rows = yield* sql<ThreadRow>`
+        }
+        const rows = yield* sql<ThreadRow>`
         SELECT
           shared_thread_id AS "sharedThreadId",
           shared_project_id AS "sharedProjectId",
@@ -1735,10 +1768,13 @@ const makeSharedProjects = Effect.fn("makeSharedProjects")(function* () {
         FROM shared_threads
         WHERE shared_thread_id = ${threadId}
       `;
-      return toThread(rows[0]!);
-    }).pipe(Effect.mapError(asSharedProjectsError("publish shared thread")));
+        return toThread(rows[0]!);
+      }).pipe(Effect.mapError(asSharedProjectsError("publish shared thread"))),
+  );
 
-  const updateThreadVisibility: SharedProjectsShape["updateThreadVisibility"] = (user, input) =>
+  const updateThreadVisibility: SharedProjectsShape["updateThreadVisibility"] = Effect.fn(
+    "updateThreadVisibility",
+  )((user, input) =>
     Effect.gen(function* () {
       const { role } = yield* requireRole(
         user,
@@ -1789,13 +1825,15 @@ const makeSharedProjects = Effect.fn("makeSharedProjects")(function* () {
         WHERE shared_thread_id = ${input.threadId}
       `;
       return toThread({ ...thread, visibility: input.visibility, updatedAt });
-    }).pipe(Effect.mapError(asSharedProjectsError("update shared thread visibility")));
+    }).pipe(Effect.mapError(asSharedProjectsError("update shared thread visibility"))),
+  );
 
-  const importThread: SharedProjectsShape["importThread"] = (user, input) =>
-    Effect.gen(function* () {
-      const access = yield* loadProjectAccess(user, input.projectId);
-      const role = roleFromDb(access.role);
-      const rows = yield* sql<ThreadRow>`
+  const importThread: SharedProjectsShape["importThread"] = Effect.fn("importThread")(
+    (user, input) =>
+      Effect.gen(function* () {
+        const access = yield* loadProjectAccess(user, input.projectId);
+        const role = roleFromDb(access.role);
+        const rows = yield* sql<ThreadRow>`
         SELECT
           shared_thread_id AS "sharedThreadId",
           shared_project_id AS "sharedProjectId",
@@ -1816,48 +1854,48 @@ const makeSharedProjects = Effect.fn("makeSharedProjects")(function* () {
           AND shared_thread_id = ${input.threadId}
         LIMIT 1
       `;
-      const thread = rows[0];
-      if (!thread) {
-        return yield* new SharedProjectsError({
-          message: "Shared thread was not found.",
-          status: 404,
+        const thread = rows[0];
+        if (!thread) {
+          return yield* new SharedProjectsError({
+            message: "Shared thread was not found.",
+            status: 404,
+          });
+        }
+        if (
+          thread.visibility !== "shared" &&
+          !roleAtLeast(role, "admin") &&
+          thread.createdByUserId !== user.user.userId
+        ) {
+          return yield* new SharedProjectsError({
+            message: "This shared session is private.",
+            status: 403,
+          });
+        }
+        const snapshot = thread.sessionSnapshotJson
+          ? decodeJsonOr<SharedSessionSnapshot | null>(
+              decodeSessionSnapshotJson,
+              thread.sessionSnapshotJson,
+              null,
+            )
+          : null;
+        if (!snapshot) {
+          return yield* new SharedProjectsError({
+            message: "This shared session does not have an importable snapshot yet.",
+            status: 400,
+          });
+        }
+        return yield* importSharedThreadSnapshot({
+          request: input,
+          title: thread.title,
+          snapshot,
+          sourceSharedThreadId: input.threadId,
         });
-      }
-      if (
-        thread.visibility !== "shared" &&
-        !roleAtLeast(role, "admin") &&
-        thread.createdByUserId !== user.user.userId
-      ) {
-        return yield* new SharedProjectsError({
-          message: "This shared session is private.",
-          status: 403,
-        });
-      }
-      const snapshot = thread.sessionSnapshotJson
-        ? decodeJsonOr<SharedSessionSnapshot | null>(
-            decodeSessionSnapshotJson,
-            thread.sessionSnapshotJson,
-            null,
-          )
-        : null;
-      if (!snapshot) {
-        return yield* new SharedProjectsError({
-          message: "This shared session does not have an importable snapshot yet.",
-          status: 400,
-        });
-      }
-      return yield* importSharedThreadSnapshot({
-        request: input,
-        title: thread.title,
-        snapshot,
-        sourceSharedThreadId: input.threadId,
-      });
-    }).pipe(Effect.mapError(asSharedProjectsError("import shared thread")));
+      }).pipe(Effect.mapError(asSharedProjectsError("import shared thread"))),
+  );
 
-  const resolveSharedThreadShare: SharedProjectsShape["resolveSharedThreadShare"] = (
-    user,
-    shareCode,
-  ) =>
+  const resolveSharedThreadShare: SharedProjectsShape["resolveSharedThreadShare"] = Effect.fn(
+    "resolveSharedThreadShare",
+  )((user, shareCode) =>
     Effect.gen(function* () {
       const rows = yield* sql<ThreadRow>`
         SELECT
@@ -1906,9 +1944,12 @@ const makeSharedProjects = Effect.fn("makeSharedProjects")(function* () {
         projectId: thread.projectId,
         thread,
       } satisfies ResolvedSharedThreadShare;
-    }).pipe(Effect.mapError(asSharedProjectsError("resolve shared thread link")));
+    }).pipe(Effect.mapError(asSharedProjectsError("resolve shared thread link"))),
+  );
 
-  const importThreadFromLink: SharedProjectsShape["importThreadFromLink"] = (user, input) =>
+  const importThreadFromLink: SharedProjectsShape["importThreadFromLink"] = Effect.fn(
+    "importThreadFromLink",
+  )((user, input) =>
     Effect.gen(function* () {
       const resolved = yield* resolveSharedThreadShare(user, input.shareCode);
       if (!resolved.thread.sessionSnapshot) {
@@ -1928,7 +1969,8 @@ const makeSharedProjects = Effect.fn("makeSharedProjects")(function* () {
         sourceSharedThreadId: resolved.thread.id,
         targetProjectCwd: input.targetProjectCwd,
       });
-    }).pipe(Effect.mapError(asSharedProjectsError("import shared thread link")));
+    }).pipe(Effect.mapError(asSharedProjectsError("import shared thread link"))),
+  );
 
   const appendThreadMessage: SharedProjectsShape["appendThreadMessage"] = () =>
     Effect.fail(
@@ -1939,56 +1981,57 @@ const makeSharedProjects = Effect.fn("makeSharedProjects")(function* () {
       }),
     );
 
-  const upsertRuntime: SharedProjectsShape["upsertRuntime"] = (user, input) =>
-    Effect.gen(function* () {
-      yield* requireRole(
-        user,
-        input.projectId,
-        canEditSharedWork,
-        "Viewers cannot attach runtimes to a shared project.",
-      );
-      const createdAt = yield* nowIso;
-      const runtimeId = input.runtimeId ?? SharedRuntimeId.make(newId("rt"));
-      if (input.sshCredentialId !== undefined && input.sshCredentialId !== null) {
-        if (input.type !== "ssh-vps") {
-          return yield* new SharedProjectsError({
-            message: "SSH credentials can only be attached to SSH/VPS runtimes.",
-            status: 400,
-          });
-        }
-        const credentialRows = yield* sql<{ readonly sshCredentialId: string }>`
+  const upsertRuntime: SharedProjectsShape["upsertRuntime"] = Effect.fn("upsertRuntime")(
+    (user, input) =>
+      Effect.gen(function* () {
+        yield* requireRole(
+          user,
+          input.projectId,
+          canEditSharedWork,
+          "Viewers cannot attach runtimes to a shared project.",
+        );
+        const createdAt = yield* nowIso;
+        const runtimeId = input.runtimeId ?? SharedRuntimeId.make(newId("rt"));
+        if (input.sshCredentialId !== undefined && input.sshCredentialId !== null) {
+          if (input.type !== "ssh-vps") {
+            return yield* new SharedProjectsError({
+              message: "SSH credentials can only be attached to SSH/VPS runtimes.",
+              status: 400,
+            });
+          }
+          const credentialRows = yield* sql<{ readonly sshCredentialId: string }>`
           SELECT ssh_credential_id AS "sshCredentialId"
           FROM shared_project_ssh_credentials
           WHERE shared_project_id = ${input.projectId}
             AND ssh_credential_id = ${input.sshCredentialId}
           LIMIT 1
         `;
-        if (!credentialRows[0]) {
-          return yield* new SharedProjectsError({
-            message: "SSH credential was not found.",
-            status: 404,
-          });
+          if (!credentialRows[0]) {
+            return yield* new SharedProjectsError({
+              message: "SSH credential was not found.",
+              status: 404,
+            });
+          }
         }
-      }
-      const existingRows = yield* sql<{
-        readonly sharedProjectId: string;
-        readonly createdAt: string;
-      }>`
+        const existingRows = yield* sql<{
+          readonly sharedProjectId: string;
+          readonly createdAt: string;
+        }>`
         SELECT shared_project_id AS "sharedProjectId",
                created_at AS "createdAt"
         FROM shared_runtimes
         WHERE runtime_id = ${runtimeId}
         LIMIT 1
       `;
-      const existing = existingRows[0];
-      if (existing && existing.sharedProjectId !== input.projectId) {
-        return yield* new SharedProjectsError({
-          message: "Runtime id is already used by another shared project.",
-          status: 409,
-        });
-      }
-      const originalCreatedAt = existing?.createdAt ?? createdAt;
-      yield* sql`
+        const existing = existingRows[0];
+        if (existing && existing.sharedProjectId !== input.projectId) {
+          return yield* new SharedProjectsError({
+            message: "Runtime id is already used by another shared project.",
+            status: 409,
+          });
+        }
+        const originalCreatedAt = existing?.createdAt ?? createdAt;
+        yield* sql`
         INSERT INTO shared_runtimes (
           runtime_id,
           shared_project_id,
@@ -2034,7 +2077,7 @@ const makeSharedProjects = Effect.fn("makeSharedProjects")(function* () {
           last_seen_at = excluded.last_seen_at,
           updated_at = excluded.updated_at
       `;
-      const rows = yield* sql<RuntimeRow>`
+        const rows = yield* sql<RuntimeRow>`
         SELECT
           runtime_id AS "runtimeId",
           shared_project_id AS "sharedProjectId",
@@ -2053,10 +2096,13 @@ const makeSharedProjects = Effect.fn("makeSharedProjects")(function* () {
         FROM shared_runtimes
         WHERE runtime_id = ${runtimeId}
       `;
-      return toRuntime(rows[0]!);
-    }).pipe(Effect.mapError(asSharedProjectsError("upsert shared runtime")));
+        return toRuntime(rows[0]!);
+      }).pipe(Effect.mapError(asSharedProjectsError("upsert shared runtime"))),
+  );
 
-  const upsertSshCredential: SharedProjectsShape["upsertSshCredential"] = (user, input) =>
+  const upsertSshCredential: SharedProjectsShape["upsertSshCredential"] = Effect.fn(
+    "upsertSshCredential",
+  )((user, input) =>
     Effect.gen(function* () {
       yield* requireRole(
         user,
@@ -2169,9 +2215,12 @@ const makeSharedProjects = Effect.fn("makeSharedProjects")(function* () {
       }
       const secret = yield* decryptSshSecret(row.encryptedSecretJson, sshEncryptionKey);
       return toSshCredential(row, secret);
-    }).pipe(Effect.mapError(asSharedProjectsError("save shared SSH credential")));
+    }).pipe(Effect.mapError(asSharedProjectsError("save shared SSH credential"))),
+  );
 
-  const removeSshCredential: SharedProjectsShape["removeSshCredential"] = (user, input) =>
+  const removeSshCredential: SharedProjectsShape["removeSshCredential"] = Effect.fn(
+    "removeSshCredential",
+  )((user, input) =>
     Effect.gen(function* () {
       yield* requireRole(
         user,
@@ -2211,9 +2260,12 @@ const makeSharedProjects = Effect.fn("makeSharedProjects")(function* () {
           AND ssh_credential_id = ${input.credentialId}
       `;
       return yield* loadDetail(user, input.projectId);
-    }).pipe(Effect.mapError(asSharedProjectsError("remove shared SSH credential")));
+    }).pipe(Effect.mapError(asSharedProjectsError("remove shared SSH credential"))),
+  );
 
-  const upsertEnvironment: SharedProjectsShape["upsertEnvironment"] = (user, input) =>
+  const upsertEnvironment: SharedProjectsShape["upsertEnvironment"] = Effect.fn(
+    "upsertEnvironment",
+  )((user, input) =>
     Effect.gen(function* () {
       yield* requireRole(
         user,
@@ -2303,9 +2355,12 @@ const makeSharedProjects = Effect.fn("makeSharedProjects")(function* () {
         WHERE environment_id = ${environmentId}
       `;
       return toEnvironment(rows[0]!);
-    }).pipe(Effect.mapError(asSharedProjectsError("upsert shared environment")));
+    }).pipe(Effect.mapError(asSharedProjectsError("upsert shared environment"))),
+  );
 
-  const setDefaultEnvironment: SharedProjectsShape["setDefaultEnvironment"] = (user, input) =>
+  const setDefaultEnvironment: SharedProjectsShape["setDefaultEnvironment"] = Effect.fn(
+    "setDefaultEnvironment",
+  )((user, input) =>
     Effect.gen(function* () {
       yield* requireRole(
         user,
@@ -2343,9 +2398,12 @@ const makeSharedProjects = Effect.fn("makeSharedProjects")(function* () {
         }),
       );
       return yield* loadDetail(user, input.projectId);
-    }).pipe(Effect.mapError(asSharedProjectsError("set shared default environment")));
+    }).pipe(Effect.mapError(asSharedProjectsError("set shared default environment"))),
+  );
 
-  const upsertDeployAssociation: SharedProjectsShape["upsertDeployAssociation"] = (user, input) =>
+  const upsertDeployAssociation: SharedProjectsShape["upsertDeployAssociation"] = Effect.fn(
+    "upsertDeployAssociation",
+  )((user, input) =>
     Effect.gen(function* () {
       const { row } = yield* requireRole(
         user,
@@ -2453,9 +2511,12 @@ const makeSharedProjects = Effect.fn("makeSharedProjects")(function* () {
           updated_at = excluded.updated_at
       `;
       return yield* loadDetail(user, input.projectId);
-    }).pipe(Effect.mapError(asSharedProjectsError("upsert shared deploy association")));
+    }).pipe(Effect.mapError(asSharedProjectsError("upsert shared deploy association"))),
+  );
 
-  const syncRemoteRuntime: SharedProjectsShape["syncRemoteRuntime"] = (user, input) =>
+  const syncRemoteRuntime: SharedProjectsShape["syncRemoteRuntime"] = Effect.fn(
+    "syncRemoteRuntime",
+  )((user, input) =>
     Effect.gen(function* () {
       yield* requireRole(
         user,
@@ -2552,7 +2613,8 @@ const makeSharedProjects = Effect.fn("makeSharedProjects")(function* () {
         ),
       );
       return yield* loadDetail(user, input.projectId);
-    }).pipe(Effect.mapError(asSharedProjectsError("sync shared remote runtime")));
+    }).pipe(Effect.mapError(asSharedProjectsError("sync shared remote runtime"))),
+  );
 
   return {
     listForUser,

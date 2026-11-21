@@ -1,37 +1,35 @@
 import type { EnvironmentId } from "@t3tools/contracts";
-import { useCallback } from "react";
+import { useGT } from "gt-react-native";
 import { View } from "react-native";
 
-import { EmptyState } from "../../components/EmptyState";
-import { environmentCatalog } from "../../connection/catalog";
+import { EmptyState } from "../../components/ui/EmptyState";
 import type { AssetUrlFailureReason } from "../../state/asset-url-state";
-import { useAtomCommand } from "../../state/use-atom-command";
 import { useEnvironmentPresentation } from "../../state/presentation";
 import { EnvironmentConnectionNotice } from "../connection/EnvironmentConnectionNotice";
+import { useRetryEnvironment } from "../connection/useRetryEnvironment";
 
-/**
- * Terminal state for a preview whose signed asset URL will not arrive. A dead
- * environment reuses the same notice the terminal and review sheets show, so the
- * user gets one recognizable way back online.
- */
 export function WorkspaceFilePreviewError(props: {
   readonly environmentId: EnvironmentId | null;
   readonly reason: AssetUrlFailureReason;
   readonly onRetry: () => void;
 }) {
   const { environmentId, onRetry } = props;
+  const gt = useGT();
   const environment = useEnvironmentPresentation(environmentId);
-  const retryEnvironment = useAtomCommand(environmentCatalog.retryNow, "environment retry");
-  const retryConnection = useCallback(() => {
+  const retryEnvironment = useRetryEnvironment();
+  const retryConnection = () => {
     if (environmentId !== null) void retryEnvironment(environmentId);
     onRetry();
-  }, [environmentId, onRetry, retryEnvironment]);
+  };
 
   if (props.reason === "disconnected") {
     return (
       <View className="flex-1 bg-sheet">
         <EnvironmentConnectionNotice
-          environmentLabel={environment.presentation?.entry.target.label ?? "Environment"}
+          environmentLabel={
+            environment.presentation?.entry.target.label ??
+            gt("Environment", { $context: "fallback environment name" })
+          }
           connection={
             environment.presentation?.connection ?? {
               phase: "available",
@@ -39,7 +37,7 @@ export function WorkspaceFilePreviewError(props: {
               traceId: null,
             }
           }
-          resourceName="preview"
+          resource="preview"
           onRetry={retryConnection}
         />
       </View>
@@ -49,9 +47,9 @@ export function WorkspaceFilePreviewError(props: {
   return (
     <View className="flex-1 items-center justify-center bg-sheet px-6">
       <EmptyState
-        title="Preview unavailable"
-        detail="This file may be missing, unsupported, or unavailable on this environment."
-        actionLabel="Try again"
+        title={gt("Preview unavailable")}
+        detail={gt("This file may be missing, unsupported, or unavailable on this environment.")}
+        actionLabel={gt("Try again")}
         onAction={props.onRetry}
       />
     </View>

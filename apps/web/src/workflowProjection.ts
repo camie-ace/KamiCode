@@ -1,3 +1,4 @@
+import type { ThreadStructure } from "@t3tools/client-runtime/state/shell";
 import type {
   OrchestrationThreadActivity,
   OrchestrationV2ThreadProjection,
@@ -8,7 +9,7 @@ import type { ChatMessage } from "./types";
 
 /** Read KamiCode workflow records from the V2 timeline, including imported history. */
 export function workflowActivities(
-  projection: OrchestrationV2ThreadProjection | null,
+  projection: ThreadStructure | null,
 ): ReadonlyArray<OrchestrationThreadActivity> {
   return (
     projection?.visibleTurnItems.flatMap(({ item }) =>

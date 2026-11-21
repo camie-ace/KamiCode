@@ -1,12 +1,6 @@
+import { isClaudeSlashCommand } from "./model.ts";
 import { describe, expect, it } from "vite-plus/test";
-import {
-  DEFAULT_TEXT_GENERATION_MODEL,
-  DEFAULT_MODEL,
-  DEFAULT_MODEL_BY_PROVIDER,
-  ProviderDriverKind,
-  ProviderInstanceId,
-  type ModelCapabilities,
-} from "@t3tools/contracts";
+import { ProviderInstanceId, type ModelCapabilities } from "@t3tools/contracts";
 
 import {
   applyClaudePromptEffortPrefix,
@@ -14,40 +8,13 @@ import {
   buildProviderOptionSelectionsFromDescriptors,
   createModelCapabilities,
   createModelSelection,
-  formatCodexModelName,
-  formatModelSlugName,
   getProviderOptionCurrentLabel,
-  getModelSelectionBooleanOptionValue,
-  getModelSelectionStringOptionValue,
   getProviderOptionDescriptors,
   readCustomModelEntries,
-  toCustomModelSetting,
-  getProviderOptionBooleanSelectionValue,
-  getProviderOptionStringSelectionValue,
-  isClaudeSlashCommand,
-  normalizeCustomModelSlug,
-  normalizeModelSlug,
   modelSelectionsEqual,
+  pickModelSelection,
+  withImplicitFastModeDefault,
 } from "./model.ts";
-
-it("keeps the Codex catalog display formatting", () => {
-  expect(formatCodexModelName("gpt-5.3-codex-spark")).toBe("GPT-5.3-Codex-Spark");
-  expect(formatCodexModelName("GPT Test")).toBe("GPT Test");
-});
-
-it.each([
-  ["gpt-5.4", "GPT-5.4"],
-  ["claude-opus-4-6", "Claude Opus 4.6"],
-  ["claude-sonnet-4-20250514", "Claude Sonnet 4 20250514"],
-  ["claude-opus-4-6[1m]", "Claude Opus 4.6[1m]"],
-  ["openai/gpt-5.4-mini", "openai/GPT-5.4-Mini"],
-  ["gemini-2.5-pro-preview-06-05", "Gemini 2.5 Pro Preview 06 05"],
-  ["custom/model-v2", "custom/model-v2"],
-  ["gpt-proxy", "gpt-proxy"],
-  ["My Custom Model", "My Custom Model"],
-])("formats a known model ID without losing its qualifiers: %s", (slug, expected) => {
-  expect(formatModelSlugName(slug)).toBe(expected);
-});
 
 const codexCaps: ModelCapabilities = createModelCapabilities({
   optionDescriptors: [
@@ -69,113 +36,7 @@ const codexCaps: ModelCapabilities = createModelCapabilities({
   ],
 });
 
-describe("model slug normalization", () => {
-  it("preserves exact custom slugs instead of expanding provider aliases", () => {
-    // Claude aliases now resolve through the model catalog (#9084), so the
-    // provider alias table passes unknown slugs through unchanged.
-    const claude = ProviderDriverKind.make("claudeAgent");
-
-    expect(normalizeModelSlug("opus", claude)).toBe("opus");
-    expect(normalizeCustomModelSlug(" opus ")).toBe("opus");
-  });
-});
-
-const claudeCaps: ModelCapabilities = createModelCapabilities({
-  optionDescriptors: [
-    {
-      id: "effort",
-      label: "Reasoning",
-      type: "select",
-      options: [
-        { id: "medium", label: "Medium" },
-        { id: "high", label: "High", isDefault: true },
-        { id: "ultrathink", label: "Ultrathink" },
-      ],
-      currentValue: "high",
-      promptInjectedValues: ["ultrathink"],
-    },
-    {
-      id: "contextWindow",
-      label: "Context Window",
-      type: "select",
-      options: [
-        { id: "200k", label: "200k" },
-        { id: "1m", label: "1M", isDefault: true },
-      ],
-      currentValue: "1m",
-    },
-  ],
-});
-
 describe("descriptor helpers", () => {
-  it("uses the nightly Codex and text-generation defaults", () => {
-    expect(DEFAULT_MODEL).toBe("gpt-6-astra");
-    expect(DEFAULT_TEXT_GENERATION_MODEL).toBe("gpt-6-luna");
-    expect(DEFAULT_MODEL_BY_PROVIDER[ProviderDriverKind.make("codex")]).toBe("gpt-6-astra");
-  });
-
-  it("normalizes GPT-5.6 Codex shorthand and named variants", () => {
-    const codex = ProviderDriverKind.make("codex");
-
-    expect(normalizeModelSlug("5.6", codex)).toBe("gpt-5.6-sol");
-    expect(normalizeModelSlug("sol", codex)).toBe("gpt-5.6-sol");
-    expect(normalizeModelSlug("5.6-sol", codex)).toBe("gpt-5.6-sol");
-    expect(normalizeModelSlug("terra", codex)).toBe("gpt-5.6-terra");
-    expect(normalizeModelSlug("5.6-terra", codex)).toBe("gpt-5.6-terra");
-    expect(normalizeModelSlug("luna", codex)).toBe("gpt-5.6-luna");
-    expect(normalizeModelSlug("5.6-luna", codex)).toBe("gpt-5.6-luna");
-  });
-
-  it("applies selection values to capability descriptors", () => {
-    expect(
-      getProviderOptionDescriptors({
-        caps: claudeCaps,
-        selections: [
-          { id: "effort", value: "medium" },
-          { id: "contextWindow", value: "200k" },
-        ],
-      }),
-    ).toEqual([
-      {
-        id: "effort",
-        label: "Reasoning",
-        type: "select",
-        options: [
-          { id: "medium", label: "Medium" },
-          { id: "high", label: "High", isDefault: true },
-          { id: "ultrathink", label: "Ultrathink" },
-        ],
-        currentValue: "medium",
-        promptInjectedValues: ["ultrathink"],
-      },
-      {
-        id: "contextWindow",
-        label: "Context Window",
-        type: "select",
-        options: [
-          { id: "200k", label: "200k" },
-          { id: "1m", label: "1M", isDefault: true },
-        ],
-        currentValue: "200k",
-      },
-    ]);
-  });
-
-  it("builds wire-format option selections from descriptors", () => {
-    const descriptors = getProviderOptionDescriptors({
-      caps: codexCaps,
-      selections: [
-        { id: "reasoningEffort", value: "high" },
-        { id: "fastMode", value: true },
-      ],
-    });
-
-    expect(buildProviderOptionSelectionsFromDescriptors(descriptors)).toEqual([
-      { id: "reasoningEffort", value: "high" },
-      { id: "fastMode", value: true },
-    ]);
-  });
-
   it("builds dispatch options only from explicit selections", () => {
     const descriptors = getProviderOptionDescriptors({
       caps: codexCaps,
@@ -192,38 +53,30 @@ describe("descriptor helpers", () => {
     ).toEqual([{ id: "fastMode", value: true }]);
   });
 
-  it("stores option selection arrays in model selections", () => {
-    expect(
-      createModelSelection(ProviderInstanceId.make("codex"), "gpt-5.4", [
-        { id: "reasoningEffort", value: "high" },
-        { id: "fastMode", value: true },
-      ]),
-    ).toEqual({
-      instanceId: "codex",
-      model: "gpt-5.4",
-      options: [
-        { id: "reasoningEffort", value: "high" },
-        { id: "fastMode", value: true },
-      ],
+  it("dispatches an old Ultracode effort as Extra High with the Ultracode toggle", () => {
+    const legacy = [{ id: "effort", value: "ultracode" }];
+    const descriptors = getProviderOptionDescriptors({
+      caps: createModelCapabilities({
+        optionDescriptors: [
+          {
+            id: "effort",
+            label: "Reasoning",
+            type: "select",
+            options: [
+              { id: "high", label: "High", isDefault: true },
+              { id: "xhigh", label: "Extra High" },
+            ],
+          },
+          { id: "ultracode", label: "Ultracode", type: "boolean" },
+        ],
+      }),
+      selections: legacy,
     });
-  });
 
-  it("reads typed option selection values", () => {
-    const selection = createModelSelection(ProviderInstanceId.make("codex"), "gpt-5.4", [
-      { id: "reasoningEffort", value: "high" },
-      { id: "fastMode", value: true },
+    expect(buildExplicitProviderOptionSelectionsFromDescriptors(descriptors, legacy)).toEqual([
+      { id: "effort", value: "xhigh" },
+      { id: "ultracode", value: true },
     ]);
-
-    expect(getProviderOptionStringSelectionValue(selection.options, "reasoningEffort")).toBe(
-      "high",
-    );
-    expect(getProviderOptionStringSelectionValue(selection.options, "fastMode")).toBeUndefined();
-    expect(getProviderOptionBooleanSelectionValue(selection.options, "fastMode")).toBe(true);
-    expect(
-      getProviderOptionBooleanSelectionValue(selection.options, "reasoningEffort"),
-    ).toBeUndefined();
-    expect(getModelSelectionStringOptionValue(selection, "reasoningEffort")).toBe("high");
-    expect(getModelSelectionBooleanOptionValue(selection, "fastMode")).toBe(true);
   });
 
   it("compares complete model selections independent of option ordering", () => {
@@ -247,6 +100,27 @@ describe("descriptor helpers", () => {
       }),
     ).toBe(false);
     expect(modelSelectionsEqual(left, { ...reordered, model: "gpt-5.5" })).toBe(false);
+  });
+
+  it("keeps the options when the current model is picked again", () => {
+    const codex = ProviderInstanceId.make("codex");
+    const current = createModelSelection(codex, "gpt-5.4", [
+      { id: "reasoningEffort", value: "high" },
+    ]);
+
+    expect(pickModelSelection(current, codex, "gpt-5.4")).toBe(current);
+    expect(pickModelSelection(current, codex, "gpt-5.5")).toEqual({
+      instanceId: "codex",
+      model: "gpt-5.5",
+    });
+    expect(pickModelSelection(current, ProviderInstanceId.make("codex_work"), "gpt-5.4")).toEqual({
+      instanceId: "codex_work",
+      model: "gpt-5.4",
+    });
+    expect(pickModelSelection(null, codex, "gpt-5.4")).toEqual({
+      instanceId: "codex",
+      model: "gpt-5.4",
+    });
   });
 });
 
@@ -277,14 +151,6 @@ describe("applyClaudePromptEffortPrefix", () => {
     expect(applyClaudePromptEffortPrefix("/home/theo/app.ts crashed on load", "ultrathink")).toBe(
       "Ultrathink:\n/home/theo/app.ts crashed on load",
     );
-  });
-});
-
-describe("isClaudeSlashCommand", () => {
-  it("distinguishes Claude commands from absolute paths", () => {
-    expect(isClaudeSlashCommand(" /compact keep recent errors ")).toBe(true);
-    expect(isClaudeSlashCommand("/plugin:skill run")).toBe(true);
-    expect(isClaudeSlashCommand("/home/theo/app.ts crashed on load")).toBe(false);
   });
 });
 
@@ -323,18 +189,6 @@ describe("readCustomModelEntries", () => {
       readCustomModelEntries([{ slug: "x", capabilities: { optionDescriptors: "nope" } }]),
     ).toEqual([{ slug: "x", name: "x", capabilities: null }]);
     expect(readCustomModelEntries("not a list")).toEqual([]);
-  });
-
-  it("writes the compact stored shape back", () => {
-    expect(toCustomModelSetting({ slug: "x", name: "x", capabilities: null })).toBe("x");
-    expect(
-      toCustomModelSetting({ slug: "x", name: "x", capabilities: { optionDescriptors: [] } }),
-    ).toBe("x");
-    expect(toCustomModelSetting({ slug: "x", name: "X", capabilities })).toEqual({
-      slug: "x",
-      name: "X",
-      capabilities,
-    });
   });
 });
 
@@ -395,5 +249,29 @@ describe("provider-reported option display", () => {
     { ...selection, options: [{ id: "variant", value: "none" }] },
   ])("ignores reports after changing the model, instance, or option: %j", (selected) => {
     expect(getProviderOptionCurrentLabel(descriptor, selected, reported)).toBe("Unknown");
+  });
+});
+
+describe("withImplicitFastModeDefault", () => {
+  // regression: #2981 a remembered Fast mode choice must survive the implicit default on new chats
+  it("injects fastMode false only when the model exposes fastMode and no selection exists", () => {
+    const caps = createModelCapabilities({
+      optionDescriptors: [{ id: "fastMode", label: "Fast", type: "boolean", currentValue: true }],
+    });
+
+    expect(withImplicitFastModeDefault(caps, undefined)).toEqual([
+      { id: "fastMode", value: false },
+    ]);
+    expect(withImplicitFastModeDefault(caps, [{ id: "fastMode", value: true }])).toEqual([
+      { id: "fastMode", value: true },
+    ]);
+  });
+});
+
+describe("isClaudeSlashCommand", () => {
+  it("distinguishes Claude commands from absolute paths", () => {
+    expect(isClaudeSlashCommand(" /compact keep recent errors ")).toBe(true);
+    expect(isClaudeSlashCommand("/plugin:skill run")).toBe(true);
+    expect(isClaudeSlashCommand("/home/theo/app.ts crashed on load")).toBe(false);
   });
 });

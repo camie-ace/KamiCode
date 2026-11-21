@@ -1,3 +1,4 @@
+import * as Schema from "effect/Schema";
 import type {
   AuthSessionId,
   KamiUser,
@@ -5,7 +6,7 @@ import type {
   UserAuthSessionState,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
-import * as Data from "effect/Data";
+
 import type * as DateTime from "effect/DateTime";
 import type * as Effect from "effect/Effect";
 import type * as HttpServerRequest from "effect/http/HttpServerRequest";
@@ -22,11 +23,11 @@ export interface AuthenticatedUser {
   readonly expiresAt: DateTime.DateTime;
 }
 
-export class UserAuthError extends Data.TaggedError("UserAuthError")<{
-  readonly message: string;
-  readonly status?: 400 | 401 | 500 | 503;
-  readonly cause?: unknown;
-}> {}
+export class UserAuthError extends Schema.TaggedError<UserAuthError>()("UserAuthError", {
+  message: Schema.String,
+  status: Schema.optionalKey(Schema.Literals([400, 401, 500, 503])),
+  cause: Schema.optionalKey(Schema.Unknown),
+}) {}
 
 export interface UserAuthShape {
   readonly cookieName: string;

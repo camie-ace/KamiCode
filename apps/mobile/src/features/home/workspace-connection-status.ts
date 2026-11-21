@@ -1,14 +1,18 @@
+import { msg } from "gt-react-native";
+
+import { m, type MessageResolver } from "../../i18n/messages";
+import { runtimeConnectionErrorText } from "../connection/environmentStatusText";
 import type { WorkspaceState } from "../../state/workspaceModel";
 
 export interface WorkspaceConnectionStatusPresentation {
   readonly label: string;
-  /** True while actively working (connecting/syncing) — render a spinner. False for offline/error/idle states — render a wifi-slash icon. */
   readonly showsProgress: boolean;
 }
 
 function shouldShowWorkspaceConnectionStatus(state: WorkspaceState): boolean {
+  if (state.networkStatus === "offline") return true;
+  if (state.hasReadyEnvironment) return state.hasSyncingConnectedEnvironment;
   return (
-    state.networkStatus === "offline" ||
     state.connectionError !== null ||
     state.hasConnectingEnvironment ||
     state.hasPendingShellSnapshot ||
@@ -16,31 +20,48 @@ function shouldShowWorkspaceConnectionStatus(state: WorkspaceState): boolean {
   );
 }
 
-function workspaceConnectionStatusLabel(state: WorkspaceState): string {
-  if (state.networkStatus === "offline") return "You are offline";
+function workspaceConnectionStatusLabel(state: WorkspaceState, resolve: MessageResolver): string {
+  if (state.networkStatus === "offline") return resolve(msg("You are offline"));
+  if (state.hasReadyEnvironment && state.hasSyncingConnectedEnvironment) {
+    return state.hasLoadedShellSnapshot
+      ? resolve(msg("Syncing threads..."))
+      : resolve(msg("Loading threads..."));
+  }
   if (state.connectingEnvironments.length === 1) {
-    return `Reconnecting to ${state.connectingEnvironments[0]!.environmentLabel}`;
+    return resolve(
+      msg("Reconnecting to {environment}", {
+        environment: state.connectingEnvironments[0]!.environmentLabel,
+      }),
+    );
   }
   if (state.connectingEnvironments.length > 1) {
-    return `Reconnecting ${state.connectingEnvironments.length} environments`;
+    return resolve(
+      msg(
+        "{count, plural, one {Reconnecting {count} environment} other {Reconnecting {count} environments}}",
+        { count: state.connectingEnvironments.length },
+      ),
+    );
   }
-  if (state.connectionError !== null) return state.connectionError;
+  const connectionError = runtimeConnectionErrorText(state, resolve);
+  if (connectionError !== null) return connectionError;
   if (state.hasPendingShellSnapshot) {
-    return state.hasLoadedShellSnapshot ? "Syncing threads..." : "Loading threads...";
+    return state.hasLoadedShellSnapshot
+      ? resolve(msg("Syncing threads..."))
+      : resolve(msg("Loading threads..."));
   }
-  return "Not connected";
+  return resolve(msg("Not connected"));
 }
 
-/** Header-title presentation of the connection state, or null while connected. */
 export function workspaceConnectionStatusPresentation(
   state: WorkspaceState,
+  resolve: MessageResolver = m,
 ): WorkspaceConnectionStatusPresentation | null {
   if (!shouldShowWorkspaceConnectionStatus(state)) return null;
   return {
-    label: workspaceConnectionStatusLabel(state),
+    label: workspaceConnectionStatusLabel(state, resolve),
     showsProgress:
       state.networkStatus !== "offline" &&
-      state.connectionError === null &&
+      (state.hasReadyEnvironment || state.connectionError === null) &&
       (state.connectingEnvironments.length > 0 || state.hasPendingShellSnapshot),
   };
 }

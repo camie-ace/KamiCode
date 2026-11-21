@@ -10,7 +10,7 @@ import { createModelSelection } from "@t3tools/shared/model";
 import * as Cause from "effect/Cause";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
-import * as Option from "effect/Option";
+
 import * as Schema from "effect/Schema";
 import * as SchemaIssue from "effect/SchemaIssue";
 import * as EffectCodexSchema from "effect-codex-app-server/schema";
@@ -203,32 +203,47 @@ function makeToolFailureResponse(input: {
   });
 }
 
+const decodeUnknownEffectCreateTriggerToolInput =
+  Schema.decodeUnknownEffect(CreateTriggerToolInput);
+
 function decodeCreateTriggerInput(rawArguments: unknown) {
-  return Schema.decodeUnknownEffect(CreateTriggerToolInput)(rawArguments).pipe(
+  return decodeUnknownEffectCreateTriggerToolInput(rawArguments).pipe(
     Effect.mapError((error) => formatSchemaIssue(error.issue)),
   );
 }
+
+const decodeUnknownEffectUpdateTriggerToolInput =
+  Schema.decodeUnknownEffect(UpdateTriggerToolInput);
 
 function decodeUpdateTriggerInput(rawArguments: unknown) {
-  return Schema.decodeUnknownEffect(UpdateTriggerToolInput)(rawArguments).pipe(
+  return decodeUnknownEffectUpdateTriggerToolInput(rawArguments).pipe(
     Effect.mapError((error) => formatSchemaIssue(error.issue)),
   );
 }
+
+const decodeUnknownEffectSetTriggerEnabledToolInput = Schema.decodeUnknownEffect(
+  SetTriggerEnabledToolInput,
+);
 
 function decodeSetTriggerEnabledInput(rawArguments: unknown) {
-  return Schema.decodeUnknownEffect(SetTriggerEnabledToolInput)(rawArguments).pipe(
+  return decodeUnknownEffectSetTriggerEnabledToolInput(rawArguments).pipe(
     Effect.mapError((error) => formatSchemaIssue(error.issue)),
   );
 }
+
+const decodeUnknownEffectDeleteTriggerToolInput =
+  Schema.decodeUnknownEffect(DeleteTriggerToolInput);
 
 function decodeDeleteTriggerInput(rawArguments: unknown) {
-  return Schema.decodeUnknownEffect(DeleteTriggerToolInput)(rawArguments).pipe(
+  return decodeUnknownEffectDeleteTriggerToolInput(rawArguments).pipe(
     Effect.mapError((error) => formatSchemaIssue(error.issue)),
   );
 }
 
+const decodeUnknownEffectListTriggersToolInput = Schema.decodeUnknownEffect(ListTriggersToolInput);
+
 function decodeListTriggersInput(rawArguments: unknown) {
-  return Schema.decodeUnknownEffect(ListTriggersToolInput)(rawArguments).pipe(
+  return decodeUnknownEffectListTriggersToolInput(rawArguments).pipe(
     Effect.mapError((error) => formatSchemaIssue(error.issue)),
   );
 }
@@ -261,14 +276,15 @@ function requireExistingTrigger(
   repository: ProjectTriggerRepository["Service"],
   triggerId: ProjectTriggerId,
 ) {
-  return repository.getTriggerById({ triggerId }).pipe(
-    Effect.flatMap((row) =>
-      Option.match(row, {
-        onNone: () => Effect.fail(`Project trigger not found: ${triggerId}`),
-        onSome: Effect.succeed,
-      }),
-    ),
-  );
+  return repository
+    .getTriggerById({ triggerId })
+    .pipe(
+      Effect.flatMap((row) =>
+        Effect.fromOption(row).pipe(
+          Effect.mapError(() => `Project trigger not found: ${triggerId}`),
+        ),
+      ),
+    );
 }
 
 function saveFromTool(input: {
@@ -334,7 +350,7 @@ function saveFromTool(input: {
   });
 }
 
-function runTool(
+const runTool = Effect.fn("runTool")(function (
   options: ProjectTriggerDynamicToolRunnerOptions,
   input: {
     readonly tool: ProjectTriggerToolName;
@@ -462,7 +478,7 @@ function runTool(
       }
     }
   });
-}
+});
 
 export function createProjectTriggerDynamicToolRunner(
   options: ProjectTriggerDynamicToolRunnerOptions,

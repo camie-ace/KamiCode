@@ -1,30 +1,27 @@
-import { RequestActionButton } from "./RequestActionButton";
+import { T, useGT } from "gt-react-native";
+import { Button } from "../../components/ui/Button";
 import { View } from "react-native";
 
-import { AppText as Text } from "../../components/AppText";
+import { AppText as Text } from "../../components/ui/AppText";
 
-/**
- * Shown in place of the composer when the server rejected a new task. The
- * prompt and attachments are already back in the project draft, so the only
- * action is reopening it.
- */
 export function ThreadCreationFailedCard(props: {
   readonly reason: string;
   readonly onEditTask: () => void;
 }) {
+  const gt = useGT();
   return (
     <View className="gap-2.5 rounded-[20px] border border-border-subtle bg-card-alt p-4">
       <Text className="font-t3-bold text-2xs uppercase tracking-[1.1px] text-danger-foreground">
-        Could not start task
+        <T>Could not start task</T>
       </Text>
       <Text className="font-sans text-sm leading-normal text-foreground-secondary">
         {props.reason}
       </Text>
       <Text className="font-sans text-xs leading-normal text-foreground-secondary">
-        Your prompt was kept in the project draft.
+        <T>Your prompt was kept in the project draft.</T>
       </Text>
       <View className="flex-row">
-        <RequestActionButton label="Edit task" onPress={props.onEditTask} />
+        <Button label={gt("Edit task")} tone="primary" onPress={props.onEditTask} />
       </View>
     </View>
   );

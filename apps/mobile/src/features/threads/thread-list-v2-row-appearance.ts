@@ -1,9 +1,21 @@
+import { msg } from "gt-react-native";
 import type { ViewStyle } from "react-native";
+
+import { m, type MessageResolver } from "../../i18n/messages";
 import type { MobileThemeVariables } from "../../lib/mobileTheme";
 
 export const THREAD_LIST_V2_MONO_FONT = "Menlo";
 export const THREAD_LIST_V2_ROW_CONTENT_CLASS_NAME = "px-5 py-2.5";
 export const THREAD_LIST_V2_ROW_DIVIDERS = true;
+export const THREAD_LIST_V2_SIDEBAR_ROW_STYLE = {
+  borderRadius: 12,
+  paddingHorizontal: 12,
+  paddingVertical: 10,
+} satisfies ViewStyle;
+export const THREAD_LIST_V2_SIDEBAR_ROW_CONTAINER_STYLE = {
+  borderRadius: 12,
+  overflow: "hidden",
+} satisfies ViewStyle;
 
 export const selectedThreadRowColors = {
   foregroundClassName: "text-thread-selected-foreground",
@@ -12,8 +24,8 @@ export const selectedThreadRowColors = {
   mutedIconTintClassName: "accent-thread-selected-foreground-muted",
 };
 
-export function getThreadListV2NewBranchMenuTitle(_branch: string) {
-  return "New thread on branch";
+export function getThreadListV2NewBranchMenuTitle(_branch: string, resolve: MessageResolver = m) {
+  return resolve(msg("New thread on branch"));
 }
 
 export function getThreadListV2RowAppearance(
@@ -25,11 +37,11 @@ export function getThreadListV2RowAppearance(
   const style: ViewStyle | undefined = sidebarPane
     ? {
         backgroundColor: selected ? selectedBackgroundColor : theme["--color-drawer"],
-        borderRadius: 12,
+        borderRadius: THREAD_LIST_V2_SIDEBAR_ROW_STYLE.borderRadius,
       }
     : undefined;
   const swipeContainerStyle: ViewStyle | undefined = sidebarPane
-    ? { borderRadius: 12, overflow: "hidden" }
+    ? THREAD_LIST_V2_SIDEBAR_ROW_CONTAINER_STYLE
     : undefined;
 
   return {
@@ -50,10 +62,9 @@ export function getThreadListV2RowAppearance(
       ? "accent-drawer-foreground-muted"
       : "accent-foreground-tertiary",
     style,
-    cardStyle: sidebarPane ? { ...style, paddingHorizontal: 12, paddingVertical: 10 } : undefined,
+    cardStyle: sidebarPane ? { ...style, ...THREAD_LIST_V2_SIDEBAR_ROW_STYLE } : undefined,
     swipeContainerStyle,
     swipeBackgroundColor: theme[sidebarPane ? "--color-drawer" : "--color-screen"],
-    // Provider badges blend into the surface beneath them.
     providerIconSurfaceColor: sidebarPane
       ? selected
         ? selectedBackgroundColor

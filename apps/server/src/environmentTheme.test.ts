@@ -1,11 +1,15 @@
-import { EnvironmentThemeFile } from "@t3tools/contracts";
+import {
+  DEFAULT_SERVER_SETTINGS,
+  EnvironmentThemeFile,
+  ServerSettingsError,
+  THEME_CSS_MAX_LENGTH,
+} from "@t3tools/contracts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { assert, describe, it } from "@effect/vitest";
+import { assert, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
-import * as Option from "effect/Option";
 import * as Queue from "effect/Queue";
 import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
@@ -13,9 +17,16 @@ import * as Stream from "effect/Stream";
 
 import * as ServerConfig from "./config.ts";
 import * as EnvironmentTheme from "./environmentTheme.ts";
+import { ServerSettingsService } from "./serverSettings.ts";
 import { symlinksSupported } from "@t3tools/shared/testing/symlinks";
 
 const encodeThemeFile = Schema.encodeSync(Schema.fromJsonString(EnvironmentThemeFile));
+/** Writes non-ASCII characters as `\uXXXX` escapes, as encoders such as Python's json.dumps do. */
+const encodeThemeFileEscaped = (theme: EnvironmentThemeFile) =>
+  encodeThemeFile(theme).replace(
+    /[\u0080-\uffff]/g,
+    (char) => `\\u${char.charCodeAt(0).toString(16).padStart(4, "0")}`,
+  );
 
 const NIGHTFALL_THEME: EnvironmentThemeFile = {
   name: "Nightfall",
@@ -24,7 +35,6 @@ const NIGHTFALL_THEME: EnvironmentThemeFile = {
   accent: "#7aa2f7",
 };
 
-/** The standard exported form: a full palette, no seeds. */
 const SHARED_THEME: EnvironmentThemeFile = {
   version: 1,
   name: "Shared Light",
@@ -32,7 +42,9 @@ const SHARED_THEME: EnvironmentThemeFile = {
   colors: { canvas: "#eff1f5", accent: "#1e66f5" },
 };
 
-/** Seeds theme files before the service starts, as a real machine would. */
+/** The settings mock refuses to make this theme the default, as a managed policy can. */
+const REFUSED_THEME_ID = "refused";
+
 const withEnvironmentThemes = <A, E>(
   seeds: Readonly<Record<string, string>>,
   body: Effect.Effect<
@@ -44,6 +56,8 @@ const withEnvironmentThemes = <A, E>(
     | Path.Path
     | Scope.Scope
   >,
+  /** Receives each theme and appearance the service makes the environment default. */
+  selected: Array<{ readonly theme?: string; readonly appearance?: string }> = [],
 ) =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
@@ -59,10 +73,31 @@ const withEnvironmentThemes = <A, E>(
       Effect.provide(
         EnvironmentTheme.layer.pipe(
           Layer.provideMerge(ServerConfig.layerTest(process.cwd(), baseDir)),
+          Layer.provideMerge(
+            Layer.mock(ServerSettingsService)({
+              updateSettings: (patch) =>
+                patch.defaultTheme === REFUSED_THEME_ID
+                  ? Effect.fail(
+                      new ServerSettingsError({
+                        settingsPath: "settings.json",
+                        operation: "write-managed-setting",
+                      }),
+                    )
+                  : Effect.sync(() => {
+                      selected.push({
+                        ...(patch.defaultTheme === undefined ? {} : { theme: patch.defaultTheme }),
+                        ...(patch.defaultAppearance === undefined
+                          ? {}
+                          : { appearance: patch.defaultAppearance }),
+                      });
+                      return DEFAULT_SERVER_SETTINGS;
+                    }),
+            }),
+          ),
         ),
       ),
     );
-  }).pipe(Effect.scoped);
+  });
 
 const currentThemes = Effect.gen(function* () {
   const environmentTheme = yield* EnvironmentTheme.EnvironmentThemeService;
@@ -70,35 +105,6 @@ const currentThemes = Effect.gen(function* () {
 });
 
 it.layer(NodeServices.layer)("environment theme", (it) => {
-  it.effect("publishes nothing when the machine has no theme files", () =>
-    withEnvironmentThemes(
-      {},
-      Effect.gen(function* () {
-        assert.deepEqual(yield* currentThemes, []);
-      }),
-    ),
-  );
-
-  it.effect("publishes each file under its filename as the id", () =>
-    withEnvironmentThemes(
-      {
-        "nightfall.json": encodeThemeFile(NIGHTFALL_THEME),
-        "shared-light.json": encodeThemeFile(SHARED_THEME),
-      },
-      Effect.gen(function* () {
-        const themes = yield* currentThemes;
-        assert.deepEqual(
-          themes.map((theme) => theme.id),
-          ["nightfall", "shared-light"],
-        );
-        assert.deepEqual(themes[0], { id: "nightfall", ...NIGHTFALL_THEME });
-        assert.deepEqual(themes[1], { id: "shared-light", ...SHARED_THEME });
-      }),
-    ),
-  );
-
-  // Read from disk rather than from the watcher's last observation, so a
-  // client connecting after a missed filesystem event still sees the truth.
   it.effect("follows the directory rather than the set read at start", () =>
     withEnvironmentThemes(
       { "nightfall.json": encodeThemeFile(NIGHTFALL_THEME) },
@@ -122,25 +128,6 @@ it.layer(NodeServices.layer)("environment theme", (it) => {
     ),
   );
 
-  // One bad file must not take down the machine's other themes: a theme
-  // script that leaves a template placeholder unresolved, a half-written
-  // file, or a stray name are each that file's problem alone.
-  // The subscription is acquired before the current set is read, so nothing
-  // published while a client connects can fall between snapshot and stream.
-  it.effect("streams the current set first", () =>
-    withEnvironmentThemes(
-      { "nightfall.json": encodeThemeFile(NIGHTFALL_THEME) },
-      Effect.gen(function* () {
-        const environmentTheme = yield* EnvironmentTheme.EnvironmentThemeService;
-        const first = yield* environmentTheme.streamChanges.pipe(Stream.runHead);
-        assert.deepEqual(Option.getOrNull(first), [{ id: "nightfall", ...NIGHTFALL_THEME }]);
-      }),
-    ),
-  );
-
-  // Subscribing happens before the snapshot read, so a publish landing in
-  // between is queued. It must not replay after the newer snapshot and walk
-  // clients back onto colors the machine has already moved past.
   it.effect("never replays a set older than the snapshot it started from", () =>
     withEnvironmentThemes(
       { "nightfall.json": encodeThemeFile(NIGHTFALL_THEME) },
@@ -150,16 +137,23 @@ it.layer(NodeServices.layer)("environment theme", (it) => {
         const fs = yield* FileSystem.FileSystem;
         const path = yield* Path.Path;
 
-        // Advance the directory twice without the watcher running, so the
-        // second read is strictly newer than anything already observed.
         yield* fs.writeFileString(
           path.join(environmentThemesDir, "shared-light.json"),
           encodeThemeFile(SHARED_THEME),
         );
-        const first = yield* environmentTheme.streamChanges.pipe(Stream.runHead);
+        const seen = yield* Queue.unbounded<ReadonlyArray<{ readonly id: string }>>();
+        yield* Stream.runForEach(environmentTheme.streamChanges, (themes) =>
+          Queue.offer(seen, themes),
+        ).pipe(Effect.forkScoped);
         assert.deepEqual(
-          Option.getOrNull(first)?.map((theme) => theme.id),
+          (yield* Queue.take(seen)).map((theme) => theme.id),
           ["nightfall", "shared-light"],
+        );
+        yield* fs.remove(path.join(environmentThemesDir, "nightfall.json"));
+        yield* currentThemes;
+        assert.deepEqual(
+          (yield* Queue.take(seen)).map((theme) => theme.id),
+          ["shared-light"],
         );
       }),
     ),
@@ -169,6 +163,7 @@ it.layer(NodeServices.layer)("environment theme", (it) => {
     withEnvironmentThemes(
       {
         "nightfall.json": encodeThemeFile(NIGHTFALL_THEME),
+        "notepad.json": `\uFEFF${encodeThemeFile(SHARED_THEME)}`,
         "unresolved.json":
           '{ "name": "X", "appearance": "dark", "canvas": "{{ background }}", "accent": "#7aa2f7" }',
         "malformed.json": "{ not json",
@@ -181,14 +176,71 @@ it.layer(NodeServices.layer)("environment theme", (it) => {
       Effect.gen(function* () {
         assert.deepEqual(
           (yield* currentThemes).map((theme) => theme.id),
-          ["nightfall"],
+          ["nightfall", "notepad"],
         );
       }),
     ),
   );
 
-  // A symlinked themes directory stays usable, but a symlinked file inside it
-  // must not publish whatever it points at.
+  it.effect("puts the previous theme back when the new one cannot be selected", () =>
+    withEnvironmentThemes(
+      { [`${REFUSED_THEME_ID}.json`]: encodeThemeFile(NIGHTFALL_THEME) },
+      Effect.gen(function* () {
+        const themes = yield* EnvironmentTheme.EnvironmentThemeService;
+        const refused = yield* themes
+          .apply({ themeId: REFUSED_THEME_ID, theme: { ...NIGHTFALL_THEME, name: "Changed" } })
+          .pipe(Effect.flip);
+        assert.strictEqual(refused._tag, "EnvironmentThemeNotSelectedError");
+        assert.deepEqual(yield* themes.current, [{ id: REFUSED_THEME_ID, ...NIGHTFALL_THEME }]);
+      }),
+    ),
+  );
+
+  it.effect("does not replace a theme file it could not put back", () => {
+    const oversized = JSON.stringify({
+      ...NIGHTFALL_THEME,
+      padding: "x".repeat(EnvironmentTheme.MAX_THEME_FILE_BYTES),
+    });
+    return withEnvironmentThemes(
+      { [`${REFUSED_THEME_ID}.json`]: oversized },
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const config = yield* ServerConfig.ServerConfig;
+        const themes = yield* EnvironmentTheme.EnvironmentThemeService;
+        const refused = yield* themes
+          .apply({ themeId: REFUSED_THEME_ID, theme: NIGHTFALL_THEME })
+          .pipe(Effect.flip);
+        assert.match(refused.message, /could not be backed up/);
+        assert.strictEqual(
+          yield* fs.readFileString(`${config.environmentThemesDir}/${REFUSED_THEME_ID}.json`),
+          oversized,
+        );
+      }),
+    );
+  });
+
+  it.effect.skipIf(!symlinksSupported)("does not write through a symlink at its staging path", () =>
+    withEnvironmentThemes(
+      {},
+      Effect.gen(function* () {
+        const { environmentThemesDir } = yield* ServerConfig.ServerConfig;
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const themes = yield* EnvironmentTheme.EnvironmentThemeService;
+        const outside = path.join(environmentThemesDir, "..", "outside.txt");
+        yield* fs.writeFileString(outside, "keep");
+        yield* fs.symlink(
+          outside,
+          path.join(environmentThemesDir, `look.json.staging-${process.pid}`),
+        );
+
+        yield* themes.apply({ themeId: "look", theme: NIGHTFALL_THEME });
+        assert.strictEqual(yield* fs.readFileString(outside), "keep");
+        assert.deepEqual(yield* themes.current, [{ id: "look", ...NIGHTFALL_THEME }]);
+      }),
+    ),
+  );
+
   it.effect.skipIf(!symlinksSupported)("ignores a symlinked theme file", () =>
     withEnvironmentThemes(
       {},
@@ -204,14 +256,148 @@ it.layer(NodeServices.layer)("environment theme", (it) => {
     ),
   );
 
-  // The aggregate size cap charges only accepted themes, so a pile of
-  // malformed files cannot spend the budget and hide a valid theme sorted
-  // after them.
+  it.effect("publishes and selects a theme, and refuses unsafe CSS and unknown ids", () => {
+    const selected: Array<{ readonly theme?: string; readonly appearance?: string }> = [];
+    return withEnvironmentThemes(
+      {},
+      Effect.gen(function* () {
+        const themes = yield* EnvironmentTheme.EnvironmentThemeService;
+        // A comment may name an address. Only a rule that loads one is refused.
+        const css =
+          "/* from url(https://example.com/guide) */ [data-chat-header] { border-bottom: 1px solid red; }";
+        yield* themes.apply({ themeId: "agent-look", theme: { ...NIGHTFALL_THEME, css } });
+        assert.deepEqual(yield* themes.current, [{ id: "agent-look", ...NIGHTFALL_THEME, css }]);
+
+        const leaky = yield* themes
+          .apply({
+            themeId: "leaky",
+            theme: {
+              ...NIGHTFALL_THEME,
+              css: 'input[value^="a"] { background: url(https://example.com/a); }',
+            },
+          })
+          .pipe(Effect.flip);
+        assert.match(leaky.message, /loads files/);
+        const reserved = yield* themes
+          .apply({ themeId: "dark", theme: NIGHTFALL_THEME })
+          .pipe(Effect.flip);
+        assert.match(reserved.message, /not a valid theme id/);
+        const unknown = yield* themes.apply({ themeId: "missing" }).pipe(Effect.flip);
+        assert.match(unknown.message, /not a built-in or published theme/);
+        yield* themes.apply({ themeId: "grove" });
+        yield* themes.apply({ themeId: "grove", appearance: "dark" });
+        yield* themes.apply({ appearance: "light" });
+
+        assert.deepEqual(
+          (yield* themes.current).map((theme) => theme.id),
+          ["agent-look"],
+        );
+        // Only a theme that was published or already exists becomes the environment theme.
+        assert.deepEqual(selected, [
+          { theme: "agent-look" },
+          { theme: "grove" },
+          { theme: "grove", appearance: "dark" },
+          { appearance: "light" },
+        ]);
+      }),
+      selected,
+    );
+  });
+
+  it.effect("switches back to the stock theme after selecting another", () => {
+    const selected: Array<{ readonly theme?: string; readonly appearance?: string }> = [];
+    return withEnvironmentThemes(
+      {},
+      Effect.gen(function* () {
+        const themes = yield* EnvironmentTheme.EnvironmentThemeService;
+        yield* themes.apply({ themeId: "agent-look", theme: NIGHTFALL_THEME });
+        yield* themes.apply({ themeId: "t3-code" });
+        assert.deepEqual(selected, [{ theme: "agent-look" }, { theme: "" }]);
+      }),
+      selected,
+    );
+  });
+
+  it.effect(
+    "reports the image beside a theme as its background, with a new revision per file",
+    () =>
+      withEnvironmentThemes(
+        { "look.json": encodeThemeFile(NIGHTFALL_THEME), "look.png": "first" },
+        Effect.gen(function* () {
+          const { environmentThemesDir } = yield* ServerConfig.ServerConfig;
+          const fs = yield* FileSystem.FileSystem;
+          const path = yield* Path.Path;
+          const background = Effect.map(currentThemes, (themes) => themes[0]?.background);
+          const image = path.join(environmentThemesDir, "look.png");
+
+          const first = yield* background;
+          assert.isDefined(first);
+          yield* fs.writeFileString(image, "a longer second image");
+          assert.notStrictEqual(yield* background, first);
+
+          yield* fs.remove(image);
+          assert.isUndefined(yield* background);
+          if (symlinksSupported) {
+            const outside = path.join(environmentThemesDir, "..", "outside.png");
+            yield* fs.writeFileString(outside, "outside");
+            yield* fs.symlink(outside, image);
+            assert.isUndefined(yield* background);
+          }
+        }),
+      ),
+  );
+
+  it.effect("keeps the served theme when an update does not fit the size limit", () => {
+    const large = (name: string): EnvironmentThemeFile => ({
+      ...NIGHTFALL_THEME,
+      name,
+      css: `/* ${"界".repeat(THEME_CSS_MAX_LENGTH - 6)} */`,
+    });
+    return withEnvironmentThemes(
+      {
+        ...Object.fromEntries(
+          Array.from({ length: 3 }, (_, index) => [
+            `aa-${index}.json`,
+            encodeThemeFileEscaped(large(`Large ${index}`)),
+          ]),
+        ),
+        "zz-look.json": encodeThemeFile(NIGHTFALL_THEME),
+      },
+      Effect.gen(function* () {
+        const themes = yield* EnvironmentTheme.EnvironmentThemeService;
+        const served = Effect.map(themes.current, (all) =>
+          all.find((theme) => theme.id === "zz-look"),
+        );
+        assert.deepEqual(yield* served, { id: "zz-look", ...NIGHTFALL_THEME });
+
+        const refused = yield* themes
+          .apply({ themeId: "zz-look", theme: large("Too much") })
+          .pipe(Effect.flip);
+        assert.match(refused.message, /could not be published/);
+        assert.deepEqual(yield* served, { id: "zz-look", ...NIGHTFALL_THEME });
+
+        // A new theme that sorts first fits, and the last large one no longer does.
+        const before = (yield* themes.current).map((theme) => theme.id);
+        const displacing = yield* themes
+          .apply({ themeId: "a0-first", theme: large("Displacing") })
+          .pipe(Effect.flip);
+        assert.match(displacing.message, /could not be published/);
+        assert.deepEqual(
+          (yield* themes.current).map((theme) => theme.id),
+          before,
+        );
+      }),
+    );
+  });
+
   it.effect("does not charge skipped files against the total size limit", () =>
     withEnvironmentThemes(
       {
         ...Object.fromEntries(
-          Array.from({ length: 7 }, (_, index) => [`junk-${index}.json`, "{".repeat(30_000)]),
+          Array.from({ length: 7 }, (_, index) => [
+            `junk-${index}.json`,
+            "{".repeat(EnvironmentTheme.MAX_THEME_FILE_BYTES),
+          ]),
         ),
         "zz-valid.json": encodeThemeFile(NIGHTFALL_THEME),
       },
@@ -222,52 +408,5 @@ it.layer(NodeServices.layer)("environment theme", (it) => {
         );
       }),
     ),
-  );
-});
-
-// The feature's headline claim: rewrite a file and connected clients retint
-// without a restart. Live clock and a real filesystem event, so this proves
-// the watcher rather than a direct read. Kept outside the it.layer block above
-// because only the top-level `it` exposes `live`.
-describe("environment theme watching", () => {
-  it.live("streams a set for every change to the directory", () =>
-    Effect.gen(function* () {
-      const fs = yield* FileSystem.FileSystem;
-      const path = yield* Path.Path;
-      const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3code-theme-watch-" });
-      const themesDir = path.join(baseDir, "userdata", "themes");
-      yield* fs.makeDirectory(themesDir, { recursive: true });
-
-      yield* Effect.gen(function* () {
-        const environmentTheme = yield* EnvironmentTheme.EnvironmentThemeService;
-        const seen = yield* Queue.unbounded<ReadonlyArray<{ readonly id: string }>>();
-        yield* Stream.runForEach(environmentTheme.streamChanges, (themes) =>
-          Queue.offer(seen, themes),
-        ).pipe(Effect.forkScoped);
-
-        // Empty to start.
-        assert.deepEqual(yield* Queue.take(seen), []);
-
-        // Published atomically, the way a theme hook writes it.
-        const staging = path.join(baseDir, "staged.json");
-        yield* fs.writeFileString(staging, encodeThemeFile(NIGHTFALL_THEME));
-        yield* fs.rename(staging, path.join(themesDir, "nightfall.json"));
-        assert.deepEqual(
-          (yield* Queue.take(seen)).map((theme) => theme.id),
-          ["nightfall"],
-        );
-
-        // Removed again, and the set empties without a restart.
-        yield* fs.remove(path.join(themesDir, "nightfall.json"));
-        assert.deepEqual(yield* Queue.take(seen), []);
-      }).pipe(
-        Effect.provide(
-          EnvironmentTheme.layer.pipe(
-            Layer.provideMerge(ServerConfig.layerTest(process.cwd(), baseDir)),
-          ),
-        ),
-        Effect.timeout("30 seconds"),
-      );
-    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 });

@@ -1,5 +1,6 @@
+import * as Schema from "effect/Schema";
 import * as Context from "effect/Context";
-import * as Data from "effect/Data";
+
 import type * as Effect from "effect/Effect";
 
 export interface GitHubOAuthToken {
@@ -29,11 +30,11 @@ export interface GitHubOAuthUser {
   readonly avatarUrl: string | null;
 }
 
-export class GitHubOAuthError extends Data.TaggedError("GitHubOAuthError")<{
-  readonly message: string;
-  readonly status?: 400 | 502;
-  readonly cause?: unknown;
-}> {}
+export class GitHubOAuthError extends Schema.TaggedError<GitHubOAuthError>()("GitHubOAuthError", {
+  message: Schema.String,
+  status: Schema.optionalKey(Schema.Literals([400, 502])),
+  cause: Schema.optionalKey(Schema.Unknown),
+}) {}
 
 export interface GitHubOAuthClientShape {
   readonly createDeviceCode: (input: {

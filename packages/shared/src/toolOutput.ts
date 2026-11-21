@@ -1,4 +1,7 @@
-import { isProviderSendTurnSupportedImageMimeType } from "@t3tools/contracts";
+import {
+  isProviderSendTurnSupportedImageMimeType,
+  PROVIDER_SEND_TURN_MAX_IMAGE_BYTES,
+} from "@t3tools/contracts";
 import * as Predicate from "effect/Predicate";
 
 import {
@@ -6,7 +9,17 @@ import {
   readHtmlRenderReference,
   type HtmlRenderReference,
 } from "./htmlRender.ts";
+import {
+  claudeMcpToolName,
+  MCP_APP_OUTPUT_KEY,
+  readMcpAppReference,
+  type McpAppReference,
+} from "./mcpApp.ts";
 import { resolveT3McpToolId } from "./t3McpToolPresentation.ts";
+
+export const SEND_TO_USER_TOOL_NAME = "send_to_user";
+// 4,000 UTF-16 units stay inside MAX_PARSED_BYTES even as 3-byte characters.
+export const SEND_TO_USER_MAX_LENGTH = 4_000;
 
 const MAX_PARSED_BYTES = 16_384;
 const MAX_METADATA_BYTES = 8_192;
@@ -36,8 +49,12 @@ interface CompactToolOutput {
   scheduledTaskId?: string;
   status?: "rolled_back";
   htmlRender?: HtmlRenderReference;
+  [MCP_APP_OUTPUT_KEY]?: McpAppReference;
   thread?: { threadId: string };
   threads?: Array<{ threadId?: string; status?: "rolled_back" }>;
+  linkedCount?: number;
+  unlinkedCount?: number;
+  sentMessage?: string;
 }
 
 function readResult(value: unknown, budget: ResultReadBudget, depth = 0): ResultEnvelope {
@@ -103,7 +120,6 @@ function boundedId(value: unknown): string | undefined {
   return Array.from(value).join("");
 }
 
-/** Keeps only IDs and failure metadata used by T3's grouped tool summaries. */
 export function compactDynamicToolOutput(value: unknown): CompactToolOutput | undefined {
   const budget: ResultReadBudget = {
     remainingBytes: MAX_PARSED_BYTES,
@@ -119,8 +135,21 @@ export function compactDynamicToolOutput(value: unknown): CompactToolOutput | un
       if (id !== undefined) output[key] = id;
     }
     if (data.status === "rolled_back") output.status = "rolled_back";
+    for (const key of ["linkedCount", "unlinkedCount"] as const) {
+      const count = data[key];
+      if (typeof count === "number" && Number.isSafeInteger(count)) output[key] = count;
+    }
+    if (
+      typeof data.sentMessage === "string" &&
+      data.sentMessage.trim() !== "" &&
+      data.sentMessage.length <= SEND_TO_USER_MAX_LENGTH
+    ) {
+      output.sentMessage = data.sentMessage;
+    }
     const htmlRender = readHtmlRenderReference(data.htmlRender);
     if (htmlRender !== undefined) output.htmlRender = htmlRender;
+    const mcpApp = readMcpAppReference(data[MCP_APP_OUTPUT_KEY]);
+    if (mcpApp !== undefined) output[MCP_APP_OUTPUT_KEY] = mcpApp;
     const nestedThreadId = Predicate.isObject(data.thread)
       ? boundedId(data.thread.threadId)
       : undefined;
@@ -149,57 +178,111 @@ export function compactDynamicToolOutput(value: unknown): CompactToolOutput | un
       }
       if (complete) output.threads = threads;
       else {
-        // A partial batch or a top-level ID would turn an unknown creation
-        // count into a confidently wrong one in the existing summary parser.
+        // Partial batches or top-level ids make the summary parser report a false creation count.
         delete output.threadId;
         delete output.status;
       }
     }
   }
-  if (encoder.encode(JSON.stringify(output)).byteLength > MAX_METADATA_BYTES) {
+  const oversized = () => encoder.encode(JSON.stringify(output)).byteLength > MAX_METADATA_BYTES;
+  if (oversized()) {
     delete output.threads;
     delete output.threadId;
     delete output.status;
   }
+  const app = output[MCP_APP_OUTPUT_KEY];
+  if (app?.csp !== undefined && oversized()) {
+    const { csp: _csp, ...rest } = app;
+    output[MCP_APP_OUTPUT_KEY] = rest;
+  }
+  if (oversized()) delete output[MCP_APP_OUTPUT_KEY];
   return Object.keys(output).length === 0 ? undefined : output;
 }
 
-/** The page a completed `html_render` tool call published, if this item is one. */
+// OpenCode 2 Code Mode reports a script's nested T3 tool calls as one item with the script's result.
+const OPENCODE_CODE_MODE_TOOL_NAME = "execute";
+
 export function htmlRenderFromToolItem(item: {
   readonly toolName: string | null | undefined;
   readonly output?: unknown;
 }): HtmlRenderReference | undefined {
-  if (resolveT3McpToolId(item.toolName) !== HTML_RENDER_TOOL_NAME) return undefined;
+  if (
+    item.toolName !== OPENCODE_CODE_MODE_TOOL_NAME &&
+    resolveT3McpToolId(item.toolName) !== HTML_RENDER_TOOL_NAME
+  ) {
+    return undefined;
+  }
   const output = compactDynamicToolOutput(item.output);
   return output?.isError ? undefined : output?.htmlRender;
 }
 
+/** The text `send_to_user` showed the user, which clients render as the agent's own words. */
+export function sentMessageFromToolItem(item: {
+  readonly toolName: string | null | undefined;
+  readonly output?: unknown;
+}): string | undefined {
+  if (
+    item.toolName !== OPENCODE_CODE_MODE_TOOL_NAME &&
+    resolveT3McpToolId(item.toolName) !== SEND_TO_USER_TOOL_NAME
+  ) {
+    return undefined;
+  }
+  const output = compactDynamicToolOutput(item.output);
+  return output?.isError ? undefined : output?.sentMessage;
+}
+
+/** The thread-owned file `preview_recording_stop` stored for the agent. */
+export function previewRecordingIdFromToolItem(item: {
+  readonly toolName: string | null | undefined;
+  readonly output?: unknown;
+}): string | undefined {
+  if (resolveT3McpToolId(item.toolName) !== "preview_recording_stop") return undefined;
+  const budget: ResultReadBudget = {
+    remainingBytes: MAX_PARSED_BYTES,
+    remainingNodes: MAX_ENVELOPE_NODES,
+    exceeded: false,
+  };
+  const result = readResult(item.output, budget);
+  return result.failed || budget.exceeded ? undefined : boundedId(result.data?.id);
+}
+
+/** Accept app references only when server and tool match the item, so tools cannot impersonate another app source. */
+export function mcpAppFromToolItem(item: {
+  readonly toolName: string | null | undefined;
+  readonly output?: unknown;
+}): McpAppReference | undefined {
+  const app = compactDynamicToolOutput(item.output)?.[MCP_APP_OUTPUT_KEY];
+  return app !== undefined &&
+    (item.toolName === `${app.server}.${app.tool}` ||
+      item.toolName === claudeMcpToolName(app.server, app.tool))
+    ? app
+    : undefined;
+}
+
+// A superset of every needle below, so most outputs are rejected by this single scan.
+const FAILURE_HINT =
+  /enoent|no such|no files found|not found|commandnotfound|not recognized|cannot (?:find path|be found)|exit/i;
+
 /** Some providers report completion even when command output describes a failure. */
 export function toolOutputIndicatesFailure(text: string): boolean {
   return (
-    /file not found|no files found|enoent|no such file|commandnotfoundexception|command not found|is not recognized as the name of a cmdlet|a parameter cannot be found that matches parameter name/i.test(
+    FAILURE_HINT.test(text) &&
+    (/file not found|no files found|enoent|no such file|commandnotfoundexception|command not found|is not recognized as the name of a cmdlet|a parameter cannot be found that matches parameter name/i.test(
       text,
     ) ||
-    (/cannot find path/i.test(text) && /because it does not exist/i.test(text)) ||
-    (/is not recognized/i.test(text) && /the term '/i.test(text)) ||
-    /<exited with exit code\s+[1-9]\d*\s*>/i.test(text) ||
-    /exit(?:ed)? with exit code\s+[1-9]\d*/i.test(text) ||
-    /exit code\s*[:\s]\s*[1-9]\d*\b/i.test(text)
+      (/cannot find path/i.test(text) && /because it does not exist/i.test(text)) ||
+      (/is not recognized/i.test(text) && /the term '/i.test(text)) ||
+      /exit(?:ed)? with exit code\s+[1-9]\d*/i.test(text) ||
+      /exit code\s*[:\s]\s*[1-9]\d*\b/i.test(text))
   );
 }
 
-/** An image a tool returned inline. `data` is base64; a detail read omits it. */
 export interface ToolOutputImage {
   readonly mimeType: string;
   readonly data?: string;
 }
 
-/**
- * Reads one image block in the MCP `{ data, mimeType }` shape or the Anthropic
- * `{ source: { type: "base64", media_type, data } }` shape Claude stores.
- * Only raster types are recognized, so the server never serves an agent's SVG
- * or HTML inline.
- */
+/** Raster types only, so agent SVG/HTML cannot be served inline. */
 export function readToolOutputImage(block: unknown): ToolOutputImage | null {
   if (!Predicate.isObject(block) || block.type !== "image") return null;
   const source = Predicate.isObject(block.source) ? block.source : undefined;
@@ -213,35 +296,47 @@ export function readToolOutputImage(block: unknown): ToolOutputImage | null {
   return typeof data === "string" ? { ...image, data } : image;
 }
 
-/** Tools return a block, a list of blocks, or an MCP result with a `content` list. */
 function outputBlocks(value: unknown): ReadonlyArray<unknown> {
   if (Array.isArray(value)) return value;
   if (Predicate.isObject(value) && Array.isArray(value.content)) return value.content;
   return [value];
 }
 
-/** A tool returns one screenshot or a few frames; more would only flood the timeline. */
 export const MAX_TOOL_OUTPUT_IMAGES = 8;
 
-/**
- * The first images in a tool output, in order. The order is the
- * `tool-output-image` asset index, so servers and clients agree on it.
- */
-export function toolOutputImages(value: unknown): ReadonlyArray<ToolOutputImage> {
-  const images: ToolOutputImage[] = [];
+export const MAX_TOOL_OUTPUT_IMAGE_BASE64_LENGTH =
+  Math.ceil(PROVIDER_SEND_TURN_MAX_IMAGE_BYTES / 3) * 4;
+
+export function toolOutputImageBlocks(value: unknown): ReadonlyArray<unknown> {
+  const blocks: unknown[] = [];
   for (const block of outputBlocks(value)) {
-    const image = readToolOutputImage(block);
-    if (image === null) continue;
-    images.push(image);
-    if (images.length === MAX_TOOL_OUTPUT_IMAGES) break;
+    if (readToolOutputImage(block) === null) continue;
+    blocks.push(block);
+    if (blocks.length === MAX_TOOL_OUTPUT_IMAGES) break;
   }
-  return images;
+  return blocks;
 }
 
-/**
- * Replaces each image's bytes with `{ type: "image", mimeType }` and keeps its
- * position, so detail reads stay small and clients load the bytes as assets.
- */
+/** Order defines the shared tool-output-image asset index. */
+export function toolOutputImages(value: unknown): ReadonlyArray<ToolOutputImage> {
+  return toolOutputImageBlocks(value).flatMap((block) => readToolOutputImage(block) ?? []);
+}
+
+export function mcpToolResultOutput(result: {
+  readonly content?: unknown;
+  readonly structuredContent?: unknown;
+}): unknown {
+  const structuredContent =
+    (Array.isArray(result.structuredContent) || Predicate.isObject(result.structuredContent)) &&
+    Object.keys(result.structuredContent).length === 0
+      ? undefined
+      : result.structuredContent;
+  if (structuredContent != null && toolOutputImages(result.content).length > 0) {
+    return { content: result.content, structuredContent };
+  }
+  return structuredContent ?? result.content;
+}
+
 export function omitToolOutputImageData(value: unknown): unknown {
   const omit = (block: unknown) => {
     const image = readToolOutputImage(block);

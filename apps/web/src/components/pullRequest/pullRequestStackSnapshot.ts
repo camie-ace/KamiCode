@@ -1,6 +1,9 @@
 import type { PullRequestRef, PullRequestStack, ThreadPullRequestLink } from "@t3tools/contracts";
+import { msg } from "gt-react";
 
-/** Saved native membership is enough for navigation, but never supplies action head SHAs. */
+import { m, type MessageResolver } from "~/i18n/messages";
+
+/** Saved membership supports navigation, never action head SHAs. */
 export function savedPullRequestStack(
   links: ReadonlyArray<ThreadPullRequestLink>,
   reference: PullRequestRef,
@@ -47,7 +50,6 @@ export function savedPullRequestStack(
   };
 }
 
-/** A fresh absence overrides saved membership; failed refreshes preserve available navigation. */
 export function pullRequestStackView(
   query: {
     data: PullRequestStack | null;
@@ -56,18 +58,20 @@ export function pullRequestStackView(
     error: string | null;
   },
   saved: PullRequestStack | null,
+  resolve: MessageResolver = m,
 ) {
   const data = query.isSuccess ? query.data : (query.data ?? saved);
   return {
     data,
+    // A settled read: one still out may be showing an answer restored from the device.
     isFresh: query.isSuccess && !query.isPending,
     notice:
       data === null
         ? null
         : query.error
-          ? "Stack data may be stale. We couldn’t refresh it."
+          ? resolve(msg("Stack data may be stale. We couldn’t refresh it."))
           : !query.isSuccess || query.isPending
-            ? "Refreshing stack… Showing saved data."
+            ? resolve(msg("Refreshing stack… Showing saved data."))
             : null,
   };
 }

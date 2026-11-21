@@ -125,6 +125,8 @@ function toSharedSessionSnapshotMessages(thread: ThreadForSharing): SharedSessio
   }));
 }
 
+const encodeSyncOrchestrationV2RunJson = Schema.encodeSync(OrchestrationV2RunJson);
+
 export function toSharedSessionSnapshot(
   thread: ThreadForSharing,
   repository: SharedRepositoryState,
@@ -197,7 +199,7 @@ export function toSharedSessionSnapshot(
     latestTurn: thread.latestRun,
     queuedTurns: thread.projection.runs
       .filter((run) => run.status === "queued")
-      .map((run) => Schema.encodeSync(OrchestrationV2RunJson)(run)),
+      .map((run) => encodeSyncOrchestrationV2RunJson(run)),
     session: thread.runtime,
 
     excludedCategories: [

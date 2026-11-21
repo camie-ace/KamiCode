@@ -1,13 +1,7 @@
 import * as Effect from "effect/Effect";
 import * as SqlClient from "effect/sql/SqlClient";
 
-/**
- * Links an environment access session to the GitHub user session that
- * identified it. The link is deliberately separate from either session row:
- * one GitHub login may identify several access-code sessions, and revoking
- * either side removes or invalidates the association without changing the
- * shared environment authorization model.
- */
+/** Link GitHub identity to access sessions without changing authorization; revoking either session invalidates the association. */
 export default Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
 

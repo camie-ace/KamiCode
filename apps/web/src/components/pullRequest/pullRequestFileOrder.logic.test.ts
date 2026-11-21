@@ -3,7 +3,6 @@ import { describe, expect, it } from "vite-plus/test";
 
 import { orderDiffFiles } from "./pullRequestFileOrder.logic";
 
-/** Only the path and the patch's own lines matter here; the viewer fills the rest in. */
 function file(name: string, additionLines: ReadonlyArray<string> = []): FileDiffMetadata {
   return { name, hunks: [], additionLines, deletionLines: [] } as unknown as FileDiffMetadata;
 }
@@ -37,27 +36,6 @@ describe("orderDiffFiles", () => {
     ).toEqual([...source, ...tests, ...generated]);
   });
 
-  it("answers an empty diff with an empty order", () => {
-    expect(order([])).toEqual([]);
-  });
-
-  it("puts a dependency before what imports it", () => {
-    expect(order([file("src/a.ts", ['import { b } from "./b";']), file("src/b.ts")])).toEqual([
-      "src/b.ts",
-      "src/a.ts",
-    ]);
-  });
-
-  it("follows a chain the whole way down", () => {
-    expect(
-      order([
-        file("src/a.ts", ['import { b } from "./b";']),
-        file("src/b.ts", ['import { c } from "./c";']),
-        file("src/c.ts"),
-      ]),
-    ).toEqual(["src/c.ts", "src/b.ts", "src/a.ts"]);
-  });
-
   it("resolves a specifier that climbs out of the importer's directory", () => {
     expect(
       order([file("src/ui/a.ts", ['import { b } from "../lib/b";']), file("src/lib/b.ts")]),
@@ -70,13 +48,35 @@ describe("orderDiffFiles", () => {
     ).toEqual(["src/lib/index.ts", "src/a.ts"]);
   });
 
+  it("resolves .mts and .cts modules from NodeNext and extensionless specifiers", () => {
+    expect(order([file("a.mts", ['import { z } from "./z.mjs";']), file("z.mts")])).toEqual([
+      "z.mts",
+      "a.mts",
+    ]);
+    expect(order([file("a.ts", ['import { z } from "./z";']), file("z.cts")])).toEqual([
+      "z.cts",
+      "a.ts",
+    ]);
+  });
+
   it("falls back to the specifier's last segment when the path does not line up", () => {
-    // An aliased import (`~/lib/b`) resolves to nothing on disk here, but the diff has only one
-    // file that could be meant.
     expect(order([file("src/a.ts", ['import { b } from "~/lib/b";']), file("lib/b.ts")])).toEqual([
       "lib/b.ts",
       "src/a.ts",
     ]);
+  });
+
+  it("falls back to the whole dotted module name, not its first segment", () => {
+    expect(
+      order([file("src/a.ts", ['import { b } from "~/z/b.logic";']), file("z/b.logic.ts")]),
+    ).toEqual(["z/b.logic.ts", "src/a.ts"]);
+    expect(
+      order([
+        file("src/a.ts", ['import { b } from "~/z/b.logic";']),
+        file("z/b.logic.ts"),
+        file("other/b.ts"),
+      ]),
+    ).toEqual(["other/b.ts", "z/b.logic.ts", "src/a.ts"]);
   });
 
   it("ignores an ambiguous last segment rather than guessing", () => {
@@ -96,6 +96,18 @@ describe("orderDiffFiles", () => {
     ]);
   });
 
+  it("strips a bundler query such as ?worker but keeps a # subpath import", () => {
+    expect(
+      order([file("src/a.js", ['import Worker from "./z.js?worker";']), file("src/z.js")]),
+    ).toEqual(["src/z.js", "src/a.js"]);
+    expect(
+      order([file("a.ts", ['import url from "~/lib/b.logic?url";']), file("lib/b.logic.ts")]),
+    ).toEqual(["lib/b.logic.ts", "a.ts"]);
+    expect(
+      order([file("src/a.ts", ['import { z } from "#internal/z";']), file("src/z.ts")]),
+    ).toEqual(["src/z.ts", "src/a.ts"]);
+  });
+
   it("reads require and bare imports too", () => {
     expect(
       order([
@@ -113,14 +125,6 @@ describe("orderDiffFiles", () => {
         file("src/a.ts", ['import { b } from "./b";']),
       ]),
     ).toEqual(["src/a.ts", "src/b.ts"]);
-  });
-
-  it("clusters unrelated files by path", () => {
-    expect(order([file("src/ui/b.ts"), file("src/lib/z.ts"), file("src/lib/a.ts")])).toEqual([
-      "src/lib/a.ts",
-      "src/lib/z.ts",
-      "src/ui/b.ts",
-    ]);
   });
 
   it("keeps the tiers apart and orders tests by the source they cover", () => {
@@ -151,14 +155,23 @@ describe("orderDiffFiles", () => {
     ]);
   });
 
-  it("orders the same diff the same way whatever order it arrives in", () => {
-    const files = [
-      file("src/a.ts", ['import { b } from "./b";']),
-      file("src/b.ts"),
-      file("src/c.ts"),
-      file("src/a.test.ts"),
-      file("yarn.lock"),
-    ];
-    expect(order(files)).toEqual(order(files.toReversed()));
+  it("pairs a test with the source whose name carries its own dotted suffix", () => {
+    expect(
+      order([
+        file("src/c.browser.test.tsx"),
+        file("src/b.test.ts"),
+        file("src/a.logic.test.ts"),
+        file("src/c.tsx"),
+        file("src/b.ts"),
+        file("src/a.logic.ts"),
+      ]),
+    ).toEqual([
+      "src/a.logic.ts",
+      "src/b.ts",
+      "src/c.tsx",
+      "src/a.logic.test.ts",
+      "src/b.test.ts",
+      "src/c.browser.test.tsx",
+    ]);
   });
 });

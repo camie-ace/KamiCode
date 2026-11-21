@@ -24,20 +24,22 @@ export const transcribeSpeechCommand = createRuntimeCommand(connectionAtomRuntim
     key: (input: { readonly environmentId: EnvironmentId; readonly file: File }) =>
       input.environmentId,
   },
-  execute: (input: { readonly environmentId: EnvironmentId; readonly file: File }, registry) =>
-    Effect.gen(function* () {
-      // Read through the same registry that owns the command so a reconnect
-      // swaps credentials before the request starts.
-      const prepared = Option.getOrNull(
-        registry.get(environmentSession.preparedConnectionValueAtom(input.environmentId)),
-      );
-      if (prepared === null) {
-        return yield* new SpeechTranscriptionConnectionError({
-          message: "The environment is not connected.",
-        });
-      }
-      return yield* transcribeEnvironmentSpeech({ prepared, file: input.file });
-    }),
+  execute: Effect.fn("execute")(function* (
+    input: { readonly environmentId: EnvironmentId; readonly file: File },
+    registry,
+  ) {
+    // Read through the same registry that owns the command so a reconnect
+    // swaps credentials before the request starts.
+    const prepared = Option.getOrNull(
+      registry.get(environmentSession.preparedConnectionValueAtom(input.environmentId)),
+    );
+    if (prepared === null) {
+      return yield* new SpeechTranscriptionConnectionError({
+        message: "The environment is not connected.",
+      });
+    }
+    return yield* transcribeEnvironmentSpeech({ prepared, file: input.file });
+  }),
 });
 
 const speechSettingsPreparedConnection = (
@@ -53,16 +55,18 @@ export const fetchSpeechTranscriptionApiKeyStatusCommand = createRuntimeCommand(
       mode: "serial",
       key: (input: { readonly environmentId: EnvironmentId }) => input.environmentId,
     },
-    execute: (input: { readonly environmentId: EnvironmentId }, registry) =>
-      Effect.gen(function* () {
-        const prepared = speechSettingsPreparedConnection(input.environmentId, registry);
-        if (prepared === null) {
-          return yield* new SpeechTranscriptionConnectionError({
-            message: "The environment is not connected.",
-          });
-        }
-        return yield* fetchSpeechTranscriptionApiKeyStatus({ prepared });
-      }),
+    execute: Effect.fn("execute")(function* (
+      input: { readonly environmentId: EnvironmentId },
+      registry,
+    ) {
+      const prepared = speechSettingsPreparedConnection(input.environmentId, registry);
+      if (prepared === null) {
+        return yield* new SpeechTranscriptionConnectionError({
+          message: "The environment is not connected.",
+        });
+      }
+      return yield* fetchSpeechTranscriptionApiKeyStatus({ prepared });
+    }),
   },
 );
 
@@ -72,20 +76,19 @@ export const updateSpeechTranscriptionApiKeyCommand = createRuntimeCommand(conne
     mode: "serial",
     key: (input: { readonly environmentId: EnvironmentId }) => input.environmentId,
   },
-  execute: (
+  execute: Effect.fn("execute")(function* (
     input: { readonly environmentId: EnvironmentId; readonly apiKey: string | null },
     registry,
-  ) =>
-    Effect.gen(function* () {
-      const prepared = speechSettingsPreparedConnection(input.environmentId, registry);
-      if (prepared === null) {
-        return yield* new SpeechTranscriptionConnectionError({
-          message: "The environment is not connected.",
-        });
-      }
-      return yield* updateSpeechTranscriptionApiKey({
-        prepared,
-        payload: { apiKey: input.apiKey },
+  ) {
+    const prepared = speechSettingsPreparedConnection(input.environmentId, registry);
+    if (prepared === null) {
+      return yield* new SpeechTranscriptionConnectionError({
+        message: "The environment is not connected.",
       });
-    }),
+    }
+    return yield* updateSpeechTranscriptionApiKey({
+      prepared,
+      payload: { apiKey: input.apiKey },
+    });
+  }),
 });

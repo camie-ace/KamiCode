@@ -17,12 +17,6 @@ import { ModelSelection } from "./modelSelection.ts";
 import type { OrchestrationV2StoredEvent } from "./orchestrationV2.ts";
 import { ProjectTestEnvironment, ProjectScript, StoredProjectIcon } from "./project.ts";
 
-/**
- * Which client dispatched the command that produced this event (#7774).
- * Stamped by the orchestration engine on client-dispatched commands; absent on
- * provider/server-originated events and on commands from clients too old to
- * report it.
- */
 export const OrchestrationClientOrigin = Schema.Struct({
   user: Schema.optional(KamiUser),
   surface: Schema.optional(ClientSurface),
@@ -30,7 +24,6 @@ export const OrchestrationClientOrigin = Schema.Struct({
 });
 export type OrchestrationClientOrigin = typeof OrchestrationClientOrigin.Type;
 
-/** Metadata retained by the shared application event source. */
 export const ApplicationEventMetadata = Schema.Struct({
   deferredTurn: Schema.optional(Schema.Boolean),
   providerTurnId: Schema.optional(TrimmedNonEmptyString),
@@ -48,10 +41,7 @@ export const ApplicationProjectCreatedPayload = Schema.Struct({
   workspaceRoot: TrimmedNonEmptyString,
   repositoryIdentity: Schema.optional(Schema.NullOr(RepositoryIdentity)),
   defaultModelSelection: Schema.NullOr(ModelSelection),
-  // Per-project override for where new threads start; optional so persisted
-  // events from older servers still decode.
   defaultThreadEnvMode: Schema.optional(Schema.NullOr(ThreadEnvMode)),
-  // Optional so persisted events from older servers still decode.
   faviconPath: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   projectIcon: Schema.optional(Schema.NullOr(StoredProjectIcon)),
   scripts: Schema.Array(ProjectScript),
@@ -74,6 +64,8 @@ export const ApplicationProjectMetaUpdatedPayload = Schema.Struct({
   projectIcon: Schema.optional(Schema.NullOr(StoredProjectIcon)),
   scripts: Schema.optional(Schema.Array(ProjectScript)),
   testEnvironments: Schema.optionalKey(Schema.Array(ProjectTestEnvironment)),
+  pinnedAt: Schema.optional(Schema.NullOr(IsoDateTime)),
+  archivedAt: Schema.optional(Schema.NullOr(IsoDateTime)),
   updatedAt: IsoDateTime,
 });
 export type ApplicationProjectMetaUpdatedPayload = typeof ApplicationProjectMetaUpdatedPayload.Type;
@@ -124,5 +116,4 @@ export const ApplicationProjectEvent = Schema.Union([
 ]);
 export type ApplicationProjectEvent = typeof ApplicationProjectEvent.Type;
 
-/** Events exposed by the retained application event source. */
 export type ApplicationStoredEvent = ApplicationProjectEvent | OrchestrationV2StoredEvent;

@@ -28,10 +28,6 @@ export function canEditSharedWork(role: SharedProjectRole): boolean {
   return roleAtLeast(role, "member");
 }
 
-function canReadSharedProject(role: SharedProjectRole | null | undefined): boolean {
-  return role !== null && role !== undefined;
-}
-
 export function validateSharedEnvironmentUrl(url: string): SharedEnvironmentValidationStatus {
   try {
     const parsed = new URL(url);

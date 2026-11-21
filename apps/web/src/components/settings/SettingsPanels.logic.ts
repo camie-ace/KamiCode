@@ -1,7 +1,6 @@
 import type {
   BackgroundActivityProfile,
   BackgroundActivitySettings,
-  ProviderDriverKind,
   ProviderInstanceConfig,
   PreviewViewportSetting,
   ProviderInstanceId,
@@ -9,7 +8,11 @@ import type {
   SidebarProjectGroupingMode,
   UnifiedSettings,
 } from "@t3tools/contracts";
-import { DEFAULT_UNIFIED_SETTINGS } from "@t3tools/contracts/settings";
+import {
+  DEFAULT_UNIFIED_SETTINGS,
+  MAX_SIDEBAR_AUTO_SETTLE_AFTER_DAYS,
+  MIN_SIDEBAR_AUTO_SETTLE_AFTER_DAYS,
+} from "@t3tools/contracts/settings";
 import {
   getBackgroundActivityBaseProfile,
   normalizeBackgroundActivitySettings,
@@ -18,6 +21,9 @@ import {
 } from "@t3tools/shared/backgroundActivitySettings";
 import * as Duration from "effect/Duration";
 import * as Equal from "effect/Equal";
+import { msg } from "gt-react";
+
+import { m, type MessageResolver } from "../../i18n/messages";
 
 export function isProjectGroupingEnabled(mode: SidebarProjectGroupingMode): boolean {
   return mode !== "separate";
@@ -47,9 +53,7 @@ export function rememberEnabledProjectGroupingMode(mode: SidebarProjectGroupingM
   if (mode === "separate") return;
   try {
     localStorage.setItem(LAST_ENABLED_PROJECT_GROUPING_MODE_KEY, mode);
-  } catch {
-    // Storage can be unavailable in restricted browser contexts.
-  }
+  } catch {}
 }
 
 export function hasChangedBackgroundActivitySettings(
@@ -87,24 +91,26 @@ type TypographySettings = Pick<
   | "fontSizeTerminal"
 >;
 
-/** Labels the font rows whose family or size differs from the defaults. */
-export function getChangedTypographySettingLabels(settings: TypographySettings): string[] {
+export function getChangedTypographySettingLabels(
+  settings: TypographySettings,
+  resolve: MessageResolver = m,
+): string[] {
   return [
     ...(settings.fontFamilySans !== DEFAULT_UNIFIED_SETTINGS.fontFamilySans ||
     settings.fontSizeInterface !== DEFAULT_UNIFIED_SETTINGS.fontSizeInterface
-      ? ["Interface font"]
+      ? [resolve(msg("Interface font"))]
       : []),
     ...(settings.fontFamilyComposer !== DEFAULT_UNIFIED_SETTINGS.fontFamilyComposer ||
     settings.fontSizePrompt !== DEFAULT_UNIFIED_SETTINGS.fontSizePrompt
-      ? ["Prompt font"]
+      ? [resolve(msg("Prompt font"))]
       : []),
     ...(settings.fontFamilyCode !== DEFAULT_UNIFIED_SETTINGS.fontFamilyCode ||
     settings.fontSizeCode !== DEFAULT_UNIFIED_SETTINGS.fontSizeCode
-      ? ["Code font"]
+      ? [resolve(msg("Code font"))]
       : []),
     ...(settings.fontFamilyTerminal !== DEFAULT_UNIFIED_SETTINGS.fontFamilyTerminal ||
     settings.fontSizeTerminal !== DEFAULT_UNIFIED_SETTINGS.fontSizeTerminal
-      ? ["Terminal font"]
+      ? [resolve(msg("Terminal font"))]
       : []),
   ];
 }
@@ -118,16 +124,12 @@ export type BrowserDefaultSettings = Pick<
   | "browserRecordingShowKeyPresses"
   | "browserRecordingShowMousePresses"
   | "browserLinkTarget"
+  | "browserSearchEngine"
+  | "browserCustomSearchUrl"
   | "browserAutoShowFloatingPreview"
+  | "pullRequestLinksOpenInApp"
 >;
 
-/**
- * True when two viewport settings describe the same viewport.
- *
- * The setting is a tagged union rather than a scalar, so identity comparison
- * reports every stored viewport as changed — including one that matches the
- * default.
- */
 function isSamePreviewViewport(
   left: PreviewViewportSetting,
   right: PreviewViewportSetting,
@@ -140,32 +142,41 @@ function isSamePreviewViewport(
     : true;
 }
 
-/** Labels the browser-default rows that differ from the defaults. */
-export function getChangedBrowserSettingLabels(settings: BrowserDefaultSettings): string[] {
+export function getChangedBrowserSettingLabels(
+  settings: BrowserDefaultSettings,
+  resolve: MessageResolver = m,
+): string[] {
   return [
     ...(isSamePreviewViewport(
       settings.browserDefaultViewport,
       DEFAULT_UNIFIED_SETTINGS.browserDefaultViewport,
     )
       ? []
-      : ["Browser viewport"]),
+      : [resolve(msg("Browser viewport"))]),
     ...(settings.browserDefaultZoomFactor !== DEFAULT_UNIFIED_SETTINGS.browserDefaultZoomFactor
-      ? ["Browser zoom"]
+      ? [resolve(msg("Browser zoom"))]
       : []),
     ...(settings.browserDefaultAppearance !== DEFAULT_UNIFIED_SETTINGS.browserDefaultAppearance
-      ? ["Browser appearance"]
+      ? [resolve(msg("Browser appearance"))]
       : []),
     ...(settings.browserRecordingFrameRate !== DEFAULT_UNIFIED_SETTINGS.browserRecordingFrameRate
-      ? ["Recording frame rate"]
+      ? [resolve(msg("Recording frame rate"))]
       : []),
-    ...(settings.browserRecordingShowKeyPresses ? ["Recording key presses"] : []),
-    ...(settings.browserRecordingShowMousePresses ? ["Recording mouse presses"] : []),
+    ...(settings.browserRecordingShowKeyPresses ? [resolve(msg("Recording key presses"))] : []),
+    ...(settings.browserRecordingShowMousePresses ? [resolve(msg("Recording mouse presses"))] : []),
     ...(settings.browserLinkTarget !== DEFAULT_UNIFIED_SETTINGS.browserLinkTarget
-      ? ["Open links in"]
+      ? [resolve(msg("Open links in"))]
+      : []),
+    ...(settings.browserSearchEngine !== DEFAULT_UNIFIED_SETTINGS.browserSearchEngine ||
+    settings.browserCustomSearchUrl !== DEFAULT_UNIFIED_SETTINGS.browserCustomSearchUrl
+      ? [resolve(msg("Search engine"))]
       : []),
     ...(settings.browserAutoShowFloatingPreview !==
     DEFAULT_UNIFIED_SETTINGS.browserAutoShowFloatingPreview
-      ? ["Floating preview"]
+      ? [resolve(msg("Floating preview"))]
+      : []),
+    ...(settings.pullRequestLinksOpenInApp !== DEFAULT_UNIFIED_SETTINGS.pullRequestLinksOpenInApp
+      ? [resolve(msg("Open pull requests in T3 Code"))]
       : []),
   ];
 }
@@ -183,7 +194,6 @@ export function resolveBackgroundActivityProfileOption(
       providerHealthRefreshInterval: resolved.providerHealthRefreshInterval,
       hostPowerMonitorActiveInterval: resolved.hostPowerMonitorActiveInterval,
       hostPowerMonitorIdleInterval: resolved.hostPowerMonitorIdleInterval,
-      idleClientTtl: resolved.idleClientTtl,
       pauseWhenHostLocked: resolved.pauseWhenHostLocked,
       pauseWhenHostLowPower: resolved.pauseWhenHostLowPower,
       pauseWhenClientLowPower: resolved.pauseWhenClientLowPower,
@@ -206,79 +216,15 @@ export function backgroundActivitySharedPolicySettings(
   };
 }
 
-function collapseOtelSignalsUrl(input: {
-  readonly tracesUrl: string;
-  readonly metricsUrl: string;
-}): string | null {
-  const tracesSuffix = "/traces";
-  const metricsSuffix = "/metrics";
-  if (!input.tracesUrl.endsWith(tracesSuffix) || !input.metricsUrl.endsWith(metricsSuffix)) {
-    return null;
-  }
-
-  const tracesBase = input.tracesUrl.slice(0, -tracesSuffix.length);
-  const metricsBase = input.metricsUrl.slice(0, -metricsSuffix.length);
-  if (tracesBase !== metricsBase) {
-    return null;
-  }
-
-  return `${tracesBase}/{traces,metrics}`;
-}
-
-export function formatDiagnosticsDescription(input: {
-  readonly localTracingEnabled: boolean;
-  readonly otlpTracesEnabled: boolean;
-  readonly otlpTracesUrl?: string | undefined;
-  readonly otlpMetricsEnabled: boolean;
-  readonly otlpMetricsUrl?: string | undefined;
-}): string {
-  const mode = input.localTracingEnabled ? "Local trace file" : "Terminal logs only";
-  const tracesUrl = input.otlpTracesEnabled ? input.otlpTracesUrl : undefined;
-  const metricsUrl = input.otlpMetricsEnabled ? input.otlpMetricsUrl : undefined;
-
-  if (tracesUrl && metricsUrl) {
-    const collapsedUrl = collapseOtelSignalsUrl({ tracesUrl, metricsUrl });
-    return collapsedUrl
-      ? `${mode}. Exporting OTEL to ${collapsedUrl}.`
-      : `${mode}. Exporting OTEL traces to ${tracesUrl} and metrics to ${metricsUrl}.`;
-  }
-
-  if (tracesUrl) {
-    return `${mode}. Exporting OTEL traces to ${tracesUrl}.`;
-  }
-
-  if (metricsUrl) {
-    return `${mode}. Exporting OTEL metrics to ${metricsUrl}.`;
-  }
-
-  return `${mode}.`;
-}
-
 export function buildProviderInstanceUpdatePatch(input: {
-  readonly settings: Pick<ServerSettings, "providers" | "providerInstances">;
+  readonly settings: Pick<ServerSettings, "providerInstances">;
   readonly instanceId: ProviderInstanceId;
   readonly instance: ProviderInstanceConfig;
-  readonly driver: ProviderDriverKind;
-  readonly isDefault: boolean;
   readonly textGenerationModelSelection?:
     | ServerSettings["textGenerationModelSelection"]
     | undefined;
 }): Partial<UnifiedSettings> {
-  type LegacyProviderSettings = ServerSettings["providers"][keyof ServerSettings["providers"]];
-  const legacyProviderDefaults = DEFAULT_UNIFIED_SETTINGS.providers as Record<
-    string,
-    LegacyProviderSettings | undefined
-  >;
-  const legacyProviderDefault = input.isDefault ? legacyProviderDefaults[input.driver] : undefined;
   return {
-    ...(legacyProviderDefault !== undefined
-      ? {
-          providers: {
-            ...input.settings.providers,
-            [input.driver]: legacyProviderDefault,
-          } as ServerSettings["providers"],
-        }
-      : {}),
     providerInstances: {
       ...input.settings.providerInstances,
       [input.instanceId]: input.instance,
@@ -288,10 +234,6 @@ export function buildProviderInstanceUpdatePatch(input: {
       : {}),
   };
 }
-
-// ── Background-activity interval helpers ─────────────────────────────
-// Shared by the General panel's interval rows and the Providers panel's
-// health-check row.
 
 export const PROVIDER_HEALTH_INTERVAL_STEP_SECONDS = 30;
 
@@ -322,7 +264,6 @@ export function backgroundActivityOverrideSettings(
     providerHealthRefreshInterval: resolved.providerHealthRefreshInterval,
     hostPowerMonitorActiveInterval: resolved.hostPowerMonitorActiveInterval,
     hostPowerMonitorIdleInterval: resolved.hostPowerMonitorIdleInterval,
-    idleClientTtl: resolved.idleClientTtl,
     pauseWhenHostLocked: resolved.pauseWhenHostLocked,
     pauseWhenHostLowPower: resolved.pauseWhenHostLowPower,
     pauseWhenClientLowPower: resolved.pauseWhenClientLowPower,
@@ -342,4 +283,74 @@ export function backgroundActivityOverrideSettings(
       overrides: nextOverrides as BackgroundActivitySettings["overrides"],
     },
   };
+}
+
+/**
+ * Saving a shorter age settles threads at once, so typing stays in `draft` until the edit is
+ * finished. `pending` is the submission in flight; `saved` is the only value a draft falls back to.
+ */
+export interface AutoSettleDaysField {
+  readonly saved: number;
+  readonly draft: string;
+  readonly dirty: boolean;
+  readonly pending: number | null;
+  readonly revision: number;
+}
+
+export function autoSettleDaysField(saved: number): AutoSettleDaysField {
+  return { saved, draft: String(saved), dirty: false, pending: null, revision: 0 };
+}
+
+export function syncAutoSettleDaysField(
+  field: AutoSettleDaysField,
+  saved: number,
+): AutoSettleDaysField {
+  // An earlier save can be confirmed while a later one is still in flight.
+  const pending = field.pending === saved ? null : field.pending;
+  if (field.saved === saved && pending === field.pending) return field;
+  return {
+    ...field,
+    saved,
+    pending,
+    draft: field.dirty ? field.draft : String(pending ?? saved),
+  };
+}
+
+export function editAutoSettleDaysField(
+  field: AutoSettleDaysField,
+  draft: string,
+): AutoSettleDaysField {
+  return { ...field, draft, dirty: true };
+}
+
+export function cancelAutoSettleDaysField(field: AutoSettleDaysField): AutoSettleDaysField {
+  return { ...field, draft: String(field.pending ?? field.saved), dirty: false };
+}
+
+export function commitAutoSettleDaysField(field: AutoSettleDaysField): {
+  readonly field: AutoSettleDaysField;
+  readonly submit: number | null;
+} {
+  const current = field.pending ?? field.saved;
+  const days = field.draft.trim() === "" ? Number.NaN : Number(field.draft);
+  if (
+    !Number.isInteger(days) ||
+    days < MIN_SIDEBAR_AUTO_SETTLE_AFTER_DAYS ||
+    days > MAX_SIDEBAR_AUTO_SETTLE_AFTER_DAYS
+  ) {
+    return { field: { ...field, draft: String(current), dirty: false }, submit: null };
+  }
+  const settled = { ...field, draft: String(days), dirty: false };
+  // An edit ending on the saved value is sent again: a save can land on the shown environment
+  // and fail on another, and retyping the number is how it is retried.
+  if (!field.dirty || days === field.pending) return { field: settled, submit: null };
+  return { field: { ...settled, pending: days, revision: field.revision + 1 }, submit: days };
+}
+
+export function failAutoSettleDaysField(
+  field: AutoSettleDaysField,
+  revision: number,
+): AutoSettleDaysField {
+  if (field.revision !== revision) return field;
+  return { ...field, pending: null, draft: field.dirty ? field.draft : String(field.saved) };
 }

@@ -70,7 +70,6 @@ function startCompletionChime(audioContext: AudioContext): RunningCompletionChim
 
 export function TurnCompletionSoundCoordinator() {
   const audioContextRef = useRef<AudioContext | null>(null);
-  const mountedAtEpochMsRef = useRef(Date.now());
   const alertedTurnKeysRef = useRef(
     new Set(
       collectSettledCompletedTurns(
@@ -80,7 +79,9 @@ export function TurnCompletionSoundCoordinator() {
   );
   const stopAlertRef = useRef<(() => void) | null>(null);
 
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- Subscribe to completed turns and own the browser audio lifecycle.
   useEffect(() => {
+    const mountedAtEpochMs = Date.now();
     const getAudioContext = () => {
       if (audioContextRef.current) {
         return audioContextRef.current;
@@ -163,7 +164,7 @@ export function TurnCompletionSoundCoordinator() {
       const nextAlerts = collectSettledCompletedTurns(
         appAtomRegistry.get(environmentThreadShells.threadShellsAtom),
         {
-          completedAfterEpochMs: mountedAtEpochMsRef.current - COMPLETION_ALERT_MOUNT_GRACE_MS,
+          completedAfterEpochMs: mountedAtEpochMs - COMPLETION_ALERT_MOUNT_GRACE_MS,
         },
       );
       const unannouncedAlerts = nextAlerts.filter((alert) => {

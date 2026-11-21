@@ -1,7 +1,8 @@
+import { useGT } from "gt-react-native";
 import type { ReactNode } from "react";
 import { Pressable, View } from "react-native";
-import { AppText as Text } from "../../components/AppText";
-import { SymbolView } from "../../components/AppSymbol";
+import { AppText as Text } from "../../components/ui/AppText";
+import { SymbolView } from "../../components/ui/AppSymbol";
 import { cn } from "../../lib/cn";
 import type { ModelOption } from "../../lib/modelOptions";
 
@@ -12,6 +13,8 @@ export type ModelRowProps = {
   readonly isFavorite: boolean;
   readonly favoritesLoaded: boolean;
   readonly onToggleFavorite: () => void;
+  readonly onToggleHidden?: () => void;
+  readonly hiddenUpdatePending?: boolean;
   readonly isFirst: boolean;
   readonly isLast: boolean;
 };
@@ -20,6 +23,7 @@ export type ChoiceRowProps = {
   readonly label: string;
   readonly description?: string;
   readonly selected: boolean;
+  readonly disabled?: boolean;
   readonly onPress: () => void;
   readonly isLast: boolean;
 };
@@ -37,6 +41,7 @@ export function ModelRowContent(
       readonly selectedClassName?: string;
     },
 ) {
+  const gt = useGT();
   return (
     <View
       style={props.minimumHeight === undefined ? undefined : { minHeight: props.minimumHeight }}
@@ -52,10 +57,10 @@ export function ModelRowContent(
         accessibilityRole="radio"
         accessibilityState={{
           checked: props.selected,
-          disabled: props.option.isUnavailable === true,
+          disabled: props.option.isUnavailable === true || props.option.isHidden === true,
         }}
         className="min-h-11 min-w-0 flex-1 flex-row items-center gap-2 active:opacity-70"
-        disabled={props.option.isUnavailable}
+        disabled={props.option.isUnavailable || props.option.isHidden}
         onPress={props.onPress}
       >
         {props.leadingSelection}
@@ -69,16 +74,27 @@ export function ModelRowContent(
             </Text>
             {props.option.isDefault ? (
               <View className="rounded-md bg-subtle-strong px-1.5 py-0.5">
-                <Text className="text-3xs font-t3-bold text-foreground-muted">Default</Text>
+                <Text className="text-3xs font-t3-bold text-foreground-muted">
+                  {gt("Default", { $context: "badge on the default model" })}
+                </Text>
               </View>
             ) : null}
             {props.option.isLegacy ? (
               <View className="rounded-md bg-subtle px-1.5 py-0.5">
-                <Text className="text-3xs font-t3-bold text-foreground-muted">Legacy</Text>
+                <Text className="text-3xs font-t3-bold text-foreground-muted">
+                  {gt("Legacy", { $context: "badge on an older model" })}
+                </Text>
               </View>
             ) : null}
+            {props.option.isHidden ? (
+              <Text className="text-xs text-foreground-muted">
+                {gt("Hidden", { $context: "model is hidden from the picker" })}
+              </Text>
+            ) : null}
             {props.option.isUnavailable ? (
-              <Text className="text-xs text-foreground">Unavailable</Text>
+              <Text className="text-xs text-foreground">
+                {gt("Unavailable", { $context: "model cannot be used" })}
+              </Text>
             ) : null}
           </View>
           {props.option.subtitle ? (
@@ -92,10 +108,45 @@ export function ModelRowContent(
         </View>
         {props.trailingSelection}
       </Pressable>
+      {props.onToggleHidden ? (
+        <Pressable
+          accessibilityLabel={
+            props.option.isHidden
+              ? gt("Show model: {provider}, {model}", {
+                  provider: props.option.providerLabel,
+                  model: props.option.label,
+                })
+              : gt("Hide model: {provider}, {model}", {
+                  provider: props.option.providerLabel,
+                  model: props.option.label,
+                })
+          }
+          accessibilityRole="button"
+          accessibilityState={{ disabled: props.hiddenUpdatePending === true }}
+          className="min-h-11 min-w-11 items-center justify-center"
+          disabled={props.hiddenUpdatePending}
+          onPress={props.onToggleHidden}
+        >
+          <SymbolView
+            name={props.option.isHidden ? "eye.slash" : "eye"}
+            size={18}
+            tintColorClassName={props.option.isHidden ? "accent-icon-subtle" : "accent-icon"}
+            type="monochrome"
+          />
+        </Pressable>
+      ) : null}
       <Pressable
-        accessibilityLabel={`${props.isFavorite ? "Remove from" : "Add to"} favorites: ${
-          props.option.providerLabel
-        }, ${props.option.label}`}
+        accessibilityLabel={
+          props.isFavorite
+            ? gt("Remove from favorites: {provider}, {model}", {
+                provider: props.option.providerLabel,
+                model: props.option.label,
+              })
+            : gt("Add to favorites: {provider}, {model}", {
+                provider: props.option.providerLabel,
+                model: props.option.label,
+              })
+        }
         accessibilityRole="button"
         accessibilityState={{ disabled: !props.favoritesLoaded, selected: props.isFavorite }}
         className="min-h-11 min-w-11 items-center justify-center"
@@ -113,13 +164,13 @@ export function ModelRowContent(
   );
 }
 
-/** Single option inside a submenu panel. */
 export function ChoiceRowContent(props: ChoiceRowProps & RowSelectionProps) {
   return (
     <Pressable
       accessibilityLabel={props.description ? `${props.label}. ${props.description}` : props.label}
       accessibilityRole="radio"
-      accessibilityState={{ checked: props.selected }}
+      accessibilityState={{ checked: props.selected, disabled: props.disabled === true }}
+      disabled={props.disabled}
       onPress={props.onPress}
       style={props.minimumHeight === undefined ? undefined : { minHeight: props.minimumHeight }}
       className={cn(
@@ -128,7 +179,7 @@ export function ChoiceRowContent(props: ChoiceRowProps & RowSelectionProps) {
       )}
     >
       {props.leadingSelection}
-      <View className="min-w-0 flex-1 gap-0.5">
+      <View className={cn("min-w-0 flex-1 gap-0.5", props.disabled && "opacity-50")}>
         <Text className="text-base font-t3-medium text-foreground">{props.label}</Text>
         {props.description ? (
           <Text className="text-sm leading-5 text-foreground-muted">{props.description}</Text>

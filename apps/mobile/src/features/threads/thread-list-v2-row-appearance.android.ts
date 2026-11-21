@@ -1,9 +1,23 @@
+import { msg } from "gt-react-native";
 import type { ViewStyle } from "react-native";
+
+import { m, type MessageResolver } from "../../i18n/messages";
 import type { MobileThemeVariables } from "../../lib/mobileTheme";
 
 export const THREAD_LIST_V2_MONO_FONT = "monospace";
 export const THREAD_LIST_V2_ROW_CONTENT_CLASS_NAME = "px-3 py-2.5";
 export const THREAD_LIST_V2_ROW_DIVIDERS = false;
+export const THREAD_LIST_V2_SIDEBAR_ROW_STYLE = {
+  borderRadius: 20,
+  paddingHorizontal: 12,
+  paddingVertical: 10,
+} satisfies ViewStyle;
+export const THREAD_LIST_V2_SIDEBAR_ROW_CONTAINER_STYLE = {
+  borderRadius: 20,
+  overflow: "hidden",
+  marginHorizontal: 8,
+  marginVertical: 2,
+} satisfies ViewStyle;
 
 export const selectedThreadRowColors = {
   foregroundClassName: "text-thread-selected-foreground",
@@ -12,8 +26,8 @@ export const selectedThreadRowColors = {
   mutedIconTintClassName: "accent-thread-selected-foreground-muted",
 };
 
-export function getThreadListV2NewBranchMenuTitle(branch: string) {
-  return `New thread on ${branch}`;
+export function getThreadListV2NewBranchMenuTitle(branch: string, resolve: MessageResolver = m) {
+  return resolve(msg("New thread on {branch}", { branch }));
 }
 
 export function getThreadListV2RowAppearance(
@@ -25,14 +39,9 @@ export function getThreadListV2RowAppearance(
   const backgroundColor = theme[sidebarPane ? "--color-drawer" : "--color-screen"];
   const style: ViewStyle = {
     backgroundColor: selected ? selectedBackgroundColor : backgroundColor,
-    borderRadius: 20,
+    borderRadius: THREAD_LIST_V2_SIDEBAR_ROW_STYLE.borderRadius,
   };
-  const swipeContainerStyle: ViewStyle = {
-    borderRadius: 20,
-    overflow: "hidden",
-    marginHorizontal: 8,
-    marginVertical: 2,
-  };
+  const swipeContainerStyle = THREAD_LIST_V2_SIDEBAR_ROW_CONTAINER_STYLE;
 
   return {
     className: undefined,
@@ -52,7 +61,7 @@ export function getThreadListV2RowAppearance(
       ? "accent-drawer-foreground-muted"
       : "accent-foreground-tertiary",
     style,
-    cardStyle: sidebarPane ? { ...style, paddingHorizontal: 12, paddingVertical: 10 } : style,
+    cardStyle: sidebarPane ? { ...style, ...THREAD_LIST_V2_SIDEBAR_ROW_STYLE } : style,
     swipeContainerStyle,
     swipeBackgroundColor: backgroundColor,
     providerIconSurfaceColor: selected ? selectedBackgroundColor : backgroundColor,

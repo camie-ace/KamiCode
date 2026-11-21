@@ -170,7 +170,7 @@ it("hosts a lazy, bounded Chromium session and returns agent-ready snapshots", a
     await controller.close();
     await NodeFSP.rm(profileDir, { recursive: true, force: true });
   }
-}, 60_000);
+});
 
 it("reclaims an inactive tab at capacity only when reuse is requested", async () => {
   const profileDir = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "t3-hosted-reclaim-"));
@@ -238,4 +238,4 @@ it("reclaims an inactive tab at capacity only when reuse is requested", async ()
     await controller.close();
     await NodeFSP.rm(profileDir, { recursive: true, force: true });
   }
-}, 60_000);
+});

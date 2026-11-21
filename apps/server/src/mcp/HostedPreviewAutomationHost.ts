@@ -70,6 +70,7 @@ const HOSTED_PREVIEW_AUTOMATION_V1_OPERATIONS = PREVIEW_AUTOMATION_V1_OPERATIONS
   (operation) => operation !== "recordingStart" && operation !== "recordingStop",
 );
 
+// @effect-diagnostics-next-line extendsNativeError:off -- CDP automation errors carry the dynamic wire tag and are translated at the Effect boundary.
 class HostedPreviewAutomationError extends Error {
   readonly _tag: string;
   readonly detail?: unknown;
@@ -1225,7 +1226,7 @@ export class HostedPreviewAutomationController {
               const result = await session.send("Runtime.evaluate", {
                 expression: input.expression,
                 awaitPromise: input.awaitPromise ?? true,
-                returnByValue: input.returnByValue ?? true,
+                returnByValue: true,
               });
               if (result.exceptionDetails) {
                 throw new Error(result.exceptionDetails.text);
@@ -1284,7 +1285,7 @@ export class HostedPreviewBrowser extends Context.Service<
   }
 >()("t3/mcp/HostedPreviewAutomationHost/HostedPreviewBrowser") {}
 
-const runtimeLayer = Layer.effect(
+export const runtimeLayer = Layer.effect(
   HostedPreviewBrowser,
   Effect.gen(function* HostedPreviewBrowserRuntimeLayer() {
     const config = yield* ServerConfig.ServerConfig;
@@ -1341,7 +1342,7 @@ const runtimeLayer = Layer.effect(
   }),
 );
 
-const layer = Layer.effectDiscard(
+export const layer = Layer.effectDiscard(
   Effect.gen(function* HostedPreviewAutomationHostLayer() {
     const config = yield* ServerConfig.ServerConfig;
     const hostedBrowser = yield* HostedPreviewBrowser;

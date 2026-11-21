@@ -100,9 +100,15 @@ describe("selectNextWaterfallProvider", () => {
   });
 });
 
+const decodeUnknownSyncOrchestrationV2ThreadProjection = Schema.decodeUnknownSync(
+  OrchestrationV2ThreadProjection,
+);
+
+const isOrchestrationV2Command = Schema.is(OrchestrationV2Command);
+
 it("uses durable run ancestry to stop provider cycles and rejects stale or settled threads", () => {
   const now = DateTime.makeUnsafe("2026-10-06T10:00:00.000Z");
-  const projection = Schema.decodeUnknownSync(OrchestrationV2ThreadProjection)({
+  const projection = decodeUnknownSyncOrchestrationV2ThreadProjection({
     thread: {
       id: "thread",
       projectId: "project",
@@ -187,7 +193,7 @@ it("uses durable run ancestry to stop provider cycles and rejects stale or settl
   const first = waterfallContinuation({ projection, providers, sequence });
   expect(first?.modelSelection?.instanceId).toBe("second");
   expect(first?.manualContinuationOfRunId).toBe("failed");
-  expect(Schema.is(OrchestrationV2Command)(first)).toBe(true);
+  expect(isOrchestrationV2Command(first)).toBe(true);
   expect(waterfallContinuation({ projection, providers, sequence })).toEqual(first);
   expect(
     waterfallContinuation({

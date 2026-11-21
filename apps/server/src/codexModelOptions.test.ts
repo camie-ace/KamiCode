@@ -13,12 +13,12 @@ it("returns the selected Codex service tier id", () => {
   assert.equal(getCodexServiceTierOptionValue(selection), "flex");
 });
 
-it("omits the standard service tier sentinel", () => {
+it("preserves the standard service tier to clear a previously selected fast tier", () => {
   const selection = createModelSelection(ProviderInstanceId.make("codex"), "gpt-5.5", [
     { id: "serviceTier", value: "default" },
   ]);
 
-  assert.equal(getCodexServiceTierOptionValue(selection), undefined);
+  assert.equal(getCodexServiceTierOptionValue(selection), "default");
 });
 
 it("keeps legacy persisted fast mode selections working", () => {

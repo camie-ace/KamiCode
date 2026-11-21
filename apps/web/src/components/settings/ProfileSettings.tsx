@@ -1,6 +1,6 @@
 import type { UserAuthSessionState } from "@t3tools/contracts";
 import { ExternalLinkIcon, LogOutIcon, RefreshCwIcon, UserRoundIcon } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 
 import {
   fetchUserAuthSessionState,
@@ -138,7 +138,7 @@ export function ProfileSettingsPanel() {
     null,
   );
 
-  const loadSession = useCallback(async () => {
+  const loadSession = async () => {
     setLoadState({ status: "loading" });
     setActionError(null);
     try {
@@ -150,22 +150,38 @@ export function ProfileSettingsPanel() {
         message: resolveErrorMessage(error, "Failed to load profile."),
       });
     }
+  };
+
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- Fetch the external authentication session on mount and ignore completion after unmount.
+  useEffect(() => {
+    let canceled = false;
+    void fetchUserAuthSessionState().then(
+      (session) => {
+        if (!canceled) setLoadState({ status: "loaded", session });
+      },
+      (error: unknown) => {
+        if (!canceled)
+          setLoadState({
+            status: "error",
+            message: resolveErrorMessage(error, "Failed to load profile."),
+          });
+      },
+    );
+    return () => {
+      canceled = true;
+    };
   }, []);
 
-  useEffect(() => {
-    void loadSession();
-  }, [loadSession]);
-
-  const refreshSession = useCallback(async () => {
+  const refreshSession = async () => {
     setPendingAction("refresh");
     try {
       await loadSession();
     } finally {
       setPendingAction(null);
     }
-  }, [loadSession]);
+  };
 
-  const connectGitHub = useCallback(async () => {
+  const connectGitHub = async () => {
     setPendingAction("connect");
     setActionError(null);
     try {
@@ -174,9 +190,9 @@ export function ProfileSettingsPanel() {
       setActionError(resolveErrorMessage(error, "Failed to start GitHub sign-in."));
       setPendingAction(null);
     }
-  }, []);
+  };
 
-  const signOut = useCallback(async () => {
+  const signOut = async () => {
     setPendingAction("sign-out");
     setActionError(null);
     try {
@@ -186,16 +202,16 @@ export function ProfileSettingsPanel() {
       setActionError(resolveErrorMessage(error, "Failed to sign out."));
       setPendingAction(null);
     }
-  }, []);
+  };
 
-  const openGitHubProfile = useCallback(async (githubLogin: string) => {
+  const openGitHubProfile = async (githubLogin: string) => {
     const url = `https://github.com/${githubLogin}`;
     if (window.desktopBridge) {
       const opened = await window.desktopBridge.openExternal(url);
       if (opened) return;
     }
     window.open(url, "_blank", "noopener,noreferrer");
-  }, []);
+  };
 
   const isPending = pendingAction !== null;
 

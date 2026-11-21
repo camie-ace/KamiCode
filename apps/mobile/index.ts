@@ -1,12 +1,18 @@
+// Must stay first: the render counter and behavior probe wrap the DevTools hook before any React commit.
+import "./src/features/development/render-counter-entry";
+import "./src/features/development/behavior-probe-entry";
+// Next, so errors thrown while the rest of the app loads are recorded too.
+import "./src/features/observability/observe";
 import { registerRootComponent } from "expo";
 import "react-native-gesture-handler";
 import { LogBox } from "react-native";
 import { featureFlags } from "react-native-screens";
 
+// Before any GT module initializes: GT validates locales with Intl APIs that Hermes lacks.
+import "./src/i18n/intl-polyfills";
 import App from "./src/App";
 
-// Required for react-native-screens' iOS FormSheet sizing fix when a nested
-// native stack is rendered inside a non-fitToContents formSheet.
+// Enables iOS FormSheet sizing for nested native stacks in non-fitToContents sheets.
 featureFlags.experiment.synchronousScreenUpdatesEnabled = true;
 
 if (process.env.EXPO_PUBLIC_SHOWCASE === "1") {

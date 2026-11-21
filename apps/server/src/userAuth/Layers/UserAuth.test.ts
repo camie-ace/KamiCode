@@ -1,3 +1,4 @@
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { AuthSessionId } from "@t3tools/contracts";
 import { expect, it } from "@effect/vitest";
@@ -96,7 +97,7 @@ const makeUserAuthLayer = (
   );
 };
 
-it.layer(NodeServices.layer)("UserAuthLive", (it) => {
+it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))("UserAuthLive", (it) => {
   it.effect("reports disabled state when GitHub OAuth credentials are absent", () =>
     Effect.gen(function* () {
       const userAuth = yield* UserAuth;

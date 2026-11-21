@@ -50,204 +50,203 @@ function failureDetail(cause: unknown, fallback: string): string {
   return (trimmed.length > 0 ? trimmed : fallback).slice(0, 2_000);
 }
 
-const makeProjectTriggerScheduler = (options?: ProjectTriggerSchedulerLiveOptions) =>
-  Effect.gen(function* () {
-    const repository = yield* ProjectTriggerRepository;
-    const dispatcher = yield* ServerOrchestrationDispatcher;
+const makeProjectTriggerScheduler = Effect.fn("execute")(function* (
+  options?: ProjectTriggerSchedulerLiveOptions,
+) {
+  const repository = yield* ProjectTriggerRepository;
+  const dispatcher = yield* ServerOrchestrationDispatcher;
 
-    const pollIntervalMs = Math.max(1, options?.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS);
-    const claimTtlMs = Math.max(1, options?.claimTtlMs ?? DEFAULT_CLAIM_TTL_MS);
-    const triggerBatchSize = Math.max(1, options?.triggerBatchSize ?? DEFAULT_TRIGGER_BATCH_SIZE);
-    const runBatchSize = Math.max(1, options?.runBatchSize ?? DEFAULT_RUN_BATCH_SIZE);
-    const dispatchConcurrency = Math.max(
-      1,
-      options?.dispatchConcurrency ?? DEFAULT_DISPATCH_CONCURRENCY,
-    );
+  const pollIntervalMs = Math.max(1, options?.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS);
+  const claimTtlMs = Math.max(1, options?.claimTtlMs ?? DEFAULT_CLAIM_TTL_MS);
+  const triggerBatchSize = Math.max(1, options?.triggerBatchSize ?? DEFAULT_TRIGGER_BATCH_SIZE);
+  const runBatchSize = Math.max(1, options?.runBatchSize ?? DEFAULT_RUN_BATCH_SIZE);
+  const dispatchConcurrency = Math.max(
+    1,
+    options?.dispatchConcurrency ?? DEFAULT_DISPATCH_CONCURRENCY,
+  );
 
-    const scheduleClaimedTrigger = Effect.fn("ProjectTriggerScheduler.scheduleClaimedTrigger")(
-      function* (trigger: ProjectTriggerRow, scheduledAt: string) {
-        if (trigger.nextFireAt === null || trigger.scheduleClaimedAt === null) {
-          return "lost-claim";
-        }
+  const scheduleClaimedTrigger = Effect.fn("ProjectTriggerScheduler.scheduleClaimedTrigger")(
+    function* (trigger: ProjectTriggerRow, scheduledAt: string) {
+      if (trigger.nextFireAt === null || trigger.scheduleClaimedAt === null) {
+        return "lost-claim";
+      }
 
-        const fireAt = trigger.nextFireAt;
-        // A thread recurrence gets at most one catch-up occurrence after downtime.
-        // Advancing from the current tick prevents a backlog of every missed cron slot.
-        const nextFireCursor = trigger.targetThreadId === null ? fireAt : scheduledAt;
-        const nextFireAtExit = yield* Effect.exit(
-          computeProjectTriggerNextFireAt(trigger, nextFireCursor, "after-fire"),
+      const fireAt = trigger.nextFireAt;
+      // A thread recurrence gets at most one catch-up occurrence after downtime.
+      // Advancing from the current tick prevents a backlog of every missed cron slot.
+      const nextFireCursor = trigger.targetThreadId === null ? fireAt : scheduledAt;
+      const nextFireAtExit = yield* Effect.exit(
+        computeProjectTriggerNextFireAt(trigger, nextFireCursor, "after-fire"),
+      );
+      if (Exit.isFailure(nextFireAtExit)) {
+        const detail = failureDetail(
+          nextFireAtExit.cause,
+          "Failed to compute the next trigger fire time.",
         );
-        if (Exit.isFailure(nextFireAtExit)) {
-          const detail = failureDetail(
-            nextFireAtExit.cause,
-            "Failed to compute the next trigger fire time.",
-          );
-          yield* repository
-            .markTriggerScheduleFailed({
-              triggerId: trigger.triggerId,
-              claimedAt: trigger.scheduleClaimedAt,
-              failedAt: scheduledAt,
-              failureDetail: detail,
-            })
-            .pipe(Effect.ignoreCause({ log: true }));
-          yield* Effect.logWarning("project trigger schedule failed", {
+        yield* repository
+          .markTriggerScheduleFailed({
             triggerId: trigger.triggerId,
-            detail,
-          });
-          return "schedule-failed";
-        }
-
-        const scheduled = yield* repository.scheduleRunForClaimedTrigger({
+            claimedAt: trigger.scheduleClaimedAt,
+            failedAt: scheduledAt,
+            failureDetail: detail,
+          })
+          .pipe(Effect.ignoreCause({ log: true }));
+        yield* Effect.logWarning("project trigger schedule failed", {
           triggerId: trigger.triggerId,
-          claimedAt: trigger.scheduleClaimedAt,
-          fireAt,
-          scheduledAt,
-          nextFireAt: nextFireAtExit.value,
-          run: makeProjectTriggerRunRow({
-            trigger,
-            fireAt,
-            queuedAt: scheduledAt,
-          }),
+          detail,
         });
-        return scheduled ? "scheduled" : "lost-claim";
-      },
+        return "schedule-failed";
+      }
+
+      const scheduled = yield* repository.scheduleRunForClaimedTrigger({
+        triggerId: trigger.triggerId,
+        claimedAt: trigger.scheduleClaimedAt,
+        fireAt,
+        scheduledAt,
+        nextFireAt: nextFireAtExit.value,
+        run: makeProjectTriggerRunRow({
+          trigger,
+          fireAt,
+          queuedAt: scheduledAt,
+        }),
+      });
+      return scheduled ? "scheduled" : "lost-claim";
+    },
+  );
+
+  const skipRun = (run: ProjectTriggerRunRow, skippedAt: string, skipReason: string) =>
+    repository
+      .markRunSkipped({
+        runId: run.runId,
+        skippedAt,
+        skipReason,
+      })
+      .pipe(Effect.map((marked) => (marked ? "skipped" : "lost-claim")));
+
+  const dispatchClaimedRun = Effect.fn("ProjectTriggerScheduler.dispatchClaimedRun")(function* (
+    run: ProjectTriggerRunRow,
+    dispatchedAt: string,
+  ) {
+    yield* repository.disableInactiveThreadTargetTriggers({ now: dispatchedAt });
+    const trigger = yield* repository.getTriggerById({ triggerId: run.triggerId });
+    if (Option.isNone(trigger)) {
+      return yield* skipRun(run, dispatchedAt, "Trigger no longer exists.");
+    }
+    if (!trigger.value.enabled || trigger.value.deletedAt !== null) {
+      return yield* skipRun(run, dispatchedAt, "Trigger is disabled or deleted.");
+    }
+
+    return yield* dispatcher
+      .dispatch(run.command, {
+        cleanupCreatedThreadOnFailure: false,
+        ...(trigger.value.createdBy === null ? {} : { origin: { user: trigger.value.createdBy } }),
+      })
+      .pipe(
+        Effect.matchEffect({
+          onFailure: (error) =>
+            repository
+              .markRunFailed({
+                runId: run.runId,
+                failedAt: dispatchedAt,
+                failureDetail: failureDetail(error, "Trigger dispatch failed."),
+              })
+              .pipe(Effect.map((marked) => (marked ? "failed" : "lost-claim"))),
+          onSuccess: (result) =>
+            repository
+              .markRunDispatched({
+                runId: run.runId,
+                dispatchedAt,
+                resultSequence: result.sequence,
+              })
+              .pipe(Effect.map((marked) => (marked ? "dispatched" : "lost-claim"))),
+        }),
+      );
+  });
+
+  const runTick = Effect.gen(function* () {
+    const now = yield* nowIso;
+    const claimExpiresAt = addMillisIso(now, claimTtlMs);
+
+    yield* repository.disableInactiveThreadTargetTriggers({ now });
+    const recoveredTriggerClaims = yield* repository.recoverExpiredTriggerClaims({ now });
+    const recoveredRunClaims = yield* repository.recoverExpiredRunClaims({ now });
+
+    const claimedTriggers = yield* repository.claimDueTriggers({
+      now,
+      claimExpiresAt,
+      limit: triggerBatchSize,
+    });
+    const scheduleOutcomes = yield* Effect.forEach(
+      claimedTriggers,
+      (trigger) => scheduleClaimedTrigger(trigger, now),
+      { concurrency: 1 },
     );
 
-    const skipRun = (run: ProjectTriggerRunRow, skippedAt: string, skipReason: string) =>
-      repository
-        .markRunSkipped({
-          runId: run.runId,
-          skippedAt,
-          skipReason,
-        })
-        .pipe(Effect.map((marked) => (marked ? "skipped" : "lost-claim")));
-
-    const dispatchClaimedRun = Effect.fn("ProjectTriggerScheduler.dispatchClaimedRun")(function* (
-      run: ProjectTriggerRunRow,
-      dispatchedAt: string,
-    ) {
-      yield* repository.disableInactiveThreadTargetTriggers({ now: dispatchedAt });
-      const trigger = yield* repository.getTriggerById({ triggerId: run.triggerId });
-      if (Option.isNone(trigger)) {
-        return yield* skipRun(run, dispatchedAt, "Trigger no longer exists.");
-      }
-      if (!trigger.value.enabled || trigger.value.deletedAt !== null) {
-        return yield* skipRun(run, dispatchedAt, "Trigger is disabled or deleted.");
-      }
-
-      return yield* dispatcher
-        .dispatch(run.command, {
-          cleanupCreatedThreadOnFailure: false,
-          ...(trigger.value.createdBy === null
-            ? {}
-            : { origin: { user: trigger.value.createdBy } }),
-        })
-        .pipe(
-          Effect.matchEffect({
-            onFailure: (error) =>
-              repository
-                .markRunFailed({
-                  runId: run.runId,
-                  failedAt: dispatchedAt,
-                  failureDetail: failureDetail(error, "Trigger dispatch failed."),
-                })
-                .pipe(Effect.map((marked) => (marked ? "failed" : "lost-claim"))),
-            onSuccess: (result) =>
-              repository
-                .markRunDispatched({
-                  runId: run.runId,
-                  dispatchedAt,
-                  resultSequence: result.sequence,
-                })
-                .pipe(Effect.map((marked) => (marked ? "dispatched" : "lost-claim"))),
-          }),
-        );
+    const claimedRuns = yield* repository.claimDueRuns({
+      now,
+      claimExpiresAt,
+      limit: runBatchSize,
     });
-
-    const runTick = Effect.gen(function* () {
-      const now = yield* nowIso;
-      const claimExpiresAt = addMillisIso(now, claimTtlMs);
-
-      yield* repository.disableInactiveThreadTargetTriggers({ now });
-      const recoveredTriggerClaims = yield* repository.recoverExpiredTriggerClaims({ now });
-      const recoveredRunClaims = yield* repository.recoverExpiredRunClaims({ now });
-
-      const claimedTriggers = yield* repository.claimDueTriggers({
-        now,
-        claimExpiresAt,
-        limit: triggerBatchSize,
-      });
-      const scheduleOutcomes = yield* Effect.forEach(
-        claimedTriggers,
-        (trigger) => scheduleClaimedTrigger(trigger, now),
-        { concurrency: 1 },
-      );
-
-      const claimedRuns = yield* repository.claimDueRuns({
-        now,
-        claimExpiresAt,
-        limit: runBatchSize,
-      });
-      // A restored queue can have several overdue jobs for one thread. Keep
-      // their claim order while allowing unrelated conversations to proceed.
-      const runsByThread = new Map<string, ProjectTriggerRunRow[]>();
-      for (const run of claimedRuns) {
-        const group = runsByThread.get(run.threadId) ?? [];
-        group.push(run);
-        runsByThread.set(run.threadId, group);
-      }
-      const dispatchOutcomes = (yield* Effect.forEach(
-        [...runsByThread.values()],
-        (runs) => Effect.forEach(runs, (run) => dispatchClaimedRun(run, now), { concurrency: 1 }),
-        { concurrency: dispatchConcurrency },
-      )).flat();
-
-      return {
-        recoveredTriggerClaims,
-        recoveredRunClaims,
-        claimedTriggers: claimedTriggers.length,
-        scheduledRuns: countValues(scheduleOutcomes, "scheduled"),
-        scheduleFailures: countValues(scheduleOutcomes, "schedule-failed"),
-        claimedRuns: claimedRuns.length,
-        dispatchedRuns: countValues(dispatchOutcomes, "dispatched"),
-        failedRuns: countValues(dispatchOutcomes, "failed"),
-        skippedRuns: countValues(dispatchOutcomes, "skipped"),
-      } satisfies ProjectTriggerSchedulerTickResult;
-    });
-
-    const emptyTickResult: ProjectTriggerSchedulerTickResult = {
-      recoveredTriggerClaims: 0,
-      recoveredRunClaims: 0,
-      claimedTriggers: 0,
-      scheduledRuns: 0,
-      scheduleFailures: 0,
-      claimedRuns: 0,
-      dispatchedRuns: 0,
-      failedRuns: 0,
-      skippedRuns: 0,
-    };
-
-    const tick = runTick.pipe(
-      Effect.catch((cause) =>
-        Effect.logWarning("project trigger scheduler tick failed", {
-          detail: failureDetail(cause, "Unexpected scheduler failure."),
-        }).pipe(Effect.as(emptyTickResult)),
-      ),
-    );
-
-    const start: ProjectTriggerSchedulerShape["start"] = () =>
-      tick.pipe(
-        Effect.repeat(Schedule.spaced(Duration.millis(pollIntervalMs))),
-        Effect.asVoid,
-        Effect.forkScoped,
-        Effect.asVoid,
-      );
+    // A restored queue can have several overdue jobs for one thread. Keep
+    // their claim order while allowing unrelated conversations to proceed.
+    const runsByThread = new Map<string, ProjectTriggerRunRow[]>();
+    for (const run of claimedRuns) {
+      const group = runsByThread.get(run.threadId) ?? [];
+      group.push(run);
+      runsByThread.set(run.threadId, group);
+    }
+    const dispatchOutcomes = (yield* Effect.forEach(
+      [...runsByThread.values()],
+      (runs) => Effect.forEach(runs, (run) => dispatchClaimedRun(run, now), { concurrency: 1 }),
+      { concurrency: dispatchConcurrency },
+    )).flat();
 
     return {
-      tick,
-      start,
-    } satisfies ProjectTriggerSchedulerShape;
+      recoveredTriggerClaims,
+      recoveredRunClaims,
+      claimedTriggers: claimedTriggers.length,
+      scheduledRuns: countValues(scheduleOutcomes, "scheduled"),
+      scheduleFailures: countValues(scheduleOutcomes, "schedule-failed"),
+      claimedRuns: claimedRuns.length,
+      dispatchedRuns: countValues(dispatchOutcomes, "dispatched"),
+      failedRuns: countValues(dispatchOutcomes, "failed"),
+      skippedRuns: countValues(dispatchOutcomes, "skipped"),
+    } satisfies ProjectTriggerSchedulerTickResult;
   });
+
+  const emptyTickResult: ProjectTriggerSchedulerTickResult = {
+    recoveredTriggerClaims: 0,
+    recoveredRunClaims: 0,
+    claimedTriggers: 0,
+    scheduledRuns: 0,
+    scheduleFailures: 0,
+    claimedRuns: 0,
+    dispatchedRuns: 0,
+    failedRuns: 0,
+    skippedRuns: 0,
+  };
+
+  const tick = runTick.pipe(
+    Effect.catch((cause) =>
+      Effect.logWarning("project trigger scheduler tick failed", {
+        detail: failureDetail(cause, "Unexpected scheduler failure."),
+      }).pipe(Effect.as(emptyTickResult)),
+    ),
+  );
+
+  const start: ProjectTriggerSchedulerShape["start"] = () =>
+    tick.pipe(
+      Effect.repeat(Schedule.spaced(Duration.millis(pollIntervalMs))),
+      Effect.asVoid,
+      Effect.forkScoped,
+      Effect.asVoid,
+    );
+
+  return {
+    tick,
+    start,
+  } satisfies ProjectTriggerSchedulerShape;
+});
 
 export const ProjectTriggerSchedulerLive = (options?: ProjectTriggerSchedulerLiveOptions) =>
   Layer.effect(ProjectTriggerScheduler, makeProjectTriggerScheduler(options));

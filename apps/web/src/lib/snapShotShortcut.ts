@@ -23,7 +23,6 @@ const DESKTOP_KEY_ALIASES: Readonly<Record<string, string>> = {
   minus: "-",
 };
 
-/** Portal labels are descriptions, not a keybinding protocol. Only parse known key notation. */
 export function parseDesktopSnapShotShortcut(label: string): KeybindingShortcut | null {
   const text = label.trim().replace(/^Press\s+/i, "");
   if (!text) return null;
@@ -64,6 +63,7 @@ function modifierKeyLabel(modifier: SnapShotModifier, platform: string): string 
     if (modifier === "control") return "⌃";
     return "⌥";
   }
+  // oxlint-disable-next-line t3code/no-untranslated-copy -- key names stay English
   if (modifier === "meta") return isWindowsPlatform(platform) ? "⊞" : "Super";
   return modifier === "control" ? "Ctrl" : "Alt";
 }

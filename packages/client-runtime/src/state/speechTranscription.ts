@@ -9,7 +9,7 @@ import * as Schema from "effect/Schema";
 
 import { RemoteEnvironmentAuthorization } from "../authorization/service.ts";
 import type { PreparedConnection } from "../connection/model.ts";
-import { environmentEndpointUrl } from "../environment/endpoint.ts";
+
 import { ManagedRelayDpopSigner } from "../relay/managedRelay.ts";
 import type { RemoteEnvironmentRequestError } from "../rpc/http.ts";
 import { executeAuthenticatedEnvironmentHttpRequest } from "./environmentHttpAuth.ts";
@@ -47,7 +47,7 @@ export const transcribeEnvironmentSpeech = Effect.fn(
     signer,
     remoteAuthorization,
     method: "POST",
-    url: (httpBaseUrl) => environmentEndpointUrl(httpBaseUrl, "/api/speech/transcribe"),
+    url: (urls) => urls.transcribe(),
     timeoutMs: SPEECH_TRANSCRIPTION_TIMEOUT_MS,
     request: ({ client, headers }) => client.transcribe({ headers, payload }),
   });
@@ -70,7 +70,7 @@ export const fetchSpeechTranscriptionApiKeyStatus = Effect.fn(
     signer,
     remoteAuthorization,
     method: "GET",
-    url: (httpBaseUrl) => environmentEndpointUrl(httpBaseUrl, "/api/speech/api-key"),
+    url: (urls) => urls.apiKeyStatus(),
     timeoutMs: SPEECH_TRANSCRIPTION_SETTINGS_TIMEOUT_MS,
     request: ({ client, headers }) => client.apiKeyStatus({ headers }),
   });
@@ -90,7 +90,7 @@ export const updateSpeechTranscriptionApiKey = Effect.fn(
     signer,
     remoteAuthorization,
     method: "PUT",
-    url: (httpBaseUrl) => environmentEndpointUrl(httpBaseUrl, "/api/speech/api-key"),
+    url: (urls) => urls.apiKeyStatus(),
     timeoutMs: SPEECH_TRANSCRIPTION_SETTINGS_TIMEOUT_MS,
     request: ({ client, headers }) =>
       client.updateApiKey({

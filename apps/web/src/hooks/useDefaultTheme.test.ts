@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { defaultThemeGeneration, defaultThemeToApply } from "./useDefaultTheme";
+import { defaultThemeGeneration, defaultThemeToApply, themeSetsOwnMode } from "./useDefaultTheme";
 
 const BASE = {
   environmentId: "env-1",
@@ -11,19 +11,11 @@ const BASE = {
 } as const;
 
 describe("default theme adoption", () => {
-  it("applies a set this client has not seen", () => {
-    expect(defaultThemeToApply(BASE)).toBe(
-      defaultThemeGeneration(BASE.defaultTheme, BASE.defaultThemeSetAt),
-    );
-  });
-
   it("does not replay a generation it already applied", () => {
     const generation = defaultThemeGeneration(BASE.defaultTheme, BASE.defaultThemeSetAt);
     expect(defaultThemeToApply({ ...BASE, appliedGeneration: generation })).toBe(null);
   });
 
-  // `t3 theme set` of a theme this client already wears must still act, which
-  // is why the generation carries the set time and not just the value.
   it("applies the same theme again when the environment re-sets it", () => {
     const applied = defaultThemeGeneration(BASE.defaultTheme, "2026-08-28T00:00:00.000Z");
     const next = defaultThemeToApply({
@@ -35,24 +27,18 @@ describe("default theme adoption", () => {
     expect(next).not.toBe(applied);
   });
 
-  // Environments provisioned before the timestamp existed.
-  it("falls back to once-per-value without a set time", () => {
-    const generation = defaultThemeGeneration("nightfall", "");
-    expect(defaultThemeToApply({ ...BASE, defaultThemeSetAt: "", appliedGeneration: null })).toBe(
-      generation,
-    );
-    expect(
-      defaultThemeToApply({ ...BASE, defaultThemeSetAt: "", appliedGeneration: generation }),
-    ).toBe(null);
+  it("applies the stock theme only when the environment set it", () => {
+    expect(defaultThemeToApply({ ...BASE, defaultTheme: "", defaultThemeSetAt: "" })).toBe(null);
+    expect(defaultThemeToApply({ ...BASE, defaultTheme: "" })).not.toBe(null);
   });
+});
 
-  // The setting and the palette it names arrive independently.
-  it("waits for a theme that has not arrived yet", () => {
-    expect(defaultThemeToApply({ ...BASE, resolves: false })).toBe(null);
-  });
-
-  it("leaves a client alone with no environment or no theme set", () => {
-    expect(defaultThemeToApply({ ...BASE, environmentId: null })).toBe(null);
-    expect(defaultThemeToApply({ ...BASE, defaultTheme: "" })).toBe(null);
-  });
+it("lets a theme set its own mode only when no mode was set with it or after it", () => {
+  const theme = "2026-11-13T10:00:00.000Z";
+  const set = (defaultAppearance: string, defaultAppearanceSetAt: string) =>
+    themeSetsOwnMode({ defaultThemeSetAt: theme, defaultAppearance, defaultAppearanceSetAt });
+  expect(set("", "")).toBe(true);
+  expect(set("dark", "2026-11-13T09:00:00.000Z")).toBe(true);
+  expect(set("dark", theme)).toBe(false);
+  expect(set("light", "2026-11-13T11:00:00.000Z")).toBe(false);
 });

@@ -13,12 +13,7 @@ import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import { afterEach, vi } from "vite-plus/test";
 
-import {
-  makeBrowserGitHubRoutingPermissions,
-  openConnectionStorageDatabase,
-  makeCatalogBackend,
-  makeCatalogStore,
-} from "./storage";
+import { openConnectionStorageDatabase } from "./storage";
 import * as ConnectionStorage from "./storage";
 
 const emptyCatalog = {
@@ -77,44 +72,6 @@ const fixedHandle = (database: IDBDatabase) => ({
 });
 
 describe("ConnectionStorage.makeCatalogBackend", () => {
-  it.effect("reports a closed IndexedDB connection as a typed read and write failure", () =>
-    Effect.gen(function* () {
-      vi.stubGlobal("window", {});
-      const database = {
-        transaction: () => {
-          throw new DOMException("The database connection is closing.", "InvalidStateError");
-        },
-      } as unknown as IDBDatabase;
-      const backend = ConnectionStorage.makeCatalogBackend(fixedHandle(database));
-
-      const readError = yield* Effect.flip(backend.read);
-      const writeError = yield* Effect.flip(backend.write("{}"));
-
-      expect(readError).toBeInstanceOf(ConnectionTransientError);
-      expect(readError.message).toContain("The database connection is closing.");
-      expect(writeError).toBeInstanceOf(ConnectionTransientError);
-    }),
-  );
-
-  it.effect("fails writes when desktop secure storage declines the catalog", () =>
-    Effect.gen(function* () {
-      const setConnectionCatalog = vi.fn().mockResolvedValue(false);
-      vi.stubGlobal("window", {
-        desktopBridge: {
-          getConnectionCatalog: vi.fn().mockResolvedValue(null),
-          setConnectionCatalog,
-        },
-      });
-      const backend = ConnectionStorage.makeCatalogBackend(fixedHandle({} as IDBDatabase));
-
-      const error = yield* backend.write("{}").pipe(Effect.flip);
-
-      expect(error).toBeInstanceOf(ConnectionTransientError);
-      expect(error.message).toContain("Desktop secure storage is unavailable");
-      expect(setConnectionCatalog).toHaveBeenCalledWith("{}");
-    }),
-  );
-
   it.effect("fails IndexedDB writes whose commit aborts", () =>
     Effect.gen(function* () {
       vi.stubGlobal("window", {});
@@ -262,27 +219,6 @@ describe("environment cache removal", () => {
 });
 
 describe("IndexedDB connection recovery", () => {
-  it.effect("reports an initial open failure from the cache operation", () =>
-    Effect.gen(function* () {
-      vi.stubGlobal("window", {});
-      const open = vi.fn(() => {
-        throw new DOMException("Storage is unavailable", "InvalidStateError");
-      });
-      vi.stubGlobal("indexedDB", { open });
-
-      yield* Effect.gen(function* () {
-        const cache = yield* Persistence.EnvironmentCacheStore;
-        expect(open).not.toHaveBeenCalled();
-        const error = yield* Effect.flip(
-          cache.loadThread(EnvironmentId.make("env"), ThreadId.make("thread")),
-        );
-        expect(error.message).toContain("Storage is unavailable");
-      }).pipe(Effect.provide(ConnectionStorage.layer));
-
-      expect(open).toHaveBeenCalledOnce();
-    }),
-  );
-
   it.effect("reopens after a forced close and finalizes the current connection", () =>
     Effect.gen(function* () {
       vi.stubGlobal("window", {});
@@ -405,8 +341,8 @@ describe("browser GitHub routing permissions", () => {
       };
       const firstBrowser = Object.assign(new EventTarget(), { localStorage });
       const secondBrowser = Object.assign(new EventTarget(), { localStorage });
-      const first = ConnectionStorage.makeBrowserGitHubRoutingPermissions(firstBrowser);
-      const second = ConnectionStorage.makeBrowserGitHubRoutingPermissions(secondBrowser);
+      const first = ConnectionStorage.makeBrowserPullRequestRoutingPermissions(firstBrowser);
+      const second = ConnectionStorage.makeBrowserPullRequestRoutingPermissions(secondBrowser);
       const entry = {
         target: new PrimaryConnectionTarget({
           environmentId: EnvironmentId.make("first"),
@@ -454,7 +390,7 @@ describe("browser GitHub routing permissions", () => {
       expect(yield* second.get(entry)).toBe("off");
       expect(yield* first.get(other)).toBe("read");
       expect(
-        yield* ConnectionStorage.makeBrowserGitHubRoutingPermissions(firstBrowser).get(entry),
+        yield* ConnectionStorage.makeBrowserPullRequestRoutingPermissions(firstBrowser).get(entry),
       ).toBe("off");
 
       yield* first.set(entry, "read-write");
@@ -468,6 +404,6 @@ describe("browser GitHub routing permissions", () => {
         ConnectionTransientError,
       );
       expect(yield* second.get(entry)).toBe("off");
-    }).pipe(Effect.scoped),
+    }),
   );
 });

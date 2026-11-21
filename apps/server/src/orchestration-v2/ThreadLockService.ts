@@ -1,9 +1,9 @@
 // @effect-diagnostics-next-line nodeBuiltinImport:off -- Effect's Crypto has no scrypt or timingSafeEqual; retain the stored passcode format.
 import * as NodeCrypto from "node:crypto";
 import * as NodeUtil from "node:util";
-import type { ThreadId } from "@t3tools/contracts";
+import { ThreadId } from "@t3tools/contracts";
 import * as Context from "effect/Context";
-import * as Data from "effect/Data";
+
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
@@ -24,10 +24,10 @@ const StoredThreadLockJson = Schema.fromJsonString(StoredThreadLock);
 const decodeStoredThreadLock = Schema.decodeUnknownEffect(StoredThreadLockJson);
 const encodeStoredThreadLock = Schema.encodeEffect(StoredThreadLockJson);
 
-class ThreadLockStorageError extends Data.TaggedError("ThreadLockStorageError")<{
-  readonly message: string;
-  readonly cause?: unknown;
-}> {}
+class ThreadLockStorageError extends Schema.TaggedError<ThreadLockStorageError>()(
+  "ThreadLockStorageError",
+  { message: Schema.String, cause: Schema.optionalKey(Schema.Unknown) },
+) {}
 
 const secretName = (threadId: ThreadId) =>
   `thread-lock-${Buffer.from(String(threadId)).toString("base64url")}`;
@@ -61,8 +61,8 @@ export class ThreadLockService extends Context.Reference<ThreadLockServiceShape>
     defaultValue: () => ({
       setPasscode: () =>
         Effect.fail(new ThreadLockStorageError({ message: "Thread lock storage is unavailable." })),
-      authorize: () => Effect.succeed(false),
-      remove: () => Effect.succeed(false),
+      authorize: Effect.fn("ThreadLockService.authorize")(() => Effect.succeed(false)),
+      remove: Effect.fn("ThreadLockService.remove")(() => Effect.succeed(false)),
       isAuthorized: () => false,
       revoke: () => undefined,
     }),
@@ -96,75 +96,79 @@ const make = Effect.gen(function* () {
         }),
       ),
     );
-  const verify = (threadId: ThreadId, passcode: string) =>
-    Effect.gen(function* () {
-      const stored = yield* read(threadId);
-      if (!stored) return false;
-      const expected = Buffer.from(stored.hash, "base64url");
-      const actual = yield* derive(passcode, Buffer.from(stored.salt, "base64url"));
-      return actual.length === expected.length && NodeCrypto.timingSafeEqual(actual, expected);
-    });
+  const verify = Effect.fn("execute")(function* (threadId: ThreadId, passcode: string) {
+    const stored = yield* read(threadId);
+    if (!stored) return false;
+    const expected = Buffer.from(stored.hash, "base64url");
+    const actual = yield* derive(passcode, Buffer.from(stored.salt, "base64url"));
+    return actual.length === expected.length && NodeCrypto.timingSafeEqual(actual, expected);
+  });
   const revoke = (threadId: ThreadId) => {
     for (const entries of authorizedBySession.values()) entries.delete(String(threadId));
   };
 
   return ThreadLockService.of({
-    setPasscode: (threadId, passcode) =>
-      Effect.gen(function* () {
-        const salt = NodeCrypto.randomBytes(16);
-        const hash = yield* derive(passcode, salt);
-        const record: StoredThreadLock = {
-          version: 1,
-          salt: salt.toString("base64url"),
-          hash: hash.toString("base64url"),
-        };
-        const encoded = yield* encodeStoredThreadLock(record).pipe(
+    setPasscode: Effect.fn("execute")(function* (threadId, passcode) {
+      const salt = NodeCrypto.randomBytes(16);
+      const hash = yield* derive(passcode, salt);
+      const record: StoredThreadLock = {
+        version: 1,
+        salt: salt.toString("base64url"),
+        hash: hash.toString("base64url"),
+      };
+      const encoded = yield* encodeStoredThreadLock(record).pipe(
+        Effect.mapError(
+          (cause) =>
+            new ThreadLockStorageError({ message: "Could not encode thread lock.", cause }),
+        ),
+      );
+      yield* secrets
+        .set(secretName(threadId), encoder.encode(encoded))
+        .pipe(
           Effect.mapError(
             (cause) =>
-              new ThreadLockStorageError({ message: "Could not encode thread lock.", cause }),
+              new ThreadLockStorageError({ message: "Could not save thread lock.", cause }),
           ),
         );
-        yield* secrets
-          .set(secretName(threadId), encoder.encode(encoded))
-          .pipe(
-            Effect.mapError(
-              (cause) =>
-                new ThreadLockStorageError({ message: "Could not save thread lock.", cause }),
-            ),
-          );
-        revoke(threadId);
-      }),
-    authorize: (threadId, sessionId, passcode) =>
+      revoke(threadId);
+    }),
+    authorize: Effect.fn("ThreadLockService.authorize")((threadId, sessionId, passcode) =>
       verify(threadId, passcode).pipe(
-        Effect.tap((valid) =>
-          Effect.sync(() => {
-            if (!valid) return;
-            const entries = authorizedBySession.get(sessionId) ?? new Set<string>();
-            entries.add(String(threadId));
-            authorizedBySession.set(sessionId, entries);
-          }),
+        Effect.tap(
+          Effect.fn("ThreadLockService.authorize")((valid) =>
+            Effect.sync(() => {
+              if (!valid) return;
+              const entries = authorizedBySession.get(sessionId) ?? new Set<string>();
+              entries.add(String(threadId));
+              authorizedBySession.set(sessionId, entries);
+            }),
+          ),
         ),
       ),
-    remove: (threadId, sessionId, passcode) =>
+    ),
+    remove: Effect.fn("ThreadLockService.remove")((threadId, sessionId, passcode) =>
       verify(threadId, passcode).pipe(
-        Effect.tap((valid) =>
-          valid
-            ? secrets.remove(secretName(threadId)).pipe(
-                Effect.mapError(
-                  (cause) =>
-                    new ThreadLockStorageError({
-                      message: "Could not remove thread lock.",
-                      cause,
-                    }),
-                ),
-                Effect.tap(() => Effect.sync(() => revoke(threadId))),
-              )
-            : Effect.void,
+        Effect.tap(
+          Effect.fn("ThreadLockService.remove")((valid) =>
+            valid
+              ? secrets.remove(secretName(threadId)).pipe(
+                  Effect.mapError(
+                    (cause) =>
+                      new ThreadLockStorageError({
+                        message: "Could not remove thread lock.",
+                        cause,
+                      }),
+                  ),
+                  Effect.tap(() => Effect.sync(() => revoke(threadId))),
+                )
+              : Effect.void,
+          ),
         ),
         Effect.tap(() =>
           Effect.sync(() => authorizedBySession.get(sessionId)?.delete(String(threadId))),
         ),
       ),
+    ),
     isAuthorized: (threadId, sessionId) =>
       authorizedBySession.get(sessionId)?.has(String(threadId)) === true,
     revoke,
@@ -173,10 +177,10 @@ const make = Effect.gen(function* () {
 
 export const ThreadLockServiceLive = Layer.effect(ThreadLockService, make);
 
-export class ThreadLockedError extends Data.TaggedError("ThreadLockedError")<{
-  readonly threadId: ThreadId;
-  readonly message: string;
-}> {}
+export class ThreadLockedError extends Schema.TaggedError<ThreadLockedError>()(
+  "ThreadLockedError",
+  { threadId: ThreadId, message: Schema.String },
+) {}
 
 export const requireThreadLockAccess = Effect.fn("ThreadLockService.requireAccess")(function* (
   thread: { readonly threadId: ThreadId; readonly locked?: boolean | undefined },

@@ -35,7 +35,8 @@ describe("managed storage", () => {
     await NodeFSP.mkdir(recentPath);
     await NodeFSP.writeFile(NodePath.join(recentPath, "pack"), "new data");
     await NodeFSP.writeFile(outsidePath, "keep");
-    const now = Date.now();
+    const now = 1_800_000_000_000;
+    await NodeFSP.utimes(recentPath, new Date(now), new Date(now));
     const old = new Date(now - 10 * 60 * 60 * 1_000);
     await NodeFSP.utimes(NodePath.join(oldPath, "pack"), old, old);
     await NodeFSP.utimes(oldPath, old, old);
@@ -85,9 +86,10 @@ describe("managed storage", () => {
     await NodeFSP.writeFile(NodePath.join(outside, "keep.txt"), "keep");
     await NodeFSP.symlink(outside, linked, "junction");
 
+    await NodeFSP.lutimes(linked, new Date(1_800_000_000_000), new Date(1_800_000_000_000));
     await pruneManagedScratch({
       root,
-      nowMs: Date.now() + 1_000,
+      nowMs: 1_800_000_001_000,
       maxAgeMs: 0,
       maxBytes: Number.MAX_SAFE_INTEGER,
     });

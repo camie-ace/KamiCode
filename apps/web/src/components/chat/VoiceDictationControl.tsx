@@ -1,10 +1,16 @@
+import * as Option from "effect/Option";
+import { useEnvironment } from "../../state/environments";
+import { usePreparedConnection } from "../../state/session";
 import { runAtomCommand, squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 import type { EnvironmentId } from "@t3tools/contracts";
 import { LoaderCircleIcon, MicIcon, SquareIcon, XIcon } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import { appAtomRegistry } from "../../rpc/atomRegistry";
-import { transcribeSpeechCommand } from "../../state/speechTranscription";
+import {
+  fetchSpeechTranscriptionApiKeyStatusCommand,
+  transcribeSpeechCommand,
+} from "../../state/speechTranscription";
 import { Button } from "../ui/button";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { toastManager } from "../ui/toast";
@@ -68,7 +74,36 @@ function waitForSegmentRetry(): Promise<void> {
   return new Promise((resolve) => window.setTimeout(resolve, SEGMENT_RETRY_DELAY_MS));
 }
 
-export function VoiceDictationControl(props: {
+/** Retains existing transcription credentials until the user chooses a new Voice destination. */
+export function useLegacyVoiceTranscription(environmentId: EnvironmentId) {
+  const environment = useEnvironment(environmentId);
+  const prepared = Option.getOrNull(usePreparedConnection(environmentId));
+  const supported =
+    environment?.serverConfig?.environment.capabilities.speechTranscription === true;
+  const [status, setStatus] = useState<{ prepared: typeof prepared; configured: boolean } | null>(
+    null,
+  );
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- Fetch the transcription capability for the current server connection.
+  useEffect(() => {
+    if (!supported || prepared === null) return;
+    let current = true;
+    void runAtomCommand(
+      appAtomRegistry,
+      fetchSpeechTranscriptionApiKeyStatusCommand,
+      { environmentId },
+      { reportFailure: false },
+    ).then((result) => {
+      if (current)
+        setStatus({ prepared, configured: result._tag === "Success" && result.value.configured });
+    });
+    return () => {
+      current = false;
+    };
+  }, [environmentId, prepared, supported]);
+  return supported && prepared !== null && status?.prepared === prepared && status.configured;
+}
+
+function VoiceDictationSession(props: {
   readonly environmentId: EnvironmentId;
   readonly disabled: boolean;
   readonly onTranscript: (text: string) => void;
@@ -93,17 +128,19 @@ export function VoiceDictationControl(props: {
   const startedAtRef = useRef(0);
   const segmentStartedAtRef = useRef(0);
 
-  environmentIdRef.current = props.environmentId;
-  onTranscriptRef.current = props.onTranscript;
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- Recorder completion must deliver to the latest committed transcript callback.
+  useLayoutEffect(() => {
+    onTranscriptRef.current = props.onTranscript;
+  }, [props.onTranscript]);
 
-  const stopTracks = useCallback(() => {
+  const stopTracks = () => {
     for (const track of streamRef.current?.getTracks() ?? []) {
       track.stop();
     }
     streamRef.current = null;
-  }, []);
+  };
 
-  const resetSession = useCallback(() => {
+  const resetSession = () => {
     recorderRef.current = null;
     stopRequestedRef.current = false;
     discardRequestedRef.current = false;
@@ -112,9 +149,9 @@ export function VoiceDictationControl(props: {
     segmentQueueRef.current?.cancel();
     segmentQueueRef.current = null;
     stopTracks();
-  }, [stopTracks]);
+  };
 
-  const stopCurrentRecorder = useCallback(() => {
+  const stopCurrentRecorder = () => {
     const recorder = recorderRef.current;
     if (recorder !== null && recorder.state !== "inactive") {
       try {
@@ -125,186 +162,174 @@ export function VoiceDictationControl(props: {
       }
     }
     return false;
-  }, []);
+  };
 
-  const abortRecording = useCallback(
-    (generation: number, description: string) => {
-      if (!mountedRef.current || generationRef.current !== generation) return;
-      generationRef.current += 1;
-      discardRequestedRef.current = true;
-      stopCurrentRecorder();
-      resetSession();
-      setElapsedMs(0);
-      setSegmentProgress({ completed: 0, queued: 0 });
-      setState("idle");
-      toastManager.add({
-        type: "error",
-        title: "Microphone recording stopped",
-        description,
-      });
-    },
-    [resetSession, stopCurrentRecorder],
-  );
+  const abortRecording = (generation: number, description: string) => {
+    if (!mountedRef.current || generationRef.current !== generation) return;
+    generationRef.current += 1;
+    discardRequestedRef.current = true;
+    stopCurrentRecorder();
+    resetSession();
+    setElapsedMs(0);
+    setSegmentProgress({ completed: 0, queued: 0 });
+    setState("idle");
+    toastManager.add({
+      type: "error",
+      title: "Microphone recording stopped",
+      description,
+    });
+  };
 
-  const transcribeSegment = useCallback(
-    async (
-      blob: Blob,
-      mimeType: string,
-      sequence: number,
-      generation: number,
-      environmentId: EnvironmentId,
-    ): Promise<string | null> => {
-      const extension = voiceRecordingFileExtension(mimeType);
-      const file = new File(
-        [blob],
-        `voice-prompt-${String(sequence).padStart(2, "0")}.${extension}`,
-        {
-          type: mimeType,
-          lastModified: Date.now(),
-        },
+  const transcribeSegment = async (
+    blob: Blob,
+    mimeType: string,
+    sequence: number,
+    generation: number,
+    environmentId: EnvironmentId,
+  ): Promise<string | null> => {
+    const extension = voiceRecordingFileExtension(mimeType);
+    const file = new File(
+      [blob],
+      `voice-prompt-${String(sequence).padStart(2, "0")}.${extension}`,
+      {
+        type: mimeType,
+        lastModified: Date.now(),
+      },
+    );
+
+    for (let attempt = 0; attempt <= SEGMENT_RETRY_LIMIT; attempt += 1) {
+      const result = await runAtomCommand(
+        appAtomRegistry,
+        transcribeSpeechCommand,
+        { environmentId, file },
+        { reportFailure: false, reportDefect: false },
       );
-
-      for (let attempt = 0; attempt <= SEGMENT_RETRY_LIMIT; attempt += 1) {
-        const result = await runAtomCommand(
-          appAtomRegistry,
-          transcribeSpeechCommand,
-          { environmentId, file },
-          { reportFailure: false, reportDefect: false },
-        );
-        if (
-          !mountedRef.current ||
-          generationRef.current !== generation ||
-          environmentIdRef.current !== environmentId ||
-          discardRequestedRef.current
-        ) {
-          return null;
-        }
-        if (result._tag === "Success") return result.value.text.trim();
-
-        const error = squashAtomCommandFailure(result);
-        if (attempt === SEGMENT_RETRY_LIMIT || !isRetryableTranscriptionError(error)) {
-          throw error;
-        }
-        await waitForSegmentRetry();
-      }
-      return null;
-    },
-    [],
-  );
-
-  const finalizeSession = useCallback(
-    async (generation: number, environmentId: EnvironmentId) => {
-      if (finalizingRef.current) return;
-      finalizingRef.current = true;
-      stopTracks();
-      if (mountedRef.current && generationRef.current === generation) setState("transcribing");
-
-      let failed = false;
-      let error: unknown;
-      let text = "";
-      try {
-        text = (await segmentQueueRef.current?.finish()) ?? "";
-      } catch (cause) {
-        failed = true;
-        error = cause;
-      }
       if (
         !mountedRef.current ||
         generationRef.current !== generation ||
         environmentIdRef.current !== environmentId ||
         discardRequestedRef.current
       ) {
-        return;
+        return null;
       }
+      if (result._tag === "Success") return result.value.text.trim();
 
-      resetSession();
-      setElapsedMs(0);
-      setSegmentProgress({ completed: 0, queued: 0 });
-      setState("idle");
-      if (failed) {
-        toastManager.add({
-          type: "error",
-          title: "Could not transcribe the complete recording",
-          description: transcriptionErrorDescription(error),
-        });
-        return;
+      const error = squashAtomCommandFailure(result);
+      if (attempt === SEGMENT_RETRY_LIMIT || !isRetryableTranscriptionError(error)) {
+        throw error;
       }
-      if (text.length === 0) {
-        toastManager.add({
-          type: "info",
-          title: "No speech detected",
-          description: "Try again and speak a little closer to the microphone.",
-        });
-        return;
-      }
-      onTranscriptRef.current(text);
-    },
-    [resetSession, stopTracks],
-  );
+      await waitForSegmentRetry();
+    }
+    return null;
+  };
 
-  const startRecorderSegment = useCallback(
-    function startRecorderSegment(
-      stream: MediaStream,
-      mimeType: string,
-      generation: number,
-      environmentId: EnvironmentId,
+  const finalizeSession = async (generation: number, environmentId: EnvironmentId) => {
+    if (finalizingRef.current) return;
+    finalizingRef.current = true;
+    stopTracks();
+    if (mountedRef.current && generationRef.current === generation) setState("transcribing");
+
+    let failed = false;
+    let error: unknown;
+    let text = "";
+    try {
+      text = (await segmentQueueRef.current?.finish()) ?? "";
+    } catch (cause) {
+      failed = true;
+      error = cause;
+    }
+    if (
+      !mountedRef.current ||
+      generationRef.current !== generation ||
+      environmentIdRef.current !== environmentId ||
+      discardRequestedRef.current
     ) {
-      const chunks: Blob[] = [];
-      const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
-      recorderRef.current = recorder;
-      rotationPendingRef.current = false;
-      recorder.addEventListener("dataavailable", (event) => {
-        if (event.data.size > 0) chunks.push(event.data);
+      return;
+    }
+
+    resetSession();
+    setElapsedMs(0);
+    setSegmentProgress({ completed: 0, queued: 0 });
+    setState("idle");
+    if (failed) {
+      toastManager.add({
+        type: "error",
+        title: "Could not transcribe the complete recording",
+        description: transcriptionErrorDescription(error),
       });
-      recorder.addEventListener(
-        "stop",
-        () => {
-          if (recorderRef.current === recorder) recorderRef.current = null;
-          rotationPendingRef.current = false;
-          if (
-            !mountedRef.current ||
-            generationRef.current !== generation ||
-            environmentIdRef.current !== environmentId ||
-            discardRequestedRef.current
-          ) {
-            return;
-          }
+      return;
+    }
+    if (text.length === 0) {
+      toastManager.add({
+        type: "info",
+        title: "No speech detected",
+        description: "Try again and speak a little closer to the microphone.",
+      });
+      return;
+    }
+    onTranscriptRef.current(text);
+  };
 
-          const resolvedMimeType = recorder.mimeType || chunks[0]?.type || mimeType || "audio/webm";
-          segmentQueueRef.current?.enqueue({
-            blob: new Blob(chunks, { type: resolvedMimeType }),
-            mimeType: resolvedMimeType,
-          });
+  const startRecorderSegment = function startRecorderSegment(
+    stream: MediaStream,
+    mimeType: string,
+    generation: number,
+    environmentId: EnvironmentId,
+  ) {
+    const chunks: Blob[] = [];
+    const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+    recorderRef.current = recorder;
+    rotationPendingRef.current = false;
+    recorder.addEventListener("dataavailable", (event) => {
+      if (event.data.size > 0) chunks.push(event.data);
+    });
+    recorder.addEventListener(
+      "stop",
+      () => {
+        if (recorderRef.current === recorder) recorderRef.current = null;
+        rotationPendingRef.current = false;
+        if (
+          !mountedRef.current ||
+          generationRef.current !== generation ||
+          environmentIdRef.current !== environmentId ||
+          discardRequestedRef.current
+        ) {
+          return;
+        }
 
-          if (stopRequestedRef.current) {
-            void finalizeSession(generation, environmentId);
-            return;
-          }
-          try {
-            startRecorderSegment(stream, mimeType, generation, environmentId);
-          } catch {
-            abortRecording(
-              generation,
-              "The browser could not continue this recording after an audio segment.",
-            );
-          }
-        },
-        { once: true },
-      );
-      recorder.addEventListener(
-        "error",
-        () => {
-          abortRecording(generation, "The browser could not finish this recording. Try again.");
-        },
-        { once: true },
-      );
-      segmentStartedAtRef.current = Date.now();
-      recorder.start(250);
-    },
-    [abortRecording, finalizeSession],
-  );
+        const resolvedMimeType = recorder.mimeType || chunks[0]?.type || mimeType || "audio/webm";
+        segmentQueueRef.current?.enqueue({
+          blob: new Blob(chunks, { type: resolvedMimeType }),
+          mimeType: resolvedMimeType,
+        });
 
-  const finishRecording = useCallback(() => {
+        if (stopRequestedRef.current) {
+          void finalizeSession(generation, environmentId);
+          return;
+        }
+        try {
+          startRecorderSegment(stream, mimeType, generation, environmentId);
+        } catch {
+          abortRecording(
+            generation,
+            "The browser could not continue this recording after an audio segment.",
+          );
+        }
+      },
+      { once: true },
+    );
+    recorder.addEventListener(
+      "error",
+      () => {
+        abortRecording(generation, "The browser could not finish this recording. Try again.");
+      },
+      { once: true },
+    );
+    segmentStartedAtRef.current = Date.now();
+    recorder.start(250);
+  };
+
+  const finishRecording = () => {
     if (stopRequestedRef.current) return;
     stopRequestedRef.current = true;
     if (mountedRef.current) setState("transcribing");
@@ -312,9 +337,9 @@ export function VoiceDictationControl(props: {
     if (!stopCurrentRecorder()) {
       void finalizeSession(generationRef.current, environmentIdRef.current);
     }
-  }, [finalizeSession, stopCurrentRecorder]);
+  };
 
-  const cancelRecording = useCallback(() => {
+  const cancelRecording = () => {
     generationRef.current += 1;
     discardRequestedRef.current = true;
     if (!rotationPendingRef.current) stopCurrentRecorder();
@@ -322,9 +347,9 @@ export function VoiceDictationControl(props: {
     setElapsedMs(0);
     setSegmentProgress({ completed: 0, queued: 0 });
     setState("idle");
-  }, [resetSession, stopCurrentRecorder]);
+  };
 
-  const startRecording = useCallback(async () => {
+  const startRecording = async () => {
     if (props.disabled || state !== "idle") return;
     if (
       typeof MediaRecorder === "undefined" ||
@@ -396,15 +421,9 @@ export function VoiceDictationControl(props: {
         description: recordingErrorDescription(error),
       });
     }
-  }, [
-    props.disabled,
-    props.environmentId,
-    resetSession,
-    startRecorderSegment,
-    state,
-    transcribeSegment,
-  ]);
+  };
 
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- Tick the recorder timer, rotate segments, and enforce the microphone session limit.
   useEffect(() => {
     if (state !== "recording") return;
     const timer = window.setInterval(() => {
@@ -429,16 +448,7 @@ export function VoiceDictationControl(props: {
     return () => window.clearInterval(timer);
   }, [finishRecording, state]);
 
-  useEffect(() => {
-    generationRef.current += 1;
-    discardRequestedRef.current = true;
-    stopCurrentRecorder();
-    resetSession();
-    setElapsedMs(0);
-    setSegmentProgress({ completed: 0, queued: 0 });
-    setState("idle");
-  }, [props.environmentId, resetSession, stopCurrentRecorder]);
-
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- Release the microphone and invalidate outstanding transcriptions when the environment session unmounts.
   useEffect(() => {
     mountedRef.current = true;
     return () => {
@@ -541,4 +551,8 @@ export function VoiceDictationControl(props: {
       ) : null}
     </div>
   );
+}
+
+export function VoiceDictationControl(props: Parameters<typeof VoiceDictationSession>[0]) {
+  return <VoiceDictationSession key={props.environmentId} {...props} />;
 }

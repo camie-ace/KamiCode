@@ -22,8 +22,12 @@ it.layer(NodeSqliteClient.layerMemory())("KamiCode nightly database upgrade", (i
       assert.deepEqual(after.slice(0, 66), before);
       assert.deepEqual(
         after.slice(66).map((entry) => entry.migration_id),
-        [67, 68, 69, 70, 71, 72, 73, 74, 75, 76],
+        Array.from({ length: 50 }, (_, index) => index + 67),
       );
+      const activitySource = yield* sql<{
+        readonly name: string;
+      }>`SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'projection_thread_activities'`;
+      assert.lengthOf(activitySource, 1);
       const messages = yield* sql<{
         readonly name: string;
       }>`PRAGMA table_info(projection_thread_messages)`;

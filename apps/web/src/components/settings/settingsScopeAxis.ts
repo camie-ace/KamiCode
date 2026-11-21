@@ -1,28 +1,66 @@
+import { fileBasename } from "@t3tools/shared/path";
+import type { SidebarProjectSnapshot } from "../../sidebarProjectGrouping";
 import type { EnvironmentPresentation } from "../../state/environments";
 import type { ResolvedSettingsScope, SettingsScopeSearch } from "./settingsScope";
 
+type ScopeCheckout = SidebarProjectSnapshot["memberProjects"][number];
 type ScopeEnvironment = Pick<EnvironmentPresentation, "environmentId" | "label" | "displayUrl">;
+
+export function settingsScopeEnvironmentAddress(environment: ScopeEnvironment) {
+  if (!environment.displayUrl) return environment.environmentId;
+  try {
+    return new URL(environment.displayUrl).host || environment.displayUrl;
+  } catch {
+    return environment.displayUrl;
+  }
+}
+
+export function settingsScopeEnvironmentLabels(
+  environment: ScopeEnvironment,
+  environments: readonly ScopeEnvironment[],
+) {
+  const duplicates = environments.filter(
+    (other) =>
+      other.environmentId !== environment.environmentId && other.label === environment.label,
+  );
+  const address = settingsScopeEnvironmentAddress(environment);
+  const secondary = duplicates.some((other) => settingsScopeEnvironmentAddress(other) === address)
+    ? environment.displayUrl || environment.environmentId
+    : address;
+  return {
+    primary: environment.label,
+    secondary: duplicates.length ? secondary : "",
+  };
+}
 
 export function settingsScopeEnvironmentLabel(
   environment: ScopeEnvironment,
   environments: readonly ScopeEnvironment[],
 ) {
-  const duplicate = environments.some(
-    (other) =>
-      other.environmentId !== environment.environmentId && other.label === environment.label,
-  );
-  return duplicate
-    ? `${environment.label} · ${environment.displayUrl ?? environment.environmentId}`
-    : environment.label;
+  const { primary, secondary } = settingsScopeEnvironmentLabels(environment, environments);
+  return secondary ? `${primary} · ${secondary}` : primary;
+}
+
+export function settingsScopeProjectMachines(
+  group: SidebarProjectSnapshot,
+  environments: readonly ScopeEnvironment[],
+  includeAddresses = false,
+) {
+  const machines = group.memberProjects.map((member) => {
+    const environment = environments.find((entry) => entry.environmentId === member.environmentId);
+    if (!environment) return member.environmentLabel ?? member.environmentId;
+    const { primary, secondary } = settingsScopeEnvironmentLabels(environment, environments);
+    const address =
+      secondary || (includeAddresses ? settingsScopeEnvironmentAddress(environment) : "");
+    return includeAddresses || address ? `${primary} · ${address}` : primary;
+  });
+  return Array.from(new Set(machines));
 }
 
 export const ALL_ENVIRONMENTS_VALUE = "all";
 export const ALL_PROJECTS_VALUE = "all";
+export const ALL_CHECKOUTS_VALUE = "all";
 
-/**
- * The environment axis: `all` or an environment id. A legacy checkout link
- * without `machine` still names one environment, which the resolver supplies.
- */
 export function environmentAxisValue(
   search: SettingsScopeSearch,
   resolvedEnvironmentId?: string | null,
@@ -30,12 +68,21 @@ export function environmentAxisValue(
   return search.machine ?? resolvedEnvironmentId ?? ALL_ENVIRONMENTS_VALUE;
 }
 
-/** The project axis: `all` or a project key. */
 export function projectAxisValue(search: SettingsScopeSearch): string {
   return search.project ?? ALL_PROJECTS_VALUE;
 }
 
-/** Choosing an environment keeps the project; a pre-existing checkout narrowing is dropped. */
+export function projectScopeMenuGroups(
+  groups: readonly SidebarProjectSnapshot[],
+  search: Pick<SettingsScopeSearch, "machine">,
+) {
+  const { machine } = search;
+  if (machine === undefined) return groups;
+  return groups.filter((group) =>
+    group.memberProjects.some((member) => member.environmentId === machine),
+  );
+}
+
 export function selectEnvironmentAxis(
   search: SettingsScopeSearch,
   value: string,
@@ -46,7 +93,6 @@ export function selectEnvironmentAxis(
   return next;
 }
 
-/** Choosing a project keeps the environment axis. */
 export function selectProjectAxis(search: SettingsScopeSearch, value: string): SettingsScopeSearch {
   const next: SettingsScopeSearch = {};
   if (value !== ALL_PROJECTS_VALUE) next.project = value;
@@ -54,7 +100,46 @@ export function selectProjectAxis(search: SettingsScopeSearch, value: string): S
   return next;
 }
 
-/** Provider configuration always belongs to one environment, including project scopes. */
+/** Empty unless the selection spans several checkouts of one environment, which only this axis can split. */
+export function settingsScopeCheckoutChoices(
+  group: SidebarProjectSnapshot,
+  search: Pick<SettingsScopeSearch, "machine" | "checkout">,
+): readonly ScopeCheckout[] {
+  const selected = group.memberProjects.find(
+    (member) => member.physicalProjectKey === search.checkout,
+  );
+  const environmentId = search.machine ?? selected?.environmentId;
+  const members =
+    environmentId === undefined
+      ? group.memberProjects
+      : group.memberProjects.filter((member) => member.environmentId === environmentId);
+  return members.length > 1 &&
+    members.every((member) => member.environmentId === members[0]!.environmentId)
+    ? members
+    : [];
+}
+
+export function selectCheckoutAxis(
+  search: SettingsScopeSearch,
+  checkout: ScopeCheckout | null,
+): SettingsScopeSearch {
+  const { checkout: _previous, ...rest } = search;
+  return checkout
+    ? { ...rest, machine: checkout.environmentId, checkout: checkout.physicalProjectKey }
+    : rest;
+}
+
+/** Repeated folder names fall back to the full path so the closed menu still identifies the checkout. */
+export function settingsScopeCheckoutLabel(
+  checkout: ScopeCheckout,
+  checkouts: readonly ScopeCheckout[],
+) {
+  const name = fileBasename(checkout.workspaceRoot);
+  return checkouts.filter((other) => fileBasename(other.workspaceRoot) === name).length > 1
+    ? checkout.workspaceRoot
+    : name;
+}
+
 export function selectSingleEnvironmentScope(
   search: SettingsScopeSearch,
   scope: ResolvedSettingsScope,

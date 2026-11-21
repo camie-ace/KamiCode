@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 
+import { T, useGT } from "gt-react";
 import { Spinner } from "~/components/ui/spinner";
 import { Button } from "~/components/ui/button";
 import { Toggle } from "~/components/ui/toggle";
@@ -7,12 +8,6 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "~/components/ui/tooltip";
 import { DIFF_SURFACE_THEME_UNSAFE_CSS } from "~/lib/diffRendering";
 import { cn } from "~/lib/utils";
 
-/**
- * One header row for every file surface in the side panel, whether the file
- * comes from the workspace or was captured as an attachment: crumbs on the
- * left, icon-only actions on the right. Attachments and workspace files must
- * not grow separate chrome.
- */
 export const FILE_SURFACE_SUBHEADER_CLASS =
   "flex h-10 min-h-10 shrink-0 items-center gap-2 border-b border-border/60 bg-background px-3 in-data-[preview-panel-mode=inline]:mb-3 in-data-[preview-panel-mode=inline]:h-7 in-data-[preview-panel-mode=inline]:min-h-7 in-data-[preview-panel-mode=inline]:border-b-transparent";
 
@@ -64,11 +59,6 @@ export const FILE_LINK_REVEAL_UNSAFE_CSS = `
   }
 `;
 
-/**
- * An icon-only header action with its label in a tooltip, the same control workspace files use.
- * A `pressed` action is a toggle and says so; a command (Copy, Save, Close) is a plain button,
- * because announcing it as an unpressed toggle tells a screen reader it has a state it has not.
- */
 export function FileSurfaceAction(props: {
   readonly label: string;
   readonly pressed?: boolean;
@@ -125,10 +115,11 @@ export function FileSurfaceNotice(props: { readonly children: ReactNode }) {
 }
 
 export function FileSurfaceLoading(props: { readonly className?: string }) {
+  const gt = useGT();
   return (
     <div
       role="status"
-      aria-label="Loading file"
+      aria-label={gt("Loading file")}
       className={cn(
         "flex min-h-0 flex-1 items-center justify-center text-muted-foreground",
         props.className,
@@ -153,9 +144,9 @@ export function FileSurfaceFailure(props: {
         <button
           type="button"
           onClick={props.onRetry}
-          className="rounded-md border border-input px-2.5 py-1 text-xs text-foreground hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring"
+          className="rounded-md border border-input px-2.5 py-1 text-xs text-foreground hover:bg-accent focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
         >
-          Try again
+          <T>Try again</T>
         </button>
       ) : null}
     </div>

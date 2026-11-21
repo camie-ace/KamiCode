@@ -1,11 +1,4 @@
-/**
- * Provider-independent repository safety and storage contract.
- *
- * This is intentionally structural: it describes how to discover ownership
- * and repository boundaries without naming projects, languages, or paths.
- * Engine-side guards remain authoritative; this prompt supplements them for
- * agent-created worktrees, dependency copies, and scratch artifacts.
- */
+/** Shared repository and storage constraints supplement authoritative engine guards. */
 export const REPOSITORY_OPERATING_CONTRACT = `<repository_operating_contract version="1">
 Apply these rules to all repository work, including resumed turns, triggers, and delegated tasks.
 
@@ -17,7 +10,3 @@ Apply these rules to all repository work, including resumed turns, triggers, and
 - At handoff, remove only temporary resources created and owned by this task. Never delete an unknown, dirty, active, or unpushed worktree to save space. If owned scratch cannot be removed safely, report its exact path and state.
 - For commits, inspect status, stage explicit intended paths, review the staged diff, and exclude generated caches, credentials, logs, recordings, and temporary artifacts unless they are deliberate deliverables. Never force-add or commit .camie/ project memory or its archives; they are local user data.
 </repository_operating_contract>`;
-
-function appendRepositoryOperatingContract(instructions: string): string {
-  return `${instructions}\n\n${REPOSITORY_OPERATING_CONTRACT}`;
-}

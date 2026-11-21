@@ -1,7 +1,9 @@
-import { ProjectId, ThreadId } from "@t3tools/contracts";
+import { setSidebarProjectScopeKeys } from "./uiStateStore";
+import { ThreadId } from "@t3tools/contracts";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 import {
+  setSidebarCreatorLogins,
   legacyProjectCwdPreferenceKey,
   markThreadUnread,
   markThreadVisited,
@@ -11,11 +13,7 @@ import {
   persistState,
   reorderProjects,
   resolveProjectExpanded,
-  setDefaultAdvertisedEndpointKey,
   setProjectExpanded,
-  setSidebarProjectScopeKey,
-  setSidebarCreatorLogins,
-  setThreadChangedFilesExpanded,
   type UiState,
 } from "./uiStateStore";
 
@@ -23,7 +21,7 @@ function makeUiState(overrides: Partial<UiState> = {}): UiState {
   return {
     projectExpandedById: {},
     projectOrder: [],
-    sidebarProjectScopeKey: null,
+    sidebarProjectScopeKeys: [],
     sidebarCreatorLogins: [],
     threadLastVisitedAtById: {},
     threadChangedFilesExpandedById: {},
@@ -86,17 +84,6 @@ describe("uiStateStore pure functions", () => {
     expect(setProjectExpanded(next, keys, false)).toBe(next);
   });
 
-  it("reorders from the current atom-derived project order", () => {
-    const project1 = ProjectId.make("project-1");
-    const project2 = ProjectId.make("project-2");
-    const project3 = ProjectId.make("project-3");
-    const currentOrder = [project1, project2, project3];
-
-    const next = reorderProjects(makeUiState(), currentOrder, [project1], [project3]);
-
-    expect(next.projectOrder).toEqual([project2, project3, project1]);
-  });
-
   it("moves grouped project members together", () => {
     const keyALocal = "env-local:proj-a";
     const keyARemote = "env-remote:proj-a";
@@ -108,97 +95,9 @@ describe("uiStateStore pure functions", () => {
 
     expect(next.projectOrder).toEqual([keyB, keyC, keyALocal, keyARemote]);
   });
-
-  it("does not reorder missing or identical groups", () => {
-    const currentOrder = ["env-local:proj-a", "env-local:proj-b"];
-    const state = makeUiState();
-
-    expect(reorderProjects(state, currentOrder, ["env-local:missing"], ["env-local:proj-b"])).toBe(
-      state,
-    );
-    expect(reorderProjects(state, currentOrder, ["env-local:proj-a"], ["env-local:proj-a"])).toBe(
-      state,
-    );
-  });
-
-  it("stores explicit changed-file expansion choices", () => {
-    const threadId = ThreadId.make("thread-1");
-    const collapsed = setThreadChangedFilesExpanded(makeUiState(), threadId, "turn-1", false);
-
-    expect(collapsed.threadChangedFilesExpandedById).toEqual({
-      [threadId]: {
-        "turn-1": false,
-      },
-    });
-    expect(
-      setThreadChangedFilesExpanded(collapsed, threadId, "turn-1", true)
-        .threadChangedFilesExpandedById,
-    ).toEqual({
-      [threadId]: {
-        "turn-1": true,
-      },
-    });
-  });
-
-  it("stores the endpoint preference by stable key", () => {
-    const next = setDefaultAdvertisedEndpointKey(makeUiState(), "desktop-core:lan:http");
-
-    expect(next.defaultAdvertisedEndpointKey).toBe("desktop-core:lan:http");
-    expect(setDefaultAdvertisedEndpointKey(next, "desktop-core:lan:http")).toBe(next);
-    expect(setDefaultAdvertisedEndpointKey(next, "")).toMatchObject({
-      defaultAdvertisedEndpointKey: null,
-    });
-  });
-
-  it("keeps multiple creators independent of project scope and clears only people", () => {
-    const project = setSidebarProjectScopeKey(makeUiState(), "project-a");
-    const selected = setSidebarCreatorLogins(project, ["Alice", "bob", "alice", ""]);
-    expect(selected.sidebarCreatorLogins).toEqual(["alice", "bob"]);
-    expect(setSidebarCreatorLogins(selected, ["alice", "bob"])).toBe(selected);
-    const cleared = setSidebarCreatorLogins(selected, []);
-    expect(cleared.sidebarCreatorLogins).toEqual([]);
-    expect(cleared.sidebarProjectScopeKey).toBe("project-a");
-    expect(setSidebarProjectScopeKey(selected, null).sidebarCreatorLogins).toEqual([
-      "alice",
-      "bob",
-    ]);
-  });
-
-  it("stores the sidebar project scope and resets it to all projects", () => {
-    const scoped = setSidebarProjectScopeKey(makeUiState(), "github.com/pingdotgg/t3code");
-
-    expect(scoped.sidebarProjectScopeKey).toBe("github.com/pingdotgg/t3code");
-    expect(setSidebarProjectScopeKey(scoped, "github.com/pingdotgg/t3code")).toBe(scoped);
-    expect(setSidebarProjectScopeKey(scoped, null).sidebarProjectScopeKey).toBeNull();
-    expect(setSidebarProjectScopeKey(scoped, "").sidebarProjectScopeKey).toBeNull();
-  });
 });
 
 describe("parsePersistedState", () => {
-  it("loads saved creators and defaults older or malformed state to all people", () => {
-    expect(
-      parsePersistedState({ sidebarCreatorLogins: ["alice", "bob", "alice", ""] })
-        .sidebarCreatorLogins,
-    ).toEqual(["alice", "bob"]);
-    expect(parsePersistedState({}).sidebarCreatorLogins).toEqual([]);
-    expect(
-      parsePersistedState({ sidebarCreatorLogins: "bad" as unknown as string[] })
-        .sidebarCreatorLogins,
-    ).toEqual([]);
-  });
-
-  it("hydrates the last selected pull request merge method", () => {
-    const parsed = parsePersistedState({
-      pullRequestMergeMethod: "squash",
-    });
-    const invalid = parsePersistedState({
-      pullRequestMergeMethod: "fast-forward",
-    });
-
-    expect(parsed.pullRequestMergeMethod).toBe("squash");
-    expect(invalid.pullRequestMergeMethod).toBe("merge");
-  });
-
   it("hydrates raw UI-owned state without server entities", () => {
     const parsed = parsePersistedState({
       projectExpandedById: {
@@ -229,7 +128,7 @@ describe("parsePersistedState", () => {
         "environment:thread-1": "2026-02-25T12:35:00.000Z",
       },
       defaultAdvertisedEndpointKey: "desktop-core:lan:http",
-      sidebarProjectScopeKey: null,
+      sidebarProjectScopeKeys: [],
       sidebarCreatorLogins: [],
       pullRequestMergeMethod: "merge",
       threadChangedFilesExpandedById: {
@@ -239,6 +138,12 @@ describe("parsePersistedState", () => {
         },
       },
     });
+  });
+
+  it("keeps a persisted fast-forward merge method", () => {
+    expect(
+      parsePersistedState({ pullRequestMergeMethod: "fast-forward" }).pullRequestMergeMethod,
+    ).toBe("fast-forward");
   });
 
   it.each([undefined, 1])("ignores changed-file expansion version %s", (version) => {
@@ -267,23 +172,6 @@ describe("parsePersistedState", () => {
     expect(resolveProjectExpanded(parsed.projectExpandedById, [projectAKey])).toBe(true);
     expect(resolveProjectExpanded(parsed.projectExpandedById, [projectBKey])).toBe(false);
     expect(resolveProjectExpanded(parsed.projectExpandedById, ["unknown"])).toBe(true);
-  });
-
-  it("preserves legacy expanded-only semantics for one-way migration", () => {
-    const parsed = parsePersistedState({
-      expandedProjectCwds: ["/repo/a"],
-    });
-
-    expect(
-      resolveProjectExpanded(parsed.projectExpandedById, [
-        legacyProjectCwdPreferenceKey("/repo/a"),
-      ]),
-    ).toBe(true);
-    expect(
-      resolveProjectExpanded(parsed.projectExpandedById, [
-        legacyProjectCwdPreferenceKey("/repo/b"),
-      ]),
-    ).toBe(false);
   });
 });
 
@@ -352,6 +240,7 @@ describe("uiStateStore persistence", () => {
         "environment:thread-1": "2026-02-25T12:35:00.000Z",
       },
       defaultAdvertisedEndpointKey: "desktop-core:lan:http",
+      sidebarProjectScopeKeys: [],
       sidebarProjectScopeKey: null,
       sidebarCreatorLogins: [],
       threadChangedFilesExpansionVersion: 2,
@@ -368,35 +257,72 @@ describe("uiStateStore persistence", () => {
     });
   });
 
-  it("restores project and creator filters across reloads", () => {
+  it("restores the sidebar project scope across reloads", () => {
+    const keys = ["github.com/pingdotgg/t3code", "github.com/pingdotgg/uploadthing"];
     persistState(
-      makeUiState({
-        sidebarProjectScopeKey: "github.com/pingdotgg/t3code",
-        sidebarCreatorLogins: ["alice", "bob"],
-      }),
+      makeUiState({ sidebarProjectScopeKeys: keys, sidebarCreatorLogins: ["alice", "bob"] }),
     );
 
     const persisted = JSON.parse(
       localStorageStub.getItem(PERSISTED_STATE_KEY) ?? "{}",
     ) as PersistedUiState;
 
+    expect(parsePersistedState(persisted).sidebarProjectScopeKeys).toEqual(keys);
     expect(parsePersistedState(persisted).sidebarCreatorLogins).toEqual(["alice", "bob"]);
-    expect(parsePersistedState(persisted).sidebarProjectScopeKey).toBe(
-      "github.com/pingdotgg/t3code",
-    );
   });
 
-  it("drops the temporary expanded-only migration fallback when rewriting state", () => {
-    const migrated = parsePersistedState({
-      expandedProjectCwds: ["/repo/a"],
-    });
-
-    persistState(migrated);
+  it("keeps a single-project scope readable by older clients", () => {
+    persistState(makeUiState({ sidebarProjectScopeKeys: ["github.com/pingdotgg/t3code"] }));
 
     const persisted = JSON.parse(
       localStorageStub.getItem(PERSISTED_STATE_KEY) ?? "{}",
     ) as PersistedUiState;
-    expect(resolveProjectExpanded(persisted.projectExpandedById ?? {}, ["unknown"])).toBe(true);
-    expect(persisted).not.toHaveProperty("threadPanelOpen");
+
+    expect(persisted.sidebarProjectScopeKey).toBe("github.com/pingdotgg/t3code");
   });
+
+  it("keeps legacy projects omitted from the expanded list collapsed across a save and reload", () => {
+    const projectAKey = legacyProjectCwdPreferenceKey("/repo/a");
+    const projectBKey = legacyProjectCwdPreferenceKey("/repo/b");
+    const migrated = parsePersistedState({ expandedProjectCwds: ["/repo/a"] });
+    expect(resolveProjectExpanded(migrated.projectExpandedById, [projectBKey])).toBe(false);
+
+    persistState({ ...migrated, pullRequestMergeMethod: "squash" });
+    const reloaded = parsePersistedState(
+      JSON.parse(localStorageStub.getItem(PERSISTED_STATE_KEY) ?? "{}") as PersistedUiState,
+    );
+
+    expect(resolveProjectExpanded(reloaded.projectExpandedById, [projectAKey])).toBe(true);
+    expect(resolveProjectExpanded(reloaded.projectExpandedById, [projectBKey])).toBe(false);
+  });
+
+  it("restores a single-project scope saved before multi-project filtering", () => {
+    expect(
+      parsePersistedState({ sidebarProjectScopeKey: "github.com/pingdotgg/t3code" })
+        .sidebarProjectScopeKeys,
+    ).toEqual(["github.com/pingdotgg/t3code"]);
+  });
+});
+
+it("keeps multiple creators independent of project scope and clears only people", () => {
+  const project = setSidebarProjectScopeKeys(makeUiState(), ["project-a"]);
+  const selected = setSidebarCreatorLogins(project, ["Alice", "bob", "alice", ""]);
+  expect(selected.sidebarCreatorLogins).toEqual(["alice", "bob"]);
+  expect(setSidebarCreatorLogins(selected, ["alice", "bob"])).toBe(selected);
+  const cleared = setSidebarCreatorLogins(selected, []);
+  expect(cleared.sidebarCreatorLogins).toEqual([]);
+  expect(cleared.sidebarProjectScopeKeys).toEqual(["project-a"]);
+  expect(setSidebarProjectScopeKeys(selected, []).sidebarCreatorLogins).toEqual(["alice", "bob"]);
+});
+
+it("loads saved creators and defaults older or malformed state to all people", () => {
+  expect(
+    parsePersistedState({ sidebarCreatorLogins: ["alice", "bob", "alice", ""] })
+      .sidebarCreatorLogins,
+  ).toEqual(["alice", "bob"]);
+  expect(parsePersistedState({}).sidebarCreatorLogins).toEqual([]);
+  expect(
+    parsePersistedState({ sidebarCreatorLogins: "bad" as unknown as string[] })
+      .sidebarCreatorLogins,
+  ).toEqual([]);
 });

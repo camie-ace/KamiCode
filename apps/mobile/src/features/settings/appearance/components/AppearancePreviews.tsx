@@ -1,6 +1,7 @@
+import { T } from "gt-react-native";
 import { Platform, ScrollView, type StyleProp, type TextStyle, View } from "react-native";
 
-import { AppText as Text } from "../../../../components/AppText";
+import { AppText as Text } from "../../../../components/ui/AppText";
 import {
   resolveMarkdownFontSizes,
   resolveMobileCodeSurface,
@@ -14,12 +15,10 @@ const CODE_FONT_FAMILY = Platform.select({
   default: "monospace",
 });
 
-/** Hairline between a section's preview surface and its control rows. */
 export function AppearancePreviewSeparator() {
   return <View className="h-px bg-separator" />;
 }
 
-/** Live sample of body text rendered at the chosen base font size. */
 export function TextAppearancePreview(props: { readonly fontSize: number }) {
   const sizes = resolveMarkdownFontSizes(props.fontSize);
 
@@ -29,34 +28,27 @@ export function TextAppearancePreview(props: { readonly fontSize: number }) {
         className="text-foreground"
         style={{ fontSize: sizes.m, lineHeight: sizes.bodyLineHeight }}
       >
-        The quick brown fox jumps over the lazy dog.
+        <T>The quick brown fox jumps over the lazy dog.</T>
       </Text>
       <Text
         className="text-foreground-muted"
         style={{ fontSize: sizes.s, lineHeight: Math.round(sizes.s * 1.4) }}
       >
-        Messages, labels, and headings scale with this size.
+        <T>Messages, labels, and headings scale with this size.</T>
       </Text>
     </View>
   );
 }
 
-/**
- * Live terminal sample using the real terminal theme's text colors and font,
- * on the shared card background so it reads like the other previews.
- */
 export function TerminalAppearancePreview(props: { readonly fontSize: number }) {
   const { themeAppearance: scheme, themeId } = useAppearancePreferences();
   const theme = getMobileTerminalTheme(themeId, scheme);
   const lineHeight = Math.round(props.fontSize * 1.6);
   const lineStyle = {
-    fontFamily: "Menlo",
+    fontFamily: Platform.OS === "android" ? "monospace" : "Menlo",
     fontSize: props.fontSize,
     lineHeight,
   } as const;
-  // AppText stamps the sans font on every node, so nested spans must
-  // re-apply the terminal font instead of relying on inheritance, exactly
-  // like the code preview's tokens below.
   const span = (color: string, extra?: TextStyle): StyleProp<TextStyle> => [
     lineStyle,
     { color, ...extra },
@@ -71,29 +63,37 @@ export function TerminalAppearancePreview(props: { readonly fontSize: number }) 
         <Text style={span(theme.palette[1])}>main</Text>
         <Text style={span(theme.palette[4])}>)</Text>
         <Text style={span(theme.palette[3])}> ✗</Text>
+        {/* oxlint-disable-next-line t3code/no-untranslated-copy -- sample terminal output */}
         <Text style={span(theme.foreground)}> vpr dev</Text>
       </Text>
       <Text style={span(theme.foreground)}>
+        {/* oxlint-disable-next-line t3code/no-untranslated-copy -- sample terminal output */}
         <Text style={span(theme.palette[2])}>VITE v7.1.1</Text>
+        {/* oxlint-disable-next-line t3code/no-untranslated-copy -- sample terminal output */}
         <Text style={span(theme.mutedForeground)}> ready in</Text>
         <Text style={span(theme.foreground)}> 1.24s</Text>
       </Text>
       <Text style={span(theme.foreground)}>
         <Text style={span(theme.palette[2])}>→ </Text>
+        {/* oxlint-disable-next-line t3code/no-untranslated-copy -- sample terminal output */}
         <Text style={span(theme.mutedForeground)}>Local: </Text>
         <Text style={span(theme.palette[6], { textDecorationLine: "underline" })}>
           http://127.0.0.1:5173/
         </Text>
       </Text>
       <Text style={span(theme.foreground)}>
+        {/* oxlint-disable-next-line t3code/no-untranslated-copy -- sample terminal output */}
         <Text style={span(theme.palette[2])}>✓ 85 passed</Text>
+        {/* oxlint-disable-next-line t3code/no-untranslated-copy -- sample terminal output */}
         <Text style={span(theme.palette[3])}> △ 2 warnings</Text>
+        {/* oxlint-disable-next-line t3code/no-untranslated-copy -- sample terminal output */}
         <Text style={span(theme.palette[1])}> ✗ 0 failed</Text>
       </Text>
       <Text style={span(theme.foreground)}>
         <Text style={span(theme.background, { backgroundColor: theme.palette[2] })}>
           {" READY "}
         </Text>
+        {/* oxlint-disable-next-line t3code/no-untranslated-copy -- sample terminal output */}
         <Text style={span(theme.mutedForeground)}> watching for changes</Text>{" "}
         <Text style={span(theme.cursorForeground)}>▏</Text>
       </Text>
@@ -114,6 +114,7 @@ interface CodePreviewLine {
 const CODE_PREVIEW_LINES: ReadonlyArray<CodePreviewLine> = [
   {
     id: "signature",
+    // oxlint-disable-next-line t3code/no-untranslated-copy -- sample code
     tokens: [{ text: "function", keyword: true }, { text: " formatUser(user) {" }],
   },
   {
@@ -121,17 +122,13 @@ const CODE_PREVIEW_LINES: ReadonlyArray<CodePreviewLine> = [
     tokens: [
       { text: "  " },
       { text: "return", keyword: true },
+      // oxlint-disable-next-line t3code/no-untranslated-copy -- sample code
       { text: " `${user.name} <${user.email}>` // demonstrates how long lines behave" },
     ],
   },
   { id: "close", tokens: [{ text: "}" }] },
 ];
 
-/**
- * Live code sample matching the code & diff surface metrics. Long lines wrap
- * when word break is on and scroll horizontally when it is off, mirroring the
- * real code surface.
- */
 export function CodeAppearancePreview(props: {
   readonly fontSize: number;
   readonly wordBreak: boolean;

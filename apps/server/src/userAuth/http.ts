@@ -25,44 +25,44 @@ import { isDesktopGitHubLoginState, UserAuth, UserAuthError } from "./Services/U
 
 const EXPIRED_COOKIE_DATE = DateTime.toDate(DateTime.makeUnsafe("1970-01-01T00:00:00.000Z"));
 
-export const respondToUserAuthError = (error: UserAuthError) =>
-  Effect.gen(function* () {
-    if ((error.status ?? 500) >= 500) {
-      yield* Effect.logError("user auth route failed", {
-        message: error.message,
-        cause: error.cause,
-      });
-    }
-    return HttpServerResponse.jsonUnsafe(
-      {
-        error: error.message,
-      },
-      { status: error.status ?? 500, headers: browserApiCorsHeaders },
-    );
-  });
+export const respondToUserAuthError = Effect.fn("execute")(function* (error: UserAuthError) {
+  if ((error.status ?? 500) >= 500) {
+    yield* Effect.logError("user auth route failed", {
+      message: error.message,
+      cause: error.cause,
+    });
+  }
+  return HttpServerResponse.jsonUnsafe(
+    {
+      error: error.message,
+    },
+    { status: error.status ?? 500, headers: browserApiCorsHeaders },
+  );
+});
 
 /**
  * Authenticate the environment session on a raw `HttpRouter` route and require
  * the given scope. Mirrors `authenticateRawRouteWithScope` in `../http.ts`;
  * failures surface as `HttpServerRespondable` environment errors.
  */
-export const authenticateEnvironmentRequestWithScope = (scope: AuthEnvironmentScope) =>
-  Effect.gen(function* () {
-    const request = yield* HttpServerRequest.HttpServerRequest;
-    const serverAuth = yield* EnvironmentAuth.EnvironmentAuth;
-    const session = yield* serverAuth.authenticateHttpRequest(request).pipe(
-      Effect.catchIf(EnvironmentAuth.isServerAuthCredentialError, (error) =>
-        failEnvironmentAuthInvalid(EnvironmentAuth.serverAuthCredentialReason(error)),
-      ),
-      Effect.catchIf(EnvironmentAuth.isServerAuthInternalError, (error) =>
-        failEnvironmentInternal("internal_error", error),
-      ),
-    );
-    if (!session.scopes.includes(scope)) {
-      return yield* failEnvironmentScopeRequired(scope);
-    }
-    return { request, session };
-  });
+export const authenticateEnvironmentRequestWithScope = Effect.fn("execute")(function* (
+  scope: AuthEnvironmentScope,
+) {
+  const request = yield* HttpServerRequest.HttpServerRequest;
+  const serverAuth = yield* EnvironmentAuth.EnvironmentAuth;
+  const session = yield* serverAuth.authenticateHttpRequest(request).pipe(
+    Effect.catchIf(EnvironmentAuth.isServerAuthCredentialError, (error) =>
+      failEnvironmentAuthInvalid(EnvironmentAuth.serverAuthCredentialReason(error)),
+    ),
+    Effect.catchIf(EnvironmentAuth.isServerAuthInternalError, (error) =>
+      failEnvironmentInternal("internal_error", error),
+    ),
+  );
+  if (!session.scopes.includes(scope)) {
+    return yield* failEnvironmentScopeRequired(scope);
+  }
+  return { request, session };
+});
 
 function escapeHtml(input: string): string {
   return input

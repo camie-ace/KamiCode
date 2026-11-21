@@ -1,13 +1,16 @@
 import type { ContextMenuItem } from "@t3tools/contracts";
+import { msg } from "gt-react";
 
-export type ExternalLinkContextMenuAction =
+import { m } from "../../i18n/messages";
+
+type ExternalLinkContextMenuAction =
   | "open-in-preview"
   | "open-external"
   | "copy-link"
   | "link-to-thread"
   | "unlink-from-thread";
 
-export type ExternalLinkContextMenuFailureOperation =
+type ExternalLinkContextMenuFailureOperation =
   | "show-link-context-menu"
   | "open-link-in-preview"
   | "open-link-external"
@@ -24,30 +27,28 @@ const FAILURE_OPERATION_BY_ACTION = {
 } as const satisfies Record<ExternalLinkContextMenuAction, ExternalLinkContextMenuFailureOperation>;
 
 const EXTERNAL_LINK_CONTEXT_MENU_ITEMS = [
-  { id: "open-in-preview", label: "Open in integrated browser" },
-  { id: "open-external", label: "Open in system browser" },
-  { id: "copy-link", label: "Copy Link" },
+  { id: "open-in-preview", label: msg("Open in integrated browser") },
+  { id: "open-external", label: msg("Open in system browser") },
+  { id: "copy-link", label: msg("Copy Link") },
 ] as const satisfies readonly ContextMenuItem<ExternalLinkContextMenuAction>[];
 
-/**
- * The integrated browser is not always there to offer — it needs a thread to open beside and a
- * runtime that can show it — but the other two answers hold wherever a link does. Dropping the
- * whole menu with the one item that cannot be honoured is what left a right-click on a link
- * showing the platform's cut-and-paste menu instead of a way to copy the link.
- */
 function externalLinkContextMenuItems(options: {
   readonly canOpenInPreview: boolean;
   readonly threadLinkAction?: "link-to-thread" | "unlink-from-thread" | undefined;
 }): readonly ContextMenuItem<ExternalLinkContextMenuAction>[] {
-  const items = options.canOpenInPreview
-    ? EXTERNAL_LINK_CONTEXT_MENU_ITEMS
-    : EXTERNAL_LINK_CONTEXT_MENU_ITEMS.filter((item) => item.id !== "open-in-preview");
+  const items = (
+    options.canOpenInPreview
+      ? EXTERNAL_LINK_CONTEXT_MENU_ITEMS
+      : EXTERNAL_LINK_CONTEXT_MENU_ITEMS.filter((item) => item.id !== "open-in-preview")
+  ).map((item) => ({ id: item.id, label: m(item.label) }));
   if (options.threadLinkAction === undefined) return items;
   return [
     {
       id: options.threadLinkAction,
       label:
-        options.threadLinkAction === "link-to-thread" ? "Link to thread" : "Unlink from thread",
+        options.threadLinkAction === "link-to-thread"
+          ? m(msg("Link to thread"))
+          : m(msg("Unlink from thread")),
     },
     ...items,
   ];
@@ -56,7 +57,6 @@ function externalLinkContextMenuItems(options: {
 interface ShowExternalLinkContextMenuOptions {
   readonly href: string;
   readonly position: { readonly x: number; readonly y: number };
-  /** Absent means yes, which is what every caller before the browser could be missing meant. */
   readonly canOpenInPreview?: boolean;
   readonly threadLinkAction?: "link-to-thread" | "unlink-from-thread" | undefined;
   readonly showContextMenu: (

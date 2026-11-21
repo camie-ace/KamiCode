@@ -56,7 +56,6 @@ describe("KeyedLock", () => {
       const holders = yield* Effect.forEach(["a", "b"], hold, { concurrency: "unbounded" }).pipe(
         Effect.forkChild,
       );
-      // Both enter while the other still holds its key.
       const both = new Set([yield* Queue.take(entered), yield* Queue.take(entered)]);
       assert.deepStrictEqual(both, new Set(["a", "b"]));
       yield* Deferred.succeed(release, undefined);
@@ -77,18 +76,15 @@ describe("KeyedLock", () => {
         )
         .pipe(Effect.forkChild);
       yield* Deferred.await(entered);
-      // A waiter that gives up and one that runs.
       const abandoned = yield* lock.withLock("key", Effect.void).pipe(Effect.forkChild);
       const waiting = yield* lock.withLock("key", Effect.void).pipe(Effect.forkChild);
       yield* Effect.yieldNow;
       assert.deepStrictEqual(yield* lock.activeKeys, ["key"]);
 
       yield* Fiber.interrupt(abandoned);
-      // The holder and the other waiter still need the lock.
       assert.deepStrictEqual(yield* lock.activeKeys, ["key"]);
       yield* Deferred.succeed(release, undefined);
       yield* Fiber.joinAll([holder, waiting]);
-      // A holder that fails releases its key too.
       assert.strictEqual(
         yield* lock.withLock("other", Effect.fail("boom")).pipe(Effect.flip),
         "boom",
@@ -98,11 +94,31 @@ describe("KeyedLock", () => {
     }),
   );
 
-  it.effect("keeps working after the scope that made it closes", () =>
+  it.effect("runner keeps each key's effects in run order and never holds up another key", () =>
     Effect.gen(function* () {
-      // Services built per request hand their lock to work that outlives the build.
-      const lock = yield* Effect.scoped(KeyedLock.make<string>());
-      assert.strictEqual(yield* lock.withLock("key", Effect.succeed("ran")), "ran");
+      const runner = yield* KeyedLock.makeRunner<string>();
+      const events = yield* Ref.make<ReadonlyArray<string>>([]);
+      const record = (event: string) => Ref.update(events, (current) => [...current, event]);
+      const release = yield* Deferred.make<void>();
+      const otherRan = yield* Deferred.make<void>();
+      const busyRan = yield* Deferred.make<void>();
+
+      yield* runner.run("busy", Effect.andThen(Deferred.await(release), record("busy:1")));
+      yield* runner.run("busy", record("busy:2"));
+      yield* runner.run(
+        "busy",
+        Effect.andThen(record("busy:3"), Deferred.succeed(busyRan, undefined)).pipe(Effect.asVoid),
+      );
+      yield* runner.run(
+        "other",
+        Effect.andThen(record("other"), Deferred.succeed(otherRan, undefined)).pipe(Effect.asVoid),
+      );
+      yield* Deferred.await(otherRan);
+      assert.deepStrictEqual(yield* Ref.get(events), ["other"]);
+
+      yield* Deferred.succeed(release, undefined);
+      yield* Deferred.await(busyRan);
+      assert.deepStrictEqual(yield* Ref.get(events), ["other", "busy:1", "busy:2", "busy:3"]);
     }),
   );
 
@@ -118,7 +134,6 @@ describe("KeyedLock", () => {
           Effect.addFinalizer(() => Ref.set(finalized, true)),
         )
         .pipe(Scope.provide(callerScope));
-      // The finalizer belongs to the caller, so releasing the lock leaves it.
       assert.isFalse(yield* Ref.get(finalized));
       yield* Scope.close(callerScope, Exit.void);
       assert.isTrue(yield* Ref.get(finalized));

@@ -1,3 +1,4 @@
+import * as DocumentText from "../../provider/DocumentText.ts";
 import { CommandId, OrchestrationDispatchCommandError } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -19,11 +20,12 @@ export const ServerOrchestrationDispatcherLive = Layer.effect(
     const context = yield* Effect.context<
       | ThreadManagement.ThreadManagementService
       | ThreadLaunch.ThreadLaunchService
+      | DocumentText.DocumentText
       | FileSystem.FileSystem
       | ServerConfig.ServerConfig
     >();
     return ServerOrchestrationDispatcher.of({
-      dispatch: (command, options) =>
+      dispatch: Effect.fn("ServerOrchestrationDispatcher.dispatch")((command, options) =>
         startup
           .enqueueCommand(
             Effect.gen(function* () {
@@ -121,6 +123,7 @@ export const ServerOrchestrationDispatcherLive = Layer.effect(
                 }),
             ),
           ),
+      ),
     });
   }),
 );

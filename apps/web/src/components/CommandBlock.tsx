@@ -1,12 +1,11 @@
-import { Check, Copy } from "lucide";
+import { msg, useGT } from "gt-react";
+import { CheckIcon, CopyIcon } from "lucide-react";
 
-import { MorphIcon } from "~/components/MorphIcon";
 import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
 import { cn } from "~/lib/utils";
 
 import { Button } from "./ui/button";
 
-/** A shell command to copy and run elsewhere, such as on the environment's host. */
 export function CommandBlock({
   command,
   className,
@@ -16,9 +15,14 @@ export function CommandBlock({
   readonly className?: string;
   readonly prominent?: boolean;
 }) {
+  const gt = useGT();
   const { copyToClipboard, isCopied } = useCopyToClipboard({
     timeout: 1500,
-    target: "command",
+    target: {
+      target: "command",
+      unavailableMessage: msg("Clipboard API is unavailable while copying command."),
+      failureMessage: msg("Failed to copy command to the clipboard."),
+    },
   });
   return (
     <div
@@ -35,10 +39,10 @@ export function CommandBlock({
       <Button
         size="icon-xs"
         variant="ghost"
-        aria-label="Copy command"
+        aria-label={gt("Copy command")}
         onClick={() => copyToClipboard(command, undefined)}
       >
-        <MorphIcon className="size-3.5" icon={isCopied ? Check : Copy} />
+        {isCopied ? <CheckIcon className="size-3.5" /> : <CopyIcon className="size-3.5" />}
       </Button>
     </div>
   );

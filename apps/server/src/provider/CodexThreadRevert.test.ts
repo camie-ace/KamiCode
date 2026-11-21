@@ -42,7 +42,6 @@ it.effect("finds the revert boundary across pages of newest-first turns", () =>
   Effect.gen(function* () {
     const client = yield* CodexClient.CodexAppServerClient;
     const result = yield* revertCodexThread(client, "thread", 3).pipe(Effect.flip);
-    // The final request reaches the server with the third-newest turn, not a turn on the first page.
     assert.equal(result.message, "boundary reached");
   }).pipe(
     Effect.provide(
@@ -69,7 +68,6 @@ it.effect("finds the revert boundary across pages of newest-first turns", () =>
         ],
       }),
     ),
-    Effect.scoped,
   ),
 );
 
@@ -88,6 +86,5 @@ it.effect("rejects repeated cursors instead of looping or reverting incomplete h
         entries: [...page(1, null, 3, ["newest"], "again"), ...page(2, "again", 2, [], "again")],
       }),
     ),
-    Effect.scoped,
   ),
 );

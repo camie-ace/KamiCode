@@ -1,4 +1,5 @@
-import { memo, useCallback, useMemo, useState } from "react";
+import { namedClipboardTarget } from "../hooks/useCopyToClipboard";
+import { memo, useState } from "react";
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
@@ -23,9 +24,9 @@ import {
   LoaderIcon,
 } from "lucide-react";
 import { cn } from "~/lib/utils";
-import type { ActivePlanState } from "../session-logic";
-import type { LatestProposedPlanState } from "../session-logic";
-import { formatTimestamp } from "../timestampFormat";
+import type { ActivePlanState } from "../workflowPlans";
+import type { LatestProposedPlanState } from "../workflowPlans";
+import { formatFullTimestamp as formatTimestamp } from "../timestampFormat";
 import {
   proposedPlanTitle,
   buildProposedPlanMarkdownFilename,
@@ -646,7 +647,9 @@ const PlanSidebar = memo(function PlanSidebar({
   const writeProjectFile = useAtomCommand(projectEnvironment.writeFile, {
     reportFailure: false,
   });
-  const { copyToClipboard, isCopied } = useCopyToClipboard({ target: "plan" });
+  const { copyToClipboard, isCopied } = useCopyToClipboard({
+    target: namedClipboardTarget("plan"),
+  });
   const [selectedWorkflowLaneId, setSelectedWorkflowLaneId] = useState<string | null>(null);
   const [selectedWorkflowRecordId, setSelectedWorkflowRecordId] = useState<string | null>(null);
   const [selectedLaneRecordId, setSelectedLaneRecordId] = useState<string | null>(null);
@@ -738,19 +741,17 @@ const PlanSidebar = memo(function PlanSidebar({
   ].toSorted((left, right) => right.createdAt.localeCompare(left.createdAt));
   const selectedWorkflowRecord =
     detailRecords.find((record) => record.id === selectedWorkflowRecordId) ?? null;
-  const selectedWorkflowLane = useMemo(
-    () => workflowLanes.find((lane) => lane.id === selectedWorkflowLaneId) ?? null,
-    [selectedWorkflowLaneId, workflowLanes],
-  );
-  const workflowRecordCountByLaneId = useMemo(() => {
+  const selectedWorkflowLane = (() =>
+    workflowLanes.find((lane) => lane.id === selectedWorkflowLaneId) ?? null)();
+  const workflowRecordCountByLaneId = (() => {
     const counts = new Map<string, number>();
     for (const record of laneRuntimeRecords) {
       if (!record.laneId) continue;
       counts.set(record.laneId, (counts.get(record.laneId) ?? 0) + 1);
     }
     return counts;
-  }, [laneRuntimeRecords]);
-  const selectedWorkflowLaneRecords = useMemo(() => {
+  })();
+  const selectedWorkflowLaneRecords = (() => {
     if (!selectedWorkflowLane) return [];
     if (selectedWorkflowLane.id === "lead") {
       return detailRecords.filter((record) => !record.laneId);
@@ -758,15 +759,15 @@ const PlanSidebar = memo(function PlanSidebar({
     return laneRuntimeRecords.filter((record) =>
       workflowRecordMatchesLane(record, selectedWorkflowLane),
     );
-  }, [detailRecords, laneRuntimeRecords, selectedWorkflowLane]);
+  })();
   const selectedLaneWorkflowRecord =
     selectedWorkflowLaneRecords.find((record) => record.id === selectedLaneRecordId) ?? null;
-  const selectedWorkflowLaneRuns = useMemo(() => {
+  const selectedWorkflowLaneRuns = (() => {
     if (!selectedWorkflowLane || selectedWorkflowLane.id === "lead") return [];
     return workflowLaneRunDetails
       .filter((run) => run.laneId === selectedWorkflowLane.id)
       .toSorted((left, right) => right.startedAt.localeCompare(left.startedAt));
-  }, [selectedWorkflowLane, workflowLaneRunDetails]);
+  })();
   const selectedWorkflowLaneRun = selectedWorkflowLaneRuns[0] ?? null;
   const leadWorkflowLane = workflowLanes.find((lane) => lane.id === "lead") ?? null;
   const workflowRuntimeLabel = workflowStarted
@@ -785,18 +786,18 @@ const PlanSidebar = memo(function PlanSidebar({
   const workflowBlocked = latestWorkflowActivity(activities, "workflow.blocked");
   const workflowBlockedPayload = workflowBlocked ? workflowActivityPayload(workflowBlocked) : null;
 
-  const handleCopyPlan = useCallback(() => {
+  const handleCopyPlan = () => {
     if (!planMarkdown) return;
     copyToClipboard(planMarkdown);
-  }, [planMarkdown, copyToClipboard]);
+  };
 
-  const handleDownload = useCallback(() => {
+  const handleDownload = () => {
     if (!planMarkdown) return;
     const filename = buildProposedPlanMarkdownFilename(planMarkdown);
     downloadPlanAsTextFile(filename, normalizePlanMarkdownForExport(planMarkdown));
-  }, [planMarkdown]);
+  };
 
-  const handleSaveToWorkspace = useCallback(() => {
+  const handleSaveToWorkspace = () => {
     if (!workspaceRoot || !planMarkdown) return;
     const filename = buildProposedPlanMarkdownFilename(planMarkdown);
     setIsSavingToWorkspace(true);
@@ -829,9 +830,9 @@ const PlanSidebar = memo(function PlanSidebar({
         );
       }
     })();
-  }, [environmentId, planMarkdown, workspaceRoot, writeProjectFile]);
+  };
 
-  const handleSubmitGuidance = useCallback(() => {
+  const handleSubmitGuidance = () => {
     if (!guidanceLaneId) return;
     const trimmed = guidanceText.trim();
     if (!trimmed) return;
@@ -840,93 +841,84 @@ const PlanSidebar = memo(function PlanSidebar({
     onSubmitWorkflowGuidance?.({ id: target.id, role: target.role }, trimmed);
     setGuidanceLaneId(null);
     setGuidanceText("");
-  }, [guidanceLaneId, guidanceText, onSubmitWorkflowGuidance, workflowLanes]);
+  };
 
-  const handleStopLane = useCallback(
-    (lane: WorkflowLaneTarget) => {
-      if (!window.confirm(`Stop this ${lane.role} lane? Preserved findings will remain visible.`)) {
-        return;
-      }
-      onStopWorkflowLane?.(lane);
-    },
-    [onStopWorkflowLane],
-  );
+  const handleStopLane = (lane: WorkflowLaneTarget) => {
+    if (!window.confirm(`Stop this ${lane.role} lane? Preserved findings will remain visible.`)) {
+      return;
+    }
+    onStopWorkflowLane?.(lane);
+  };
 
-  const renderStringList = useCallback(
-    (label: string, entries: ReadonlyArray<string>) =>
-      entries.length > 0 ? (
-        <div className="mt-1.5">
-          <p className="text-3xs font-semibold text-foreground/60">{label}</p>
-          <ul className="mt-0.5 space-y-0.5 text-2xs leading-snug text-muted-foreground/60">
-            {entries.map((entry) => (
-              <li key={entry} className="flex gap-1.5">
-                <span>-</span>
-                <span>{entry}</span>
-              </li>
-            ))}
-          </ul>
-        </div>
-      ) : null,
-    [],
-  );
-
-  const renderWorkflowRecordDetails = useCallback(
-    (record: WorkflowRecord) => (
-      <div className="rounded-md border border-border/50 bg-background/60 p-2 text-2xs leading-snug text-muted-foreground/70">
-        <p className="font-medium text-foreground/80">{record.title ?? record.summary}</p>
-        <p className="mt-0.5 text-muted-foreground/50">
-          {record.kind} | {formatTimestamp(record.createdAt, timestampFormat)}
-          {record.laneRole ? ` | ${record.laneRole}` : ""}
-        </p>
-        {record.detail ? <p className="mt-1">{record.detail}</p> : null}
-        {record.guidance ? (
-          <p className="mt-1">
-            <span className="font-medium text-foreground/70">Guidance:</span> {record.guidance}
-          </p>
-        ) : null}
-        {record.reason ? (
-          <p className="mt-1">
-            <span className="font-medium text-foreground/70">Reason:</span> {record.reason}
-          </p>
-        ) : null}
-        {record.action ? (
-          <p className="mt-1">
-            <span className="font-medium text-foreground/70">Action:</span> {record.action}
-          </p>
-        ) : null}
-        {record.result ? (
-          <p className="mt-1">
-            <span className="font-medium text-foreground/70">Result:</span> {record.result}
-          </p>
-        ) : null}
-        {record.decision ? (
-          <p className="mt-1">
-            <span className="font-medium text-foreground/70">Decision:</span> {record.decision}
-          </p>
-        ) : null}
-        {record.memoryText ? (
-          <p className="mt-1">
-            <span className="font-medium text-foreground/70">Memory:</span> {record.memoryText}
-          </p>
-        ) : null}
-        {renderStringList("Files touched", record.filesTouched)}
-        {renderStringList("Tests run", record.testsRun)}
-        {renderStringList("Checks run", record.checksRun)}
-        {renderStringList("Artifacts", record.artifacts)}
-        {renderStringList("Passed", record.passed)}
-        {renderStringList("Failed", record.failed)}
-        {renderStringList("Known risks", record.knownRisks)}
-        {renderStringList("Concerns", record.concerns)}
-        {renderStringList("Alternatives", record.alternatives)}
-        {renderStringList("Overrides", record.overrides)}
-        {record.requiredFix ? (
-          <p className="mt-1.5 rounded-md border border-destructive/20 bg-destructive/5 px-2 py-1 text-destructive">
-            Required fix: {record.requiredFix}
-          </p>
-        ) : null}
+  const renderStringList = (label: string, entries: ReadonlyArray<string>) =>
+    entries.length > 0 ? (
+      <div className="mt-1.5">
+        <p className="text-3xs font-semibold text-foreground/60">{label}</p>
+        <ul className="mt-0.5 space-y-0.5 text-2xs leading-snug text-muted-foreground/60">
+          {entries.map((entry) => (
+            <li key={entry} className="flex gap-1.5">
+              <span>-</span>
+              <span>{entry}</span>
+            </li>
+          ))}
+        </ul>
       </div>
-    ),
-    [renderStringList, timestampFormat],
+    ) : null;
+
+  const renderWorkflowRecordDetails = (record: WorkflowRecord) => (
+    <div className="rounded-md border border-border/50 bg-background/60 p-2 text-2xs leading-snug text-muted-foreground/70">
+      <p className="font-medium text-foreground/80">{record.title ?? record.summary}</p>
+      <p className="mt-0.5 text-muted-foreground/50">
+        {record.kind} | {formatTimestamp(record.createdAt, timestampFormat)}
+        {record.laneRole ? ` | ${record.laneRole}` : ""}
+      </p>
+      {record.detail ? <p className="mt-1">{record.detail}</p> : null}
+      {record.guidance ? (
+        <p className="mt-1">
+          <span className="font-medium text-foreground/70">Guidance:</span> {record.guidance}
+        </p>
+      ) : null}
+      {record.reason ? (
+        <p className="mt-1">
+          <span className="font-medium text-foreground/70">Reason:</span> {record.reason}
+        </p>
+      ) : null}
+      {record.action ? (
+        <p className="mt-1">
+          <span className="font-medium text-foreground/70">Action:</span> {record.action}
+        </p>
+      ) : null}
+      {record.result ? (
+        <p className="mt-1">
+          <span className="font-medium text-foreground/70">Result:</span> {record.result}
+        </p>
+      ) : null}
+      {record.decision ? (
+        <p className="mt-1">
+          <span className="font-medium text-foreground/70">Decision:</span> {record.decision}
+        </p>
+      ) : null}
+      {record.memoryText ? (
+        <p className="mt-1">
+          <span className="font-medium text-foreground/70">Memory:</span> {record.memoryText}
+        </p>
+      ) : null}
+      {renderStringList("Files touched", record.filesTouched)}
+      {renderStringList("Tests run", record.testsRun)}
+      {renderStringList("Checks run", record.checksRun)}
+      {renderStringList("Artifacts", record.artifacts)}
+      {renderStringList("Passed", record.passed)}
+      {renderStringList("Failed", record.failed)}
+      {renderStringList("Known risks", record.knownRisks)}
+      {renderStringList("Concerns", record.concerns)}
+      {renderStringList("Alternatives", record.alternatives)}
+      {renderStringList("Overrides", record.overrides)}
+      {record.requiredFix ? (
+        <p className="mt-1.5 rounded-md border border-destructive/20 bg-destructive/5 px-2 py-1 text-destructive">
+          Required fix: {record.requiredFix}
+        </p>
+      ) : null}
+    </div>
   );
 
   return (

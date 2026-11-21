@@ -3,7 +3,8 @@ import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
 
 import * as Console from "effect/Console";
-import * as Data from "effect/Data";
+import * as Schema from "effect/Schema";
+import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import { Argument, Command, Flag } from "effect/cli";
@@ -18,10 +19,10 @@ import {
   type TestHarnessAction,
 } from "../testing/browserHarness.ts";
 
-class TestCommandError extends Data.TaggedError("TestCommandError")<{
-  readonly message: string;
-  readonly cause?: unknown;
-}> {}
+class TestCommandError extends Schema.TaggedError<TestCommandError>()("TestCommandError", {
+  message: Schema.String,
+  cause: Schema.optional(Schema.Defect()),
+}) {}
 
 const browserFlag = Flag.Literals("browser", ["chromium", "firefox", "webkit"]).pipe(
   Flag.withDescription("Browser engine to launch."),
@@ -138,76 +139,78 @@ const readHarnessActions = (actionsPath: string, cwd: string) =>
     catch: (cause) => new TestCommandError({ message: errorMessage(cause), cause }),
   });
 
-const runBrowserCommand = (flags: BrowserCommandFlags) =>
-  Effect.gen(function* () {
-    const baseDir = yield* resolveBaseDir(
-      Option.getOrUndefined(flags.baseDir) ?? process.env.T3CODE_HOME,
-    );
-    const devUrl =
-      Option.getOrUndefined(flags.devUrl) ?? parseOptionalUrl(process.env.VITE_DEV_SERVER_URL);
-    const paths = yield* deriveServerPaths(baseDir, devUrl);
-    yield* ensureServerDirectories(paths);
-    const cwd = process.cwd();
-    const actions = Option.isSome(flags.actions)
-      ? yield* readHarnessActions(flags.actions.value, cwd)
-      : undefined;
-    const auth =
-      Option.isSome(flags.auth) && flags.auth.value === "kamicode-pairing"
-        ? {
-            type: "kamicode-pairing" as const,
-            credential: Option.getOrUndefined(flags.authCredential) ?? "",
-          }
-        : undefined;
-    if (Option.isSome(flags.auth) && !auth?.credential) {
-      return yield* new TestCommandError({
-        message: "--auth-credential is required when --auth kamicode-pairing is used.",
-      });
-    }
-    const result = yield* Effect.tryPromise({
-      try: () =>
-        runBrowserHarness({
-          url: flags.url,
-          cwd,
-          stateDir: paths.stateDir,
-          browser: flags.browser as BrowserHarnessBrowser,
-          headless: flags.visible ? false : flags.headless,
-          recordVideo: !flags.noVideo,
-          timeoutMs: flags.timeoutMs,
-          lingerMs: flags.lingerMs,
-          viewport: {
-            width: flags.viewportWidth,
-            height: flags.viewportHeight,
-          },
-          ...(Option.isSome(flags.goal) ? { goal: flags.goal.value } : {}),
-          ...(Option.isSome(flags.script) ? { scriptPath: flags.script.value } : {}),
-          ...(actions ? { actions } : {}),
-          ...(Option.isSome(flags.artifactsDir) ? { artifactsDir: flags.artifactsDir.value } : {}),
-          ...(Option.isSome(flags.storageState)
-            ? { storageStatePath: flags.storageState.value }
-            : {}),
-          ...(Option.isSome(flags.projectId) ? { projectId: flags.projectId.value } : {}),
-          ...(Option.isSome(flags.environmentId)
-            ? { environmentId: flags.environmentId.value }
-            : {}),
-          ...(Option.isSome(flags.authExpectation)
-            ? { authExpectation: flags.authExpectation.value }
-            : {}),
-          ...(auth ? { auth } : {}),
-        }),
-      catch: (cause) => new TestCommandError({ message: errorMessage(cause), cause }),
-    });
+const encodeEffectJsonValue = Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown));
 
-    yield* Console.log(
-      // @effect-diagnostics-next-line preferSchemaOverJson:off - This is human-facing CLI output.
-      flags.json ? JSON.stringify(result, null, 2) : formatBrowserHarnessCliOutput(result),
-    );
-    if (!result.success) {
-      yield* Effect.sync(() => {
-        process.exitCode = 1;
-      });
-    }
-    return result;
+const runBrowserCommand = Effect.fn("execute")(function* (flags: BrowserCommandFlags) {
+  const env = yield* HostProcess.Environment;
+  const baseDir = yield* resolveBaseDir(Option.getOrUndefined(flags.baseDir) ?? env.T3CODE_HOME);
+  const devUrl = Option.getOrUndefined(flags.devUrl) ?? parseOptionalUrl(env.VITE_DEV_SERVER_URL);
+  const paths = yield* deriveServerPaths(baseDir, devUrl);
+  yield* ensureServerDirectories(paths);
+  const cwd = process.cwd();
+  const actions = Option.isSome(flags.actions)
+    ? yield* readHarnessActions(flags.actions.value, cwd)
+    : undefined;
+  const auth =
+    Option.isSome(flags.auth) && flags.auth.value === "kamicode-pairing"
+      ? {
+          type: "kamicode-pairing" as const,
+          credential: Option.getOrUndefined(flags.authCredential) ?? "",
+        }
+      : undefined;
+  if (Option.isSome(flags.auth) && !auth?.credential) {
+    return yield* new TestCommandError({
+      message: "--auth-credential is required when --auth kamicode-pairing is used.",
+    });
+  }
+  const result = yield* Effect.tryPromise({
+    try: () =>
+      runBrowserHarness({
+        url: flags.url,
+        cwd,
+        stateDir: paths.stateDir,
+        browser: flags.browser as BrowserHarnessBrowser,
+        headless: flags.visible ? false : flags.headless,
+        recordVideo: !flags.noVideo,
+        timeoutMs: flags.timeoutMs,
+        lingerMs: flags.lingerMs,
+        viewport: {
+          width: flags.viewportWidth,
+          height: flags.viewportHeight,
+        },
+        ...(Option.isSome(flags.goal) ? { goal: flags.goal.value } : {}),
+        ...(Option.isSome(flags.script) ? { scriptPath: flags.script.value } : {}),
+        ...(actions ? { actions } : {}),
+        ...(Option.isSome(flags.artifactsDir) ? { artifactsDir: flags.artifactsDir.value } : {}),
+        ...(Option.isSome(flags.storageState)
+          ? { storageStatePath: flags.storageState.value }
+          : {}),
+        ...(Option.isSome(flags.projectId) ? { projectId: flags.projectId.value } : {}),
+        ...(Option.isSome(flags.environmentId) ? { environmentId: flags.environmentId.value } : {}),
+        ...(Option.isSome(flags.authExpectation)
+          ? { authExpectation: flags.authExpectation.value }
+          : {}),
+        ...(auth ? { auth } : {}),
+      }),
+    catch: (cause) => new TestCommandError({ message: errorMessage(cause), cause }),
   });
+
+  yield* Console.log(
+    flags.json
+      ? yield* encodeEffectJsonValue(result).pipe(
+          Effect.mapError(
+            (cause) => new TestCommandError({ message: "Could not encode test output", cause }),
+          ),
+        )
+      : formatBrowserHarnessCliOutput(result),
+  );
+  if (!result.success) {
+    yield* Effect.sync(() => {
+      process.exitCode = 1;
+    });
+  }
+  return result;
+});
 
 const browserCommand = Command.make("browser", {
   ...browserCommandServerFlags,

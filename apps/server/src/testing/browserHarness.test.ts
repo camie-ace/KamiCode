@@ -288,7 +288,7 @@ describe("browserHarness", () => {
     expect(result.errorMessage).toContain(
       "Assert action requires at least one machine-checkable field",
     );
-  }, 30_000);
+  });
 
   it("passes assert actions with machine-checkable text and title expectations", async () => {
     const result = await runBrowserHarness({
@@ -315,7 +315,7 @@ describe("browserHarness", () => {
     expect(result.success).toBe(true);
     expect(result.status).toBe("passed");
     expect(result.errorMessage).toBeUndefined();
-  }, 30_000);
+  });
 
   it("uses a KamiCode pairing credential to recover from /pair and reach the app UI", async () => {
     const fixture = await startAuthenticatedKamiCodeFixture();
@@ -389,5 +389,5 @@ describe("browserHarness", () => {
       await fixture.close();
       await Fs.rm(stateDir, { recursive: true, force: true });
     }
-  }, 60_000);
+  });
 });

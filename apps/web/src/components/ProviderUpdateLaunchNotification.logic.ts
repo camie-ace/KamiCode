@@ -1,8 +1,8 @@
+import { thrownErrorMessage } from "@t3tools/client-runtime/errors";
 import {
   defaultInstanceIdForDriver,
   PROVIDER_DISPLAY_NAMES,
   type EnvironmentId,
-  type ExecutionEnvironmentPlatformOs,
   type ProviderDriverKind,
   type ProviderInstanceId,
   type ServerProvider,
@@ -12,6 +12,9 @@ import {
   squashAtomCommandFailure,
   type AtomCommandResult,
 } from "@t3tools/client-runtime/state/runtime";
+import { msg } from "gt-react";
+
+import { m, type MessageResolver } from "../i18n/messages";
 
 export type ProviderUpdateCandidate = ServerProvider & {
   readonly versionAdvisory: NonNullable<ServerProvider["versionAdvisory"]> & {
@@ -26,28 +29,6 @@ export type ProviderSettingsUpdateCandidate = ServerProvider & {
     readonly updateCommand: string;
   };
 };
-
-export type ProviderUpdateToastType = "warning" | "loading" | "error" | "success";
-export type ProviderUpdateToastPhase = "initial" | "running" | "failed" | "unchanged" | "succeeded";
-
-export interface ProviderUpdateToastView {
-  readonly phase: ProviderUpdateToastPhase;
-  readonly type: ProviderUpdateToastType;
-  readonly title: string;
-  readonly description: string;
-  readonly dismissAfterVisibleMs?: number;
-}
-
-/**
- * Terminal update phases — outcomes that are safe to persist as a one-shot row
- * result. A non-terminal ("initial"/"running") snapshot never re-polls itself,
- * so storing one pins an update row's spinner indefinitely once its pending flag
- * expires; such phases must be dropped in favor of the live per-environment
- * provider state instead of being persisted.
- */
-export function isTerminalProviderUpdatePhase(phase: ProviderUpdateToastPhase): boolean {
-  return phase === "succeeded" || phase === "failed" || phase === "unchanged";
-}
 
 export type ProviderUpdateSidebarPillTone = "loading" | "warning" | "error" | "success";
 
@@ -101,40 +82,54 @@ function dedupeProvidersByDriver<T extends ServerProvider>(providers: ReadonlyAr
   return [...latestProviderByDriver.values()];
 }
 
-function dedupeProvidersByInstanceId<T extends ServerProvider>(providers: ReadonlyArray<T>): T[] {
-  const latestProviderByInstanceId = new Map<ProviderInstanceId, T>();
-
-  for (const provider of providers) {
-    const current = latestProviderByInstanceId.get(provider.instanceId);
-    if (!current || provider.checkedAt.localeCompare(current.checkedAt) >= 0) {
-      latestProviderByInstanceId.set(provider.instanceId, provider);
-    }
-  }
-
-  return [...latestProviderByInstanceId.values()];
-}
-
-function getProviderUpdatedTitle(provider: Pick<ServerProvider, "driver" | "version">): string {
+function getProviderUpdatedTitle(
+  provider: Pick<ServerProvider, "driver" | "version" | "installedVersion">,
+  resolve: MessageResolver,
+): string {
   const providerName = PROVIDER_DISPLAY_NAMES[provider.driver] ?? provider.driver;
-  return provider.version
-    ? `${providerName} updated: ${formatVersion(provider.version)}`
-    : `${providerName} updated`;
+  const version = provider.installedVersion ?? provider.version;
+  return version
+    ? resolve(
+        msg("{provider} updated: {version}", {
+          provider: providerName,
+          version: formatVersion(version),
+        }),
+      )
+    : resolve(msg("{provider} updated", { provider: providerName }));
 }
 
-function getProviderUpdatedDescription(providerCount: number): string {
+// Only OpenCode reports an installed CLI apart from a running external server.
+export function getProviderRestartNotice(
+  provider: Pick<ServerProvider, "version" | "installedVersion" | "updateState">,
+): string | null {
+  return provider.updateState?.status === "succeeded" &&
+    provider.installedVersion != null &&
+    provider.version != null &&
+    provider.installedVersion !== provider.version
+    ? provider.updateState.message
+    : null;
+}
+
+function getProviderUpdatedDescription(providerCount: number, resolve: MessageResolver): string {
   return providerCount === 1
-    ? "New sessions will use the updated provider."
-    : "New sessions will use the updated providers.";
+    ? resolve(msg("New sessions will use the updated provider."))
+    : resolve(msg("New sessions will use the updated providers."));
 }
 
 function getProviderFailedUpdateTitle(
   provider: Pick<ServerProvider, "driver" | "versionAdvisory">,
+  resolve: MessageResolver,
 ): string {
   const providerName = PROVIDER_DISPLAY_NAMES[provider.driver] ?? provider.driver;
   const attemptedVersion = provider.versionAdvisory?.latestVersion;
   return attemptedVersion
-    ? `${providerName} ${formatVersion(attemptedVersion)} update failed`
-    : `${providerName} update failed`;
+    ? resolve(
+        msg("{provider} {version} update failed", {
+          provider: providerName,
+          version: formatVersion(attemptedVersion),
+        }),
+      )
+    : resolve(msg("{provider} update failed", { provider: providerName }));
 }
 
 export function isProviderUpdateCandidate(
@@ -212,127 +207,27 @@ export function canOneClickUpdateProviderCandidate(
   );
 }
 
-export function providerUpdateNotificationKey(
-  providers: ReadonlyArray<ProviderUpdateCandidate>,
-): string | null {
-  const parts = dedupeProvidersByDriver(providers)
-    .map((provider) => {
-      const advisory = provider.versionAdvisory;
-      return [provider.driver, advisory.latestVersion].join(":");
-    })
-    .toSorted();
-
-  return parts.length > 0 ? parts.join("|") : null;
-}
-
-function formatProviderList(providers: ReadonlyArray<Pick<ServerProvider, "driver">>) {
+function formatProviderList(
+  providers: ReadonlyArray<Pick<ServerProvider, "driver">>,
+  resolve: MessageResolver,
+) {
   const names = providers.map(
     (provider) => PROVIDER_DISPLAY_NAMES[provider.driver] ?? provider.driver,
   );
-  if (names.length <= 2) {
-    return names.join(" and ");
+  if (names.length <= 1) return names.join("");
+  if (names.length === 2) {
+    return resolve(msg("{first} and {second}", { first: names[0], second: names[1] }));
   }
-  return `${names.slice(0, -1).join(", ")}, and ${names[names.length - 1]}`;
-}
-
-export function getProviderUpdateInitialToastView(input: {
-  readonly updateProviders: ReadonlyArray<ProviderUpdateCandidate>;
-  readonly oneClickProviders: ReadonlyArray<ProviderUpdateCandidate>;
-}): ProviderUpdateToastView {
-  return {
-    phase: "initial",
-    type: "warning",
-    title: getProviderUpdateInitialToastTitle(input.updateProviders),
-    description:
-      input.oneClickProviders.length > 0
-        ? "Install the update now or review provider settings."
-        : `${formatProviderList(input.updateProviders)} can be updated from provider settings.`,
-  };
-}
-
-export function shouldShowPrimaryProviderUpdateToast(view: ProviderUpdateToastView): boolean {
-  return view.phase !== "running";
-}
-
-function getProviderUpdateRunningToastView(providerCount: number): ProviderUpdateToastView {
-  return {
-    phase: "running",
-    type: "loading",
-    title: providerCount === 1 ? "Updating provider" : "Updating providers",
-    description: "Running provider update command.",
-  };
-}
-
-export function getProviderUpdateRejectedToastView(
-  providerCount: number,
-  message: string,
-): ProviderUpdateToastView {
-  return {
-    phase: "failed",
-    type: "error",
-    title: providerCount === 1 ? "Provider update failed" : "Provider updates failed",
-    description: message,
-  };
-}
-
-export function getProviderUpdateProgressToastView(input: {
-  readonly providers: ReadonlyArray<ServerProvider>;
-  readonly providerCount: number;
-}): ProviderUpdateToastView {
-  const providers = dedupeProvidersByDriver(input.providers);
-  const failedProviders = providers.filter((provider) => provider.updateState?.status === "failed");
-  if (failedProviders.length > 0) {
-    return {
-      phase: "failed",
-      type: "error",
-      title: failedProviders.length === 1 ? "Provider update failed" : "Provider updates failed",
-      description: getFailedProviderUpdateDescription(failedProviders),
-    };
-  }
-
-  const unchangedProviders = providers.filter(
-    (provider) => provider.updateState?.status === "unchanged",
+  return resolve(
+    msg("{items}, and {last}", {
+      items: names.slice(0, -1).join(", "),
+      last: names[names.length - 1],
+    }),
   );
-  if (unchangedProviders.length > 0) {
-    return {
-      phase: "unchanged",
-      type: "warning",
-      title:
-        unchangedProviders.length === 1
-          ? "Provider still needs an update"
-          : "Providers still need updates",
-      description: `${formatProviderList(unchangedProviders)} ${
-        unchangedProviders.length === 1 ? "still appears" : "still appear"
-      } outdated. Check provider settings for details.`,
-    };
-  }
-
-  if (providers.some(isProviderUpdateActive)) {
-    return getProviderUpdateRunningToastView(input.providerCount);
-  }
-
-  const hasCompleteProviderSnapshots = providers.length >= input.providerCount;
-  const allProvidersUpdated =
-    hasCompleteProviderSnapshots &&
-    providers.every(
-      (provider) =>
-        provider.updateState?.status === "succeeded" || !isProviderUpdateCandidate(provider),
-    );
-  if (allProvidersUpdated) {
-    return {
-      phase: "succeeded",
-      type: "success",
-      title: input.providerCount === 1 ? "Provider updated" : "Provider updates finished",
-      description: getProviderUpdatedDescription(input.providerCount),
-      dismissAfterVisibleMs: PROVIDER_UPDATE_SUCCESS_VISIBLE_MS,
-    };
-  }
-
-  return getProviderUpdateRunningToastView(input.providerCount);
 }
 
-/** One provider update sent by the cross-machine "Update all", with its result. */
 export interface ProviderUpdateRun {
+  readonly environmentId: EnvironmentId;
   readonly machineLabel: string;
   readonly driver: ProviderDriverKind;
   readonly instanceId: ProviderInstanceId;
@@ -342,81 +237,93 @@ export interface ProviderUpdateRun {
   >;
 }
 
-/**
- * Summarize a cross-machine "Update all" as one toast, or null when every
- * request was interrupted. Each update that did not succeed gets its own line,
- * so a failure on one machine is not hidden by successes on the others.
- */
+export function getProviderUpdateRunOutcome(
+  run: ProviderUpdateRun,
+  resolve: MessageResolver = m,
+):
+  | { readonly status: "interrupted" }
+  | { readonly status: "updated"; readonly message: string | null }
+  | { readonly status: "failed"; readonly line: string } {
+  if (isAtomCommandInterrupted(run.result)) return { status: "interrupted" };
+  const label = `${run.machineLabel} · ${PROVIDER_DISPLAY_NAMES[run.driver] ?? run.driver}`;
+  if (run.result._tag === "Failure") {
+    const error = squashAtomCommandFailure(run.result);
+    return {
+      status: "failed",
+      line: `${label}: ${thrownErrorMessage(error, resolve) ?? resolve(msg("Provider update failed."))}`,
+    };
+  }
+  const provider = run.result.value.providers.find(
+    (candidate) => candidate.instanceId === run.instanceId,
+  );
+  const updateState = provider?.updateState;
+  const restartNotice = provider ? getProviderRestartNotice(provider) : null;
+  return updateState?.status === "succeeded"
+    ? { status: "updated", message: restartNotice ? `${label}: ${restartNotice}` : null }
+    : {
+        status: "failed",
+        line: `${label}: ${updateState?.message ?? resolve(msg("Provider update did not finish."))}`,
+      };
+}
+
 export function getProviderUpdateRunToastView(
   runs: ReadonlyArray<ProviderUpdateRun>,
-): Pick<ProviderUpdateToastView, "type" | "title" | "description"> | null {
-  const settled = runs.filter((run) => !isAtomCommandInterrupted(run.result));
+  resolve: MessageResolver = m,
+): {
+  readonly type: "success" | "error";
+  readonly title: string;
+  readonly description: string;
+} | null {
+  const settled = runs
+    .map((run) => getProviderUpdateRunOutcome(run, resolve))
+    .filter((outcome) => outcome.status !== "interrupted");
   if (settled.length === 0) {
     return null;
   }
-  const failureLines = settled.flatMap((run) => {
-    const label = `${run.machineLabel} · ${PROVIDER_DISPLAY_NAMES[run.driver] ?? run.driver}`;
-    if (run.result._tag === "Failure") {
-      const error = squashAtomCommandFailure(run.result);
-      return [`${label}: ${error instanceof Error ? error.message : "Provider update failed."}`];
-    }
-    const updateState = run.result.value.providers.find(
-      (provider) => provider.instanceId === run.instanceId,
-    )?.updateState;
-    return updateState?.status === "succeeded"
-      ? []
-      : [`${label}: ${updateState?.message ?? "Provider update did not finish."}`];
-  });
+  const failureLines = settled.flatMap((outcome) =>
+    outcome.status === "failed" ? [outcome.line] : [],
+  );
+  const successMessages = [
+    ...new Set(
+      settled.flatMap((outcome) =>
+        outcome.status === "updated" && outcome.message ? [outcome.message] : [],
+      ),
+    ),
+  ];
   if (failureLines.length === 0) {
     return {
       type: "success",
-      title: settled.length === 1 ? "Provider updated" : `${settled.length} providers updated`,
-      description: getProviderUpdatedDescription(settled.length),
+      title:
+        settled.length === 1
+          ? resolve(msg("Provider updated"))
+          : resolve(
+              msg(
+                "{count, plural, one {{count} providers updated} other {{count} providers updated}}",
+                { count: settled.length },
+              ),
+            ),
+      description:
+        successMessages.join("\n") || getProviderUpdatedDescription(settled.length, resolve),
     };
   }
   return {
     type: "error",
     title:
       failureLines.length < settled.length
-        ? `${failureLines.length} of ${settled.length} provider updates failed`
+        ? resolve(
+            msg(
+              "{total, plural, one {{failed} of {total} provider updates failed} other {{failed} of {total} provider updates failed}}",
+              {
+                failed: failureLines.length,
+                total: settled.length,
+              },
+            ),
+          )
         : settled.length === 1
-          ? "Provider update failed"
-          : "Provider updates failed",
-    description: failureLines.join("\n"),
+          ? resolve(msg("Provider update failed"))
+          : resolve(msg("Provider updates failed")),
+    description: [...failureLines, ...successMessages].join("\n"),
   };
-}
-
-export function collectUpdatedProviderSnapshots(input: {
-  readonly results: ReadonlyArray<
-    AtomCommandResult<{ readonly providers: ReadonlyArray<ServerProvider> }, unknown>
-  >;
-  readonly providerInstanceIds: ReadonlySet<ProviderInstanceId>;
-}): ServerProvider[] {
-  const matchedProviders: ServerProvider[] = [];
-
-  for (const result of input.results) {
-    if (result._tag === "Failure") {
-      continue;
-    }
-    for (const provider of result.value.providers) {
-      if (input.providerInstanceIds.has(provider.instanceId)) {
-        matchedProviders.push(provider);
-      }
-    }
-  }
-
-  return dedupeProvidersByInstanceId(matchedProviders);
-}
-
-export function firstFailedProviderUpdateMessage(
-  results: ReadonlyArray<AtomCommandResult<unknown, unknown>>,
-): string | null {
-  const failed = results.find((result) => result._tag === "Failure");
-  if (!failed || failed._tag !== "Failure") {
-    return null;
-  }
-  const error = squashAtomCommandFailure(failed);
-  return error instanceof Error ? error.message : "Provider update failed.";
 }
 
 function getUpdateFinishedAt(provider: ServerProvider): string | null {
@@ -448,12 +355,27 @@ function latestFinishedAtForProviders(providers: ReadonlyArray<ServerProvider>):
   }, null);
 }
 
+/** Use each driver's latest finished instance so an older default-instance result cannot hide it. */
+function latestTerminalProvidersByDriver(providers: ReadonlyArray<ServerProvider>) {
+  const latestProviderByDriver = new Map<ProviderDriverKind, ServerProvider>();
+
+  for (const provider of providers) {
+    const current = latestProviderByDriver.get(provider.driver);
+    if (!current || (getUpdateFinishedAt(provider) ?? "") >= (getUpdateFinishedAt(current) ?? "")) {
+      latestProviderByDriver.set(provider.driver, provider);
+    }
+  }
+
+  return [...latestProviderByDriver.values()];
+}
+
 export function getProviderUpdateSidebarPillView(
   providers: ReadonlyArray<ServerProvider>,
   options?: ProviderUpdateSidebarPillOptions,
+  resolve: MessageResolver = m,
 ): ProviderUpdateSidebarPillView | null {
-  const dedupedProviders = dedupeProvidersByDriver(providers);
-  const activeProviders = dedupedProviders.filter(isProviderUpdateActive);
+  // Filter active instances before deduplicating drivers because update state is per instance.
+  const activeProviders = dedupeProvidersByDriver(providers.filter(isProviderUpdateActive));
   if (activeProviders.length > 0) {
     const activeProvider = activeProviders[0]!;
     const activeProviderName =
@@ -466,17 +388,30 @@ export function getProviderUpdateSidebarPillView(
       tone: "loading",
       title:
         activeProviders.length === 1
-          ? `Updating ${activeProviderName}`
-          : `Updating ${activeProviders.length} providers`,
+          ? resolve(msg("Updating {provider}", { provider: activeProviderName }))
+          : resolve(
+              msg(
+                "{count, plural, one {Updating {count} providers} other {Updating {count} providers}}",
+                { count: activeProviders.length },
+              ),
+            ),
       description:
         activeProviders.length === 1
-          ? `${formatProviderList(activeProviders)} update in progress.`
-          : `${formatProviderList(activeProviders)} updates are in progress.`,
+          ? resolve(
+              msg("{providers} update in progress.", {
+                providers: formatProviderList(activeProviders, resolve),
+              }),
+            )
+          : resolve(
+              msg("{providers} updates are in progress.", {
+                providers: formatProviderList(activeProviders, resolve),
+              }),
+            ),
     };
   }
 
-  const recentTerminalProviders = dedupedProviders.filter((provider) =>
-    isRecentTerminalProvider(provider, options?.visibleAfterIso),
+  const recentTerminalProviders = latestTerminalProvidersByDriver(
+    providers.filter((provider) => isRecentTerminalProvider(provider, options?.visibleAfterIso)),
   );
   const terminalCandidates: ProviderUpdateSidebarPillView[] = [];
 
@@ -496,9 +431,14 @@ export function getProviderUpdateSidebarPillView(
       tone: "error",
       title:
         failedProviders.length === 1
-          ? getProviderFailedUpdateTitle(failedProvider)
-          : `${failedProviders.length} provider updates failed`,
-      description: getFailedProviderUpdateDescription(failedProviders),
+          ? getProviderFailedUpdateTitle(failedProvider, resolve)
+          : resolve(
+              msg(
+                "{count, plural, one {{count} provider updates failed} other {{count} provider updates failed}}",
+                { count: failedProviders.length },
+              ),
+            ),
+      description: getFailedProviderUpdateDescription(failedProviders, resolve),
       dismissible: true,
     });
   }
@@ -521,11 +461,25 @@ export function getProviderUpdateSidebarPillView(
       tone: "warning",
       title:
         unchangedProviders.length === 1
-          ? `${unchangedProviderName} still needs an update`
-          : `${unchangedProviders.length} providers still need updates`,
-      description: `${formatProviderList(unchangedProviders)} ${
-        unchangedProviders.length === 1 ? "still appears" : "still appear"
-      } outdated. Review provider settings for details.`,
+          ? resolve(msg("{provider} still needs an update", { provider: unchangedProviderName }))
+          : resolve(
+              msg(
+                "{count, plural, one {{count} providers still need updates} other {{count} providers still need updates}}",
+                { count: unchangedProviders.length },
+              ),
+            ),
+      description:
+        unchangedProviders.length === 1
+          ? resolve(
+              msg("{providers} still appears outdated. Review provider settings for details.", {
+                providers: formatProviderList(unchangedProviders, resolve),
+              }),
+            )
+          : resolve(
+              msg("{providers} still appear outdated. Review provider settings for details.", {
+                providers: formatProviderList(unchangedProviders, resolve),
+              }),
+            ),
       dismissible: true,
     });
   }
@@ -546,9 +500,16 @@ export function getProviderUpdateSidebarPillView(
       tone: "success",
       title:
         succeededProviders.length === 1
-          ? getProviderUpdatedTitle(succeededProvider)
-          : `${succeededProviders.length} providers updated`,
-      description: getProviderUpdatedDescription(succeededProviders.length),
+          ? getProviderUpdatedTitle(succeededProvider, resolve)
+          : resolve(
+              msg(
+                "{count, plural, one {{count} providers updated} other {{count} providers updated}}",
+                { count: succeededProviders.length },
+              ),
+            ),
+      description:
+        [...new Set(succeededProviders.map(getProviderRestartNotice).filter(Boolean))].join("\n") ||
+        getProviderUpdatedDescription(succeededProviders.length, resolve),
       dismissAfterVisibleMs: PROVIDER_UPDATE_SUCCESS_VISIBLE_MS,
     });
   }
@@ -576,267 +537,19 @@ export function getProviderUpdateSidebarPillView(
   );
 }
 
-function getProviderUpdateInitialToastTitle(
-  providers: ReadonlyArray<ProviderUpdateCandidate>,
+function getFailedProviderUpdateDescription(
+  providers: ReadonlyArray<ServerProvider>,
+  resolve: MessageResolver,
 ): string {
-  if (providers.length === 1) {
-    const provider = providers[0]!;
-    const providerName = PROVIDER_DISPLAY_NAMES[provider.driver] ?? provider.driver;
-    return `Update Available: ${providerName} ${formatVersion(provider.versionAdvisory.latestVersion)}`;
-  }
-  return `Updates Available: ${providers.length} providers`;
-}
-
-function getFailedProviderUpdateDescription(providers: ReadonlyArray<ServerProvider>): string {
   if (providers.length === 1) {
     const provider = providers[0]!;
     if (provider.updateState?.message) {
       return provider.updateState.message;
     }
   }
-  return `${formatProviderList(providers)} failed to update. Check provider settings for details.`;
-}
-
-// ===========================================================================
-// Multi-environment provider updates
-//
-// With a desktop-local secondary backend present (the WSL backend alongside the
-// Windows primary), a provider update is applied across every local backend.
-// Each environment owns its own provider instances, so candidates and progress
-// are computed per environment and the dispatch targets that environment's
-// connection. These helpers are pure; the dispatch itself runs through the
-// `serverEnvironment.updateProvider` atom command in the components.
-// ===========================================================================
-
-/**
- * The settled result of dispatching a provider update to one local backend.
- * `provider` is the post-update snapshot of the targeted instance returned by
- * that backend (null when the backend did not report the targeted instance,
- * e.g. it does not have it installed).
- */
-export interface LocalProviderUpdateOutcome {
-  readonly environmentId: EnvironmentId;
-  readonly isPrimary: boolean;
-  readonly driver: ProviderDriverKind;
-  readonly instanceId: ProviderInstanceId;
-  readonly provider: ServerProvider | null;
-}
-
-// Worst-case ordering across backends: a failed copy outranks an unchanged one,
-// which outranks a still-running one, which outranks a succeeded one.
-const PROVIDER_UPDATE_STATUS_SEVERITY: Record<string, number> = {
-  succeeded: 1,
-  queued: 2,
-  running: 2,
-  unchanged: 3,
-  failed: 4,
-};
-
-function providerUpdateOutcomeSeverity(provider: ServerProvider): number {
-  return PROVIDER_UPDATE_STATUS_SEVERITY[provider.updateState?.status ?? ""] ?? 0;
-}
-
-export function firstRejectedProviderUpdateMessage(
-  results: ReadonlyArray<PromiseSettledResult<unknown>>,
-): string | null {
-  const rejected = results.find((result) => result.status === "rejected");
-  if (!rejected) {
-    return null;
-  }
-  return rejected.reason instanceof Error ? rejected.reason.message : "Provider update failed.";
-}
-
-/**
- * Reduce per-backend update outcomes to one representative snapshot per driver,
- * keeping the worst-case status across every local backend. Because the same
- * driver has a distinct instance id per environment, a secondary backend (e.g.
- * WSL) that *resolved* with a failed or unchanged provider would otherwise be
- * filtered out (its instance id is not the primary's) or collapsed behind the
- * primary's success — this surfaces it instead.
- */
-export function collectProviderUpdateOutcomeSnapshots(
-  results: ReadonlyArray<PromiseSettledResult<LocalProviderUpdateOutcome>>,
-): ServerProvider[] {
-  const worstByDriver = new Map<ProviderDriverKind, ServerProvider>();
-  for (const result of results) {
-    if (result.status !== "fulfilled" || result.value.provider === null) {
-      continue;
-    }
-    const provider = result.value.provider;
-    const current = worstByDriver.get(provider.driver);
-    if (
-      !current ||
-      providerUpdateOutcomeSeverity(provider) > providerUpdateOutcomeSeverity(current)
-    ) {
-      worstByDriver.set(provider.driver, provider);
-    }
-  }
-  return [...worstByDriver.values()];
-}
-
-/**
- * A human label that distinguishes local environments by platform (so the
- * popover shows "Windows" / "WSL" rather than the account name twice). WSL is
- * identified by its backend instance id; everything else falls back to the
- * reported OS, then the environment's own label.
- */
-export function deriveEnvironmentDisplayLabel(input: {
-  readonly isWsl: boolean;
-  readonly wslDistro: string | null;
-  readonly platformOs: ExecutionEnvironmentPlatformOs | undefined;
-  readonly fallbackLabel: string;
-}): string {
-  if (input.isWsl) {
-    return input.wslDistro ? `WSL · ${input.wslDistro}` : "WSL";
-  }
-  switch (input.platformOs) {
-    case "windows":
-      return "Windows";
-    case "darwin":
-      return "macOS";
-    case "linux":
-      return "Linux";
-    default:
-      return input.fallbackLabel;
-  }
-}
-
-/** Connection state of a local environment, normalized across primary/secondary sources. */
-export type EnvironmentUpdateConnectionState = "connecting" | "ready" | "disconnected" | "error";
-
-export interface LocalEnvironmentProvidersInput {
-  readonly environmentId: EnvironmentId;
-  readonly label: string;
-  readonly isPrimary: boolean;
-  readonly connectionState: EnvironmentUpdateConnectionState;
-  readonly providers: ReadonlyArray<ServerProvider>;
-}
-
-export interface LocalEnvironmentUpdateGroup {
-  readonly environmentId: EnvironmentId;
-  readonly label: string;
-  readonly isPrimary: boolean;
-  /** True while this environment's backend is still connecting (e.g. WSL booting). */
-  readonly isSettling: boolean;
-  /** Outdated, one-click-updatable providers in this environment. */
-  readonly candidates: ProviderUpdateCandidate[];
-  /** Full provider list for this environment, used to derive live update progress. */
-  readonly providers: ReadonlyArray<ServerProvider>;
-}
-
-/**
- * Build one update group per local environment, pairing each environment's
- * outdated one-click candidates with its own provider list, and report whether
- * any environment is still settling (so the caller can defer the popover).
- */
-export function buildLocalEnvironmentUpdateGroups(
-  environments: ReadonlyArray<LocalEnvironmentProvidersInput>,
-): { groups: LocalEnvironmentUpdateGroup[]; isAnySettling: boolean } {
-  const groups = environments.map((environment) => ({
-    environmentId: environment.environmentId,
-    label: environment.label,
-    isPrimary: environment.isPrimary,
-    isSettling: environment.connectionState === "connecting",
-    candidates: collectProviderUpdateCandidates(environment.providers).filter((candidate) =>
-      canOneClickUpdateProviderCandidate(candidate, environment.providers),
-    ),
-    providers: environment.providers,
-  }));
-  const isAnySettling = environments.some(
-    (environment) => environment.connectionState === "connecting",
+  return resolve(
+    msg("{providers} failed to update. Check provider settings for details.", {
+      providers: formatProviderList(providers, resolve),
+    }),
   );
-  return { groups, isAnySettling };
-}
-
-/** Groups that actually have a one-click update available, in display order (primary first). */
-export function environmentGroupsWithUpdates(
-  groups: ReadonlyArray<LocalEnvironmentUpdateGroup>,
-): LocalEnvironmentUpdateGroup[] {
-  return groups.filter((group) => group.candidates.length > 0);
-}
-
-/**
- * Stable key over the set of (environment, driver, latest version) updates on
- * offer, so the popover is shown once per distinct set and re-shown when it
- * changes.
- */
-export function localEnvironmentUpdateNotificationKey(
-  groups: ReadonlyArray<LocalEnvironmentUpdateGroup>,
-): string | null {
-  const parts = environmentGroupsWithUpdates(groups)
-    .map((group) => {
-      const providerParts = group.candidates
-        .map((candidate) => `${candidate.driver}:${candidate.versionAdvisory.latestVersion}`)
-        .toSorted()
-        .join(",");
-      return `${group.environmentId}=${providerParts}`;
-    })
-    .toSorted();
-  return parts.length > 0 ? parts.join("|") : null;
-}
-
-export type ProviderUpdateRowStatusKind = "idle" | "loading" | "success" | "failed" | "unchanged";
-
-export interface ProviderUpdateRowStatus {
-  readonly kind: ProviderUpdateRowStatusKind;
-  readonly text: string;
-}
-
-function environmentProviderNames(group: LocalEnvironmentUpdateGroup): string {
-  return group.candidates
-    .map((candidate) => PROVIDER_DISPLAY_NAMES[candidate.driver] ?? candidate.driver)
-    .join(", ");
-}
-
-/**
- * Resolve one environment row's display from every available signal, in
- * priority order: a transport rejection, then the dispatch's own *terminal*
- * result payload (reliable even when a secondary backend's config does not
- * re-sync), then live server state (reliable even when the dispatch RPC is lost
- * to a reconnect), then the optimistic pending spinner, then the idle state.
- *
- * A non-terminal result snapshot ("running") is intentionally skipped rather
- * than treated as authoritative, so live server state can still drive the row
- * to its terminal status instead of pinning it on "Updating…".
- */
-export function resolveEnvironmentUpdateRowStatus(input: {
-  readonly group: LocalEnvironmentUpdateGroup;
-  readonly error: string | undefined;
-  readonly result: ProviderUpdateToastView | undefined;
-  readonly pill: ProviderUpdateSidebarPillView | null;
-  readonly isPending: boolean;
-}): ProviderUpdateRowStatus {
-  if (input.error) {
-    return { kind: "failed", text: input.error };
-  }
-  if (input.result) {
-    switch (input.result.phase) {
-      case "succeeded":
-        return { kind: "success", text: "Updated" };
-      case "failed":
-        return { kind: "failed", text: input.result.description };
-      case "unchanged":
-        return { kind: "unchanged", text: input.result.description };
-      // "running" / "initial": non-terminal snapshot — fall through to live state.
-    }
-  }
-  if (input.pill) {
-    switch (input.pill.tone) {
-      case "success":
-        return { kind: "success", text: "Updated" };
-      case "error":
-        return { kind: "failed", text: input.pill.description };
-      case "warning":
-        return { kind: "unchanged", text: input.pill.description };
-      default:
-        return { kind: "loading", text: "Updating…" };
-    }
-  }
-  // A non-terminal result snapshot or the optimistic pending flag means an
-  // update is still in flight — keep showing the spinner rather than reverting
-  // to the Update button as if nothing happened.
-  if (input.result || input.isPending) {
-    return { kind: "loading", text: "Updating…" };
-  }
-  return { kind: "idle", text: environmentProviderNames(input.group) };
 }

@@ -1,3 +1,4 @@
+import { T, useGT, useMessages, Var } from "gt-react";
 import { useState } from "react";
 
 import { Button } from "~/components/ui/button";
@@ -6,38 +7,99 @@ import { describePreviewError } from "./errorCodeMessages";
 
 interface Props {
   url: string;
-  /** Chromium net error code, e.g. -105. */
   code: number;
-  /** Stringified Chromium error, e.g. "ERR_NAME_NOT_RESOLVED". */
   description: string;
   onReload: () => void;
+  move?: { readonly label: string; readonly onMove: () => void };
 }
 
-/** Theme-aware tailwind port of Chromium's "This site can't be reached" page. */
-export function PreviewUnreachable({ url, code, description, onReload }: Props) {
-  const [showDetails, setShowDetails] = useState(false);
+export function PreviewFileNotShown({
+  url,
+  fileName,
+  downloadUrl,
+  onOpen,
+}: {
+  url: string;
+  fileName: string;
+  downloadUrl: string | null;
+  onOpen: () => void;
+}) {
   const host = safeHost(url) ?? url;
-  const friendly = describePreviewError(description);
-  const errorLabel = description.length > 0 ? description : `ERR_${Math.abs(code) || "FAILED"}`;
-
   return (
-    <div className="relative flex h-full min-h-0 w-full overflow-y-auto bg-background">
+    <div className="scrollbar-gutter-both relative flex h-full min-h-0 w-full overflow-y-auto bg-background">
       <div className="mx-auto flex w-full max-w-xl flex-1 flex-col px-8 py-12 sm:py-16">
         <ErrorIcon className="mb-6 size-12 text-muted-foreground/70" />
         <h1 className="mb-3 text-2xl font-semibold leading-tight text-foreground">
-          This site can&rsquo;t be reached
+          <T>This file can&rsquo;t be shown here</T>
         </h1>
         <p className="text-sm leading-relaxed text-muted-foreground">
-          <span className="font-semibold text-foreground">{host}</span>: {friendly}.
+          <T>
+            <span className="font-semibold text-foreground">
+              <Var>{fileName}</Var>
+            </span>{" "}
+            from <Var>{host}</Var> was downloaded instead.
+          </T>
+        </p>
+        <div className="mt-auto flex items-center gap-2 pt-8">
+          <div className="flex-1" />
+          <Button type="button" variant="outline" size="sm" onClick={onOpen}>
+            <T>Open in browser</T>
+          </Button>
+          {downloadUrl ? (
+            <Button type="button" size="sm" render={<a href={downloadUrl} download={fileName} />}>
+              <T context="verb">Download</T>
+            </Button>
+          ) : null}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export function PreviewUnreachable({ url, code, description, onReload, move }: Props) {
+  const gt = useGT();
+  const m = useMessages();
+  const [showDetails, setShowDetails] = useState(false);
+  const host = safeHost(url) ?? url;
+  const friendly = describePreviewError(description, m);
+  const errorLabel = description.length > 0 ? description : `ERR_${Math.abs(code) || "FAILED"}`;
+
+  return (
+    <div className="scrollbar-gutter-both relative flex h-full min-h-0 w-full overflow-y-auto bg-background">
+      <div className="mx-auto flex w-full max-w-xl flex-1 flex-col px-8 py-12 sm:py-16">
+        <ErrorIcon className="mb-6 size-12 text-muted-foreground/70" />
+        <h1 className="mb-3 text-2xl font-semibold leading-tight text-foreground">
+          <T>This site can&rsquo;t be reached</T>
+        </h1>
+        <p className="text-sm leading-relaxed text-muted-foreground">
+          <T>
+            <span className="font-semibold text-foreground">
+              <Var>{host}</Var>
+            </span>
+            : <Var>{friendly}</Var>.
+          </T>
         </p>
 
         {showDetails ? (
           <div className="mt-6 rounded-lg border border-border bg-muted/40 p-4 text-sm">
-            <p className="mb-2 font-medium text-foreground">Try:</p>
+            <p className="mb-2 font-medium text-foreground">
+              <T>Try:</T>
+            </p>
             <ul className="list-disc space-y-1 pl-5 text-muted-foreground">
-              <li>Checking your connection</li>
-              <li>Confirming the dev server is running</li>
-              <li>Checking the proxy and the firewall</li>
+              <li>
+                <T>Checking your connection</T>
+              </li>
+              <li>
+                <T>Confirming the dev server is running</T>
+              </li>
+              {move ? (
+                <li>
+                  <T>Opening it in the environment&rsquo;s browser, which reaches its network</T>
+                </li>
+              ) : null}
+              <li>
+                <T>Checking the proxy and the firewall</T>
+              </li>
             </ul>
           </div>
         ) : null}
@@ -53,11 +115,16 @@ export function PreviewUnreachable({ url, code, description, onReload }: Props) 
             size="sm"
             onClick={() => setShowDetails((value) => !value)}
           >
-            {showDetails ? "Hide details" : "Details"}
+            {showDetails ? gt("Hide details") : gt("Details")}
           </Button>
           <div className="flex-1" />
+          {move ? (
+            <Button type="button" variant="outline" size="sm" onClick={move.onMove}>
+              {move.label}
+            </Button>
+          ) : null}
           <Button type="button" size="sm" onClick={onReload}>
-            Reload
+            <T>Reload</T>
           </Button>
         </div>
       </div>

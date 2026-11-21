@@ -1,8 +1,11 @@
+import { MarkedText, markedTextEnglish, translatableMessage } from "../errors/translatable.ts";
+import { msg } from "gt-i18n";
 import {
   EnvironmentHttpApi,
   EnvironmentHttpBadRequestError,
   EnvironmentHttpCommonError,
   type EnvironmentAuthInvalidError,
+  type EnvironmentConnectApprovalPendingError,
   type EnvironmentInternalError,
   type EnvironmentOperationForbiddenError,
   type EnvironmentRequestInvalidError,
@@ -10,7 +13,6 @@ import {
   type EnvironmentScopeRequiredError,
 } from "@t3tools/contracts";
 import * as HttpObservability from "@t3tools/shared/httpObservability";
-import * as Data from "effect/Data";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -22,51 +24,67 @@ import * as HttpApiClient from "effect/http-api/HttpApiClient";
 const isEnvironmentHttpCommonError = Schema.is(EnvironmentHttpCommonError);
 const isEnvironmentHttpBadRequestError = Schema.is(EnvironmentHttpBadRequestError);
 
-export class RemoteEnvironmentAuthFetchError extends Data.TaggedError(
+export class RemoteEnvironmentAuthFetchError extends Schema.TaggedError<RemoteEnvironmentAuthFetchError>()(
   "RemoteEnvironmentAuthFetchError",
-)<{
-  readonly message: string;
-  readonly cause: unknown;
-}> {}
+  {
+    message: Schema.String,
+    i18nMessage: Schema.optionalKey(MarkedText),
+    cause: Schema.Defect(),
+  },
+) {}
 
-export class RemoteEnvironmentAuthInvalidJsonError extends Data.TaggedError(
+class RemoteEnvironmentAuthInvalidJsonError extends Schema.TaggedError<RemoteEnvironmentAuthInvalidJsonError>()(
   "RemoteEnvironmentAuthInvalidJsonError",
-)<{
-  readonly message: string;
-  readonly cause: unknown;
-}> {}
+  {
+    message: Schema.String,
+    i18nMessage: Schema.optionalKey(MarkedText),
+    cause: Schema.Defect(),
+  },
+) {}
 
-export class RemoteEnvironmentAuthUndeclaredStatusError extends Data.TaggedError(
+export class RemoteEnvironmentAuthUndeclaredStatusError extends Schema.TaggedError<RemoteEnvironmentAuthUndeclaredStatusError>()(
   "RemoteEnvironmentAuthUndeclaredStatusError",
-)<{
-  readonly message: string;
-  readonly status: number;
-  readonly requestUrl: string;
-}> {
-  constructor(requestUrl: string, status: number) {
-    super({
-      message: `Remote environment endpoint ${requestUrl} returned undeclared status ${status}.`,
-      requestUrl,
-      status,
-    });
+  {
+    status: Schema.Number,
+    requestUrl: Schema.String,
+  },
+) {
+  override get message(): string {
+    return markedTextEnglish(this.i18nMessage);
+  }
+
+  get i18nMessage(): MarkedText {
+    return [
+      msg("Remote environment endpoint {url} returned undeclared status {status}.", {
+        url: this.requestUrl,
+        status: String(this.status),
+      }),
+    ];
   }
 }
 
-export class RemoteEnvironmentAuthTimeoutError extends Data.TaggedError(
+export class RemoteEnvironmentAuthTimeoutError extends Schema.TaggedError<RemoteEnvironmentAuthTimeoutError>()(
   "RemoteEnvironmentAuthTimeoutError",
-)<{
-  readonly message: string;
-  readonly requestUrl: string;
-  readonly timeoutMs: number;
-}> {
-  constructor(requestUrl: string, timeoutMs: number) {
-    super({
-      message: `Remote environment endpoint ${requestUrl} timed out after ${timeoutMs}ms.`,
-      requestUrl,
-      timeoutMs,
-    });
+  {
+    requestUrl: Schema.String,
+    timeoutMs: Schema.Number,
+  },
+) {
+  override get message(): string {
+    return markedTextEnglish(this.i18nMessage);
+  }
+
+  get i18nMessage(): MarkedText {
+    return [
+      msg("Remote environment endpoint {url} timed out after {timeoutMs}ms.", {
+        url: this.requestUrl,
+        timeoutMs: String(this.timeoutMs),
+      }),
+    ];
   }
 }
+
+const isRemoteEnvironmentAuthTimeoutError = Schema.is(RemoteEnvironmentAuthTimeoutError);
 
 export type RemoteEnvironmentRequestError =
   | EnvironmentRequestInvalidError
@@ -76,6 +94,7 @@ export type RemoteEnvironmentRequestError =
   | EnvironmentResourceNotFoundError
   | EnvironmentInternalError
   | EnvironmentHttpBadRequestError
+  | EnvironmentConnectApprovalPendingError
   | RemoteEnvironmentAuthFetchError
   | RemoteEnvironmentAuthInvalidJsonError
   | RemoteEnvironmentAuthUndeclaredStatusError
@@ -116,7 +135,6 @@ export const makeEnvironmentHttpApiGroupClient = <
     }),
   );
 
-/** Contract-derived request URLs for authentication proofs, tracing, and structured errors. */
 export const makeEnvironmentHttpApiUrlBuilder = (httpBaseUrl: string) =>
   HttpApiClient.urlBuilder(EnvironmentHttpApi, {
     baseUrl: remoteApiBaseUrl(httpBaseUrl),
@@ -126,7 +144,7 @@ const failRemoteRequest = (
   requestUrl: string,
   cause: unknown,
 ): Effect.Effect<never, RemoteEnvironmentRequestError> => {
-  if (cause instanceof RemoteEnvironmentAuthTimeoutError) {
+  if (isRemoteEnvironmentAuthTimeoutError(cause)) {
     return Effect.fail(cause);
   }
   if (isEnvironmentHttpCommonError(cause)) {
@@ -138,7 +156,11 @@ const failRemoteRequest = (
   if (Schema.isSchemaError(cause)) {
     return Effect.fail(
       new RemoteEnvironmentAuthInvalidJsonError({
-        message: `Remote environment endpoint returned an invalid response from ${requestUrl}.`,
+        ...translatableMessage(
+          msg("Remote environment endpoint returned an invalid response from {url}.", {
+            url: requestUrl,
+          }),
+        ),
         cause,
       }),
     );
@@ -147,19 +169,28 @@ const failRemoteRequest = (
     const response = cause.response;
     if (response.status < 200 || response.status >= 300) {
       return Effect.fail(
-        new RemoteEnvironmentAuthUndeclaredStatusError(requestUrl, response.status),
+        new RemoteEnvironmentAuthUndeclaredStatusError({ requestUrl, status: response.status }),
       );
     }
     return Effect.fail(
       new RemoteEnvironmentAuthInvalidJsonError({
-        message: `Remote environment endpoint returned an invalid response from ${requestUrl}.`,
+        ...translatableMessage(
+          msg("Remote environment endpoint returned an invalid response from {url}.", {
+            url: requestUrl,
+          }),
+        ),
         cause,
       }),
     );
   }
   return Effect.fail(
     new RemoteEnvironmentAuthFetchError({
-      message: `Failed to fetch remote environment endpoint ${requestUrl} (${String(cause)}).`,
+      ...translatableMessage(
+        msg("Failed to fetch remote environment endpoint {url} ({cause}).", {
+          url: requestUrl,
+          cause: String(cause),
+        }),
+      ),
       cause,
     }),
   );
@@ -174,7 +205,7 @@ export const executeEnvironmentHttpRequest = <A, E, R>(
     Effect.timeoutOption(Duration.millis(timeoutMs)),
     Effect.flatMap(
       Option.match({
-        onNone: () => Effect.fail(new RemoteEnvironmentAuthTimeoutError(requestUrl, timeoutMs)),
+        onNone: () => Effect.fail(new RemoteEnvironmentAuthTimeoutError({ requestUrl, timeoutMs })),
         onSome: Effect.succeed,
       }),
     ),

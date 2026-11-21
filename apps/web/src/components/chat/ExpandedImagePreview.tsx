@@ -15,6 +15,8 @@ import type {
   ScopedThreadRef,
 } from "@t3tools/contracts";
 import { videoMimeType } from "@t3tools/shared/video";
+import { msg } from "gt-react";
+import { m } from "~/i18n/messages";
 import { resolveMediaSource } from "@t3tools/client-runtime/media-source";
 import { resolveAssetUrl } from "@t3tools/client-runtime/state/assets";
 import {
@@ -26,13 +28,15 @@ import type { MediaActionSource } from "../media/MediaActions";
 import { resolveProtocolRelativeMediaUrl } from "../media/mediaContent";
 
 export interface ExpandedImageItem {
-  /** A loadable URL, or null when the dialog must mint one from `asset` first. */
   src: string | null;
   name: string;
+  mimeType?: string;
   type?: "video";
+  /** Revoke this owned object URL; other blob URLs belong to the timeline. */
+  ownsSrc?: boolean;
   source?: SnapShotSource;
+  onCopySnapshot?: (() => Promise<void>) | undefined;
   autoPlay?: boolean;
-  /** Authored remote destination to open when embedding fails, never a generated asset URL. */
   originalUrl?: string;
   srcFragment?: string;
   actionsSource?: MediaActionSource;
@@ -43,12 +47,6 @@ export interface ExpandedImagePreview {
   index: number;
 }
 
-/** Wraps navigation in either direction, including offsets beyond a complete cycle. */
-export function wrapExpandedImageIndex(index: number, imageCount: number): number {
-  return imageCount > 0 ? ((index % imageCount) + imageCount) % imageCount : 0;
-}
-
-/** Resolves a chat media reference on its owning environment, without downloading its bytes. */
 export async function resolveMarkdownMediaPreview(input: {
   source: string;
   resolvedFilePath?: string | undefined;
@@ -76,7 +74,7 @@ export async function resolveMarkdownMediaPreview(input: {
     src = resolveProtocolRelativeMediaUrl(media.uri);
   } else {
     if (media.access === "unavailable" || !input.threadRef || !input.httpBaseUrl) {
-      throw new Error("Reconnect to this environment and open the media again.");
+      throw new Error(m(msg("Reconnect to this environment and open the media again.")));
     }
     asset = { environmentId: input.threadRef.environmentId, resource: media.resource };
     const result = await input.createAssetUrl({
@@ -85,7 +83,9 @@ export async function resolveMarkdownMediaPreview(input: {
     });
     if (result._tag === "Failure") throw squashAtomCommandFailure(result);
     const assetUrl = resolveAssetUrl(input.httpBaseUrl, result.value.relativeUrl);
-    if (assetUrl === null) throw new Error("The environment returned an invalid media URL.");
+    if (assetUrl === null) {
+      throw new Error(m(msg("The environment returned an invalid media URL.")));
+    }
     src = assetUrl + media.srcFragment;
   }
   return {
@@ -116,9 +116,7 @@ export async function resolveMarkdownMediaPreview(input: {
 
 export function buildAttachmentVideoAsset(
   environmentId: EnvironmentId,
-  attachment:
-    | ChatFileAttachment
-    | { readonly id: string; readonly name: string; readonly mimeType: string },
+  attachment: Pick<ChatFileAttachment, "id" | "name" | "mimeType">,
 ): NonNullable<MediaActionSource["asset"]> {
   return {
     environmentId,
@@ -131,7 +129,6 @@ export function buildAttachmentVideoAsset(
   };
 }
 
-/** Opens a persisted video through the same signed-asset dialog used by message media. */
 export function buildAttachmentVideoPreview(
   environmentId: EnvironmentId,
   attachment: ChatFileAttachment | ChatVideoAttachment,
@@ -176,11 +173,19 @@ export function attachVideoThumbnail(video: HTMLVideoElement, file: File): () =>
 export function buildExpandedImagePreview(
   images: ReadonlyArray<ChatImageAttachment | ChatGifAttachment | ComposerFileAttachment>,
   selectedImageId: string,
+  onCopySnapshot?: (id: string) => Promise<void>,
 ): ExpandedImagePreview | null {
   const selected = images.find((image) => image.id === selectedImageId);
   if (selected?.type === "file" && selected.file && isVideoAttachment(selected)) {
     return {
-      images: [{ src: URL.createObjectURL(selected.file), name: selected.name, type: "video" }],
+      images: [
+        {
+          src: URL.createObjectURL(selected.file),
+          name: selected.name,
+          type: "video",
+          ownsSrc: true,
+        },
+      ],
       index: 0,
     };
   }
@@ -191,6 +196,7 @@ export function buildExpandedImagePreview(
             id: image.id,
             src: image.previewUrl,
             name: image.name,
+            mimeType: image.mimeType,
             ...(image.type === "image" ? { source: image.source } : {}),
           },
         ]
@@ -207,7 +213,13 @@ export function buildExpandedImagePreview(
     images: previewableImages.map((image) => ({
       src: image.src,
       name: image.name,
-      ...(image.source?.kind === "snap-shot" ? { source: image.source } : {}),
+      mimeType: image.mimeType,
+      ...(image.source?.kind === "snap-shot"
+        ? {
+            source: image.source,
+            onCopySnapshot: onCopySnapshot ? () => onCopySnapshot(image.id) : undefined,
+          }
+        : {}),
     })),
     index: selectedIndex,
   };

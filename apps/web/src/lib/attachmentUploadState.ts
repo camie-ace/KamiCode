@@ -1,4 +1,7 @@
 import type { EnvironmentId } from "@t3tools/contracts";
+import { msg } from "gt-react";
+
+import { m, type MessageResolver } from "../i18n/messages";
 
 export type ReadyAttachmentUpload = {
   readonly status: "ready";
@@ -18,39 +21,43 @@ export type AttachmentUploadState =
       readonly status: "failed";
       readonly environmentId: EnvironmentId;
       readonly reason: string;
-      /**
-       * A pending upload the queue minted for this failed attempt. Retry and
-       * release delete it, so it must never carry a draft's persisted
-       * attachment id.
-       */
+      /** `reason` as a `msg()`, so the composer shows it in the current language. */
+      readonly reasonMessage?: string;
+      /** Retry/release deletes this id; never use a persisted draft attachment id. */
       readonly attachmentId?: string;
       readonly previous?: ReadyAttachmentUpload;
     };
 
-export function attachmentUploadBlockReason(input: {
-  readonly imageIds: ReadonlyArray<string>;
-  readonly uploadsByImageId: Readonly<Record<string, AttachmentUploadState>>;
-  readonly environmentId: EnvironmentId;
-}): string | null {
+export function attachmentUploadFailureText(
+  upload: Extract<AttachmentUploadState, { status: "failed" }>,
+  resolve: MessageResolver,
+): string {
+  return upload.reasonMessage === undefined ? upload.reason : resolve(upload.reasonMessage);
+}
+
+export function attachmentUploadBlockReason(
+  input: {
+    readonly imageIds: ReadonlyArray<string>;
+    readonly uploadsByImageId: Readonly<Record<string, AttachmentUploadState>>;
+    readonly environmentId: EnvironmentId;
+  },
+  resolve: MessageResolver = m,
+): string | null {
   let pending = 0;
-  let failed = 0;
 
   for (const imageId of input.imageIds) {
     const upload = input.uploadsByImageId[imageId];
-    if (upload?.status === "failed" && upload.environmentId === input.environmentId) {
-      failed += 1;
-    } else if (upload?.status !== "ready" || upload.environmentId !== input.environmentId) {
+    // Send retries failed uploads, so they must not disable it.
+    if (upload?.status === "failed" && upload.environmentId === input.environmentId) continue;
+    if (upload?.status !== "ready" || upload.environmentId !== input.environmentId) {
       pending += 1;
     }
   }
 
-  if (failed > 0) {
-    return failed === 1
-      ? "Retry or remove the failed attachment"
-      : "Retry or remove the failed attachments";
-  }
   if (pending > 0) {
-    return pending === 1 ? "Attachment still uploading" : "Attachments still uploading";
+    return pending === 1
+      ? resolve(msg("Attachment still uploading"))
+      : resolve(msg("Attachments still uploading"));
   }
   return null;
 }

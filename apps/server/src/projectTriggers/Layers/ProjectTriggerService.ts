@@ -12,8 +12,8 @@ import { computeProjectTriggerNextFireAt } from "../schedule.ts";
 const makeProjectTriggerService = Effect.gen(function* () {
   const repository = yield* ProjectTriggerRepository;
 
-  const saveTrigger: ProjectTriggerServiceShape["saveTrigger"] = (input) =>
-    Effect.gen(function* () {
+  const saveTrigger: ProjectTriggerServiceShape["saveTrigger"] = Effect.fn("execute")(
+    function* (input) {
       const baseRow: ProjectTriggerRow = {
         triggerId: input.triggerId,
         projectId: input.projectId,
@@ -55,7 +55,8 @@ const makeProjectTriggerService = Effect.gen(function* () {
       };
       yield* repository.upsertTrigger(row);
       return row;
-    });
+    },
+  );
 
   return {
     saveTrigger,

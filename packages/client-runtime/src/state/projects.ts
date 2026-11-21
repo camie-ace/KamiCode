@@ -7,7 +7,7 @@ import {
   normalizeProjectPathForDispatch,
 } from "@t3tools/shared/path";
 
-export { normalizeProjectPathForComparison, normalizeProjectPathForDispatch };
+export { normalizeProjectPathForComparison };
 
 export const isWindowsPlatform = (platform: string): boolean => {
   return /^win(dows)?/i.test(platform);
@@ -135,13 +135,14 @@ export function findProjectByPath<T extends { workspaceRoot?: string; cwd?: stri
   });
 }
 
-/** Whether a project is its environment's Scratch project (`ServerConfig.scratchWorkspaceRoot`). */
 export function isScratchProject(
-  project: { readonly workspaceRoot: string },
+  project: { readonly workspaceRoot: string; readonly isScratch?: true },
   scratchWorkspaceRoot: string | null | undefined,
 ): boolean {
   return (
-    scratchWorkspaceRoot != null && findProjectByPath([project], scratchWorkspaceRoot) !== undefined
+    project.isScratch === true ||
+    (scratchWorkspaceRoot != null &&
+      findProjectByPath([project], scratchWorkspaceRoot) !== undefined)
   );
 }
 
@@ -206,3 +207,4 @@ export function canNavigateUp(currentPath: string): boolean {
 
 export * from "./projectCommands.ts";
 export * from "./projectEntities.ts";
+export * from "./projectRemoval.ts";

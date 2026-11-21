@@ -188,10 +188,6 @@ export function extensionFromLocalMediaPath(path: string): CommonLocalMediaExten
   return extension !== null && isCommonLocalMediaExtension(extension) ? extension : null;
 }
 
-function isLocalMediaCandidatePath(path: string): boolean {
-  return extensionFromLocalMediaPath(path) !== null;
-}
-
 function tokenizeLocalMediaQuery(query: string): readonly string[] {
   const normalized = normalizeSearchText(query);
   return normalized.length > 0 ? normalized.split(" ") : [];

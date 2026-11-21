@@ -1,4 +1,4 @@
-import { MaterialSegmentedButtons } from "../../components/MaterialSegmentedButtons.android";
+import { SegmentedControl } from "../../components/ui/SegmentedControl";
 import {
   BasicAlertDialog,
   Column,
@@ -6,6 +6,7 @@ import {
   Host,
   FilledTonalIconButton,
   Row,
+  RNHostView,
   Shape,
   Surface,
   Text,
@@ -26,31 +27,34 @@ import {
   type CustomSnoozeInput,
 } from "@t3tools/client-runtime/state/thread-settled";
 import { requireNativeModule } from "expo";
+import { msg, useGT, useMessages } from "gt-react-native";
 import { useEffect, useState } from "react";
 import { AppState, useWindowDimensions } from "react-native";
 
-import { OverlayPortal } from "../../components/OverlayPortal";
+import { OverlayPortal } from "../../components/ui/OverlayPortal";
 import { useAppearancePreferences } from "../settings/appearance/AppearancePreferencesProvider";
 import { useScaledTextRole } from "../settings/appearance/useScaledTextRole";
-import type { CustomSnoozeSheet as SharedCustomSnoozeSheet } from "./CustomSnoozeSheet.shared";
 import {
   applySnoozePickerDate,
   applySnoozePickerTime,
   snoozeDateToPickerDate,
 } from "./customSnoozeDate";
 
-type Props = Parameters<typeof SharedCustomSnoozeSheet>[0];
+type Props = {
+  readonly onClose: () => void;
+  readonly onSnooze: (snoozedUntil: string) => void;
+};
 
 const roundedCorner = Shape.RoundedCorner;
 
 const modes = [
-  { value: "date", label: "Date and time" },
-  { value: "duration", label: "Duration" },
+  { value: "date", label: msg("Date and time") },
+  { value: "duration", label: msg("Duration") },
 ] as const;
 const units = [
-  { value: "minutes", label: "Minutes" },
-  { value: "hours", label: "Hours" },
-  { value: "days", label: "Days" },
+  { value: "minutes", label: msg("Minutes") },
+  { value: "hours", label: msg("Hours") },
+  { value: "days", label: msg("Days") },
 ] as const;
 
 function systemUses24HourClock() {
@@ -58,8 +62,11 @@ function systemUses24HourClock() {
 }
 
 export function CustomSnoozeSheet(props: Props) {
+  const gt = useGT();
+  const m = useMessages();
   const { themeAppearance, themeVariables: colors } = useAppearancePreferences();
   const [is24Hour, setIs24Hour] = useState(systemUses24HourClock);
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- subscribes to AppState to re-read the native 24-hour clock setting when the app resumes
   useEffect(() => {
     const subscription = AppState.addEventListener("change", (state) => {
       if (state === "active") setIs24Hour(systemUses24HourClock());
@@ -83,7 +90,9 @@ export function CustomSnoozeSheet(props: Props) {
     const snoozedUntil = resolveCustomSnooze(input, new Date());
     if (!snoozedUntil) {
       setError(
-        mode === "date" ? "Choose a date and time in the future." : "Enter a positive duration.",
+        mode === "date"
+          ? gt("Choose a date and time in the future.")
+          : gt("Enter a positive duration."),
       );
       return;
     }
@@ -140,34 +149,40 @@ export function CustomSnoozeSheet(props: Props) {
                 verticalArrangement={{ spacedBy: 16 }}
                 modifiers={[fillMaxWidth(), padding(24, 24, 24, 16)]}
               >
-                <Text style={titleTypography}>Custom snooze</Text>
-                <MaterialSegmentedButtons
-                  options={modes}
-                  selected={mode}
-                  onSelect={(value) => {
-                    setMode(value);
-                    setError(null);
-                  }}
-                />
-                {mode === "date" ? (
-                  <MaterialSegmentedButtons
-                    options={[
-                      {
-                        value: "date",
-                        label: date.toLocaleDateString([], { month: "short", day: "numeric" }),
-                      },
-                      {
-                        value: "time",
-                        label: date.toLocaleTimeString([], {
-                          hour: "numeric",
-                          minute: "2-digit",
-                          hourCycle: is24Hour ? "h23" : "h12",
-                        }),
-                      },
-                    ]}
-                    selected={picker}
-                    onSelect={setPicker}
+                <Text style={titleTypography}>{gt("Custom snooze")}</Text>
+                <RNHostView matchContents={{ vertical: true }} modifiers={[fillMaxWidth()]}>
+                  <SegmentedControl
+                    variant="card"
+                    options={modes.map((option) => ({ ...option, label: m(option.label) }))}
+                    selected={mode}
+                    onSelect={(value) => {
+                      setMode(value);
+                      setError(null);
+                    }}
                   />
+                </RNHostView>
+                {mode === "date" ? (
+                  <RNHostView matchContents={{ vertical: true }} modifiers={[fillMaxWidth()]}>
+                    <SegmentedControl
+                      variant="card"
+                      options={[
+                        {
+                          value: "date",
+                          label: date.toLocaleDateString([], { month: "short", day: "numeric" }),
+                        },
+                        {
+                          value: "time",
+                          label: date.toLocaleTimeString([], {
+                            hour: "numeric",
+                            minute: "2-digit",
+                            hourCycle: is24Hour ? "h23" : "h12",
+                          }),
+                        },
+                      ]}
+                      selected={picker}
+                      onSelect={setPicker}
+                    />
+                  </RNHostView>
                 ) : null}
               </Column>
               {mode === "date" ? (
@@ -224,7 +239,14 @@ export function CustomSnoozeSheet(props: Props) {
                       <Text style={titleTypography}>+</Text>
                     </FilledTonalIconButton>
                   </Row>
-                  <MaterialSegmentedButtons options={units} selected={unit} onSelect={setUnit} />
+                  <RNHostView matchContents={{ vertical: true }} modifiers={[fillMaxWidth()]}>
+                    <SegmentedControl
+                      variant="card"
+                      options={units.map((option) => ({ ...option, label: m(option.label) }))}
+                      selected={unit}
+                      onSelect={setUnit}
+                    />
+                  </RNHostView>
                 </Column>
               )}
               <Column
@@ -241,13 +263,15 @@ export function CustomSnoozeSheet(props: Props) {
                     onClick={props.onClose}
                     colors={{ contentColor: colors["--color-foreground"] }}
                   >
-                    <Text style={bodyTypography}>Cancel</Text>
+                    <Text style={bodyTypography}>{gt("Cancel")}</Text>
                   </TextButton>
                   <TextButton
                     onClick={submit}
                     colors={{ contentColor: colors["--color-foreground"] }}
                   >
-                    <Text style={bodyTypography}>Snooze</Text>
+                    <Text style={bodyTypography}>
+                      {gt("Snooze", { $context: "verb, confirm button" })}
+                    </Text>
                   </TextButton>
                 </Row>
               </Column>
@@ -277,7 +301,10 @@ function SnoozeDateTimePicker(props: {
       is24Hour={props.is24Hour}
       showVariantToggle={false}
       elementColors={props.colors}
-      onDateSelected={props.onChange}
+      // Null marks incomplete input; keep the last valid date.
+      onDateSelected={(date) => {
+        if (date) props.onChange(date);
+      }}
     />
   );
 }

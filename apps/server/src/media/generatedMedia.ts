@@ -1,12 +1,9 @@
+import { type CommonLocalMediaExtension } from "./localMediaSearch.ts";
+import { type MediaArtifact } from "./MediaArtifacts.ts";
 // @effect-diagnostics nodeBuiltinImport:off
 import * as NodePath from "node:path";
 
-import {
-  isCommonLocalMediaExtension,
-  normalizeLocalMediaExtension,
-  type CommonLocalMediaExtension,
-} from "./localMediaSearch.ts";
-import { createMediaArtifact, type MediaArtifact } from "./MediaArtifacts.ts";
+import { isCommonLocalMediaExtension, normalizeLocalMediaExtension } from "./localMediaSearch.ts";
 
 const GENERATED_MEDIA_SAFE_ROOT_FOLDER = ".kamicode";
 const GENERATED_MEDIA_FOLDER = "generated-media";
@@ -65,38 +62,6 @@ export function resolveGeneratedMediaPath(input: {
     fileName,
     fileRelativePath,
     fileAbsolutePath,
-  };
-}
-
-function representGeneratedMediaArtifact(input: {
-  readonly projectRoot: string;
-  readonly threadId: string;
-  readonly fileName: string;
-  readonly title?: string;
-  readonly sizeBytes?: number;
-  readonly modifiedAt?: string;
-  readonly score?: number;
-}): GeneratedMediaArtifactRepresentation {
-  const path = resolveGeneratedMediaPath(input);
-  const extension = normalizeGeneratedMediaExtension(NodePath.extname(path.fileName));
-  const artifact = createMediaArtifact({
-    id: `generated:${path.threadSegment}:${path.fileName}`,
-    target: path.fileRelativePath,
-    source: "generated",
-    title: input.title?.trim() || path.fileName,
-    extension,
-    ...(input.sizeBytes !== undefined ? { sizeBytes: input.sizeBytes } : {}),
-    ...(input.modifiedAt !== undefined ? { modifiedAt: input.modifiedAt } : {}),
-    ...(input.score !== undefined ? { score: input.score } : {}),
-  });
-  if (!artifact) {
-    throw new Error(`Generated media extension is not representable: ${path.fileName}`);
-  }
-
-  return {
-    ...path,
-    artifact,
-    markdownReference: `[${escapeMarkdownLinkText(artifact.title)}](${path.fileRelativePath})`,
   };
 }
 
@@ -161,8 +126,4 @@ function assertInsideRoot(root: string, absolutePath: string): void {
   if (relative === "" || relative.startsWith("..") || NodePath.isAbsolute(relative)) {
     throw new Error(`Generated media path escaped project root: ${absolutePath}`);
   }
-}
-
-function escapeMarkdownLinkText(text: string): string {
-  return text.replace(/[\\\]]/gu, "\\$&");
 }

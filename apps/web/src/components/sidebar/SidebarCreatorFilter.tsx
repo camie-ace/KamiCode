@@ -1,5 +1,6 @@
+import { useGT } from "gt-react";
 import { CheckIcon, UsersIcon } from "lucide-react";
-import { useMemo, useState, type RefObject } from "react";
+import { useState, type RefObject } from "react";
 import { GitHubIcon } from "../Icons";
 import { SidebarHeaderIconButton } from "./SidebarThreadHeader";
 import { Button } from "../ui/button";
@@ -50,17 +51,14 @@ export function SidebarCreatorFilter({
   setCreatorLogins: (logins: string[]) => void;
   headerSearchRef?: RefObject<HTMLDivElement | null>;
 }) {
-  const selectedCreatorLogins = useMemo(() => new Set(creatorLogins), [creatorLogins]);
-  const selectedCreatorItems = useMemo(
-    () => creatorItems.filter((item) => selectedCreatorLogins.has(item.value)),
-    [creatorItems, selectedCreatorLogins],
-  );
+  const gt = useGT();
+  const selectedCreatorLogins = (() => new Set(creatorLogins))();
+  const selectedCreatorItems = (() =>
+    creatorItems.filter((item) => selectedCreatorLogins.has(item.value)))();
   const [creatorQuery, setCreatorQuery] = useState("");
   const creatorFilter = useComboboxFilter();
-  const filteredCreatorItems = useMemo(
-    () => creatorItems.filter((item) => creatorFilter.contains(item.label, creatorQuery)),
-    [creatorItems, creatorFilter, creatorQuery],
-  );
+  const filteredCreatorItems = (() =>
+    creatorItems.filter((item) => creatorFilter.contains(item.label, creatorQuery)))();
   return (
     <Combobox
       multiple
@@ -77,8 +75,10 @@ export function SidebarCreatorFilter({
           <SidebarHeaderIconButton
             label={
               creatorLogins.length > 0
-                ? `Filter threads by creator: ${selectedCreatorItems.map((item) => item.label).join(", ")}`
-                : "Filter threads by creator"
+                ? gt("Filter threads by creator: {people}", {
+                    people: selectedCreatorItems.map((item) => item.label).join(", "),
+                  })
+                : gt("Filter threads by creator")
             }
           />
         }
@@ -96,7 +96,7 @@ export function SidebarCreatorFilter({
         className="max-w-[min(22rem,var(--available-width))] overflow-hidden"
       >
         <div className="flex items-center justify-between gap-2 px-2 py-1">
-          <span className="text-xs font-medium">Created by</span>
+          <span className="text-xs font-medium">{gt("Created by")}</span>
           <Button
             size="xs"
             variant="ghost"
@@ -106,16 +106,16 @@ export function SidebarCreatorFilter({
               setCreatorQuery("");
             }}
           >
-            Clear people filter
+            {gt("Clear people filter")}
           </Button>
         </div>
         <ComboboxSearchInput
-          aria-label="Search people"
-          placeholder="Search people..."
+          aria-label={gt("Search people")}
+          placeholder={gt("Search people...")}
           value={creatorQuery}
           onChange={(event) => setCreatorQuery(event.target.value)}
         />
-        <ComboboxEmpty>No matching people.</ComboboxEmpty>
+        <ComboboxEmpty>{gt("No matching people.")}</ComboboxEmpty>
         <ComboboxList>
           {(item: (typeof creatorItems)[number]) => (
             <ComboboxItem key={item.value} value={item}>

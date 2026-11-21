@@ -2,6 +2,7 @@ import { Spinner } from "~/components/ui/spinner";
 import type {
   EnvironmentId,
   ProjectId,
+  PullRequestFilterOptionsInput,
   PullRequestInvolvement,
   PullRequestListFilters,
   PullRequestListState,
@@ -20,9 +21,12 @@ import {
   TagIcon,
   UserRoundIcon,
 } from "lucide-react";
+import { msg, T, useGT, useMessages } from "gt-react";
 import { type ElementType, useState } from "react";
 
 import { getSourceControlPresentationForKind } from "~/sourceControlPresentation";
+import { useDebouncedValue } from "~/state/queries";
+import { type EnvironmentQueryTarget, usePullRequestFilterOptions } from "~/state/pullRequests";
 import { ProjectFavicon, type ProjectFaviconProject } from "../ProjectFavicon";
 import { InputGroup, InputGroupAddon, InputGroupInput } from "../ui/input-group";
 import { Button } from "../ui/button";
@@ -36,6 +40,7 @@ import {
   MenuRadioGroup,
   MenuRadioItem,
   MenuRadioItemIndicator,
+  MenuSearchInput,
   MenuSeparator,
   MenuSub,
   MenuSubPopup,
@@ -44,20 +49,22 @@ import {
 } from "../ui/menu";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import {
+  pullRequestAuthorChoices,
+  selectedPullRequestAuthor,
+  pullRequestLabelChoices,
   pullRequestLabelColor,
   type PullRequestAuthorFacet,
   type PullRequestLabelFacet,
 } from "./pullRequestList.logic";
+import { resolveFilterOptions } from "./pullRequestListOptions";
 import { PullRequestActorAvatar } from "./pullRequestPresentation";
 import { PullRequestGlyph } from "./pullRequestIcons";
 
 export interface PullRequestFilterOption<Value extends string> {
   readonly value: Value;
   readonly label: string;
-  /** Uses the option's native icon tone. */
   readonly Icon: ElementType<{ className?: string }>;
   readonly project?: ProjectFaviconProject;
-  /** Why it cannot be chosen, carried onto the item as its title. */
   readonly unavailable?: string | undefined;
 }
 
@@ -78,12 +85,6 @@ export interface PullRequestExpectedHost {
   readonly kind: SourceControlProviderKind;
 }
 
-/**
- * What to call a host in the row. The provider's own name reads best — "GitHub" over
- * "github.com" — but it stops naming anything once a workspace has two hosts of one kind, so
- * those wear the host itself instead. Only the ambiguous ones: a lone GitLab beside two GitHub
- * installs is still "GitLab".
- */
 export function pullRequestHostLabel(
   entries: ReadonlyArray<{ readonly host: string; readonly kind: SourceControlProviderKind }>,
   entry: { readonly host: string; readonly kind: SourceControlProviderKind },
@@ -97,13 +98,19 @@ export function pullRequestHostLabel(
 export function PullRequestSearchInput({
   value,
   busy,
+  label,
+  placeholder,
   onChange,
+  onSubmit,
 }: {
   value: string;
-  /** A search is on its way to the hosts, said where the typing is rather than over the list. */
   busy?: boolean;
+  label: string;
+  placeholder: string;
   onChange: (value: string) => void;
+  onSubmit: (value: string) => void;
 }) {
+  const [draft, setDraft] = useState<string | null>(null);
   return (
     <InputGroup className="min-w-0 flex-1 **:[input]:h-9 sm:**:[input]:h-8">
       <InputGroupAddon>
@@ -111,53 +118,72 @@ export function PullRequestSearchInput({
       </InputGroupAddon>
       <InputGroupInput
         type="search"
-        value={value}
-        onChange={(event) => onChange(event.currentTarget.value)}
-        placeholder="Search pull requests, or label:bug"
-        aria-label="Search pull requests"
+        value={draft ?? value}
+        onFocus={() => setDraft(value)}
+        onBlur={() => setDraft(null)}
+        onChange={(event) => {
+          setDraft(event.currentTarget.value);
+          onChange(event.currentTarget.value);
+          if ((event.nativeEvent as InputEvent).inputType === "insertFromPaste") {
+            onSubmit(event.currentTarget.value);
+          }
+        }}
+        onKeyDown={(event) => {
+          if (event.key === "Enter" && !event.nativeEvent.isComposing) {
+            onSubmit(event.currentTarget.value);
+          }
+        }}
+        placeholder={placeholder}
+        aria-label={label}
       />
     </InputGroup>
   );
 }
 
-/**
- * List narrowings live behind one filter control, separate from sorting. The trigger carries a
- * count whenever any filter is off its default, so a narrowed list is never a mystery.
- */
 const ALL_PROJECTS_VALUE = "all";
-/** MenuRadioGroup wants a string, so "every host" wears the one value no host can be. */
 const ALL_HOSTS_VALUE = "";
-/** The same trick for the servers, which are named by an id no empty string can collide with. */
 const ALL_SERVERS_VALUE = "";
-/** The unset value of each narrowing group, which no filter of theirs is named after. */
 const UNFILTERED_VALUE = "all";
-/**
- * A project's own radio value, carrying the server along with the id: the id alone is only
- * unique within its own server, so two rows sharing one would otherwise both read as checked.
- */
+/** Project ids are unique only within an environment. */
 export const pullRequestProjectKey = (project: {
   readonly id: ProjectId;
   readonly environmentId: EnvironmentId;
 }) => JSON.stringify([project.environmentId, project.id]);
 
 const DRAFT_OPTIONS = [
-  { value: UNFILTERED_VALUE, label: "All", Icon: LayersIcon },
-  { value: "only", label: "Drafts only", Icon: PullRequestGlyph.draft },
-  { value: "hide", label: "Hide drafts", Icon: EyeOffIcon },
+  {
+    value: UNFILTERED_VALUE,
+    label: msg("All", { $context: "pull request filter" }),
+    Icon: LayersIcon,
+  },
+  { value: "only", label: msg("Drafts only"), Icon: PullRequestGlyph.draft },
+  { value: "hide", label: msg("Hide drafts"), Icon: EyeOffIcon },
 ] as const satisfies ReadonlyArray<PullRequestFilterOption<string>>;
 
 const REVIEW_OPTIONS = [
-  { value: UNFILTERED_VALUE, label: "All", Icon: LayersIcon },
-  { value: "approved", label: "Approved", Icon: CircleCheckIcon },
-  { value: "changes-requested", label: "Changes requested", Icon: CircleXIcon },
-  { value: "review-required", label: "Review required", Icon: CircleDashedIcon },
-  { value: "none", label: "No reviews", Icon: CircleSlashIcon },
+  {
+    value: UNFILTERED_VALUE,
+    label: msg("All", { $context: "pull request filter" }),
+    Icon: LayersIcon,
+  },
+  {
+    value: "approved",
+    label: msg("Approved", { $context: "review decision" }),
+    Icon: CircleCheckIcon,
+  },
+  { value: "changes-requested", label: msg("Changes requested"), Icon: CircleXIcon },
+  { value: "review-required", label: msg("Review required"), Icon: CircleDashedIcon },
+  { value: "none", label: msg("No reviews"), Icon: CircleSlashIcon },
 ] as const satisfies ReadonlyArray<PullRequestFilterOption<string>>;
 
 const CHECKS_OPTIONS = [
-  { value: UNFILTERED_VALUE, label: "All", Icon: LayersIcon },
-  { value: "passing", label: "Passing", Icon: CircleCheckIcon },
-  { value: "failing", label: "Failing", Icon: CircleXIcon },
+  {
+    value: UNFILTERED_VALUE,
+    label: msg("All", { $context: "pull request filter" }),
+    Icon: LayersIcon,
+  },
+  { value: "passing", label: msg("Passing", { $context: "checks filter" }), Icon: CircleCheckIcon },
+  { value: "failing", label: msg("Failing", { $context: "checks filter" }), Icon: CircleXIcon },
 ] as const satisfies ReadonlyArray<PullRequestFilterOption<string>>;
 
 function PullRequestFilterRadioGroup<Value extends string>({
@@ -171,6 +197,7 @@ function PullRequestFilterRadioGroup<Value extends string>({
   options: ReadonlyArray<PullRequestFilterOption<Value>>;
   onChange: (value: Value) => void;
 }) {
+  const gt = useGT();
   return (
     <MenuRadioGroup
       value={value}
@@ -180,8 +207,6 @@ function PullRequestFilterRadioGroup<Value extends string>({
     >
       <MenuGroupLabel>{label}</MenuGroupLabel>
       {options.map((option) => {
-        // A host the server has already said it cannot read is not a choice here: offering
-        // it would answer the press by replacing a working list with that failure.
         const item = (
           <MenuRadioItem
             key={option.value}
@@ -192,7 +217,11 @@ function PullRequestFilterRadioGroup<Value extends string>({
             <span className="flex min-w-0 items-center gap-2">
               <PullRequestFilterOptionIcon option={option} />
               <span className="min-w-0 flex-1 truncate">{option.label}</span>
-              {option.unavailable ? <span className="shrink-0">· Unavailable</span> : null}
+              {option.unavailable ? (
+                <span className="shrink-0">
+                  · {gt("Unavailable", { $context: "filter option" })}
+                </span>
+              ) : null}
               <MenuRadioItemIndicator />
             </span>
           </MenuRadioItem>
@@ -209,7 +238,7 @@ function PullRequestFilterRadioGroup<Value extends string>({
   );
 }
 
-function PullRequestFilterRadioSubmenu<Value extends string>({
+export function PullRequestFilterRadioSubmenu<Value extends string>({
   label,
   value,
   options,
@@ -243,143 +272,236 @@ function PullRequestFilterRadioSubmenu<Value extends string>({
   );
 }
 
-function PullRequestAuthorFilter({
+/** The listing's own scope, which the pickers search the host within. */
+export type PullRequestFilterOptionScope = EnvironmentQueryTarget<
+  Omit<PullRequestFilterOptionsInput, "kind" | "query">
+>;
+
+const OPTION_SEARCH_DEBOUNCE_MS = 250;
+
+function useHostedFilterOptions(
+  scope: ReadonlyArray<PullRequestFilterOptionScope>,
+  kind: PullRequestFilterOptionsInput["kind"],
+  query: string,
+) {
+  const typed = query.trim().slice(0, 100);
+  const sent = useDebouncedValue(typed, OPTION_SEARCH_DEBOUNCE_MS);
+  const hosted = usePullRequestFilterOptions(
+    scope.map(({ environmentId, input }) => ({
+      environmentId,
+      input: { ...input, kind, ...(sent ? { query: sent } : {}) },
+    })),
+  );
+  // Until the search catches up with the typing, the host's answers are for older text.
+  return sent === typed ? hosted : { labels: [], authors: [], error: null, isPending: true };
+}
+
+function PullRequestAuthorChoices({
   value,
   options,
+  scope,
   onChange,
 }: {
   value: string | undefined;
   options: ReadonlyArray<PullRequestAuthorFacet>;
+  scope: ReadonlyArray<PullRequestFilterOptionScope>;
   onChange: (author: string | undefined) => void;
 }) {
+  const gt = useGT();
   const [query, setQuery] = useState("");
-  const needle = query.trim().toLowerCase();
+  const hosted = useHostedFilterOptions(scope, "authors", query);
   const login = value?.toLowerCase() ?? "";
-  const selected = options.find((option) => option.actor.login.toLowerCase() === login);
+  const selected = selectedPullRequestAuthor(options, hosted.authors, value);
   const visible = [
     ...(selected ? [selected] : []),
-    ...options.filter(
-      (option) =>
-        option !== selected &&
-        (needle.length === 0 ||
-          option.actor.login.toLowerCase().includes(needle) ||
-          option.actor.name?.toLowerCase().includes(needle)),
+    ...pullRequestAuthorChoices(options, hosted.authors, query).filter(
+      (option) => option.actor.login.toLowerCase() !== login,
     ),
-  ].slice(0, 10);
+  ].slice(0, 30);
   const select = (next: string) => next.toLowerCase() !== login && onChange(next || undefined);
+  return (
+    <>
+      <MenuSearchInput
+        autoFocus
+        busy={hosted.isPending}
+        value={query}
+        onChange={(event) => setQuery(event.currentTarget.value)}
+        placeholder={gt("Search authors")}
+        aria-label={gt("Search authors")}
+      />
+      <MenuRadioGroup value={selected?.actor.login ?? value ?? ""} onValueChange={select}>
+        <MenuRadioItem value="">
+          <span className="flex min-w-0 items-center gap-2">
+            <LayersIcon aria-hidden className="size-3.5" />
+            <T>Anyone</T>
+          </span>
+        </MenuRadioItem>
+        {visible.map((option) => (
+          <MenuRadioItem key={option.actor.login.toLowerCase()} value={option.actor.login}>
+            <span className="flex min-w-0 items-center gap-2">
+              <PullRequestActorAvatar actor={option.actor} />
+              <span className="min-w-0 flex-1 truncate">{option.actor.login}</span>
+              {option.mergedCount > 0 ? (
+                <span className="shrink-0 text-xs text-muted-foreground tabular-nums">
+                  {option.mergedCount} {option.mergedCount === 1 ? "merge" : "merges"} loaded
+                </span>
+              ) : null}
+            </span>
+          </MenuRadioItem>
+        ))}
+        {visible.length === 0 && !hosted.isPending ? (
+          <MenuItem disabled>
+            {hosted.error === null
+              ? gt("No authors found")
+              : gt("Couldn't search authors on the host")}
+          </MenuItem>
+        ) : null}
+      </MenuRadioGroup>
+    </>
+  );
+}
+
+function PullRequestAuthorFilter({
+  value,
+  options,
+  scope,
+  onChange,
+}: {
+  value: string | undefined;
+  options: ReadonlyArray<PullRequestAuthorFacet>;
+  scope: ReadonlyArray<PullRequestFilterOptionScope>;
+  onChange: (author: string | undefined) => void;
+}) {
+  const gt = useGT();
   return (
     <MenuSub>
       <MenuSubTrigger>
         <UserRoundIcon aria-hidden className="size-3.5" />
-        <span className="flex-1">Author</span>
+        <span className="flex-1">
+          <T>Author</T>
+        </span>
         <span className="min-w-0 max-w-32 truncate text-xs text-muted-foreground">
-          {value ?? "Anyone"}
+          {value ?? gt("Anyone")}
         </span>
       </MenuSubTrigger>
       <MenuSubPopup>
-        <div className="p-1 pb-2">
-          <InputGroup>
-            <InputGroupAddon>
-              <SearchIcon aria-hidden />
-            </InputGroupAddon>
-            <InputGroupInput
-              autoFocus
-              size="compact"
-              value={query}
-              onChange={(event) => setQuery(event.currentTarget.value)}
-              onKeyDown={(event) => {
-                if (event.key !== "ArrowDown" && event.key !== "Escape") event.stopPropagation();
-              }}
-              placeholder="Search authors"
-              aria-label="Search authors"
-            />
-          </InputGroup>
-        </div>
-        <MenuRadioGroup value={selected?.actor.login ?? value ?? ""} onValueChange={select}>
-          <MenuRadioItem value="">
-            <span className="flex min-w-0 items-center gap-2">
-              <LayersIcon aria-hidden className="size-3.5" />
-              Anyone
-            </span>
-          </MenuRadioItem>
-          {visible.map((option) => (
-            <MenuRadioItem key={option.actor.login.toLowerCase()} value={option.actor.login}>
-              <span className="flex min-w-0 items-center gap-2">
-                <PullRequestActorAvatar actor={option.actor} />
-                <span className="min-w-0 flex-1 truncate">{option.actor.login}</span>
-                <span className="shrink-0 text-xs text-muted-foreground tabular-nums">
-                  {option.mergedCount} merges loaded
-                </span>
-              </span>
-            </MenuRadioItem>
-          ))}
-          {visible.length === 0 ? <MenuItem disabled>No authors found</MenuItem> : null}
-        </MenuRadioGroup>
+        <PullRequestAuthorChoices
+          value={value}
+          options={options}
+          scope={scope}
+          onChange={onChange}
+        />
       </MenuSubPopup>
     </MenuSub>
+  );
+}
+
+function PullRequestLabelChoices({
+  value,
+  options,
+  scope,
+  onChange,
+}: {
+  value: ReadonlyArray<string>;
+  options: ReadonlyArray<PullRequestLabelFacet>;
+  scope: ReadonlyArray<PullRequestFilterOptionScope>;
+  onChange: (labels: ReadonlyArray<string>) => void;
+}) {
+  const gt = useGT();
+  const [query, setQuery] = useState("");
+  const hosted = useHostedFilterOptions(scope, "labels", query);
+  const selected = new Set(value.map((name) => name.toLowerCase()));
+  const choices = pullRequestLabelChoices(options, hosted.labels, query);
+  const visible = [
+    ...value
+      .filter((name) => !choices.some((option) => option.name.toLowerCase() === name.toLowerCase()))
+      .map((name) => ({ name, color: null, count: 0 })),
+    ...choices,
+  ];
+  return (
+    <>
+      <MenuSearchInput
+        autoFocus
+        busy={hosted.isPending}
+        value={query}
+        onChange={(event) => setQuery(event.currentTarget.value)}
+        placeholder={gt("Search labels")}
+        aria-label={gt("Search labels")}
+      />
+      {visible.length === 0 && !hosted.isPending ? (
+        <MenuItem disabled>
+          {hosted.error === null ? gt("No labels found") : gt("Couldn't search labels on the host")}
+        </MenuItem>
+      ) : null}
+      {visible.map((option) => {
+        const key = option.name.toLowerCase();
+        const dot = pullRequestLabelColor(option.color);
+        return (
+          <MenuCheckboxItem
+            key={key}
+            checked={selected.has(key)}
+            onCheckedChange={(next) =>
+              onChange(
+                next
+                  ? [...value, option.name]
+                  : value.filter((name) => name.toLowerCase() !== option.name.toLowerCase()),
+              )
+            }
+          >
+            <span className="flex min-w-0 items-center gap-2">
+              <span
+                aria-hidden
+                className="size-2.5 shrink-0 rounded-full bg-muted-foreground"
+                {...(dot ? { style: { backgroundColor: dot } } : {})}
+              />
+              <span className="min-w-0 flex-1 truncate">{option.name}</span>
+              {option.count > 0 ? (
+                <span className="shrink-0 text-xs text-muted-foreground tabular-nums">
+                  {option.count}
+                </span>
+              ) : null}
+            </span>
+          </MenuCheckboxItem>
+        );
+      })}
+    </>
   );
 }
 
 function PullRequestLabelFilter({
   value,
   options,
+  scope,
   onChange,
 }: {
   value: ReadonlyArray<string>;
   options: ReadonlyArray<PullRequestLabelFacet>;
+  scope: ReadonlyArray<PullRequestFilterOptionScope>;
   onChange: (labels: ReadonlyArray<string>) => void;
 }) {
-  const selected = new Set(value.map((name) => name.toLowerCase()));
-  const visible = [
-    ...value
-      .filter((name) => !options.some((option) => option.name.toLowerCase() === name.toLowerCase()))
-      .map((name) => ({ name, color: null, count: 0 })),
-    ...options,
-  ];
+  const gt = useGT();
   return (
     <MenuSub>
       <MenuSubTrigger>
         <TagIcon aria-hidden className="size-3.5" />
-        <span className="flex-1">Labels</span>
+        <span className="flex-1">
+          <T>Labels</T>
+        </span>
         <span className="text-xs text-muted-foreground">
-          {value.length === 0 ? "Any" : `${value.length} selected`}
+          {value.length === 0
+            ? gt("Any", { $context: "no label filter" })
+            : gt("{count, plural, one {{count} selected} other {{count} selected}}", {
+                count: value.length,
+              })}
         </span>
       </MenuSubTrigger>
       <MenuSubPopup>
-        {visible.length === 0 ? (
-          <MenuItem disabled>No labels in this view</MenuItem>
-        ) : (
-          visible.map((option) => {
-            const key = option.name.toLowerCase();
-            const checked = selected.has(key);
-            const dot = pullRequestLabelColor(option.color);
-            return (
-              <MenuCheckboxItem
-                key={key}
-                checked={checked}
-                onCheckedChange={(next) =>
-                  onChange(
-                    next
-                      ? [...value, option.name]
-                      : value.filter((name) => name.toLowerCase() !== option.name.toLowerCase()),
-                  )
-                }
-              >
-                <span className="flex min-w-0 items-center gap-2">
-                  <span
-                    aria-hidden
-                    className="size-2.5 shrink-0 rounded-full bg-muted-foreground"
-                    {...(dot ? { style: { backgroundColor: dot } } : {})}
-                  />
-                  <span className="min-w-0 flex-1 truncate">{option.name}</span>
-                  <span className="shrink-0 text-xs text-muted-foreground tabular-nums">
-                    {option.count}
-                  </span>
-                </span>
-              </MenuCheckboxItem>
-            );
-          })
-        )}
+        <PullRequestLabelChoices
+          value={value}
+          options={options}
+          scope={scope}
+          onChange={onChange}
+        />
       </MenuSubPopup>
     </MenuSub>
   );
@@ -397,6 +519,7 @@ export function PullRequestFiltersMenu({
   onFilters,
   authorOptions = [],
   labelOptions = [],
+  optionScope,
   host,
   hostOptions,
   onHost,
@@ -416,42 +539,25 @@ export function PullRequestFiltersMenu({
   involvement: PullRequestInvolvement;
   involvementOptions: ReadonlyArray<PullRequestFilterOption<PullRequestInvolvement>>;
   onInvolvement: (involvement: PullRequestInvolvement) => void;
-  /** The narrowings beyond state and involvement; an absent field is that group unfiltered. */
   filters: PullRequestListFilters;
   onFilters: (filters: PullRequestListFilters) => void;
   authorOptions?: ReadonlyArray<PullRequestAuthorFacet>;
   labelOptions?: ReadonlyArray<PullRequestLabelFacet>;
+  optionScope: ReadonlyArray<PullRequestFilterOptionScope>;
   host: string | undefined;
-  /**
-   * Includes the "all hosts" entry, whose value is the empty string. With fewer than two real
-   * hosts there is nothing to switch between, so the whole group stays out of the menu.
-   */
   hostOptions: ReadonlyArray<PullRequestFilterOption<string>>;
   onHost: (host: string | undefined) => void;
   server: EnvironmentId | undefined;
-  /**
-   * Includes the "all servers" entry, whose value is the empty string. With one server there is
-   * nothing to switch between, so the whole group stays out of the menu.
-   */
   serverOptions: ReadonlyArray<PullRequestFilterOption<string>>;
   onServer: (server: EnvironmentId | undefined) => void;
-  /** The projects of every connected environment, each carrying the one its favicon is read from. */
   projects: ReadonlyArray<ProjectFaviconProject & { readonly id: ProjectId }>;
   projectId: ProjectId | undefined;
-  /**
-   * The server the selected project belongs to. A project id is only unique within its own
-   * server, so without this two rows sharing an id would both read as checked here.
-   */
   projectEnvironmentId: EnvironmentId | undefined;
-  /**
-   * Projects whose repository could not be read this time round. They are named here, where
-   * the reader is already choosing between projects, rather than as a count above the list
-   * that says something is missing without saying which.
-   */
   unavailable: ReadonlyMap<string, string>;
-  /** The environment comes with the project id, since picking a row picks a specific server's copy of it. */
   onProject: (projectId: ProjectId | undefined, environmentId: EnvironmentId | undefined) => void;
 }) {
+  const gt = useGT();
+  const resolve = useMessages();
   const selectedLabels = (filters.labels ?? []).flatMap((group) => group);
   const filterCount = [
     state !== "open",
@@ -480,7 +586,7 @@ export function PullRequestFiltersMenu({
       ? ALL_PROJECTS_VALUE
       : pullRequestProjectKey({ id: projectId, environmentId: projectEnvironmentId });
   const projectOptions: ReadonlyArray<PullRequestFilterOption<string>> = [
-    { value: ALL_PROJECTS_VALUE, label: "All projects", Icon: LayersIcon },
+    { value: ALL_PROJECTS_VALUE, label: gt("All projects"), Icon: LayersIcon },
     ...projects
       .toSorted(
         (left, right) =>
@@ -501,7 +607,9 @@ export function PullRequestFiltersMenu({
     <Menu onOpenChange={onOpenChange}>
       <MenuTrigger render={<Button variant="outline" />}>
         <ListFilterIcon className="size-4" />
-        <span>Filters</span>
+        <span>
+          <T>Filters</T>
+        </span>
         {filterCount > 0 ? (
           <span className="rounded-full bg-muted px-1.5 text-xs text-muted-foreground tabular-nums">
             {filterCount}
@@ -510,13 +618,13 @@ export function PullRequestFiltersMenu({
       </MenuTrigger>
       <MenuPopup align="end" side="bottom">
         <PullRequestFilterRadioSubmenu
-          label="State"
+          label={gt("State", { $context: "pull request filter" })}
           value={state}
           options={stateOptions}
           onChange={onState}
         />
         <PullRequestFilterRadioSubmenu
-          label="Involvement"
+          label={gt("Involvement")}
           value={involvement}
           options={involvementOptions}
           onChange={onInvolvement}
@@ -525,11 +633,13 @@ export function PullRequestFiltersMenu({
         <PullRequestAuthorFilter
           value={filters.author}
           options={authorOptions}
+          scope={optionScope}
           onChange={(author) => updateFilters({ author })}
         />
         <PullRequestLabelFilter
           value={selectedLabels}
           options={labelOptions}
+          scope={optionScope}
           onChange={(labels) =>
             updateFilters({
               labels: labels.length === 0 ? undefined : labels.slice(0, 10).map((label) => [label]),
@@ -537,28 +647,28 @@ export function PullRequestFiltersMenu({
           }
         />
         <PullRequestFilterRadioSubmenu
-          label="Draft"
+          label={gt("Draft", { $context: "pull request filter" })}
           value={filters.draft ?? UNFILTERED_VALUE}
-          options={DRAFT_OPTIONS}
+          options={resolveFilterOptions(DRAFT_OPTIONS, resolve)}
           onChange={(draft) => updateFilter("draft", draft)}
         />
         <PullRequestFilterRadioSubmenu
-          label="Review"
+          label={gt("Review", { $context: "pull request filter" })}
           value={filters.review ?? UNFILTERED_VALUE}
-          options={REVIEW_OPTIONS}
+          options={resolveFilterOptions(REVIEW_OPTIONS, resolve)}
           onChange={(review) => updateFilter("review", review)}
         />
         <PullRequestFilterRadioSubmenu
-          label="Checks"
+          label={gt("Checks", { $context: "pull request filter" })}
           value={filters.checks ?? UNFILTERED_VALUE}
-          options={CHECKS_OPTIONS}
+          options={resolveFilterOptions(CHECKS_OPTIONS, resolve)}
           onChange={(checks) => updateFilter("checks", checks)}
         />
         {hostOptions.length > 2 ? (
           <>
             <MenuSeparator />
             <PullRequestFilterRadioSubmenu
-              label="Host"
+              label={gt("Host", { $context: "pull request filter" })}
               value={host ?? ALL_HOSTS_VALUE}
               options={hostOptions}
               onChange={(next) => onHost(next === ALL_HOSTS_VALUE ? undefined : next)}
@@ -569,7 +679,7 @@ export function PullRequestFiltersMenu({
           <>
             <MenuSeparator />
             <PullRequestFilterRadioSubmenu
-              label="Server"
+              label={gt("Server", { $context: "pull request filter" })}
               value={server ?? ALL_SERVERS_VALUE}
               options={serverOptions}
               onChange={(next) =>
@@ -580,7 +690,7 @@ export function PullRequestFiltersMenu({
         ) : null}
         <MenuSeparator />
         <PullRequestFilterRadioSubmenu
-          label="Project"
+          label={gt("Project", { $context: "pull request filter" })}
           value={projectValue}
           options={projectOptions}
           onChange={(next) => {

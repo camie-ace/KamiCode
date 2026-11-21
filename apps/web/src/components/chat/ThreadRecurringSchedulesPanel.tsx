@@ -1,6 +1,6 @@
 import type { EnvironmentId, ProjectId, ThreadId } from "@t3tools/contracts";
 import { AlarmClockIcon, PauseIcon, PlayIcon, Trash2Icon } from "lucide-react";
-import { memo, useCallback, useEffect, useMemo, useState } from "react";
+import { memo, useEffect, useState } from "react";
 
 import { usePrimaryEnvironmentId } from "../../state/environments";
 import {
@@ -38,6 +38,7 @@ function reportError(title: string, error: unknown) {
 }
 
 export const ThreadRecurringSchedulesPanel = memo(function ThreadRecurringSchedulesPanel(props: {
+  readonly refreshKey: number;
   readonly environmentId: EnvironmentId;
   readonly projectId: ProjectId;
   readonly threadId: ThreadId;
@@ -50,105 +51,112 @@ export const ThreadRecurringSchedulesPanel = memo(function ThreadRecurringSchedu
   const [loaded, setLoaded] = useState(false);
   const [pendingId, setPendingId] = useState<string | null>(null);
 
-  const reload = useCallback(
-    async (reportFailure = true) => {
-      try {
-        const next = await listProjectTriggers({ environmentId, projectId });
-        setTriggers(next.filter((trigger) => trigger.targetThreadId === threadId));
-      } catch (error) {
-        if (reportFailure) reportError("Scheduled messages unavailable", error);
-      } finally {
-        setLoaded(true);
-      }
-    },
-    [environmentId, listProjectTriggers, projectId, threadId],
-  );
+  const reportLoadError = (error: unknown) => reportError("Scheduled messages unavailable", error);
 
+  const reload = async (reportFailure = true) => {
+    try {
+      const next = await listProjectTriggers({ environmentId, projectId });
+      setTriggers(next.filter((trigger) => trigger.targetThreadId === threadId));
+    } catch (error) {
+      if (reportFailure) reportLoadError(error);
+    } finally {
+      setLoaded(true);
+    }
+  };
+
+  const refreshKey = props.refreshKey;
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- Fetch this thread's schedules and discard responses after the destination or refresh generation changes.
   useEffect(() => {
-    void reload();
-  }, [reload]);
+    let canceled = false;
+    void listProjectTriggers({ environmentId, projectId }).then(
+      (next) => {
+        if (canceled) return;
+        setTriggers(next.filter((trigger) => trigger.targetThreadId === threadId));
+        setLoaded(true);
+      },
+      (error: unknown) => {
+        if (canceled) return;
+        reportLoadError(error);
+        setLoaded(true);
+      },
+    );
+    return () => {
+      canceled = true;
+    };
+    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- A schedule mutation increments refreshKey to invalidate this server read.
+  }, [environmentId, projectId, threadId, listProjectTriggers, refreshKey, reportLoadError]);
 
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- Poll the server while this thread has schedules whose next fire time can change.
   useEffect(() => {
     if (!loaded || triggers.length === 0) return;
     const interval = window.setInterval(() => void reload(false), 5_000);
     return () => window.clearInterval(interval);
   }, [loaded, reload, triggers.length]);
 
-  const executionLocation = useMemo(
-    () => resolveProjectTriggerExecutionLocation(environmentId, primaryEnvironmentId),
-    [environmentId, primaryEnvironmentId],
-  );
+  const executionLocation = (() =>
+    resolveProjectTriggerExecutionLocation(environmentId, primaryEnvironmentId))();
 
-  const toggle = useCallback(
-    async (trigger: ProjectTrigger) => {
-      setPendingId(trigger.id);
-      try {
-        await updateProjectTrigger({
-          environmentId,
-          trigger: {
-            projectId,
-            triggerId: trigger.id,
-            patch: {
-              name: trigger.name,
-              description: trigger.description ?? null,
-              schedule: trigger.schedule,
-              ...(trigger.onceAt ? { onceAt: trigger.onceAt } : {}),
-              prompt: trigger.prompt ?? "",
-              enabled: !trigger.enabled,
-              timezone: trigger.timezone ?? null,
-              executionLocation: trigger.executionLocation ?? executionLocation,
-            },
+  const toggle = async (trigger: ProjectTrigger) => {
+    setPendingId(trigger.id);
+    try {
+      await updateProjectTrigger({
+        environmentId,
+        trigger: {
+          projectId,
+          triggerId: trigger.id,
+          patch: {
+            name: trigger.name,
+            description: trigger.description ?? null,
+            schedule: trigger.schedule,
+            ...(trigger.onceAt ? { onceAt: trigger.onceAt } : {}),
+            prompt: trigger.prompt ?? "",
+            enabled: !trigger.enabled,
+            timezone: trigger.timezone ?? null,
+            executionLocation: trigger.executionLocation ?? executionLocation,
           },
-        });
-        await reload();
-      } catch (error) {
-        reportError(
-          trigger.enabled ? "Could not pause schedule" : "Could not resume schedule",
-          error,
-        );
-      } finally {
-        setPendingId(null);
-      }
-    },
-    [environmentId, executionLocation, projectId, reload, updateProjectTrigger],
-  );
+        },
+      });
+      await reload();
+    } catch (error) {
+      reportError(
+        trigger.enabled ? "Could not pause schedule" : "Could not resume schedule",
+        error,
+      );
+    } finally {
+      setPendingId(null);
+    }
+  };
 
-  const runNow = useCallback(
-    async (trigger: ProjectTrigger) => {
-      setPendingId(trigger.id);
-      try {
-        await runProjectTriggerNow({
-          environmentId,
-          trigger: { projectId, triggerId: trigger.id },
-        });
-        toastManager.add({ type: "success", title: "Scheduled message queued" });
-        await reload();
-      } catch (error) {
-        reportError("Could not run schedule", error);
-      } finally {
-        setPendingId(null);
-      }
-    },
-    [environmentId, projectId, reload, runProjectTriggerNow],
-  );
+  const runNow = async (trigger: ProjectTrigger) => {
+    setPendingId(trigger.id);
+    try {
+      await runProjectTriggerNow({
+        environmentId,
+        trigger: { projectId, triggerId: trigger.id },
+      });
+      toastManager.add({ type: "success", title: "Scheduled message queued" });
+      await reload();
+    } catch (error) {
+      reportError("Could not run schedule", error);
+    } finally {
+      setPendingId(null);
+    }
+  };
 
-  const remove = useCallback(
-    async (trigger: ProjectTrigger) => {
-      setPendingId(trigger.id);
-      try {
-        await deleteProjectTrigger({
-          environmentId,
-          trigger: { projectId, triggerId: trigger.id },
-        });
-        await reload();
-      } catch (error) {
-        reportError("Could not delete schedule", error);
-      } finally {
-        setPendingId(null);
-      }
-    },
-    [deleteProjectTrigger, environmentId, projectId, reload],
-  );
+  const remove = async (trigger: ProjectTrigger) => {
+    setPendingId(trigger.id);
+    try {
+      await deleteProjectTrigger({
+        environmentId,
+        trigger: { projectId, triggerId: trigger.id },
+      });
+      await reload();
+    } catch (error) {
+      reportError("Could not delete schedule", error);
+    } finally {
+      setPendingId(null);
+    }
+  };
 
   if (!loaded || triggers.length === 0) return null;
 

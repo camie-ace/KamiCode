@@ -7,10 +7,14 @@ import {
   clampFileAttachmentUploadBytes,
   fileAttachmentTooLargeMessage,
 } from "@t3tools/client-runtime/state/attachments";
+import { msg } from "gt-react";
 
 import type { ComposerFileAttachment, ComposerImageAttachment } from "../../composerDraftStore";
+import { m, type MessageResolver } from "../../i18n/messages";
 import { isHeicImageFile } from "../../lib/imageCompression";
-import { isVideoAttachment } from "../../types";
+import { isVideoAttachment, videoMimeType } from "../../types";
+import { isSvgAttachment } from "@t3tools/shared/image";
+import { isWorkspaceImagePreviewPath } from "@t3tools/shared/mediaPreview";
 
 type ComposerAttachmentFileKind = "image" | "file" | "unsupported-image";
 
@@ -29,12 +33,10 @@ const IMAGE_MIME_TYPE_BY_EXTENSION: Readonly<Record<string, string>> = {
 };
 
 /**
- * Some sources (drags from other apps, files piped through a shell) hand over
- * a `File` with an empty or generic MIME type. Maps the extension to a
- * provider-supported image type so a plain `photo.jpg` still lands on the
- * image path; anything unrecognized stays a generic file.
+ * Some sources (drags from other apps, files piped through a shell) hand over a
+ * `File` with an empty or generic MIME type.
  */
-export function inferImageMimeTypeFromName(name: string): string | null {
+function inferImageMimeTypeFromName(name: string): string | null {
   const dotIndex = name.lastIndexOf(".");
   if (dotIndex <= 0) {
     return null;
@@ -50,7 +52,6 @@ function inferImageMimeTypeForUnknownFile(file: Pick<File, "name" | "type">): st
   return inferImageMimeTypeFromName(file.name);
 }
 
-/** Give extension-recognized images a concrete type before compression. */
 export function normalizeComposerImageFileMimeType(file: File): File {
   const inferredMimeType = inferImageMimeTypeForUnknownFile(file);
   if (!inferredMimeType) {
@@ -62,9 +63,103 @@ export function normalizeComposerImageFileMimeType(file: File): File {
   });
 }
 
+function composerImageSignature(
+  image: Pick<ComposerImageAttachment, "mimeType" | "sizeBytes" | "name">,
+): string {
+  // Hydrated images get fresh lastModified values, so exclude it from dedupe.
+  return `${image.mimeType}\u0000${image.sizeBytes}\u0000${image.name}`;
+}
+
+// Byte hashes by file; a file whose bytes were never read gets a key that matches only itself.
+const composerImageFingerprints = new WeakMap<File, string>();
+let unreadComposerImageCount = 0;
+
+function composerImageFingerprint(file: File): string {
+  let fingerprint = composerImageFingerprints.get(file);
+  if (fingerprint === undefined) {
+    fingerprint = `unread:${unreadComposerImageCount++}`;
+    composerImageFingerprints.set(file, fingerprint);
+  }
+  return fingerprint;
+}
+
+/** Records the bytes behind an image file, so a draft drops it only as a byte-for-byte repeat. */
+export function rememberComposerImageBytes(file: File, bytes: Uint8Array): void {
+  // cyrb53, synchronous: crypto.subtle is missing on plain-http remote origins.
+  let first = 0xdeadbeef;
+  let second = 0x41c6ce57;
+  for (let index = 0; index < bytes.length; index++) {
+    const byte = bytes[index]!;
+    first = Math.imul(first ^ byte, 2654435761);
+    second = Math.imul(second ^ byte, 1597334677);
+  }
+  first = Math.imul(first ^ (first >>> 16), 2246822507);
+  first ^= Math.imul(second ^ (second >>> 13), 3266489909);
+  second = Math.imul(second ^ (second >>> 16), 2246822507);
+  second ^= Math.imul(first ^ (first >>> 13), 3266489909);
+  composerImageFingerprints.set(file, `${second >>> 0}:${first >>> 0}`);
+}
+
+export async function readComposerImageBytes(file: File): Promise<void> {
+  // An unreadable file keeps matching only itself.
+  const bytes = await file.arrayBuffer().catch(() => null);
+  if (bytes) rememberComposerImageBytes(file, new Uint8Array(bytes));
+}
+
+/**
+ * Matches name, type, size and bytes; unread files match only themselves.
+ * Producers must await readComposerImageBytes before publishing images to the draft.
+ */
+export function composerImageDedupKey(
+  image: Pick<ComposerImageAttachment, "mimeType" | "sizeBytes" | "name" | "file">,
+): string {
+  return `${composerImageSignature(image)}\u0000${composerImageFingerprint(image.file)}`;
+}
+
+// Compression changes an image's bytes, so a compressed image answers for the file it came from.
+const composerImageSourceKeys = new WeakMap<File, string>();
+
+/** A pasted image's name, type and size: a guess, before its bytes are read, that the draft has it. */
+export function composerImageSourceKey(file: File): string {
+  return (
+    composerImageSourceKeys.get(file) ??
+    composerImageSignature({
+      mimeType: file.type,
+      sizeBytes: file.size,
+      name: file.name || "image",
+    })
+  );
+}
+
+export function rememberComposerImageSource(source: File, prepared: File): void {
+  if (prepared !== source) composerImageSourceKeys.set(prepared, composerImageSourceKey(source));
+}
+
+function isDngFile(file: Pick<File, "name" | "type">): boolean {
+  const mimeType = file.type.split(";", 1)[0]?.trim().toLowerCase();
+  return (
+    file.name.toLowerCase().endsWith(".dng") ||
+    mimeType === "image/dng" ||
+    mimeType === "image/x-dng" ||
+    mimeType === "image/x-adobe-dng"
+  );
+}
+
+export function composerFileAttachmentMimeType(file: Pick<File, "name" | "type">): string {
+  // Downstream image detection uses MIME, even for attachments staged as files.
+  if (isDngFile(file)) return "image/x-adobe-dng";
+  if (isSvgAttachment({ name: file.name, mimeType: file.type })) return "image/svg+xml";
+  return (
+    videoMimeType({ name: file.name, mimeType: file.type }) ??
+    (file.type || "application/octet-stream")
+  );
+}
+
 export function classifyComposerAttachmentFile(
   file: Pick<File, "name" | "type">,
 ): ComposerAttachmentFileKind {
+  if (isSvgAttachment({ name: file.name, mimeType: file.type })) return "file";
+  if (isDngFile(file)) return "file";
   if (isHeicImageFile(file)) {
     return "image";
   }
@@ -74,7 +169,9 @@ export function classifyComposerAttachmentFile(
   if (!file.type.toLowerCase().startsWith("image/")) {
     return "file";
   }
-  return isProviderSendTurnSupportedImageMimeType(file.type) ? "image" : "unsupported-image";
+  if (isProviderSendTurnSupportedImageMimeType(file.type)) return "image";
+  // These can be previewed as files, but providers must not receive them as images.
+  return isWorkspaceImagePreviewPath(file.name) ? "file" : "unsupported-image";
 }
 
 export function isPreviewableComposerVideo(
@@ -88,7 +185,6 @@ export function isPreviewableComposerVideo(
   );
 }
 
-/** Non-media files without an inline reference still need the legacy attachment row. */
 export function composerOtherFilesForPresentation(
   files: ReadonlyArray<ComposerFileAttachment>,
   environmentId: EnvironmentId,
@@ -99,7 +195,6 @@ export function composerOtherFilesForPresentation(
   );
 }
 
-/** Byte limit for adding a generic file to the local composer draft. */
 export function fileAttachmentStagingLimit(input: FileAttachmentCapabilityState): number | null {
   if (!input.attachmentUploadsCapabilityKnown) {
     return PROVIDER_SEND_TURN_MAX_FILE_BYTES;
@@ -110,37 +205,32 @@ export function fileAttachmentStagingLimit(input: FileAttachmentCapabilityState)
   return clampFileAttachmentUploadBytes(input.maxFileAttachmentBytes);
 }
 
-/** Why retained generic files cannot send with the current server config. */
 export function fileAttachmentCapabilityBlockReason(
   input: FileAttachmentCapabilityState & {
     readonly files: ReadonlyArray<{ readonly name: string; readonly sizeBytes: number }>;
   },
+  resolve: MessageResolver = m,
 ): string | null {
   if (input.files.length === 0) {
     return null;
   }
   if (!input.attachmentUploadsCapabilityKnown) {
-    return "Waiting for the server before file attachments can send";
+    return resolve(msg("Waiting for the server before file attachments can send"));
   }
   const maxFileAttachmentBytes = fileAttachmentStagingLimit(input);
   if (maxFileAttachmentBytes === null) {
-    return "This server does not accept file attachments right now. Remove the files to send.";
+    return resolve(
+      msg("This server does not accept file attachments right now. Remove the files to send."),
+    );
   }
   const oversizedFile = input.files.find((file) => file.sizeBytes > maxFileAttachmentBytes);
   if (oversizedFile) {
-    return fileAttachmentTooLargeMessage(oversizedFile.name, maxFileAttachmentBytes);
+    return fileAttachmentTooLargeMessage(oversizedFile.name, maxFileAttachmentBytes, resolve);
   }
   return null;
 }
 
-/**
- * When `capabilities.attachmentUploads` flips off (reconnect, version skew),
- * tear down only uploads that have not been persisted onto a draft file.
- * Once `uploadedAttachmentId` is stamped, the draft references that server
- * copy after reload even if its local `File` is still available in memory.
- * Explicit attachment removal releases persisted uploads through
- * `releaseDraftAttachment`.
- */
+/** Release only unpersisted uploads; hydrated files still need their server copies. */
 export function attachmentsToReleaseOnUploadCapabilityLoss(
   attachments: ReadonlyArray<ComposerImageAttachment | ComposerFileAttachment>,
 ): Array<ComposerImageAttachment | ComposerFileAttachment> {
@@ -149,21 +239,22 @@ export function attachmentsToReleaseOnUploadCapabilityLoss(
   );
 }
 
-/**
- * Whether a paste's files should be claimed as composer attachments instead of
- * falling through to the default text paste. Deliberately no capacity or
- * pending-plan-question gate here: `addComposerAttachments` owns those limits
- * and reports them, while a gate at this layer would swallow the paste with no
- * feedback.
- */
 export function shouldHandleComposerAttachmentPaste(input: {
   readonly files: ReadonlyArray<File>;
   readonly plainText: string;
+  readonly bypassAutoAttachment?: boolean;
 }): boolean {
+  // Paste as Text keeps the text even when the source also put an image of it on the clipboard.
+  if (input.bypassAutoAttachment && input.plainText.length > 0) return false;
   if (
     input.files.some((file) => {
+      if (isDngFile(file)) return true;
       const classification = classifyComposerAttachmentFile(file);
-      return classification === "image" || classification === "unsupported-image";
+      return (
+        classification === "image" ||
+        classification === "unsupported-image" ||
+        isSvgAttachment({ name: file.name, mimeType: file.type })
+      );
     })
   ) {
     return true;

@@ -11,10 +11,10 @@ import {
   type FormEvent,
   type KeyboardEvent,
   type ReactNode,
-  useEffect,
-  useRef,
+  type RefObject,
   useState,
 } from "react";
+import { T, useGT } from "gt-react";
 
 import { Button } from "~/components/ui/button";
 import { InputGroup, InputGroupAddon, InputGroupInput } from "~/components/ui/input-group";
@@ -28,13 +28,13 @@ interface Props {
   canGoForward: boolean;
   refreshDisabled: boolean;
   inputDisabled?: boolean | undefined;
-  /** Bumping this value re-focuses and selects the URL input. */
-  focusUrlNonce?: number | undefined;
+  /** Owned by the caller so its shortcut handler can focus the address bar directly. */
+  urlInputRef: RefObject<HTMLInputElement | null>;
   onBack: () => void;
   onForward: () => void;
   onRefresh: () => void;
+  onStopLoading: () => void;
   onSubmit: (url: string) => void;
-  /** When provided, renders an "Open in browser" affordance to the right. */
   onOpenInBrowser?: (() => void) | undefined;
   onCapture?: ((record: boolean) => void) | undefined;
   captureDisabled?: boolean | undefined;
@@ -42,25 +42,11 @@ interface Props {
   onPictureInPicture?: (() => void) | undefined;
   pictureInPicture?: boolean | undefined;
   pictureInPictureDisabled?: boolean | undefined;
-  /**
-   * When provided, renders an annotation-mode toggle button to the right of
-   * the URL input. Pressed while annotation mode is active (button shows in `pressed`
-   * state). Disabled in `pickDisabled` mode.
-   */
   onPickElement?: (() => void) | undefined;
   pickActive?: boolean | undefined;
   pickDisabled?: boolean | undefined;
-  /** Optional reason string surfaced in the disabled tooltip. */
   pickDisabledReason?: string | undefined;
-  /**
-   * Trailing slot rendered after the URL input. Used by the preview view
-   * to mount the three-dot menu (hard reload, devtools, zoom, clear data).
-   */
   trailingActions?: ReactNode;
-  /**
-   * Slot between the nav buttons and the URL input. The preview view uses it
-   * to name the tab's browser profile, which is otherwise invisible.
-   */
   leadingActions?: ReactNode;
 }
 
@@ -73,10 +59,11 @@ export function PreviewChromeRow({
   canGoForward,
   refreshDisabled,
   inputDisabled,
-  focusUrlNonce,
+  urlInputRef: inputRef,
   onBack,
   onForward,
   onRefresh,
+  onStopLoading,
   onSubmit,
   onOpenInBrowser,
   onCapture,
@@ -92,16 +79,9 @@ export function PreviewChromeRow({
   trailingActions,
   leadingActions,
 }: Props) {
-  const inputRef = useRef<HTMLInputElement | null>(null);
+  const gt = useGT();
   const [draft, setDraft] = useState(url);
   const [inputFocused, setInputFocused] = useState(false);
-
-  useEffect(() => {
-    if (focusUrlNonce == null) return;
-    const node = inputRef.current;
-    if (!node) return;
-    node.focus();
-  }, [focusUrlNonce]);
 
   const submit = (event?: FormEvent | KeyboardEvent) => {
     event?.preventDefault();
@@ -118,7 +98,7 @@ export function PreviewChromeRow({
         className="flex h-10 min-h-10 shrink-0 items-center gap-1 border-b border-border/60 bg-background px-2 in-data-[preview-panel-mode=inline]:mb-3 in-data-[preview-panel-mode=inline]:h-7 in-data-[preview-panel-mode=inline]:min-h-7 in-data-[preview-panel-mode=inline]:border-b-transparent"
         data-surface-subheader
       >
-        <div className="flex items-center gap-0.5" role="group" aria-label="Navigation">
+        <div className="flex items-center gap-0.5" role="group" aria-label={gt("Navigation")}>
           <Tooltip>
             <TooltipTrigger
               render={
@@ -127,14 +107,16 @@ export function PreviewChromeRow({
                   size="icon-xs"
                   onClick={canGoBack ? onBack : NOOP}
                   disabled={!canGoBack}
-                  aria-label="Back"
+                  aria-label={gt("Back", { $context: "browser navigation" })}
                   type="button"
                 />
               }
             >
               <ArrowLeft />
             </TooltipTrigger>
-            <TooltipPopup>Back</TooltipPopup>
+            <TooltipPopup>
+              <T context="browser navigation">Back</T>
+            </TooltipPopup>
           </Tooltip>
           <Tooltip>
             <TooltipTrigger
@@ -144,14 +126,16 @@ export function PreviewChromeRow({
                   size="icon-xs"
                   onClick={canGoForward ? onForward : NOOP}
                   disabled={!canGoForward}
-                  aria-label="Forward"
+                  aria-label={gt("Forward", { $context: "browser navigation" })}
                   type="button"
                 />
               }
             >
               <ArrowRight />
             </TooltipTrigger>
-            <TooltipPopup>Forward</TooltipPopup>
+            <TooltipPopup>
+              <T context="browser navigation">Forward</T>
+            </TooltipPopup>
           </Tooltip>
           <Tooltip>
             <TooltipTrigger
@@ -159,16 +143,20 @@ export function PreviewChromeRow({
                 <Button
                   variant="ghost"
                   size="icon-xs"
-                  onClick={refreshDisabled ? NOOP : onRefresh}
+                  onClick={refreshDisabled ? NOOP : loading ? onStopLoading : onRefresh}
                   disabled={refreshDisabled}
-                  aria-label={loading ? "Stop" : "Refresh"}
+                  aria-label={
+                    loading ? gt("Stop", { $context: "stop loading the page" }) : gt("Refresh")
+                  }
                   type="button"
                 />
               }
             >
               <RefreshIcon refreshing={loading} />
             </TooltipTrigger>
-            <TooltipPopup>{loading ? "Loading…" : "Refresh"}</TooltipPopup>
+            <TooltipPopup>
+              {loading ? gt("Stop", { $context: "stop loading the page" }) : gt("Refresh")}
+            </TooltipPopup>
           </Tooltip>
         </div>
 
@@ -191,6 +179,11 @@ export function PreviewChromeRow({
                     setInputFocused(false);
                   }}
                   onKeyDown={(event) => {
+                    if (event.nativeEvent.isComposing || event.keyCode === 229) {
+                      // A trusted Enter would still submit the form implicitly.
+                      if (event.key === "Enter") event.preventDefault();
+                      return;
+                    }
                     if (event.key === "Enter") submit(event);
                     if (event.key === "Escape") {
                       event.preventDefault();
@@ -198,7 +191,9 @@ export function PreviewChromeRow({
                       inputRef.current?.blur();
                     }
                   }}
-                  placeholder="Search or enter URL"
+                  placeholder={gt("Search or enter URL")}
+                  aria-label={gt("Search or enter URL")}
+                  data-workspace-focus-default
                   spellCheck={false}
                   disabled={inputDisabled}
                   data-preview-url-input
@@ -209,7 +204,7 @@ export function PreviewChromeRow({
           </Tooltip>
           {onOpenInBrowser && !inputFocused ? (
             <InputGroupAddon align="inline-end">
-              {/* Revealed on hover so a resting address bar reads as plain text. */}
+              {}
               <span className="pointer-events-none flex opacity-0 transition-opacity focus-within:pointer-events-auto focus-within:opacity-100 group-hover/address:pointer-events-auto group-hover/address:opacity-100">
                 <Tooltip>
                   <TooltipTrigger
@@ -218,14 +213,16 @@ export function PreviewChromeRow({
                         variant="ghost"
                         size="icon-xs"
                         onClick={onOpenInBrowser}
-                        aria-label="Open in system browser"
+                        aria-label={gt("Open in system browser")}
                         type="button"
                       />
                     }
                   >
                     <ExternalLink />
                   </TooltipTrigger>
-                  <TooltipPopup>Open in system browser</TooltipPopup>
+                  <TooltipPopup>
+                    <T>Open in system browser</T>
+                  </TooltipPopup>
                 </Tooltip>
               </span>
             </InputGroupAddon>
@@ -241,7 +238,7 @@ export function PreviewChromeRow({
                   size="icon-xs"
                   onClick={onPickElement}
                   disabled={pickDisabled}
-                  aria-label={pickActive ? "Cancel annotation" : "Annotate preview"}
+                  aria-label={pickActive ? gt("Cancel annotation") : gt("Annotate preview")}
                   aria-pressed={pickActive ? "true" : "false"}
                   type="button"
                 />
@@ -253,8 +250,8 @@ export function PreviewChromeRow({
               {pickDisabled && pickDisabledReason
                 ? pickDisabledReason
                 : pickActive
-                  ? "Cancel annotation (Esc)"
-                  : "Annotate elements, regions, and drawings"}
+                  ? gt("Cancel annotation (Esc)")
+                  : gt("Annotate elements, regions, and drawings")}
             </TooltipPopup>
           </Tooltip>
         ) : null}
@@ -266,7 +263,7 @@ export function PreviewChromeRow({
                   variant={recording ? "secondary" : "ghost"}
                   size="icon-xs"
                   onClick={(event) => onCapture(event.shiftKey)}
-                  aria-label={recording ? "Stop recording" : "Capture screenshot"}
+                  aria-label={recording ? gt("Stop recording") : gt("Capture screenshot")}
                   type="button"
                   className="relative"
                   disabled={captureDisabled}
@@ -275,11 +272,11 @@ export function PreviewChromeRow({
             >
               <Camera className={cn(recording && "text-destructive")} />
               {recording ? (
-                <span className="absolute right-0.5 top-0.5 size-1.5 animate-status-pulse rounded-full bg-destructive" />
+                <span className="absolute right-0.5 top-0.5 size-1.5 motion-safe:animate-status-pulse rounded-full bg-destructive" />
               ) : null}
             </TooltipTrigger>
             <TooltipPopup>
-              {recording ? "Stop recording" : "Screenshot · Shift-click to record"}
+              {recording ? gt("Stop recording") : gt("Screenshot · Shift-click to record")}
             </TooltipPopup>
           </Tooltip>
         ) : null}
@@ -292,7 +289,7 @@ export function PreviewChromeRow({
                   size="icon-xs"
                   onClick={onPictureInPicture}
                   aria-label={
-                    pictureInPicture ? "Close floating preview" : "Float preview over chat"
+                    pictureInPicture ? gt("Close floating preview") : gt("Float preview over chat")
                   }
                   aria-pressed={pictureInPicture ? "true" : "false"}
                   type="button"
@@ -303,7 +300,7 @@ export function PreviewChromeRow({
               <PictureInPicture2 className={cn(pictureInPicture && "text-primary")} />
             </TooltipTrigger>
             <TooltipPopup>
-              {pictureInPicture ? "Close floating preview" : "Float preview over chat"}
+              {pictureInPicture ? gt("Close floating preview") : gt("Float preview over chat")}
             </TooltipPopup>
           </Tooltip>
         ) : null}

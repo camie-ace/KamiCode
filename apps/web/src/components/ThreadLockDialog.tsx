@@ -63,6 +63,7 @@ function finish(choice: Choice | null) {
 
 export function ThreadLockDialogHost() {
   const request = useRequest((state) => state.request);
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- Resolve any external lock-dialog promise when its host unmounts.
   useEffect(() => () => finish(null), []);
   return request ? <ThreadLockDialog request={request} /> : null;
 }

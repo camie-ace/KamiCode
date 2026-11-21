@@ -3,12 +3,14 @@ import type {
   ServerSettingsPatch,
   UsageModelPriceOverride,
 } from "@t3tools/contracts";
+import { msg } from "gt-react";
+
+import { m } from "~/i18n/messages";
 
 export interface UsagePriceTarget {
   readonly environmentId: EnvironmentId;
   readonly label: string;
   readonly prices: Readonly<Record<string, UsageModelPriceOverride>> | null;
-  /** Model mappings. `null` when they are not loaded or the server cannot store them. */
   readonly aliases: Readonly<Record<string, string>> | null;
   readonly unavailable: string | null;
 }
@@ -22,10 +24,7 @@ export type UsagePriceWriteResult =
   | { readonly status: "saved" }
   | { readonly status: "failed"; readonly error: string };
 
-/**
- * Each destination settles independently; retry callers pass only the failed destinations.
- * Prices and mappings for one destination go out in a single patch.
- */
+/** Destinations settle independently; retries pass only failures. */
 export async function writeUsagePrices(input: {
   readonly targets: readonly UsagePriceTarget[];
   readonly changes: ReadonlyMap<EnvironmentId, readonly UsagePriceChange[]>;
@@ -48,7 +47,7 @@ export async function writeUsagePrices(input: {
       if (target.unavailable !== null) {
         result = { status: "failed", error: target.unavailable };
       } else if (aliases.length > 0 && target.aliases === null) {
-        result = { status: "failed", error: "Update server to map models" };
+        result = { status: "failed", error: m(msg("Update server to map models")) };
       } else {
         try {
           const saved =
@@ -70,9 +69,9 @@ export async function writeUsagePrices(input: {
           result =
             saved._tag === "Success"
               ? { status: "saved" }
-              : { status: "failed", error: "Could not save. Try again." };
+              : { status: "failed", error: m(msg("Could not save. Try again.")) };
         } catch {
-          result = { status: "failed", error: "Could not save. Try again." };
+          result = { status: "failed", error: m(msg("Could not save. Try again.")) };
         }
       }
       input.onResult(target.environmentId, result);

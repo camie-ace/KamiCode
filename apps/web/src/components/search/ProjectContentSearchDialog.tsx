@@ -1,13 +1,15 @@
 import { Spinner } from "~/components/ui/spinner";
-import type { ProjectContentMatch } from "@t3tools/contracts";
+import { AuthFilesystemReadScope, type ProjectContentMatch } from "@t3tools/contracts";
 
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { T, useGT, useMessages } from "gt-react";
+import { useState, type ReactNode } from "react";
 
 import { useActiveProjectTarget, type ActiveProjectTarget } from "~/hooks/useActiveProjectTarget";
-import { useTheme } from "~/hooks/useTheme";
+import { useRenderedAppearance, useTheme } from "~/hooks/useTheme";
 import { cn } from "~/lib/utils";
 import { useRightPanelStore } from "~/rightPanelStore";
 import { useProjectContentSearch } from "~/state/queries";
+import { readEnvironmentScope } from "~/state/session";
 
 import { PierreEntryIcon } from "../chat/PierreEntryIcon";
 import { CommandPaletteContent } from "../CommandPaletteContent";
@@ -20,12 +22,7 @@ interface ProjectContentSearchDialogProps {
   readonly onOpenChange: (open: boolean) => void;
 }
 
-/**
- * Result rows are syntax highlighted, so mounting all 500 possible rows at
- * once stalls the UI. Rows render in windows that grow as the sentinel at the
- * bottom of the list scrolls into view (or keyboard navigation moves past
- * the rendered window).
- */
+/** Syntax-highlighting all 500 result rows at once stalls the UI. */
 const VISIBLE_MATCH_WINDOW = 100;
 
 interface MatchGroup {
@@ -56,6 +53,7 @@ function groupMatches(matches: ReadonlyArray<ProjectContentMatch>): MatchGroup[]
 
 function SearchOptionButton(props: {
   readonly active: boolean;
+  readonly disabled: boolean;
   readonly label: string;
   readonly onClick: () => void;
   readonly children: ReactNode;
@@ -66,6 +64,7 @@ function SearchOptionButton(props: {
         render={
           <Toggle
             aria-label={props.label}
+            disabled={props.disabled}
             pressed={props.active}
             size="segmented"
             variant="segmented"
@@ -81,30 +80,38 @@ function SearchOptionButton(props: {
 }
 
 function EmptyContentSearchDialog() {
+  const gt = useGT();
   return (
     <CommandPaletteContent
-      aria-label="Search project contents"
-      escapeLabel="Back"
-      footerActionLabel="Open file"
-      inputProps={{ disabled: true, placeholder: "Search project contents…" }}
+      aria-label={gt("Search project contents")}
+      escapeLabel={gt("Back")}
+      footerActionLabel={gt("Open file")}
+      inputProps={{ disabled: true, placeholder: gt("Search project contents…") }}
       mode="none"
       panelSize="fill"
       testId="project-content-search"
       value=""
     >
       <p className="m-auto px-6 text-center text-muted-foreground text-sm">
-        Open a project to search its files.
+        <T>Open a project to search its files.</T>
       </p>
     </CommandPaletteContent>
   );
 }
+
+const scrollSelectedRowIntoView = (row: HTMLElement | null) => {
+  row?.scrollIntoView({ block: "nearest" });
+};
 
 function OpenContentSearchDialog(props: {
   readonly onOpenChange: (open: boolean) => void;
   readonly target: ActiveProjectTarget;
 }) {
   const { target } = props;
+  const gt = useGT();
+  const messages = useMessages();
   const { resolvedTheme } = useTheme();
+  const renderedAppearance = useRenderedAppearance();
   const [query, setQuery] = useState("");
   const [caseSensitive, setCaseSensitive] = useState(false);
   const [wholeWord, setWholeWord] = useState(false);
@@ -113,35 +120,32 @@ function OpenContentSearchDialog(props: {
 
   const [visibleCount, setVisibleCount] = useState(VISIBLE_MATCH_WINDOW);
 
-  const search = useProjectContentSearch({
-    environmentId: target.environmentId,
-    cwd: target.cwd,
-    query,
-    caseSensitive,
-    wholeWord,
-    useRegex,
-  });
-  const canOpenMatches = !search.isPending;
+  const search = useProjectContentSearch(
+    {
+      environmentId: target.environmentId,
+      cwd: target.cwd,
+      query,
+      caseSensitive,
+      wholeWord,
+      useRegex,
+    },
+    messages,
+  );
+  const canOpenMatches = search.canReadFiles && !search.isPending && search.error === null;
   const matches = search.matches;
-  const visibleMatches = useMemo(() => matches.slice(0, visibleCount), [matches, visibleCount]);
-  const groups = useMemo(() => groupMatches(visibleMatches), [visibleMatches]);
-
-  useEffect(() => {
+  const [resultsFor, setResultsFor] = useState(matches);
+  if (resultsFor !== matches) {
+    setResultsFor(matches);
     setSelectedIndex(0);
     setVisibleCount(VISIBLE_MATCH_WINDOW);
-  }, [matches]);
+  }
+  if (selectedIndex >= visibleCount) {
+    setVisibleCount(selectedIndex + VISIBLE_MATCH_WINDOW);
+  }
+  const visibleMatches = matches.slice(0, visibleCount);
+  const groups = groupMatches(visibleMatches);
 
-  useEffect(() => {
-    if (selectedIndex >= visibleCount) {
-      setVisibleCount(selectedIndex + VISIBLE_MATCH_WINDOW);
-      return;
-    }
-    document
-      .querySelector<HTMLElement>(`[data-content-search-result="${selectedIndex}"]`)
-      ?.scrollIntoView({ block: "nearest" });
-  }, [selectedIndex, visibleCount]);
-
-  const observeLoadMoreSentinel = useCallback((sentinel: HTMLElement | null) => {
+  const observeLoadMoreSentinel = (sentinel: HTMLElement | null) => {
     if (!sentinel) return;
     const observer = new IntersectionObserver((entries) => {
       if (entries.some((entry) => entry.isIntersecting)) {
@@ -150,41 +154,48 @@ function OpenContentSearchDialog(props: {
     });
     observer.observe(sentinel);
     return () => observer.disconnect();
-  }, []);
+  };
 
   const openMatch = (match: ProjectContentMatch) => {
-    if (!canOpenMatches) return;
+    if (!canOpenMatches || !readEnvironmentScope(target.environmentId, AuthFilesystemReadScope)) {
+      return;
+    }
     props.onOpenChange(false);
     useRightPanelStore.getState().openFile(target.threadRef, match.path, match.lineNumber);
   };
-  const fileCount = useMemo(() => new Set(matches.map((match) => match.path)).size, [matches]);
+  const fileCount = new Set(matches.map((match) => match.path)).size;
   const showSearchStatus =
-    search.hasQuery || search.isPending || search.error !== null || search.invalidRegex;
+    search.canReadFiles &&
+    (search.hasQuery || search.isPending || search.error !== null || search.invalidRegex);
 
   return (
     <CommandPaletteContent
-      aria-label={`Search file contents in ${target.projectName}`}
-      escapeLabel="Back"
-      footerActionLabel="Open file"
+      aria-label={gt("Search file contents in {project}", { project: target.projectName })}
+      escapeLabel={gt("Back")}
+      footerActionLabel={gt("Open file")}
       inputAccessory={
-        <div className="absolute inset-e-2.5 top-1/2 flex shrink-0 -translate-y-1/2 items-center gap-0.5 rounded-md border bg-muted/30 p-0.5">
+        <div className="absolute inset-e-2.5 top-1/2 flex shrink-0 -translate-y-1/2 items-center gap-0.5 rounded-lg border bg-muted/30 p-0.5">
           <SearchOptionButton
             active={caseSensitive}
-            label="Match case"
+            disabled={!search.canReadFiles}
+            label={gt("Match case")}
             onClick={() => setCaseSensitive((current) => !current)}
           >
-            Aa
+            {/* oxlint-disable-next-line t3code/no-untranslated-copy -- match-case glyph; the label carries the meaning */}
+            {"Aa"}
           </SearchOptionButton>
           <SearchOptionButton
             active={wholeWord}
-            label="Match whole word"
+            disabled={!search.canReadFiles}
+            label={gt("Match whole word")}
             onClick={() => setWholeWord((current) => !current)}
           >
             <span className="underline decoration-2 underline-offset-2">ab</span>
           </SearchOptionButton>
           <SearchOptionButton
             active={useRegex}
-            label="Use regular expression"
+            disabled={!search.canReadFiles}
+            label={gt("Use regular expression")}
             onClick={() => setUseRegex((current) => !current)}
           >
             .*
@@ -193,8 +204,10 @@ function OpenContentSearchDialog(props: {
       }
       inputProps={{
         className: "pe-30",
-        placeholder: `Search in ${target.projectName}`,
+        disabled: !search.canReadFiles,
+        placeholder: gt("Search in {project}", { project: target.projectName }),
         onKeyDown: (event) => {
+          if (event.nativeEvent.isComposing || event.keyCode === 229) return;
           if (event.key === "ArrowDown" && matches.length > 0) {
             event.preventDefault();
             setSelectedIndex((current) => (current + 1) % matches.length);
@@ -202,9 +215,6 @@ function OpenContentSearchDialog(props: {
             event.preventDefault();
             setSelectedIndex((current) => (current - 1 + matches.length) % matches.length);
           } else if (event.key === "Enter") {
-            // While a newer query is debouncing or in flight, the visible
-            // matches belong to the previous query; opening one would jump
-            // to a result the user did not ask for.
             if (!canOpenMatches) {
               event.preventDefault();
               return;
@@ -227,23 +237,37 @@ function OpenContentSearchDialog(props: {
         <div className="flex h-9 shrink-0 items-center border-b px-3 text-xs text-muted-foreground">
           {search.isPending ? (
             <span className="flex items-center gap-2">
-              <Spinner size="sm" /> Searching…
+              <Spinner size="sm" /> <T>Searching…</T>
             </span>
           ) : search.error ? (
             <span className="text-destructive">{search.error}</span>
           ) : search.invalidRegex ? (
-            <span className="text-destructive">Invalid regular expression</span>
+            <span className="text-destructive">
+              <T>Invalid regular expression</T>
+            </span>
+          ) : search.truncated ? (
+            gt("{results}+ results in {files} files", {
+              results: matches.length.toLocaleString(),
+              files: fileCount.toLocaleString(),
+            })
           ) : (
-            `${matches.length.toLocaleString()}${search.truncated ? "+" : ""} results in ${fileCount.toLocaleString()} files`
+            gt("{results} results in {files} files", {
+              results: matches.length.toLocaleString(),
+              files: fileCount.toLocaleString(),
+            })
           )}
         </div>
       ) : null}
 
       {matches.length === 0 ? (
         <div className="flex flex-1 items-center justify-center px-6 text-center text-sm text-muted-foreground">
-          {search.hasQuery && !search.isPending && !search.error
-            ? "No results found."
-            : "Type to search across your project."}
+          {search.isCheckingAccess
+            ? gt("Checking file access…")
+            : !search.canReadFiles
+              ? search.error
+              : search.hasQuery && !search.isPending && !search.error
+                ? gt("No results found.")
+                : gt("Type to search across your project.")}
         </div>
       ) : (
         <ScrollArea className="min-h-0 flex-1" scrollFade>
@@ -273,7 +297,9 @@ function OpenContentSearchDialog(props: {
                     <button
                       type="button"
                       key={`${match.path}:${match.lineNumber}:${match.resultIndex}`}
-                      data-content-search-result={match.resultIndex}
+                      ref={
+                        match.resultIndex === selectedIndex ? scrollSelectedRowIntoView : undefined
+                      }
                       className={cn(
                         "flex h-7 w-full min-w-0 items-center gap-3 px-3 text-left font-mono text-xs hover:bg-accent/60 disabled:pointer-events-none",
                         match.resultIndex === selectedIndex && "bg-accent text-accent-foreground",
@@ -289,7 +315,7 @@ function OpenContentSearchDialog(props: {
                         <HighlightedSearchLine
                           match={match}
                           path={group.path}
-                          theme={resolvedTheme}
+                          theme={renderedAppearance}
                         />
                       </span>
                     </button>
@@ -312,7 +338,6 @@ export function ProjectContentSearchDialog(props: ProjectContentSearchDialogProp
 
   return target ? (
     <OpenContentSearchDialog
-      // Reset the query and options whenever the workspace changes.
       key={`${target.environmentId}:${target.cwd}`}
       onOpenChange={props.onOpenChange}
       target={target}

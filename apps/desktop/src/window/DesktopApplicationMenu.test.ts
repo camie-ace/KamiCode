@@ -3,9 +3,15 @@ import { assert, describe, it } from "@effect/vitest";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 
-import type * as Electron from "electron";
-import type { DesktopUpdateState } from "@t3tools/contracts";
+import type { DesktopUpdateCheckResult, DesktopUpdateState } from "@t3tools/contracts";
+import * as Electron from "electron";
+import { vi } from "vite-plus/test";
+
+vi.mock("electron", () => ({
+  webContents: { getAllWebContents: vi.fn(() => []) },
+}));
 
 import * as ElectronApp from "../electron/ElectronApp.ts";
 import * as ElectronDialog from "../electron/ElectronDialog.ts";
@@ -14,6 +20,7 @@ import * as DesktopApplicationMenu from "./DesktopApplicationMenu.ts";
 import * as DesktopConfig from "../app/DesktopConfig.ts";
 import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
 import * as DesktopUpdates from "../updates/DesktopUpdates.ts";
+import { createInitialDesktopUpdateState } from "../updates/updateMachine.ts";
 import * as DesktopWindow from "./DesktopWindow.ts";
 
 const environmentInput = {
@@ -32,7 +39,9 @@ const layerElectronApp = Layer.succeed(ElectronApp.ElectronApp, {
   metadata: Effect.die("unexpected metadata read"),
   name: Effect.succeed("KamiCode"),
   systemLocale: Effect.succeed("en-US"),
+  preferredSystemLanguages: Effect.succeed(["en-US"]),
   whenReady: Effect.void,
+  requestSingleInstanceLock: Effect.succeed(true),
   quit: Effect.void,
   exit: () => Effect.void,
   relaunch: () => Effect.void,
@@ -50,59 +59,46 @@ const layerElectronApp = Layer.succeed(ElectronApp.ElectronApp, {
   on: () => Effect.void,
 } satisfies ElectronApp.ElectronApp["Service"]);
 
-const electronDialogShape = {
-  pickFolder: () => Effect.succeedNone,
-  pickFiles: () => Effect.succeed([]),
-  showMessageBox: () => Effect.succeed({ response: 0, checkboxChecked: false }),
-  showErrorBox: () => Effect.void,
-} satisfies ElectronDialog.ElectronDialog["Service"];
+interface MenuServices {
+  readonly checkResult?: DesktopUpdateCheckResult;
+  readonly shownMessageBox?: Deferred.Deferred<Electron.MessageBoxOptions>;
+}
 
-const layerElectronDialog = Layer.succeed(ElectronDialog.ElectronDialog, electronDialogShape);
+const layerElectronDialog = ({ shownMessageBox }: MenuServices) =>
+  Layer.succeed(ElectronDialog.ElectronDialog, {
+    pickFolder: () => Effect.succeedNone,
+    pickFiles: () => Effect.succeed([]),
+    showMessageBox: (options) =>
+      (shownMessageBox ? Deferred.succeed(shownMessageBox, options) : Effect.void).pipe(
+        Effect.as({ response: options.cancelId ?? 0, checkboxChecked: false }),
+      ),
+    showErrorBox: () => Effect.void,
+  } satisfies ElectronDialog.ElectronDialog["Service"]);
 
-const baseUpdateState: DesktopUpdateState = {
-  enabled: true,
-  status: "idle",
-  channel: "latest",
-  currentVersion: "1.2.3",
-  hostArch: "x64",
-  appArch: "x64",
-  runningUnderArm64Translation: false,
-  availableVersion: null,
-  downloadedVersion: null,
-  downloadPercent: null,
-  checkedAt: null,
-  message: null,
-  errorContext: null,
-  canRetry: false,
-  releaseNotes: [],
-  omittedReleaseCount: 0,
-};
-
-const desktopUpdatesShape = {
-  getState: Effect.die("unexpected getState"),
-  isActionActive: Effect.succeed(false),
-  isInstallActive: Effect.succeed(false),
-  subscribe: Effect.die("unexpected subscribe"),
-  emitState: Effect.void,
-  disabledReason: Effect.succeedNone,
-  configure: Effect.void,
-  setChannel: () => Effect.die("unexpected setChannel"),
-  check: () => Effect.die("unexpected check"),
-  download: Effect.die("unexpected download"),
-  install: Effect.die("unexpected install"),
-  installPrepared: () => Effect.die("unexpected installPrepared"),
-} satisfies DesktopUpdates.DesktopUpdates["Service"];
-
-const layerDesktopUpdates = Layer.succeed(DesktopUpdates.DesktopUpdates, desktopUpdatesShape);
+const layerDesktopUpdates = ({ checkResult }: MenuServices) =>
+  Layer.succeed(DesktopUpdates.DesktopUpdates, {
+    getState: Effect.die("unexpected getState"),
+    isActionActive: Effect.succeed(false),
+    isInstallActive: Effect.succeed(false),
+    subscribe: Effect.die("unexpected subscribe"),
+    emitState: Effect.void,
+    disabledReason: Effect.succeedNone,
+    configure: Effect.void,
+    setChannel: () => Effect.die("unexpected setChannel"),
+    check: () => (checkResult ? Effect.succeed(checkResult) : Effect.die("unexpected check")),
+    download: Effect.die("unexpected download"),
+    install: Effect.die("unexpected install"),
+    installPrepared: () => Effect.die("unexpected installPrepared"),
+  } satisfies DesktopUpdates.DesktopUpdates["Service"]);
 
 const layerDesktopWindow = (selectedAction: Deferred.Deferred<string>) =>
   Layer.succeed(DesktopWindow.DesktopWindow, {
     createMain: Effect.die("unexpected createMain"),
-    ensureMain: Effect.succeed({} as Electron.BrowserWindow),
+    ensureMain: Effect.die("unexpected ensureMain"),
     revealOrCreateMain: Effect.die("unexpected revealOrCreateMain"),
     activate: Effect.void,
     createMainIfBackendReady: Effect.void,
-    showStartupSplash: Effect.void,
+    showConnectingSplash: Effect.void,
     handleBackendReady: () => Effect.void,
     handleBackendNotReady: Effect.void,
     flushMainWindowBounds: Effect.void,
@@ -111,6 +107,8 @@ const layerDesktopWindow = (selectedAction: Deferred.Deferred<string>) =>
     dispatchSnapShotEvent: () => Effect.void,
     zoomMain: (direction) =>
       Deferred.succeed(selectedAction, `zoom-${direction}`).pipe(Effect.asVoid),
+    runMainContentsCommand: (command) =>
+      Deferred.succeed(selectedAction, `main-${command}`).pipe(Effect.asVoid),
     syncAppearance: Effect.void,
   } satisfies DesktopWindow.DesktopWindow["Service"]);
 
@@ -124,30 +122,11 @@ const layerElectronMenu = (
     showContextMenu: () => Effect.succeedNone,
   } satisfies ElectronMenu.ElectronMenu["Service"]);
 
-const findMenuItem = (
-  template: readonly Electron.MenuItemConstructorOptions[],
-  label: string,
-): Electron.MenuItemConstructorOptions | undefined => {
-  for (const item of template) {
-    if (item.label === label) return item;
-    if (Array.isArray(item.submenu)) {
-      const child = findMenuItem(item.submenu, label);
-      if (child) return child;
-    }
-  }
-  return undefined;
-};
-
-const clickMenuItem = (item: Electron.MenuItemConstructorOptions) => {
-  if (typeof item.click !== "function") {
-    throw new Error(`Expected ${String(item.label)} menu item to have a click handler.`);
-  }
-  item.click({} as Electron.MenuItem, {} as Electron.BrowserWindow, {} as KeyboardEvent);
-};
-
 const configureMenu = (
   selectedAction: Deferred.Deferred<string>,
   applicationMenuTemplate: Deferred.Deferred<readonly Electron.MenuItemConstructorOptions[]>,
+  environment: Partial<DesktopEnvironment.MakeDesktopEnvironmentInput> = {},
+  services: MenuServices = {},
 ) =>
   Effect.gen(function* () {
     const menu = yield* DesktopApplicationMenu.DesktopApplicationMenu;
@@ -157,11 +136,11 @@ const configureMenu = (
       DesktopApplicationMenu.layer.pipe(
         Layer.provideMerge(layerElectronMenu(applicationMenuTemplate)),
         Layer.provideMerge(layerDesktopWindow(selectedAction)),
-        Layer.provideMerge(layerDesktopUpdates),
-        Layer.provideMerge(layerElectronDialog),
+        Layer.provideMerge(layerDesktopUpdates(services)),
+        Layer.provideMerge(layerElectronDialog(services)),
         Layer.provideMerge(layerElectronApp),
         Layer.provideMerge(
-          DesktopEnvironment.layer(environmentInput).pipe(
+          DesktopEnvironment.layer({ ...environmentInput, ...environment }).pipe(
             Layer.provide(Layer.mergeAll(NodeServices.layer, DesktopConfig.layerTest({}))),
           ),
         ),
@@ -169,162 +148,55 @@ const configureMenu = (
     ),
   );
 
+const checkForUpdatesFromMacMenu = (state: Partial<DesktopUpdateState>) =>
+  Effect.gen(function* () {
+    const applicationMenuTemplate =
+      yield* Deferred.make<readonly Electron.MenuItemConstructorOptions[]>();
+    const shownMessageBox = yield* Deferred.make<Electron.MessageBoxOptions>();
+    yield* configureMenu(
+      yield* Deferred.make<string>(),
+      applicationMenuTemplate,
+      { platform: "darwin" },
+      {
+        checkResult: {
+          checked: true,
+          state: {
+            ...createInitialDesktopUpdateState(
+              "0.1.5",
+              { hostArch: "arm64", appArch: "arm64", runningUnderArm64Translation: false },
+              "latest",
+            ),
+            enabled: true,
+            ...state,
+          },
+        },
+        shownMessageBox,
+      },
+    );
+
+    const appMenu = (yield* Deferred.await(applicationMenuTemplate))[0];
+    if (!Array.isArray(appMenu?.submenu)) {
+      throw new Error("Expected the macOS app menu submenu to be an array.");
+    }
+    const checkForUpdates = appMenu.submenu.find((item) => item.label === "Check for Updates...");
+    if (typeof checkForUpdates?.click !== "function") {
+      throw new Error("Expected Check for Updates... menu item to have a click handler.");
+    }
+
+    // Every stub completes synchronously, so the menu action has finished when click returns.
+    checkForUpdates.click(
+      {} as Electron.MenuItem,
+      {} as Electron.BrowserWindow,
+      {} as KeyboardEvent,
+    );
+    const dialog = yield* Deferred.poll(shownMessageBox);
+    if (Option.isNone(dialog)) {
+      throw new Error("Check for Updates... finished without showing any dialog.");
+    }
+    return yield* dialog.value;
+  });
+
 describe("DesktopApplicationMenu", () => {
-  it.effect("installs the native menu and routes Settings through DesktopWindow", () =>
-    Effect.gen(function* () {
-      const selectedAction = yield* Deferred.make<string>();
-      const applicationMenuTemplate =
-        yield* Deferred.make<readonly Electron.MenuItemConstructorOptions[]>();
-
-      yield* configureMenu(selectedAction, applicationMenuTemplate);
-
-      const template = yield* Deferred.await(applicationMenuTemplate);
-      const fileMenu = template.find((item) => item.label === "File");
-      assert.isDefined(fileMenu);
-      if (!Array.isArray(fileMenu.submenu)) {
-        throw new Error("Expected File menu submenu to be an array.");
-      }
-      const settingsItem = fileMenu.submenu.find((item) => item.label === "Settings...");
-      assert.isDefined(settingsItem);
-      clickMenuItem(settingsItem);
-      assert.equal(yield* Deferred.await(selectedAction), "open-settings");
-    }),
-  );
-
-  it.effect("downloads and installs an available update from the native menu", () =>
-    Effect.gen(function* () {
-      const selectedAction = yield* Deferred.make<string>();
-      const applicationMenuTemplate =
-        yield* Deferred.make<readonly Electron.MenuItemConstructorOptions[]>();
-      const downloadRequested = yield* Deferred.make<void>();
-      const installRequested = yield* Deferred.make<void>();
-      const dialogTitles: string[] = [];
-
-      const availableState: DesktopUpdateState = {
-        ...baseUpdateState,
-        status: "available",
-        availableVersion: "1.2.4",
-      };
-      const downloadedState: DesktopUpdateState = {
-        ...availableState,
-        status: "downloaded",
-        downloadedVersion: "1.2.4",
-      };
-
-      const menuLayer = DesktopApplicationMenu.layer.pipe(
-        Layer.provideMerge(layerElectronMenu(applicationMenuTemplate)),
-        Layer.provideMerge(layerDesktopWindow(selectedAction)),
-        Layer.provideMerge(
-          Layer.succeed(DesktopUpdates.DesktopUpdates, {
-            ...desktopUpdatesShape,
-            getState: Effect.succeed(baseUpdateState),
-            check: () => Effect.succeed({ checked: true, state: availableState }),
-            download: Deferred.succeed(downloadRequested, undefined).pipe(
-              Effect.as({ accepted: true, completed: true, state: downloadedState }),
-            ),
-            install: Deferred.succeed(installRequested, undefined).pipe(
-              Effect.as({ accepted: true, completed: false, state: downloadedState }),
-            ),
-          } satisfies DesktopUpdates.DesktopUpdates["Service"]),
-        ),
-        Layer.provideMerge(
-          Layer.succeed(ElectronDialog.ElectronDialog, {
-            ...electronDialogShape,
-            showMessageBox: (options) =>
-              Effect.sync(() => {
-                dialogTitles.push(String(options.title));
-                return { response: 1, checkboxChecked: false };
-              }),
-          } satisfies ElectronDialog.ElectronDialog["Service"]),
-        ),
-        Layer.provideMerge(layerElectronApp),
-        Layer.provideMerge(
-          DesktopEnvironment.layer(environmentInput).pipe(
-            Layer.provide(Layer.mergeAll(NodeServices.layer, DesktopConfig.layerTest({}))),
-          ),
-        ),
-      );
-
-      yield* Effect.gen(function* () {
-        const menu = yield* DesktopApplicationMenu.DesktopApplicationMenu;
-        yield* menu.configure;
-      }).pipe(Effect.provide(menuLayer));
-
-      const checkForUpdates = findMenuItem(
-        yield* Deferred.await(applicationMenuTemplate),
-        "Check for Updates...",
-      );
-      assert.isDefined(checkForUpdates);
-      clickMenuItem(checkForUpdates);
-
-      yield* Deferred.await(downloadRequested);
-      yield* Deferred.await(installRequested);
-      assert.deepEqual(dialogTitles, ["Update available", "Update ready"]);
-    }),
-  );
-
-  it.effect("installs an already downloaded update from the native menu", () =>
-    Effect.gen(function* () {
-      const selectedAction = yield* Deferred.make<string>();
-      const applicationMenuTemplate =
-        yield* Deferred.make<readonly Electron.MenuItemConstructorOptions[]>();
-      const installRequested = yield* Deferred.make<void>();
-
-      const downloadedState: DesktopUpdateState = {
-        ...baseUpdateState,
-        status: "downloaded",
-        availableVersion: "1.2.4",
-        downloadedVersion: "1.2.4",
-      };
-
-      yield* Effect.gen(function* () {
-        const menu = yield* DesktopApplicationMenu.DesktopApplicationMenu;
-        yield* menu.configure;
-      }).pipe(
-        Effect.provide(
-          DesktopApplicationMenu.layer.pipe(
-            Layer.provideMerge(layerElectronMenu(applicationMenuTemplate)),
-            Layer.provideMerge(layerDesktopWindow(selectedAction)),
-            Layer.provideMerge(
-              Layer.succeed(DesktopUpdates.DesktopUpdates, {
-                ...desktopUpdatesShape,
-                getState: Effect.succeed(downloadedState),
-                check: () => Effect.succeed({ checked: true, state: downloadedState }),
-                download: Effect.die("unexpected download"),
-                install: Deferred.succeed(installRequested, undefined).pipe(
-                  Effect.as({ accepted: true, completed: false, state: downloadedState }),
-                ),
-              } satisfies DesktopUpdates.DesktopUpdates["Service"]),
-            ),
-            Layer.provideMerge(
-              Layer.succeed(ElectronDialog.ElectronDialog, {
-                ...electronDialogShape,
-                showMessageBox: () => Effect.succeed({ response: 1, checkboxChecked: false }),
-              } satisfies ElectronDialog.ElectronDialog["Service"]),
-            ),
-            Layer.provideMerge(layerElectronApp),
-            Layer.provideMerge(
-              DesktopEnvironment.layer(environmentInput).pipe(
-                Layer.provide(Layer.mergeAll(NodeServices.layer, DesktopConfig.layerTest({}))),
-              ),
-            ),
-          ),
-        ),
-      );
-
-      const checkForUpdates = findMenuItem(
-        yield* Deferred.await(applicationMenuTemplate),
-        "Check for Updates...",
-      );
-      assert.isDefined(checkForUpdates);
-      clickMenuItem(checkForUpdates);
-
-      yield* Deferred.await(installRequested);
-    }),
-  );
-
-  // Chromium pastes as plain text for the accelerator on its own. Dispatching
-  // the action as well injects a second paste, which doubles the pasted text.
   it.effect("leaves the accelerator to Chromium instead of injecting a paste", () =>
     Effect.gen(function* () {
       const selectedAction = yield* Deferred.make<string>();
@@ -354,16 +226,13 @@ describe("DesktopApplicationMenu", () => {
     }),
   );
 
-  // Zoom must route through DesktopWindow.zoomMain instead of the Electron
-  // zoom roles: the roles zoom whichever webContents has focus, which breaks
-  // app zoom while an embedded preview WebContentsView holds focus.
-  it.effect("routes View menu zoom to the main window instead of zoom roles", () =>
+  it.effect("registers macOS command-plus once and routes it through main-window zoom", () =>
     Effect.gen(function* () {
       const selectedAction = yield* Deferred.make<string>();
       const applicationMenuTemplate =
         yield* Deferred.make<readonly Electron.MenuItemConstructorOptions[]>();
 
-      yield* configureMenu(selectedAction, applicationMenuTemplate);
+      yield* configureMenu(selectedAction, applicationMenuTemplate, { platform: "darwin" });
 
       const template = yield* Deferred.await(applicationMenuTemplate);
       const viewMenu = template.find((item) => item.label === "View");
@@ -373,12 +242,22 @@ describe("DesktopApplicationMenu", () => {
       }
 
       assert.isUndefined(
-        viewMenu.submenu.find((item) => item.role?.toLowerCase().includes("zoom")),
+        viewMenu.submenu.find((item) =>
+          ["zoom", "reload", "devtools"].some((role) => item.role?.toLowerCase().includes(role)),
+        ),
       );
 
-      const zoomIn = viewMenu.submenu.find((item) => item.label === "Zoom In");
+      const shiftedEqual = viewMenu.submenu.filter(
+        (item) => item.accelerator === "CmdOrCtrl+Shift+=",
+      );
+      assert.lengthOf(shiftedEqual, 1);
+      assert.lengthOf(
+        viewMenu.submenu.filter((item) => item.accelerator === "CmdOrCtrl+numadd"),
+        1,
+      );
+      const zoomIn = shiftedEqual[0];
       assert.isDefined(zoomIn);
-      assert.equal(zoomIn.accelerator, "CmdOrCtrl+=");
+      assert.isFalse(zoomIn.visible);
       if (typeof zoomIn.click !== "function") {
         throw new Error("Expected Zoom In menu item to have a click handler.");
       }
@@ -387,7 +266,65 @@ describe("DesktopApplicationMenu", () => {
       assert.equal(yield* Deferred.await(selectedAction), "zoom-in");
     }),
   );
-  it.effect("owns Paste as Text and routes it through the renderer", () =>
+
+  it.effect("never binds Cmd/Ctrl+W to closing the window", () =>
+    Effect.gen(function* () {
+      for (const platform of ["darwin", "linux", "win32"] as const) {
+        const applicationMenuTemplate =
+          yield* Deferred.make<readonly Electron.MenuItemConstructorOptions[]>();
+        yield* configureMenu(yield* Deferred.make<string>(), applicationMenuTemplate, {
+          platform,
+        });
+
+        const items: Electron.MenuItemConstructorOptions[] = [];
+        const collect = (template: readonly Electron.MenuItemConstructorOptions[]) => {
+          for (const item of template) {
+            items.push(item);
+            if (Array.isArray(item.submenu)) collect(item.submenu);
+          }
+        };
+        collect(yield* Deferred.await(applicationMenuTemplate));
+
+        assert.isUndefined(
+          items.find((item) => item.role === "close"),
+          platform,
+        );
+        // Electron's default windowMenu submenu includes a close role.
+        assert.isUndefined(
+          items.find((item) => item.role === "windowMenu" && item.submenu === undefined),
+          platform,
+        );
+        const closeTools = items.find((item) => item.accelerator === "CmdOrCtrl+W");
+        assert.equal(closeTools?.label, "Close Developer Tools", platform);
+        assert.isFunction(closeTools?.click);
+        const appContents = {
+          isDestroyed: () => false,
+          isDevToolsFocused: () => false,
+          closeDevTools: vi.fn(),
+        };
+        const inspectedContents = {
+          ...appContents,
+          isDevToolsFocused: () => true,
+          closeDevTools: vi.fn(),
+        };
+        using allContents = vi
+          .spyOn(Electron.webContents, "getAllWebContents")
+          .mockReturnValue([
+            appContents as unknown as Electron.WebContents,
+            inspectedContents as unknown as Electron.WebContents,
+          ]);
+        closeTools?.click?.({} as Electron.MenuItem, undefined, {} as KeyboardEvent);
+        assert.equal(inspectedContents.closeDevTools.mock.calls.length, 1);
+        assert.equal(appContents.closeDevTools.mock.calls.length, 0);
+
+        allContents.mockReturnValue([appContents as unknown as Electron.WebContents]);
+        closeTools?.click?.({} as Electron.MenuItem, undefined, {} as KeyboardEvent);
+        assert.equal(appContents.closeDevTools.mock.calls.length, 0);
+      }
+    }),
+  );
+
+  it.effect("reloads the main window even while a browser page has focus", () =>
     Effect.gen(function* () {
       const selectedAction = yield* Deferred.make<string>();
       const applicationMenuTemplate =
@@ -396,24 +333,39 @@ describe("DesktopApplicationMenu", () => {
       yield* configureMenu(selectedAction, applicationMenuTemplate);
 
       const template = yield* Deferred.await(applicationMenuTemplate);
-      const editMenu = template.find((item) => item.label === "Edit");
-      assert.isDefined(editMenu);
-      if (!Array.isArray(editMenu.submenu)) {
-        throw new Error("Expected Edit menu submenu to be an array.");
+      const viewMenu = template.find((item) => item.label === "View");
+      if (!Array.isArray(viewMenu?.submenu)) {
+        throw new Error("Expected View menu submenu to be an array.");
       }
-      const pasteAsTextItem = editMenu.submenu.find((item) => item.label === "Paste as Text");
-      assert.isDefined(pasteAsTextItem);
-      assert.equal(pasteAsTextItem.accelerator, "CmdOrCtrl+Shift+V");
-      if (typeof pasteAsTextItem.click !== "function") {
-        throw new Error("Expected Paste as Text menu item to have a click handler.");
+      const reload = viewMenu.submenu.find((item) => item.label === "Reload");
+      assert.equal(reload?.accelerator, "CmdOrCtrl+R");
+      if (typeof reload?.click !== "function") {
+        throw new Error("Expected Reload menu item to have a click handler.");
       }
 
-      pasteAsTextItem.click(
-        {} as Electron.MenuItem,
-        {} as Electron.BrowserWindow,
-        {} as KeyboardEvent,
-      );
-      assert.equal(yield* Deferred.await(selectedAction), "paste-as-text");
+      reload.click({} as Electron.MenuItem, {} as Electron.BrowserWindow, {} as KeyboardEvent);
+      assert.equal(yield* Deferred.await(selectedAction), "main-reload");
+    }),
+  );
+  it.effect("tells the user which update the menu check found", () =>
+    Effect.gen(function* () {
+      const dialog = yield* checkForUpdatesFromMacMenu({
+        status: "available",
+        availableVersion: "0.1.7",
+      });
+      assert.include(`${dialog.title ?? ""} ${dialog.message} ${dialog.detail ?? ""}`, "0.1.7");
+    }),
+  );
+
+  it.effect("tells the user a downloaded update is ready when the menu check runs", () =>
+    Effect.gen(function* () {
+      const dialog = yield* checkForUpdatesFromMacMenu({
+        status: "downloaded",
+        availableVersion: "0.1.7",
+        downloadedVersion: "0.1.7",
+        downloadPercent: 100,
+      });
+      assert.include(`${dialog.title ?? ""} ${dialog.message} ${dialog.detail ?? ""}`, "0.1.7");
     }),
   );
 });

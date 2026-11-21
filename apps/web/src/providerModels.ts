@@ -14,6 +14,41 @@ const EMPTY_CAPABILITIES: ModelCapabilities = createModelCapabilities({
   optionDescriptors: [],
 });
 const DEFAULT_DRIVER_KIND = ProviderDriverKind.make("codex");
+const RUNTIME_MODEL_CATALOG_DRIVERS: ReadonlySet<string> = new Set([
+  "opencode",
+  "antigravity",
+  "cursor",
+  "pi",
+  "acpRegistry",
+]);
+
+// These drivers discover models at runtime, so a refresh can briefly omit a model the user chose.
+export function hasRuntimeModelCatalog(provider: ProviderDriverKind): boolean {
+  return RUNTIME_MODEL_CATALOG_DRIVERS.has(provider);
+}
+
+// These markers follow the session's current model rather than naming an unavailable model.
+export function isRuntimeModelDefaultAlias(
+  provider: ProviderDriverKind,
+  model: string | null | undefined,
+): boolean {
+  return (
+    (provider === "antigravity" || provider === "acpRegistry") &&
+    model === DEFAULT_MODEL_BY_PROVIDER[provider]
+  );
+}
+
+// Antigravity lists its default model only as an alias, which a slug lookup would call missing.
+export function keepsUnavailableModelOptions(
+  provider: ProviderDriverKind,
+  model: string | null | undefined,
+): boolean {
+  return (
+    provider !== "antigravity" &&
+    !isRuntimeModelDefaultAlias(provider, model) &&
+    hasRuntimeModelCatalog(provider)
+  );
+}
 
 export function formatProviderDriverKindLabel(provider: ProviderDriverKind): string {
   return provider
@@ -38,9 +73,6 @@ function getProviderSnapshot(
   return providers.find((candidate) => candidate.instanceId === defaultInstanceId);
 }
 
-// Resolve an instance selection to the correlated live driver. If the
-// instance is absent, fall back to a live enabled provider instead of
-// inferring a driver from the missing instance id.
 export function resolveSelectableProvider(
   providers: ReadonlyArray<ServerProvider>,
   provider: ProviderDriverKind | ProviderInstanceId | null | undefined,
@@ -56,22 +88,17 @@ export function getProviderModelCapabilities(
   models: ReadonlyArray<ServerProviderModel>,
   model: string | null | undefined,
   provider: ProviderDriverKind,
-  planModeEnabled = true,
+  includePlanAgent = false,
 ): ModelCapabilities {
   const slug = resolveSelectableModel(provider, model, models);
   const selectedModel = models.find((candidate) => candidate.slug === slug);
   const caps = selectedModel?.capabilities ?? EMPTY_CAPABILITIES;
-  if (planModeEnabled) {
+  if (includePlanAgent) {
     return caps;
   }
   return withoutPlanAgentOption(caps);
 }
 
-// The opencode "plan" agent is only reachable while legacy plan mode is on.
-// With it off, drop the option so it cannot be selected or dispatched, and
-// drop the descriptor entirely when nothing remains selectable. currentValue
-// is re-resolved against the surviving options so a stale or defaulted "plan"
-// value cannot leak back into dispatch.
 function withoutPlanAgentOption(caps: ModelCapabilities): ModelCapabilities {
   return {
     ...caps,

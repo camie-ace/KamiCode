@@ -260,8 +260,8 @@ const makeUserAuthRepository = Effect.gen(function* () {
       ),
       Effect.flatMap((rowOption) =>
         Option.match(rowOption, {
-          onNone: () => Effect.succeed(Option.none()),
-          onSome: (row) => Effect.succeed(Option.some(toSessionRecord(row))),
+          onNone: () => Effect.succeedNone,
+          onSome: (row) => Effect.succeedSome(toSessionRecord(row)),
         }),
       ),
     );

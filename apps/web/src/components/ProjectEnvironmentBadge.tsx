@@ -1,27 +1,22 @@
 import type { EnvironmentId, EnvironmentMachineKind } from "@t3tools/contracts";
+import { useGT } from "gt-react";
 
 import type { SidebarProjectSnapshot } from "~/sidebarProjectGrouping";
 import { EnvironmentMachineIcon } from "./EnvironmentMachineIcon";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 
-/**
- * Machine icon for a project picker row whose group has a member on another
- * environment, with the environment names in a tooltip. Projects that only
- * live on this device render nothing, the rule thread rows use for their
- * machine icon. Callers
- * render it only while the catalog spans environments (see
- * projectGroupsSpanEnvironments), so single-machine users see no change.
- */
 export function ProjectEnvironmentBadge(props: {
   readonly group: Pick<SidebarProjectSnapshot, "memberProjects">;
   readonly primaryEnvironmentId: EnvironmentId | null;
   readonly machineByEnvironmentId: ReadonlyMap<EnvironmentId, EnvironmentMachineKind>;
 }) {
-  // Member order follows registration order and can differ between sessions,
-  // so sort by label to keep the icon and tooltip stable.
+  const gt = useGT();
   const remoteMembers = props.group.memberProjects
     .filter((member) => member.environmentId !== props.primaryEnvironmentId)
-    .map((member) => ({ ...member, environmentLabel: member.environmentLabel ?? "Remote" }))
+    .map((member) => ({
+      ...member,
+      environmentLabel: member.environmentLabel ?? gt("Remote", { $context: "machine location" }),
+    }))
     .sort((a, b) => a.environmentLabel.localeCompare(b.environmentLabel));
   const first = remoteMembers[0];
   if (!first) return null;
@@ -30,7 +25,7 @@ export function ProjectEnvironmentBadge(props: {
     .filter((label, index, all) => all.indexOf(label) === index)
     .join(", ");
   const alsoHere = remoteMembers.length < props.group.memberProjects.length;
-  const description = `${alsoHere ? "Also on" : "On"} ${labels}`;
+  const description = alsoHere ? gt("Also on {labels}", { labels }) : gt("On {labels}", { labels });
   return (
     <Tooltip>
       <TooltipTrigger
@@ -38,7 +33,7 @@ export function ProjectEnvironmentBadge(props: {
           <span
             role="img"
             aria-label={description}
-            className="ml-auto inline-flex shrink-0 items-center text-muted-foreground"
+            className="inline-flex shrink-0 items-center text-muted-foreground"
           />
         }
       >

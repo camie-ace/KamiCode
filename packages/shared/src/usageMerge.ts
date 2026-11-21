@@ -1,11 +1,3 @@
-/**
- * Merges per-environment usage summaries into the single view the page renders.
- *
- * Pure, so the de-duplication and derivation rules can be tested without a
- * connected environment.
- *
- * @module usageMerge
- */
 import {
   USAGE_MERGE_COMPATIBLE_SINCE,
   type EnvironmentId,
@@ -40,24 +32,13 @@ export interface ModelTotals {
   readonly totalTokens: number;
   readonly tokens: UsageTokenTotals;
   readonly records: number;
-  /**
-   * Records whose tokens are counted here but which contributed nothing to
-   * `costUsd`. When it equals `records` the cost is unknown, not zero.
-   */
   readonly unpricedRecords: number;
-  /**
-   * Tokens with no known rates, which a custom price would cover. A cell that
-   * mixes these with reported costs counts its tokens by record share.
-   */
   readonly unpricedTokens: number;
   readonly costShare: number;
   readonly tokenShare: number;
 }
 
-/**
- * A model whose every record lacked rates has an unknown cost, not a zero one.
- * Clients must not present its `costUsd` as a real dollar figure.
- */
+/** When every record lacks rates, costUsd is unknown and must not be displayed as a dollar figure. */
 export function isModelCostUnknown(model: ModelTotals): boolean {
   return model.records > 0 && model.unpricedRecords >= model.records;
 }
@@ -84,10 +65,6 @@ export interface CostQuality {
   readonly cacheSavingsUsd: number;
 }
 
-/**
- * `costUsd` by token category. `unsplit` is cost no rates could split,
- * including all cost from servers that predate the split.
- */
 export interface CategoryCost {
   readonly input: number;
   readonly cacheRead: number;
@@ -96,12 +73,10 @@ export interface CategoryCost {
   readonly unsplit: number;
 }
 
-/** `costUsd` by request speed. Servers that predate speeds count as standard. */
 export interface SpeedCost {
   readonly standard: number;
   readonly fast: number;
   readonly ultrafast: number;
-  /** What fast and ultrafast requests cost above the standard rate. */
   readonly premium: number;
 }
 
@@ -128,20 +103,12 @@ export interface MergedUsage {
   readonly costQuality: CostQuality;
   readonly categoryCost: CategoryCost;
   readonly speedCost: SpeedCost;
-  /** Environments whose data was dropped as a duplicate of another's. */
   readonly duplicateSources: readonly string[];
   readonly contributingEnvironments: readonly EnvironmentId[];
   readonly contractMismatches: readonly UsageContractMismatch[];
 }
 
-/**
- * Two sources are the same physical transcript directory only when host,
- * provider, path and filesystem identity all agree.
- *
- * `volumeId` is what stops two machines that happen to share a hostname and a
- * home path, which is every Mac in a fleet, from collapsing into one source and
- * having one of them silently dropped.
- */
+// volumeId distinguishes machines sharing a hostname and home path.
 function fingerprintKey(fingerprint: UsageSourceFingerprint): string {
   return [
     fingerprint.hostId,
@@ -149,6 +116,31 @@ function fingerprintKey(fingerprint: UsageSourceFingerprint): string {
     fingerprint.resolvedHomePath,
     fingerprint.volumeId,
   ].join(" ");
+}
+
+// Sources are one directory when either their legacy key or their physicalSourceId matches.
+// physicalSourceId joins a directory read natively by Windows and through a WSL mount (path
+// and dev:ino both differ); the legacy key still joins installs whose host scopes differ.
+function sourceIdentity(
+  environments: readonly EnvironmentUsage[],
+): (fingerprint: UsageSourceFingerprint) => string {
+  const parent = new Map<string, string>();
+  const find = (key: string): string => {
+    const next = parent.get(key);
+    if (next === undefined || next === key) return key;
+    const root = find(next);
+    parent.set(key, root);
+    return root;
+  };
+  for (const environment of environments) {
+    for (const { fingerprint } of environment.summary.sources) {
+      if (fingerprint.physicalSourceId === undefined) continue;
+      const legacy = find(fingerprintKey(fingerprint));
+      const physical = find(`\u0000${fingerprint.provider}\u0000${fingerprint.physicalSourceId}`);
+      if (legacy !== physical) parent.set(legacy, physical);
+    }
+  }
+  return (fingerprint) => find(fingerprintKey(fingerprint));
 }
 
 function bucketsForSource(summary: UsageSummary, source: UsageSource): readonly UsageBucket[] {
@@ -167,23 +159,15 @@ function bucketKey(bucket: UsageBucket): string {
   return JSON.stringify([bucket.day, bucket.hourStart ?? null, bucket.provider, bucket.model]);
 }
 
-/**
- * Decides which environment owns each physical transcript directory.
- *
- * Several environments on one machine (worktree servers, for instance) resolve
- * the same provider home and would otherwise double count every token. The
- * Complete scans claim a fingerprint ahead of partial scans, then the most
- * recently read scan wins within each status. A newer partial scan can still
- * contribute cells absent from an older complete scan. Environment ids break
- * ties so the result is stable when summaries have the same read time.
- */
-function claimSources(environments: readonly EnvironmentUsage[]): {
-  readonly ownerByFingerprint: ReadonlyMap<string, EnvironmentId>;
+function claimSources(
+  environments: readonly EnvironmentUsage[],
+  sourceKey: (fingerprint: UsageSourceFingerprint) => string,
+): {
+  readonly ownerScanByFingerprint: ReadonlyMap<string, { readonly source: UsageSource }>;
   readonly supplementalBucketsByEnvironment: ReadonlyMap<EnvironmentId, ReadonlySet<UsageBucket>>;
   readonly sessionsByFingerprint: ReadonlyMap<string, number>;
   readonly duplicates: readonly string[];
 } {
-  const ownerByFingerprint = new Map<string, EnvironmentId>();
   const ownerScanByFingerprint = new Map<
     string,
     { environment: EnvironmentUsage; source: UsageSource }
@@ -199,35 +183,33 @@ function claimSources(environments: readonly EnvironmentUsage[]): {
       a.environmentId.localeCompare(b.environmentId),
   );
 
-  // A complete scan takes precedence over a newer partial scan of the same
-  // directory. Partial history still contributes when no complete copy exists.
   for (const status of ["ok", "partial", "failed"] as const) {
     for (const environment of ordered) {
       for (const source of environment.summary.sources) {
         if (source.status !== status) continue;
-        const key = fingerprintKey(source.fingerprint);
-        if (ownerByFingerprint.has(key)) {
+        const key = sourceKey(source.fingerprint);
+        if (ownerScanByFingerprint.has(key)) {
           duplicates.push(`${environment.label}: ${source.fingerprint.resolvedHomePath}`);
           continue;
         }
-        ownerByFingerprint.set(key, environment.environmentId);
         ownerScanByFingerprint.set(key, { environment, source });
         sessionsByFingerprint.set(key, source.distinctSessions);
       }
     }
   }
 
-  // A newer partial scan may contain usage recorded after an older complete
-  // scan. Keep cells absent from the complete scan. Aggregated cells do not
-  // reveal enough to reconcile overlapping records without double counting.
+  // Keep cells unique to newer partial scans; aggregates cannot reconcile overlapping records without double-counting.
   for (const environment of ordered) {
     for (const source of environment.summary.sources) {
       if (source.status !== "partial") continue;
-      const key = fingerprintKey(source.fingerprint);
+      const key = sourceKey(source.fingerprint);
       const owner = ownerScanByFingerprint.get(key);
+      // A scan under another model filter counts different records, so its cells are not missing ones.
       if (
         owner?.source.status !== "ok" ||
-        Date.parse(environment.summary.readAt) <= Date.parse(owner.environment.summary.readAt)
+        Date.parse(environment.summary.readAt) <= Date.parse(owner.environment.summary.readAt) ||
+        JSON.stringify(environment.summary.modelFilter) !==
+          JSON.stringify(owner.environment.summary.modelFilter)
       ) {
         continue;
       }
@@ -256,19 +238,19 @@ function claimSources(environments: readonly EnvironmentUsage[]): {
   }
 
   return {
-    ownerByFingerprint,
+    ownerScanByFingerprint,
     supplementalBucketsByEnvironment,
     sessionsByFingerprint,
     duplicates,
   };
 }
 
-/** Sources this environment owns after fingerprint claims, plus their buckets. */
 function ownedContribution(
   environment: EnvironmentUsage,
-  ownerByFingerprint: ReadonlyMap<string, EnvironmentId>,
+  ownerScanByFingerprint: ReadonlyMap<string, { readonly source: UsageSource }>,
   supplementalBuckets: ReadonlySet<UsageBucket>,
   sessionsByFingerprint: ReadonlyMap<string, number>,
+  sourceKey: (fingerprint: UsageSourceFingerprint) => string,
 ): {
   readonly buckets: readonly UsageBucket[];
   readonly sessionsByProvider: ReadonlyMap<UsageProviderKind, number>;
@@ -278,13 +260,14 @@ function ownedContribution(
   const sessionsByProvider = new Map<UsageProviderKind, number>();
   for (const source of environment.summary.sources) {
     if (source.status === "missing") continue;
-    const key = fingerprintKey(source.fingerprint);
-    if (ownerByFingerprint.get(key) === environment.environmentId) {
+    const key = sourceKey(source.fingerprint);
+    // By source, not environment: one server can reach a directory through two
+    // mounts, and only the winning reading may count.
+    if (ownerScanByFingerprint.get(key)?.source === source) {
       const provider = source.fingerprint.provider;
       ownedProviders.add(provider);
       ownedSources.add(`${provider}\u0000${source.fingerprint.resolvedHomePath}`);
-      // Distinct within a directory. Summing per-bucket session counts instead
-      // would count a session once per day and model it spans.
+      // Count distinct sessions per directory; bucket sums overcount sessions spanning days/models.
       sessionsByProvider.set(
         provider,
         (sessionsByProvider.get(provider) ?? 0) +
@@ -345,15 +328,6 @@ const EMPTY_MERGED: MergedUsage = {
   contractMismatches: [],
 };
 
-/**
- * Merges every connected environment's summary.
- *
- * `expectedContractVersion` guards against incompatible server code: rather
- * than blocking the page, its data is excluded and the mismatch direction is
- * reported so the UI can identify which side needs updating. Versions in
- * [{@link USAGE_MERGE_COMPATIBLE_SINCE}, expected] still merge, so an additive
- * provider expansion does not drop Claude/Codex totals from older servers.
- */
 export function mergeUsage(
   environments: readonly EnvironmentUsage[],
   expectedContractVersion: number,
@@ -379,12 +353,13 @@ export function mergeUsage(
     }
   }
 
+  const sourceKey = sourceIdentity(current);
   const {
-    ownerByFingerprint,
+    ownerScanByFingerprint,
     supplementalBucketsByEnvironment,
     sessionsByFingerprint,
     duplicates,
-  } = claimSources(current);
+  } = claimSources(current, sourceKey);
 
   let costUsd = 0;
   let uncachedInputTokens = 0;
@@ -439,9 +414,10 @@ export function mergeUsage(
   for (const environment of current) {
     const { buckets, sessionsByProvider } = ownedContribution(
       environment,
-      ownerByFingerprint,
+      ownerScanByFingerprint,
       supplementalBucketsByEnvironment.get(environment.environmentId) ?? new Set(),
       sessionsByFingerprint,
+      sourceKey,
     );
     if (buckets.length > 0) contributingEnvironments.push(environment.environmentId);
 
@@ -519,7 +495,9 @@ export function mergeUsage(
       };
       model.records += bucket.records;
       model.unpricedRecords += bucket.unpricedRecords;
-      if (bucket.records > 0) {
+      if (bucket.unpricedTokens !== undefined) {
+        model.unpricedTokens += bucket.unpricedTokens;
+      } else if (bucket.records > 0) {
         model.unpricedTokens += (tokens * bucket.unpricedRecords) / bucket.records;
       }
       modelAccumulator.set(modelKey, model);
@@ -622,7 +600,6 @@ export function mergeUsage(
         records === 0 ? 0 : (records - providerReportedRecords - unpricedRecords) / records,
       cacheSavingsUsd,
     },
-    // Clamped so float error never shows as a negative remainder.
     categoryCost: {
       ...categoryCost,
       unsplit: Math.max(

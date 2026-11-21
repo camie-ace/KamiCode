@@ -4,8 +4,11 @@ export const REPOSITORY_URL = `https://github.com/${REPO}`;
 export const RELEASES_URL = `${REPOSITORY_URL}/releases`;
 export const LATEST_WINDOWS_DOWNLOAD_URL = `${RELEASES_URL}/latest/download/KamiCode-Setup-x64.exe`;
 
-const API_URL = `https://api.github.com/repos/${REPO}/releases/latest`;
-const CACHE_KEY = "kamicode-latest-release";
+const LATEST_API_URL = `https://api.github.com/repos/${REPO}/releases/latest`;
+// GitHub's latest endpoint excludes prereleases; the newest nightly comes from the ordered release list.
+const LIST_API_URL = `https://api.github.com/repos/${REPO}/releases?per_page=10`;
+
+export type ReleaseChannel = "stable" | "nightly";
 
 export interface ReleaseAsset {
   name: string;
@@ -18,14 +21,38 @@ export interface Release {
   assets: ReleaseAsset[];
 }
 
-export async function fetchLatestRelease(): Promise<Release> {
-  const cached = sessionStorage.getItem(CACHE_KEY);
+function cacheKey(channel: ReleaseChannel) {
+  return `kamicode-${channel}-release`;
+}
+
+async function fetchJson<T>(url: string): Promise<T> {
+  const response = await fetch(url);
+  if (!response.ok) throw new Error(`GitHub API responded ${response.status}`);
+  return response.json();
+}
+
+async function fetchStable(): Promise<Release> {
+  return fetchJson(LATEST_API_URL);
+}
+
+async function fetchNightly(): Promise<Release> {
+  const list = await fetchJson<Release[]>(LIST_API_URL);
+  const nightly = Array.isArray(list)
+    ? list.find((release) => release.tag_name?.includes("-nightly."))
+    : undefined;
+  if (!nightly) throw new Error("No nightly release in the latest page");
+  return nightly;
+}
+
+export async function fetchLatestRelease(channel: ReleaseChannel = "stable"): Promise<Release> {
+  const key = cacheKey(channel);
+  const cached = sessionStorage.getItem(key);
   if (cached) return JSON.parse(cached);
 
-  const data = await fetch(API_URL).then((r) => r.json());
+  const data = channel === "nightly" ? await fetchNightly() : await fetchStable();
 
   if (data?.assets) {
-    sessionStorage.setItem(CACHE_KEY, JSON.stringify(data));
+    sessionStorage.setItem(key, JSON.stringify(data));
   }
 
   return data;

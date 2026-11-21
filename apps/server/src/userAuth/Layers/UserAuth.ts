@@ -1,5 +1,6 @@
+import * as PayloadSigner from "../../auth/PayloadSigner.ts";
 import * as NodeBuffer from "node:buffer";
-import * as Crypto from "effect/Crypto";
+import * as SecureRandom from "effect/crypto/SecureRandom";
 
 import {
   KamiUserId,
@@ -25,7 +26,6 @@ import { ServerSecretStore } from "../../auth/ServerSecretStore.ts";
 import {
   base64UrlDecodeUtf8,
   base64UrlEncode,
-  signPayload,
   timingSafeEqualBase64Url,
 } from "../../auth/utils.ts";
 import {
@@ -168,8 +168,10 @@ function resolveRequestUrl(request: HttpServerRequest.HttpServerRequest): Option
   return HttpServerRequest.toURL(request);
 }
 
+const isUserAuthError = Schema.is(UserAuthError);
+
 const makeUserAuth = Effect.gen(function* () {
-  const crypto = yield* Crypto.Crypto;
+  const random = yield* SecureRandom.SecureRandom;
   const config = yield* ServerConfig;
   const secretStore = yield* ServerSecretStore;
   const userAuthRepository = yield* UserAuthRepository;
@@ -185,6 +187,7 @@ const makeUserAuth = Effect.gen(function* () {
     ),
   );
 
+  const signer = yield* PayloadSigner.fromSecret(signingSecret);
   const cookieName = resolveUserSessionCookieName({
     mode: config.mode,
     port: config.port,
@@ -205,11 +208,11 @@ const makeUserAuth = Effect.gen(function* () {
       cause,
     });
 
-  const randomId = crypto.randomUUIDv4.pipe(
-    Effect.mapError(toUserAuthError("Failed to generate an authentication ID.", 500)),
-  );
+  const randomId = random
+    .uuidV4()
+    .pipe(Effect.mapError(toUserAuthError("Failed to generate an authentication ID.", 500)));
   const randomBase64Url = (bytes: number) =>
-    crypto.randomBytes(bytes).pipe(
+    random.randomBytes(bytes).pipe(
       Effect.map((value) => NodeBuffer.Buffer.from(value).toString("base64url")),
       Effect.mapError(toUserAuthError("Failed to generate an authentication token.", 500)),
     );
@@ -259,7 +262,7 @@ const makeUserAuth = Effect.gen(function* () {
     return Effect.succeed(callbackUrl.toString());
   };
 
-  const issueSession = (user: UserAuthUserRecord) =>
+  const issueSession = Effect.fn("issueSession")((user: UserAuthUserRecord) =>
     Effect.gen(function* () {
       const issuedAt = yield* DateTime.now;
       const expiresAt = DateTime.add(issuedAt, {
@@ -278,7 +281,7 @@ const makeUserAuth = Effect.gen(function* () {
         Effect.map(base64UrlEncode),
         Effect.mapError(toUserAuthError("Failed to encode user auth session.", 500)),
       );
-      const signature = signPayload(encodedPayload, signingSecret);
+      const signature = yield* signer.sign(encodedPayload);
 
       yield* userAuthRepository
         .createSession({
@@ -294,82 +297,85 @@ const makeUserAuth = Effect.gen(function* () {
         token: `${encodedPayload}.${signature}`,
         expiresAt,
       };
-    });
+    }),
+  );
 
-  const verifyToken = (token: string): Effect.Effect<AuthenticatedUser, UserAuthError> =>
-    Effect.gen(function* () {
-      const [encodedPayload, signature] = token.split(".");
-      if (!encodedPayload || !signature) {
-        return yield* new UserAuthError({
-          message: "Malformed user auth session token.",
-          status: 401,
-        });
-      }
+  const verifyToken = Effect.fn("verifyToken")(
+    (token: string): Effect.Effect<AuthenticatedUser, UserAuthError> =>
+      Effect.gen(function* () {
+        const [encodedPayload, signature] = token.split(".");
+        if (!encodedPayload || !signature) {
+          return yield* new UserAuthError({
+            message: "Malformed user auth session token.",
+            status: 401,
+          });
+        }
 
-      const expectedSignature = signPayload(encodedPayload, signingSecret);
-      if (!timingSafeEqualBase64Url(signature, expectedSignature)) {
-        return yield* new UserAuthError({
-          message: "Invalid user auth session signature.",
-          status: 401,
-        });
-      }
+        const expectedSignature = yield* signer.sign(encodedPayload);
+        if (!timingSafeEqualBase64Url(signature, expectedSignature)) {
+          return yield* new UserAuthError({
+            message: "Invalid user auth session signature.",
+            status: 401,
+          });
+        }
 
-      const claims = yield* decodeUserSessionClaims(base64UrlDecodeUtf8(encodedPayload)).pipe(
-        Effect.mapError(toUserAuthError("Invalid user auth session payload.", 401)),
-      );
+        const claims = yield* decodeUserSessionClaims(base64UrlDecodeUtf8(encodedPayload)).pipe(
+          Effect.mapError(toUserAuthError("Invalid user auth session payload.", 401)),
+        );
 
-      const now = yield* Clock.currentTimeMillis;
-      if (claims.exp <= now) {
-        return yield* new UserAuthError({
-          message: "User auth session expired.",
-          status: 401,
-        });
-      }
+        const now = yield* Clock.currentTimeMillis;
+        if (claims.exp <= now) {
+          return yield* new UserAuthError({
+            message: "User auth session expired.",
+            status: 401,
+          });
+        }
 
-      const row = yield* userAuthRepository
-        .getSessionById({ sessionId: claims.sid })
-        .pipe(Effect.mapError(toUserAuthError("Failed to load user auth session.", 500)));
-      if (Option.isNone(row)) {
-        return yield* new UserAuthError({
-          message: "Unknown user auth session.",
-          status: 401,
-        });
-      }
-      if (row.value.revokedAt !== null) {
-        return yield* new UserAuthError({
-          message: "User auth session revoked.",
-          status: 401,
-        });
-      }
-      if (row.value.userId !== claims.uid) {
-        return yield* new UserAuthError({
-          message: "User auth session user mismatch.",
-          status: 401,
-        });
-      }
-      if (row.value.expiresAt.epochMilliseconds <= now) {
-        return yield* new UserAuthError({
-          message: "User auth session expired.",
-          status: 401,
-        });
-      }
+        const row = yield* userAuthRepository
+          .getSessionById({ sessionId: claims.sid })
+          .pipe(Effect.mapError(toUserAuthError("Failed to load user auth session.", 500)));
+        if (Option.isNone(row)) {
+          return yield* new UserAuthError({
+            message: "Unknown user auth session.",
+            status: 401,
+          });
+        }
+        if (row.value.revokedAt !== null) {
+          return yield* new UserAuthError({
+            message: "User auth session revoked.",
+            status: 401,
+          });
+        }
+        if (row.value.userId !== claims.uid) {
+          return yield* new UserAuthError({
+            message: "User auth session user mismatch.",
+            status: 401,
+          });
+        }
+        if (row.value.expiresAt.epochMilliseconds <= now) {
+          return yield* new UserAuthError({
+            message: "User auth session expired.",
+            status: 401,
+          });
+        }
 
-      return {
-        sessionId: row.value.sessionId,
-        user: toKamiUser(row.value.user),
-        expiresAt: row.value.expiresAt,
-      } satisfies AuthenticatedUser;
-    }).pipe(
-      Effect.mapError((cause) =>
-        cause instanceof UserAuthError
-          ? cause
-          : new UserAuthError({
-              message: "Failed to verify user auth session.",
-              status: 401,
-              cause,
-            }),
+        return {
+          sessionId: row.value.sessionId,
+          user: toKamiUser(row.value.user),
+          expiresAt: row.value.expiresAt,
+        } satisfies AuthenticatedUser;
+      }).pipe(
+        Effect.mapError((cause) =>
+          isUserAuthError(cause)
+            ? cause
+            : new UserAuthError({
+                message: "Failed to verify user auth session.",
+                status: 401,
+                cause,
+              }),
+        ),
       ),
-    );
+  );
 
   const bindEnvironmentSession: UserAuthShape["bindEnvironmentSession"] = Effect.fn(
     "UserAuth.bindEnvironmentSession",
@@ -423,7 +429,9 @@ const makeUserAuth = Effect.gen(function* () {
     } satisfies AuthenticatedUser;
   });
 
-  const authenticateRequest: UserAuthShape["authenticateRequest"] = (request) =>
+  const authenticateRequest: UserAuthShape["authenticateRequest"] = Effect.fn(
+    "authenticateRequest",
+  )((request) =>
     Effect.gen(function* () {
       yield* ensureGitHubLoginEnabled();
       const token = request.cookies[cookieName];
@@ -434,7 +442,8 @@ const makeUserAuth = Effect.gen(function* () {
         });
       }
       return yield* verifyToken(token);
-    });
+    }),
+  );
 
   const authenticateEnvironmentSession: UserAuthShape["authenticateEnvironmentSession"] = Effect.fn(
     "UserAuth.authenticateEnvironmentSession",
@@ -488,29 +497,33 @@ const makeUserAuth = Effect.gen(function* () {
     );
   };
 
-  const createGitHubLogin: UserAuthShape["createGitHubLogin"] = (request) =>
-    Effect.gen(function* () {
-      const credentials = yield* ensureOAuthAppConfigured();
-      const state = yield* randomBase64Url(32);
-      const issuedAt = yield* DateTime.now;
-      const expiresAt = DateTime.add(issuedAt, {
-        milliseconds: Duration.toMillis(DEFAULT_STATE_TTL),
-      });
-      const redirectUri = yield* resolveCallbackUrl(request);
-      const authorizationUrl = new URL("https://github.com/login/oauth/authorize");
-      authorizationUrl.searchParams.set("client_id", credentials.clientId);
-      authorizationUrl.searchParams.set("redirect_uri", redirectUri);
-      authorizationUrl.searchParams.set("state", state);
-      authorizationUrl.searchParams.set("scope", "read:user");
+  const createGitHubLogin: UserAuthShape["createGitHubLogin"] = Effect.fn("createGitHubLogin")(
+    (request) =>
+      Effect.gen(function* () {
+        const credentials = yield* ensureOAuthAppConfigured();
+        const state = yield* randomBase64Url(32);
+        const issuedAt = yield* DateTime.now;
+        const expiresAt = DateTime.add(issuedAt, {
+          milliseconds: Duration.toMillis(DEFAULT_STATE_TTL),
+        });
+        const redirectUri = yield* resolveCallbackUrl(request);
+        const authorizationUrl = new URL("https://github.com/login/oauth/authorize");
+        authorizationUrl.searchParams.set("client_id", credentials.clientId);
+        authorizationUrl.searchParams.set("redirect_uri", redirectUri);
+        authorizationUrl.searchParams.set("state", state);
+        authorizationUrl.searchParams.set("scope", "read:user");
 
-      return {
-        authorizationUrl: authorizationUrl.toString(),
-        state,
-        expiresAt,
-      };
-    });
+        return {
+          authorizationUrl: authorizationUrl.toString(),
+          state,
+          expiresAt,
+        };
+      }),
+  );
 
-  const createDesktopGitHubLogin: UserAuthShape["createDesktopGitHubLogin"] = (_request) =>
+  const createDesktopGitHubLogin: UserAuthShape["createDesktopGitHubLogin"] = Effect.fn(
+    "createDesktopGitHubLogin",
+  )((_request) =>
     Effect.gen(function* () {
       const credentials = yield* ensureGitHubLoginEnabled();
       const handoffId = yield* randomBase64Url(18);
@@ -555,9 +568,10 @@ const makeUserAuth = Effect.gen(function* () {
         pollIntervalMs,
         expiresAt,
       };
-    });
+    }),
+  );
 
-  const completeGitHubToken = (token: GitHubOAuthToken) =>
+  const completeGitHubToken = Effect.fn("completeGitHubToken")((token: GitHubOAuthToken) =>
     Effect.gen(function* () {
       const githubUser = yield* githubOAuthClient
         .fetchUser({ accessToken: token.accessToken })
@@ -602,36 +616,41 @@ const makeUserAuth = Effect.gen(function* () {
           expiresAt: DateTime.toUtc(session.expiresAt),
         } satisfies UserAuthSessionState,
       };
-    });
+    }),
+  );
 
-  const completeGitHubOAuthCode = (input: {
-    readonly clientId: string;
-    readonly clientSecret: string;
-    readonly code: string;
-    readonly redirectUri: string;
-  }) =>
-    Effect.gen(function* () {
-      const token = yield* githubOAuthClient
-        .exchangeCode({
-          clientId: input.clientId,
-          clientSecret: input.clientSecret,
-          code: input.code,
-          redirectUri: input.redirectUri,
-        })
-        .pipe(
-          Effect.mapError(
-            (cause: GitHubOAuthError) =>
-              new UserAuthError({
-                message: cause.message,
-                status: cause.status === 400 ? 400 : 500,
-                cause,
-              }),
-          ),
-        );
-      return yield* completeGitHubToken(token);
-    });
+  const completeGitHubOAuthCode = Effect.fn("completeGitHubOAuthCode")(
+    (input: {
+      readonly clientId: string;
+      readonly clientSecret: string;
+      readonly code: string;
+      readonly redirectUri: string;
+    }) =>
+      Effect.gen(function* () {
+        const token = yield* githubOAuthClient
+          .exchangeCode({
+            clientId: input.clientId,
+            clientSecret: input.clientSecret,
+            code: input.code,
+            redirectUri: input.redirectUri,
+          })
+          .pipe(
+            Effect.mapError(
+              (cause: GitHubOAuthError) =>
+                new UserAuthError({
+                  message: cause.message,
+                  status: cause.status === 400 ? 400 : 500,
+                  cause,
+                }),
+            ),
+          );
+        return yield* completeGitHubToken(token);
+      }),
+  );
 
-  const completeGitHubLogin: UserAuthShape["completeGitHubLogin"] = (input) =>
+  const completeGitHubLogin: UserAuthShape["completeGitHubLogin"] = Effect.fn(
+    "completeGitHubLogin",
+  )((input) =>
     Effect.gen(function* () {
       const credentials = yield* ensureOAuthAppConfigured();
       const storedState = input.request.cookies[stateCookieName];
@@ -649,9 +668,12 @@ const makeUserAuth = Effect.gen(function* () {
         code: input.code,
         redirectUri,
       });
-    });
+    }),
+  );
 
-  const completeDesktopGitHubLogin: UserAuthShape["completeDesktopGitHubLogin"] = (input) =>
+  const completeDesktopGitHubLogin: UserAuthShape["completeDesktopGitHubLogin"] = Effect.fn(
+    "completeDesktopGitHubLogin",
+  )((input) =>
     Effect.gen(function* () {
       const credentials = yield* ensureOAuthAppConfigured();
       const handoffId = parseDesktopGitHubLoginHandoffId(input.state);
@@ -694,9 +716,12 @@ const makeUserAuth = Effect.gen(function* () {
         });
         return next;
       });
-    });
+    }),
+  );
 
-  const failDesktopGitHubLogin: UserAuthShape["failDesktopGitHubLogin"] = (input) =>
+  const failDesktopGitHubLogin: UserAuthShape["failDesktopGitHubLogin"] = Effect.fn(
+    "failDesktopGitHubLogin",
+  )((input) =>
     Effect.gen(function* () {
       const handoffId = parseDesktopGitHubLoginHandoffId(input.state);
       if (!handoffId) {
@@ -718,9 +743,12 @@ const makeUserAuth = Effect.gen(function* () {
         });
         return next;
       });
-    });
+    }),
+  );
 
-  const consumeDesktopGitHubLogin: UserAuthShape["consumeDesktopGitHubLogin"] = (input) =>
+  const consumeDesktopGitHubLogin: UserAuthShape["consumeDesktopGitHubLogin"] = Effect.fn(
+    "consumeDesktopGitHubLogin",
+  )((input) =>
     Effect.gen(function* () {
       const credentials = yield* ensureGitHubLoginEnabled();
       const nowDateTime = yield* DateTime.now;
@@ -839,9 +867,10 @@ const makeUserAuth = Effect.gen(function* () {
         sessionExpiresAt: handoff.sessionExpiresAt,
         authenticatedUser: handoff.authenticatedUser,
       } as const;
-    });
+    }),
+  );
 
-  const logout: UserAuthShape["logout"] = (request, environmentSessionId) =>
+  const logout: UserAuthShape["logout"] = Effect.fn("logout")((request, environmentSessionId) =>
     Effect.gen(function* () {
       const token = request.cookies[cookieName];
       if (!token) {
@@ -869,7 +898,8 @@ const makeUserAuth = Effect.gen(function* () {
       if (environmentSessionId !== undefined) {
         yield* unbindEnvironmentSession(environmentSessionId);
       }
-    });
+    }),
+  );
 
   return {
     cookieName,

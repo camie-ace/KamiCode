@@ -1,21 +1,16 @@
 import type {
-  AppendSharedThreadMessageInput,
   ClaimSharedProjectInviteInput,
   CreateSharedProjectInviteInput,
   DeleteSharedProjectInput,
   DeleteSharedProjectResult,
   ImportSharedThreadInput,
-  ImportSharedThreadLinkInput,
   ImportSharedThreadResult,
   PublishLocalProjectInput,
   PublishSharedThreadInput,
-  ResolveSharedThreadShareInput,
   RemoveSharedProjectMemberInput,
   RemoveSharedSshCredentialInput,
   SetSharedDefaultEnvironmentInput,
-  SharedProjectBootstrapManifest,
   SharedProjectClaimResult,
-  SharedProjectCurrentUser,
   SharedProjectDetail,
   SharedProjectEnvironment,
   SharedProjectId,
@@ -23,7 +18,6 @@ import type {
   SharedProjectListResult,
   SharedProjectSshCredential,
   SharedRuntime,
-  ResolvedSharedThreadShare,
   SharedThread,
   SyncSharedProjectContextInput,
   SyncSharedRemoteRuntimeInput,
@@ -106,10 +100,6 @@ async function sharedProjectPost<T>(
   return decodeSharedProjectResponse<T>(response);
 }
 
-function fetchSharedProjectCurrentUser(): Promise<SharedProjectCurrentUser> {
-  return sharedProjectGet("/api/shared-projects/current-user");
-}
-
 export function listSharedProjects(
   options?: SharedProjectRequestOptions,
 ): Promise<SharedProjectListResult> {
@@ -128,12 +118,6 @@ export function fetchSharedProjectDetail(
   options?: SharedProjectRequestOptions,
 ): Promise<SharedProjectDetail> {
   return sharedProjectGet("/api/shared-projects/detail", { projectId }, options);
-}
-
-function fetchSharedProjectBootstrap(
-  projectId: SharedProjectId,
-): Promise<SharedProjectBootstrapManifest> {
-  return sharedProjectGet("/api/shared-projects/bootstrap", { projectId });
 }
 
 export function syncSharedProjectContext(
@@ -190,24 +174,6 @@ export function importSharedThread(
   options?: SharedProjectRequestOptions,
 ): Promise<ImportSharedThreadResult> {
   return sharedProjectPost("/api/shared-projects/threads/import", input, options);
-}
-
-export function resolveSharedThreadShare(
-  input: ResolveSharedThreadShareInput,
-  options?: SharedProjectRequestOptions,
-): Promise<ResolvedSharedThreadShare> {
-  return sharedProjectPost("/api/shared-projects/threads/resolve", input, options);
-}
-
-export function importSharedThreadLink(
-  input: ImportSharedThreadLinkInput,
-  options?: SharedProjectRequestOptions,
-): Promise<ImportSharedThreadResult> {
-  return sharedProjectPost("/api/shared-projects/threads/import-link", input, options);
-}
-
-function appendSharedThreadMessage(input: AppendSharedThreadMessageInput): Promise<SharedThread> {
-  return sharedProjectPost("/api/shared-projects/threads/messages", input);
 }
 
 export function upsertSharedRuntime(input: UpsertSharedRuntimeInput): Promise<SharedRuntime> {

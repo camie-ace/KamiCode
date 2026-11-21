@@ -1,19 +1,4 @@
-/**
- * CheckpointStore - Repository interface for filesystem-backed workspace checkpoints.
- *
- * Owns hidden Git-ref checkpoint capture/restore and diff computation for a
- * workspace thread timeline. It does not store user-facing checkpoint metadata
- * and does not coordinate provider conversation rollback.
- *
- * The live adapter resolves the active VCS driver once per checkpoint operation
- * and delegates to the driver's optional checkpoint capability.
- *
- * Uses Effect `Context.Service` for dependency injection and exposes typed
- * domain errors for checkpoint storage operations.
- *
- * @module CheckpointStore
- */
-import { VcsUnsupportedOperationError, type CheckpointRef } from "@t3tools/contracts";
+import { type CheckpointRef } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -25,6 +10,8 @@ import * as VcsDriverRegistry from "../vcs/VcsDriverRegistry.ts";
 export interface CaptureCheckpointInput {
   readonly cwd: string;
   readonly checkpointRef: CheckpointRef;
+  /** The checkpoint this one follows, so a turn that switched branches starts where it landed. */
+  readonly previousCheckpointRef?: CheckpointRef;
 }
 
 export interface RestoreCheckpointInput {
@@ -40,6 +27,16 @@ export interface DiffCheckpointsInput {
   readonly fallbackFromToHead?: boolean;
   readonly ignoreWhitespace: boolean;
   readonly format?: "patch" | "numstat";
+  /** Maximum bytes collected from the diff command. */
+  readonly maxOutputBytes?: number;
+  /** Limits the diff to these exact paths. An empty list yields an empty diff. */
+  readonly filePaths?: ReadonlyArray<string>;
+}
+
+export interface ListAuthoredPathsInput {
+  readonly cwd: string;
+  readonly fromCheckpointRef: CheckpointRef;
+  readonly toCheckpointRef: CheckpointRef;
 }
 
 export interface DeleteCheckpointRefsInput {
@@ -47,11 +44,9 @@ export interface DeleteCheckpointRefsInput {
   readonly checkpointRefs: ReadonlyArray<CheckpointRef>;
 }
 
-/** Service tag for checkpoint persistence and restore operations. */
 export class CheckpointStore extends Context.Service<
   CheckpointStore,
   {
-    /** Check whether cwd is inside a Git worktree. */
     readonly isGitRepository: (cwd: string) => Effect.Effect<boolean, CheckpointStoreError>;
 
     /** Determine whether an automatic checkpoint is safe to start. */
@@ -68,75 +63,59 @@ export class CheckpointStore extends Context.Service<
       input: CaptureCheckpointInput,
     ) => Effect.Effect<void, CheckpointStoreError>;
 
-    /** Check whether a checkpoint ref exists. */
     readonly hasCheckpointRef: (
       input: Omit<RestoreCheckpointInput, "fallbackToHead">,
     ) => Effect.Effect<boolean, CheckpointStoreError>;
 
-    /**
-     * Restore workspace and staging state to a checkpoint.
-     *
-     * Optionally falls back to current `HEAD` when the checkpoint ref is missing.
-     */
     readonly restoreCheckpoint: (
       input: RestoreCheckpointInput,
     ) => Effect.Effect<boolean, CheckpointStoreError>;
 
-    /**
-     * Compute a diff between two checkpoint refs. Defaults to a full patch.
-     *
-     * Numstat output has NUL-delimited paths for file summaries.
-     * Can optionally treat a missing "from" ref as `HEAD`.
-     */
     readonly diffCheckpoints: (
       input: DiffCheckpointsInput,
     ) => Effect.Effect<string, CheckpointStoreError>;
 
-    /**
-     * Delete the provided checkpoint refs.
-     *
-     * Best-effort delete: missing refs are tolerated.
-     */
+    /** Null means HEAD is unchanged or unrecorded; all changed paths then belong to the turn. */
+    readonly listAuthoredPaths: (
+      input: ListAuthoredPathsInput,
+    ) => Effect.Effect<ReadonlySet<string> | null, CheckpointStoreError>;
+
     readonly deleteCheckpointRefs: (
       input: DeleteCheckpointRefsInput,
     ) => Effect.Effect<void, CheckpointStoreError>;
   }
 >()("t3/checkpointing/CheckpointStore") {}
 
-/** @public Service construction is part of the canonical Effect module API. */
+/** @public */
 export const make = Effect.gen(function* () {
   const vcsRegistry = yield* VcsDriverRegistry.VcsDriverRegistry;
 
   const resolveCheckpoints = Effect.fn("CheckpointStore.resolveCheckpoints")(function* (
-    operation: string,
     cwd: string,
   ) {
     const handle = yield* vcsRegistry.resolve({ cwd });
-    if (!handle.driver.checkpoints) {
-      return yield* new VcsUnsupportedOperationError({
-        operation,
-        kind: handle.kind,
-        detail: `${handle.kind} driver does not implement checkpoint operations.`,
-      });
-    }
     return handle.driver.checkpoints satisfies VcsCheckpointOps;
   });
 
-  const isGitRepository: CheckpointStore["Service"]["isGitRepository"] = (cwd) =>
-    vcsRegistry
-      .detect({ cwd, requestedKind: "git" })
-      .pipe(Effect.map((repository) => repository !== null));
+  // The registry reads an unreadable repository as none; ask Git again so that fails here.
+  const isGitRepository: CheckpointStore["Service"]["isGitRepository"] = Effect.fn(
+    "CheckpointStore.isGitRepository",
+  )(function* (cwd) {
+    if ((yield* vcsRegistry.detect({ cwd, requestedKind: "git" })) !== null) return true;
+    const git = yield* vcsRegistry.get("git");
+    return (yield* git.detectRepository(cwd)) !== null;
+  });
 
   const captureCheckpoint: CheckpointStore["Service"]["captureCheckpoint"] = Effect.fn(
     "captureCheckpoint",
   )(function* (input) {
-    const checkpoints = yield* resolveCheckpoints("CheckpointStore.captureCheckpoint", input.cwd);
+    const checkpoints = yield* resolveCheckpoints(input.cwd);
     return yield* checkpoints.captureCheckpoint(input);
   });
 
   const assessCapture: CheckpointStore["Service"]["assessCapture"] = Effect.fn("assessCapture")(
     function* (input) {
-      const checkpoints = yield* resolveCheckpoints("CheckpointStore.assessCapture", input.cwd);
+      const checkpoints = yield* resolveCheckpoints(input.cwd);
       if (!checkpoints.assessCapture) {
         return { status: "ready" as const };
       }
@@ -147,31 +126,35 @@ export const make = Effect.gen(function* () {
   const hasCheckpointRef: CheckpointStore["Service"]["hasCheckpointRef"] = Effect.fn(
     "hasCheckpointRef",
   )(function* (input) {
-    const checkpoints = yield* resolveCheckpoints("CheckpointStore.hasCheckpointRef", input.cwd);
+    const checkpoints = yield* resolveCheckpoints(input.cwd);
     return yield* checkpoints.hasCheckpointRef(input);
   });
 
   const restoreCheckpoint: CheckpointStore["Service"]["restoreCheckpoint"] = Effect.fn(
     "restoreCheckpoint",
   )(function* (input) {
-    const checkpoints = yield* resolveCheckpoints("CheckpointStore.restoreCheckpoint", input.cwd);
+    const checkpoints = yield* resolveCheckpoints(input.cwd);
     return yield* checkpoints.restoreCheckpoint(input);
   });
 
   const diffCheckpoints: CheckpointStore["Service"]["diffCheckpoints"] = Effect.fn(
     "diffCheckpoints",
   )(function* (input) {
-    const checkpoints = yield* resolveCheckpoints("CheckpointStore.diffCheckpoints", input.cwd);
+    const checkpoints = yield* resolveCheckpoints(input.cwd);
     return yield* checkpoints.diffCheckpoints(input);
+  });
+
+  const listAuthoredPaths: CheckpointStore["Service"]["listAuthoredPaths"] = Effect.fn(
+    "listAuthoredPaths",
+  )(function* (input) {
+    const checkpoints = yield* resolveCheckpoints(input.cwd);
+    return yield* checkpoints.listAuthoredPaths(input);
   });
 
   const deleteCheckpointRefs: CheckpointStore["Service"]["deleteCheckpointRefs"] = Effect.fn(
     "deleteCheckpointRefs",
   )(function* (input) {
-    const checkpoints = yield* resolveCheckpoints(
-      "CheckpointStore.deleteCheckpointRefs",
-      input.cwd,
-    );
+    const checkpoints = yield* resolveCheckpoints(input.cwd);
     return yield* checkpoints.deleteCheckpointRefs(input);
   });
 
@@ -182,6 +165,7 @@ export const make = Effect.gen(function* () {
     hasCheckpointRef,
     restoreCheckpoint,
     diffCheckpoints,
+    listAuthoredPaths,
     deleteCheckpointRefs,
   });
 });

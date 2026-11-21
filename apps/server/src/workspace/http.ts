@@ -36,6 +36,8 @@ export const workspaceHttpApiLayer = HttpApiBuilder.group(
           })
           .pipe(
             Effect.catchTags({
+              UnknownWorkspaceError: (error) =>
+                Effect.fail(new EnvironmentHttpBadRequestError({ message: error.message })),
               WorkspacePathOutsideRootError: (error) =>
                 Effect.fail(
                   new EnvironmentHttpBadRequestError({

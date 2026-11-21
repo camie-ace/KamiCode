@@ -1,34 +1,35 @@
 import {
   type ConnectionTarget,
   connectionRouteId,
-  connectionRouteLabel,
+  connectionRouteLabelText,
   connectionRoutes,
 } from "@t3tools/client-runtime/connection";
 import type { DesktopSshEnvironmentTarget, EnvironmentMachineKind } from "@t3tools/contracts";
 import * as Option from "effect/Option";
+import { msg, useMessages } from "gt-react";
 import type { ReactNode } from "react";
 
 import { cn } from "~/lib/utils";
 import type { EnvironmentPresentation } from "~/state/environments";
+import { usePreparedConnection } from "~/state/session";
 import { isDesktopLocalConnectionTarget } from "~/connection/desktopLocal";
 import { EnvironmentMachineIcon } from "../EnvironmentMachineIcon";
+import { m, type MessageResolver } from "../../i18n/messages";
+
+const T3_CONNECT_NAME = "T3 Connect";
 
 export function formatDesktopSshTarget(target: DesktopSshEnvironmentTarget): string {
   const authority = target.username ? `${target.username}@${target.hostname}` : target.hostname;
   return target.port ? `${authority}:${target.port}` : authority;
 }
 
-/**
- * How this client reaches a machine, printed first in every environment row so
- * T3 Connect, SSH, WSL, and plain remote links are told apart without a legend.
- * A machine with several routes names the one in use, or how many it has.
- */
 export function environmentTransportLabel(
   environment: EnvironmentPresentation,
   activeTarget: ConnectionTarget | null = null,
+  resolve: MessageResolver = m,
 ): string {
   const { entry } = environment;
-  if (entry.target._tag === "PrimaryConnectionTarget") return "This machine";
+  if (entry.target._tag === "PrimaryConnectionTarget") return resolve(msg("This machine"));
   const routes = connectionRoutes(entry);
   if (routes.length > 1) {
     const active =
@@ -38,10 +39,10 @@ export function environmentTransportLabel(
             (route) => connectionRouteId(route.target) === connectionRouteId(activeTarget),
           );
     return active === undefined
-      ? connectionRouteLabel(routes[0]!)
-      : `via ${connectionRouteLabel(active)}`;
+      ? connectionRouteLabelText(routes[0]!, resolve)
+      : resolve(msg("via {route}", { route: connectionRouteLabelText(active, resolve) }));
   }
-  if (environment.relayManaged) return "T3 Connect";
+  if (environment.relayManaged) return T3_CONNECT_NAME;
   if (isDesktopLocalConnectionTarget(entry.target)) return "WSL";
   if (
     entry.target._tag === "SshConnectionTarget" &&
@@ -50,14 +51,27 @@ export function environmentTransportLabel(
   ) {
     return `SSH ${formatDesktopSshTarget(entry.profile.value.target)}`;
   }
-  return environment.displayUrl ?? "Remote link";
+  return environment.displayUrl ?? resolve(msg("Remote link"));
 }
 
-/**
- * One machine in a grouped settings list: icon, name, a single subtitle line,
- * and controls on the right. Every environment list on the Connections page
- * uses this so the lists share one rhythm.
- */
+export function useEnvironmentTransportLabel(environment: EnvironmentPresentation): string {
+  const prepared = usePreparedConnection(environment.environmentId);
+  const resolve = useMessages();
+  return environmentTransportLabel(
+    environment,
+    environment.connection.phase === "connected" && prepared._tag === "Some"
+      ? prepared.value.target
+      : null,
+    resolve,
+  );
+}
+
+export function EnvironmentTransportLabel(props: {
+  readonly environment: EnvironmentPresentation;
+}) {
+  return useEnvironmentTransportLabel(props.environment);
+}
+
 export function EnvironmentRow({
   kind,
   label,
@@ -71,9 +85,7 @@ export function EnvironmentRow({
   readonly kind: EnvironmentMachineKind;
   readonly label: string;
   readonly subtitle: ReactNode;
-  /** Extra content under the subtitle, such as update progress. */
   readonly below?: ReactNode;
-  /** Expanded content under the whole row, aligned with the label, such as its routes. */
   readonly detail?: ReactNode;
   readonly dimmed?: boolean;
   readonly className?: string;
@@ -83,12 +95,16 @@ export function EnvironmentRow({
     <div
       className={cn(
         "grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-3 px-3 py-2.5 sm:px-4",
-        dimmed && "opacity-60",
         className,
       )}
     >
-      <EnvironmentMachineIcon aria-hidden kind={kind} className="size-4 text-muted-foreground" />
-      <div className="min-w-0">
+      {/* Dim only identity so switched-off controls remain readable and distinct from disabled controls. */}
+      <EnvironmentMachineIcon
+        aria-hidden
+        kind={kind}
+        className={cn("size-4 text-muted-foreground", dimmed && "opacity-60")}
+      />
+      <div className={cn("min-w-0", dimmed && "opacity-60")}>
         <p className="truncate text-sm font-medium text-foreground">{label}</p>
         <div className="truncate text-xs text-muted-foreground">{subtitle}</div>
         {below}

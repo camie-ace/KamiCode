@@ -1,21 +1,17 @@
+import { managedCapabilityDenial } from "@t3tools/client-runtime/contract-labels";
 import { DeviceHostUpdates } from "../device/DeviceHostUpdates";
 import { DeviceToolVersions } from "../device/DeviceToolVersions";
 import { useScopedSettings, useUpdateScopedSettings } from "./useScopedSettings";
 import { ScopedSwitch } from "./ScopedSwitch";
-import { DeviceHostsSettings } from "./DeviceHostsSettings";
-/**
- * Integrations settings - preferences for surfaces T3 Code embeds rather than
- * owns. Browser is the first section: the defaults a preview tab opens at,
- * applied to both hand-opened tabs and agent `preview_open` calls that don't
- * state their own size.
- *
- * @module IntegrationsSettings
- */
+import { DeviceSourcesSettings } from "./DeviceSourcesSettings";
 import {
+  AuthSettingsWriteScope,
   BrowserImportFailureReason,
   BROWSER_PROFILE_MAX_COUNT,
   type BrowserLinkTarget,
   type BrowserProfile,
+  BrowserSearchEngine,
+  BROWSER_CUSTOM_SEARCH_URL_MAX_LENGTH,
   type EnvironmentId,
   BROWSER_PROFILE_NAME_MAX_LENGTH,
   BROWSER_RECORDING_FRAME_RATES,
@@ -23,9 +19,11 @@ import {
   DEFAULT_BROWSER_PROFILE_ID,
   DEFAULT_BROWSER_LINK_TARGET,
   DEFAULT_BROWSER_RECORDING_FRAME_RATE,
+  DEFAULT_BROWSER_SEARCH_ENGINE,
   DEFAULT_BROWSER_VIEWPORT,
   DEFAULT_PREVIEW_APPEARANCE,
   DEFAULT_PREVIEW_ZOOM_FACTOR,
+  DEFAULT_SERVER_SETTINGS,
   FILL_PREVIEW_VIEWPORT,
   PREVIEW_VIEWPORT_MAX_AREA,
   PREVIEW_VIEWPORT_MAX_DIMENSION,
@@ -38,31 +36,34 @@ import {
   type PreviewAppearancePreference,
   type PreviewViewportSetting,
 } from "@t3tools/contracts";
+import { usePrimaryManagedPolicy } from "~/state/managedPolicy";
+import { isValidSearchUrlTemplate } from "@t3tools/shared/preview";
 import { PREVIEW_VIEWPORT_PRESETS } from "@t3tools/shared/previewViewport";
 import { isHostedBrowserProxyUrl } from "@t3tools/shared/hostedBrowserProxy";
 import { useAtomValue } from "@effect/atom-react";
-import { Link } from "@tanstack/react-router";
+
 import { MoreVertical, Plus as PlusIcon } from "lucide-react";
-import { useCallback, useRef, useState } from "react";
+import * as Schema from "effect/Schema";
+import { useRef, useState } from "react";
+import { msg, T, useGT, useMessages, Var } from "gt-react";
+import { m as resolveNow, type MessageResolver } from "../../i18n/messages";
 
 import { ScreenRotationIcon } from "~/browser/ScreenRotationIcon";
-import { AnimatedHeight } from "~/components/AnimatedHeight";
 import { resolveEnvironmentOptionLabel } from "~/components/BranchToolbar.logic";
 import { previewBridge } from "~/components/preview/previewBridge";
 import { cn, randomUUID } from "~/lib/utils";
 import { useEnvironments, usePrimaryEnvironment } from "~/state/environments";
 import { deviceEnvironment, useDeviceState } from "~/state/device";
+import { readEnvironmentScope, useEnvironmentScope } from "~/state/session";
 import { useAtomCommand } from "~/state/use-atom-command";
+import { formatEnvironmentQueryError } from "~/state/query";
 import { previewEnvironment } from "~/state/preview";
 import { useServerConfigs } from "~/state/entities";
 import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 import {
   AgentDeviceSetupStatus,
   DeviceHubSetupStatus,
-  PlatformStatus,
-  platformSetupStatus,
-  deviceHubDescription,
-  agentDeviceDescription,
+  deviceHubReadiness,
 } from "~/components/device/DeviceSetup";
 import { isElectron } from "../../env";
 
@@ -120,8 +121,8 @@ import {
   SettingsRow,
   SettingsSection,
 } from "./settingsLayout";
-import { searchableSetting } from "./settingsSearch";
-import { ProjectDefaultsSettings } from "./ProjectDefaultsSettings";
+import { useSearchableSetting } from "./settingsSearch";
+import { AdvancedSettings } from "./AdvancedSettings";
 import { useSettingsScope } from "./SettingsScopeContext";
 import { BrowserImportWizard, type WizardTarget } from "./BrowserImportWizard";
 import type { ImportOutcome } from "./browserImportWizard.logic";
@@ -134,7 +135,6 @@ type BrowserProfileDataBridge = Pick<
   "clearCookies" | "clearCache"
 >;
 
-/** Environments that host server-runtime tabs keep their own copy of each profile. */
 export interface ServerProfileData {
   readonly environmentIds: ReadonlyArray<EnvironmentId>;
   readonly clear: (environmentId: EnvironmentId, profileId: string) => Promise<void>;
@@ -149,7 +149,7 @@ export async function clearBrowserProfileData(
   const desktopEnvironmentIds = bridge === null ? [] : environmentIds;
   const serverEnvironmentIds = server?.environmentIds ?? [];
   if (desktopEnvironmentIds.length === 0 && serverEnvironmentIds.length === 0) {
-    throw new Error("Browser profile data is not available to clear.");
+    throw new Error(resolveNow(msg("Browser profile data is not available to clear.")));
   }
   await Promise.all([
     ...desktopEnvironmentIds.flatMap((environmentId) => [
@@ -160,7 +160,7 @@ export async function clearBrowserProfileData(
   ]);
 }
 
-export function browserProfileRemovalAvailable(
+function browserProfileRemovalAvailable(
   bridgeAvailable: boolean,
   environmentsReady: boolean,
   environmentCount: number,
@@ -169,35 +169,30 @@ export function browserProfileRemovalAvailable(
   return (bridgeAvailable || serverBrowserCount > 0) && environmentsReady && environmentCount > 0;
 }
 
-/**
- * The size a "Responsive" default falls back to when the user switches away
- * from Fill and hasn't typed dimensions yet. Fill has no dimensions to carry
- * over, so the picker needs something concrete to seed the inputs with.
- */
 const RESPONSIVE_SEED_SIZE = { width: 1280, height: 800 } as const;
 
 const NO_GROUPING: Intl.NumberFormatOptions = { useGrouping: false };
 
 const APPEARANCE_LABELS: Readonly<Record<PreviewAppearancePreference, string>> = {
-  system: "System",
-  light: "Light",
-  dark: "Dark",
+  system: msg("System", { $context: "appearance follows the system" }),
+  light: msg("Light", { $context: "appearance" }),
+  dark: msg("Dark", { $context: "appearance" }),
 };
 
 const zoomLabel = (zoomFactor: number) => `${Math.round(zoomFactor * 100)}%`;
 
-/**
- * IPC flattens the failure to its message, so the reason token travels inside
- * it. Anything unrecognised reads as a plain read failure rather than leaking
- * the raw message into a toast.
- */
-/** Thrown from the post-import settings updater when the cap was hit meanwhile. */
-class ProfileLimitReachedError extends Error {
-  constructor() {
-    super("Browser profile limit reached.");
-    this.name = "ProfileLimitReachedError";
+/** IPC carries reason tokens inside messages; treat unknown tokens as read failures without exposing raw
+ * text. */
+class ProfileLimitReachedError extends Schema.TaggedError<ProfileLimitReachedError>()(
+  "ProfileLimitReachedError",
+  {},
+) {
+  override get message(): string {
+    return "Browser profile limit reached.";
   }
 }
+
+const isProfileLimitReachedError = Schema.is(ProfileLimitReachedError);
 
 export const importFailureReason = (cause: unknown): BrowserImportFailureReason => {
   const message = String((cause as { message?: unknown } | undefined)?.message ?? "");
@@ -206,6 +201,100 @@ export const importFailureReason = (cause: unknown): BrowserImportFailureReason 
     "readFailed"
   );
 };
+
+/**
+ * The desktop's refusal when the machine's managed policy forbids cookie import. IPC wraps the
+ * message in its own prefixes, so the sentence is matched on the contract's wording.
+ */
+export const importPolicyRefusal = (cause: unknown): string | undefined => {
+  const message = String((cause as { message?: unknown } | undefined)?.message ?? "");
+  return (
+    /The managed policy at .* importing browser cookies is not allowed\./u.exec(message)?.[0] ??
+    /(?:^|: )([^:]*'s policy does not allow importing browser cookies\.)/u.exec(message)?.[1]
+  );
+};
+
+async function importBrowserCookiesIntoTarget(
+  bridge: NonNullable<typeof previewBridge>,
+  source: BrowserImportSource,
+  environmentId: EnvironmentId,
+  input: { readonly sourceProfileDirectory: string; readonly target: WizardTarget },
+): Promise<ImportOutcome> {
+  try {
+    const result = await bridge.importBrowserCookies({
+      environmentId,
+      sourceId: source.id,
+      sourceProfileDirectory: input.sourceProfileDirectory,
+      targetProfileId: input.target.profileId,
+    });
+    if (
+      input.target.kind === "existing" &&
+      !resolveBrowserProfiles(getClientSettings().browserProfiles).some(
+        (profile) => profile.id === input.target.profileId,
+      )
+    ) {
+      return { kind: "blocked", reason: "readFailed" };
+    }
+    let targetName: string;
+    if (input.target.kind === "new") {
+      if (result.imported > 0) {
+        try {
+          const persisted = await persistClientSettingsUpdate((current) => {
+            const existing = current.browserProfiles.find(
+              (profile) => profile.id === input.target.profileId,
+            );
+            if (existing) return current;
+            // The profile cap may be reached during import; enforce it against the updater's latest settings.
+            if (current.browserProfiles.length >= BROWSER_PROFILE_MAX_COUNT) {
+              throw new ProfileLimitReachedError();
+            }
+            const taken = new Set(
+              resolveBrowserProfiles(current.browserProfiles).map((profile) => profile.name),
+            );
+            let name = source.name;
+            for (let index = 2; taken.has(name); index += 1) name = `${source.name} ${index}`;
+            return {
+              ...current,
+              browserProfiles: [
+                ...current.browserProfiles,
+                { id: input.target.profileId, name, kind: "persistent" as const },
+              ],
+            };
+          });
+          targetName =
+            persisted.browserProfiles.find((profile) => profile.id === input.target.profileId)
+              ?.name ?? source.name;
+        } catch (cause) {
+          // Clear the new target's partition on registration failure so imported cookies cannot outlive its
+          // profile.
+          await clearBrowserProfileData(bridge, [environmentId], input.target.profileId).catch(
+            () => undefined,
+          );
+          const reason = isProfileLimitReachedError(cause)
+            ? "profileLimitReached"
+            : "profileNotSaved";
+          throw new Error(`Importing cookies from ${source.id} failed: ${reason}.`, { cause });
+        }
+      } else {
+        targetName = source.name;
+      }
+    } else {
+      targetName = input.target.name;
+    }
+    return {
+      kind: "imported",
+      imported: result.imported,
+      skipped: result.skipped,
+      skippedDomains: result.skippedDomains,
+      targetName,
+    };
+  } catch (cause) {
+    const policyRefusal = importPolicyRefusal(cause);
+    return policyRefusal !== undefined
+      ? { kind: "blocked", reason: "readFailed", message: policyRefusal }
+      : { kind: "blocked", reason: importFailureReason(cause) };
+  }
+}
 
 const viewportSelectValue = (viewport: PreviewViewportSetting): string => {
   if (viewport._tag === "fill") return FILL_VALUE;
@@ -218,16 +307,18 @@ const viewportSelectValue = (viewport: PreviewViewportSetting): string => {
   return RESPONSIVE_VALUE;
 };
 
-/**
- * The trigger renders this rather than a bare `SelectValue`, which would fall
- * back to printing the raw stored value ("fill") because the options are built
- * inline instead of from an `items` map.
- */
-const viewportSelectLabel = (viewport: PreviewViewportSetting): string => {
+/** Inline options lack an items map; bare SelectValue would display the stored fill token. */
+const viewportSelectLabel = (
+  viewport: PreviewViewportSetting,
+  resolve: MessageResolver,
+): string => {
   const value = viewportSelectValue(viewport);
-  if (value === FILL_VALUE) return "Fill panel";
-  if (value === RESPONSIVE_VALUE) return "Responsive";
-  return PREVIEW_VIEWPORT_PRESETS.find((preset) => preset.id === value)?.label ?? "Responsive";
+  if (value === FILL_VALUE) return resolve(msg("Fill panel"));
+  if (value === RESPONSIVE_VALUE) return resolve(msg("Responsive"));
+  return (
+    PREVIEW_VIEWPORT_PRESETS.find((preset) => preset.id === value)?.label ??
+    resolve(msg("Responsive"))
+  );
 };
 
 const isValidDimension = (value: number) =>
@@ -235,12 +326,6 @@ const isValidDimension = (value: number) =>
   value >= PREVIEW_VIEWPORT_MIN_DIMENSION &&
   value <= PREVIEW_VIEWPORT_MAX_DIMENSION;
 
-/**
- * A sized viewport with width and height swapped. Presets keep their identity
- * through a rotation — `resolvePreviewViewport` already stores rotated presets
- * as the preset id plus swapped dimensions — so a rotated iPad is still an
- * iPad, not an anonymous custom size.
- */
 const rotateViewport = (
   viewport: Exclude<PreviewViewportSetting, { readonly _tag: "fill" }>,
 ): PreviewViewportSetting => ({
@@ -250,8 +335,11 @@ const rotateViewport = (
 });
 
 function BrowserViewportSetting({ disabled }: { readonly disabled: boolean }) {
+  const searchableSetting = useSearchableSetting();
+  const gt = useGT();
+  const m = useMessages();
   const viewport = useClientSettings((settings) => settings.browserDefaultViewport);
-  const updateSettings = useUpdatePrimarySettings();
+  const updateSettings = useUpdateScopedSettings();
 
   const sized = viewport._tag === "fill" ? null : viewport;
   const presentedSize = {
@@ -286,26 +374,26 @@ function BrowserViewportSetting({ disabled }: { readonly disabled: boolean }) {
     });
   };
 
-  // Committed on blur rather than per keystroke: typing "2560" passes through
-  // "256", which is a legal dimension, so an onValueChange handler would
-  // persist that intermediate size and churn the settings file on every key.
+  // Commit on blur to avoid persisting valid intermediate dimensions and rewriting settings per keystroke.
   const commitDimension = (axis: "width" | "height", value: number | null) => {
     if (value === null || !isValidDimension(value)) return;
     const next = { ...presentedSize, [axis]: value };
     if (next.width * next.height > PREVIEW_VIEWPORT_MAX_AREA) return;
     if (sized && next.width === sized.width && next.height === sized.height) return;
-    // Typing a size means the preset no longer describes it.
     updateSettings({ browserDefaultViewport: { _tag: "freeform", ...next } });
   };
 
   return (
     <SettingsRow
       {...searchableSetting("browser-default-viewport")}
-      description="Tab size for you and agents. Fill fits the panel; other sizes show the device toolbar."
+      devicePreference
+      description={gt(
+        "Tab size for you and agents. Fill fits the panel; other sizes show the device toolbar.",
+      )}
       resetAction={
         !disabled && viewport._tag !== DEFAULT_BROWSER_VIEWPORT._tag ? (
           <SettingResetButton
-            label="default browser viewport"
+            ariaLabel={gt("Reset default browser viewport to default")}
             onClick={() => updateSettings({ browserDefaultViewport: DEFAULT_BROWSER_VIEWPORT })}
           />
         ) : null
@@ -320,15 +408,21 @@ function BrowserViewportSetting({ disabled }: { readonly disabled: boolean }) {
             <SelectTrigger
               size="sm"
               className="w-full min-w-0 sm:w-44"
-              aria-label="Default browser viewport"
+              aria-label={gt("Default browser viewport")}
             >
-              <SelectValue>{viewportSelectLabel(viewport)}</SelectValue>
+              <SelectValue>{viewportSelectLabel(viewport, m)}</SelectValue>
             </SelectTrigger>
             <SelectPopup align="end" alignItemWithTrigger={false}>
-              <SelectItem value={FILL_VALUE}>Fill panel</SelectItem>
-              <SelectItem value={RESPONSIVE_VALUE}>Responsive</SelectItem>
+              <SelectItem value={FILL_VALUE}>
+                <T>Fill panel</T>
+              </SelectItem>
+              <SelectItem value={RESPONSIVE_VALUE}>
+                <T>Responsive</T>
+              </SelectItem>
               <SelectGroup>
-                <SelectGroupLabel>Standard</SelectGroupLabel>
+                <SelectGroupLabel>
+                  {gt("Standard", { $context: "standard viewport sizes" })}
+                </SelectGroupLabel>
                 {PREVIEW_VIEWPORT_PRESETS.map((preset) => (
                   <SelectItem key={preset.id} value={preset.id}>
                     <span className="flex w-full items-center justify-between gap-5">
@@ -350,14 +444,13 @@ function BrowserViewportSetting({ disabled }: { readonly disabled: boolean }) {
                 min={PREVIEW_VIEWPORT_MIN_DIMENSION}
                 max={PREVIEW_VIEWPORT_MAX_DIMENSION}
                 disabled={disabled}
-                // Pixel counts read as raw numbers; grouping would show "1,024".
                 format={NO_GROUPING}
                 size="sm"
                 className="w-20"
                 onValueCommitted={(value) => commitDimension("width", value)}
               >
                 <NumberFieldGroup>
-                  <NumberFieldInput aria-label="Default viewport width" />
+                  <NumberFieldInput aria-label={gt("Default viewport width")} />
                 </NumberFieldGroup>
               </NumberField>
               <span className="text-xs text-muted-foreground">×</span>
@@ -372,7 +465,7 @@ function BrowserViewportSetting({ disabled }: { readonly disabled: boolean }) {
                 onValueCommitted={(value) => commitDimension("height", value)}
               >
                 <NumberFieldGroup>
-                  <NumberFieldInput aria-label="Default viewport height" />
+                  <NumberFieldInput aria-label={gt("Default viewport height")} />
                 </NumberFieldGroup>
               </NumberField>
               <Tooltip>
@@ -382,9 +475,11 @@ function BrowserViewportSetting({ disabled }: { readonly disabled: boolean }) {
                       size="icon-sm"
                       variant="ghost-muted"
                       disabled={disabled}
-                      aria-label={`Rotate to ${
-                        presentedSize.height >= presentedSize.width ? "landscape" : "portrait"
-                      }`}
+                      aria-label={
+                        presentedSize.height >= presentedSize.width
+                          ? gt("Rotate to landscape")
+                          : gt("Rotate to portrait")
+                      }
                       onClick={() =>
                         updateSettings({ browserDefaultViewport: rotateViewport(sized) })
                       }
@@ -393,7 +488,9 @@ function BrowserViewportSetting({ disabled }: { readonly disabled: boolean }) {
                     </Button>
                   }
                 />
-                <TooltipPopup side="top">Rotate</TooltipPopup>
+                <TooltipPopup side="top">
+                  <T>Rotate</T>
+                </TooltipPopup>
               </Tooltip>
             </div>
           ) : null}
@@ -404,17 +501,20 @@ function BrowserViewportSetting({ disabled }: { readonly disabled: boolean }) {
 }
 
 function BrowserZoomSetting({ disabled }: { readonly disabled: boolean }) {
+  const searchableSetting = useSearchableSetting();
+  const gt = useGT();
   const zoomFactor = useClientSettings((settings) => settings.browserDefaultZoomFactor);
-  const updateSettings = useUpdatePrimarySettings();
+  const updateSettings = useUpdateScopedSettings();
 
   return (
     <SettingsRow
       {...searchableSetting("browser-default-zoom")}
-      description="Page zoom applied to new browser tabs."
+      devicePreference
+      description={gt("Page zoom applied to new browser tabs.")}
       resetAction={
         !disabled && zoomFactor !== DEFAULT_PREVIEW_ZOOM_FACTOR ? (
           <SettingResetButton
-            label="default browser zoom"
+            ariaLabel={gt("Reset default browser zoom to default")}
             onClick={() =>
               updateSettings({ browserDefaultZoomFactor: DEFAULT_PREVIEW_ZOOM_FACTOR })
             }
@@ -430,7 +530,11 @@ function BrowserZoomSetting({ disabled }: { readonly disabled: boolean }) {
             if (next !== undefined) updateSettings({ browserDefaultZoomFactor: next });
           }}
         >
-          <SelectTrigger size="sm" className="w-full sm:w-40" aria-label="Default browser zoom">
+          <SelectTrigger
+            size="sm"
+            className="w-full sm:w-40"
+            aria-label={gt("Default browser zoom")}
+          >
             <SelectValue>{zoomLabel(zoomFactor)}</SelectValue>
           </SelectTrigger>
           <SelectPopup align="end" alignItemWithTrigger={false}>
@@ -447,17 +551,21 @@ function BrowserZoomSetting({ disabled }: { readonly disabled: boolean }) {
 }
 
 function BrowserAppearanceSetting({ disabled }: { readonly disabled: boolean }) {
+  const searchableSetting = useSearchableSetting();
+  const gt = useGT();
+  const m = useMessages();
   const appearance = useClientSettings((settings) => settings.browserDefaultAppearance);
-  const updateSettings = useUpdatePrimarySettings();
+  const updateSettings = useUpdateScopedSettings();
 
   return (
     <SettingsRow
       {...searchableSetting("browser-default-appearance")}
-      description="The color scheme pages are told to prefer. System follows your OS setting."
+      devicePreference
+      description={gt("The color scheme pages are told to prefer. System follows your OS setting.")}
       resetAction={
         !disabled && appearance !== DEFAULT_PREVIEW_APPEARANCE ? (
           <SettingResetButton
-            label="default browser appearance"
+            ariaLabel={gt("Reset default browser appearance to default")}
             onClick={() => updateSettings({ browserDefaultAppearance: DEFAULT_PREVIEW_APPEARANCE })}
           />
         ) : null
@@ -475,14 +583,14 @@ function BrowserAppearanceSetting({ disabled }: { readonly disabled: boolean }) 
           <SelectTrigger
             size="sm"
             className="w-full sm:w-40"
-            aria-label="Default browser appearance"
+            aria-label={gt("Default browser appearance")}
           >
-            <SelectValue>{APPEARANCE_LABELS[appearance]}</SelectValue>
+            <SelectValue>{m(APPEARANCE_LABELS[appearance])}</SelectValue>
           </SelectTrigger>
           <SelectPopup align="end" alignItemWithTrigger={false}>
             {Object.entries(APPEARANCE_LABELS).map(([value, label]) => (
               <SelectItem hideIndicator key={value} value={value}>
-                {label}
+                {m(label)}
               </SelectItem>
             ))}
           </SelectPopup>
@@ -493,19 +601,24 @@ function BrowserAppearanceSetting({ disabled }: { readonly disabled: boolean }) 
 }
 
 function BrowserRecordingInputSettings({ disabled }: { readonly disabled: boolean }) {
+  const searchableSetting = useSearchableSetting();
+  const gt = useGT();
   const showKeys = useClientSettings((settings) => settings.browserRecordingShowKeyPresses);
   const showMouse = useClientSettings((settings) => settings.browserRecordingShowMousePresses);
-  const updateSettings = useUpdatePrimarySettings();
+  const updateSettings = useUpdateScopedSettings();
   return (
     <>
       <SettingsRow
         {...searchableSetting("browser-recording-key-presses")}
-        description="Show pressed keys and shortcuts in new recordings. Password fields are excluded."
+        devicePreference
+        description={gt(
+          "Show pressed keys and shortcuts in new recordings. Password fields are excluded.",
+        )}
         control={
           <Switch
             disabled={disabled}
             checked={showKeys}
-            aria-label="Show key presses in recordings"
+            aria-label={gt("Show key presses in recordings")}
             onCheckedChange={(checked) =>
               updateSettings({ browserRecordingShowKeyPresses: Boolean(checked) })
             }
@@ -514,12 +627,13 @@ function BrowserRecordingInputSettings({ disabled }: { readonly disabled: boolea
       />
       <SettingsRow
         {...searchableSetting("browser-recording-mouse-presses")}
-        description="Highlight mouse presses and held buttons in new recordings."
+        devicePreference
+        description={gt("Highlight mouse presses and held buttons in new recordings.")}
         control={
           <Switch
             disabled={disabled}
             checked={showMouse}
-            aria-label="Show mouse presses in recordings"
+            aria-label={gt("Show mouse presses in recordings")}
             onCheckedChange={(checked) =>
               updateSettings({ browserRecordingShowMousePresses: Boolean(checked) })
             }
@@ -531,17 +645,20 @@ function BrowserRecordingInputSettings({ disabled }: { readonly disabled: boolea
 }
 
 function BrowserRecordingFrameRateSetting({ disabled }: { readonly disabled: boolean }) {
+  const searchableSetting = useSearchableSetting();
+  const gt = useGT();
   const frameRate = useClientSettings((settings) => settings.browserRecordingFrameRate);
-  const updateSettings = useUpdatePrimarySettings();
+  const updateSettings = useUpdateScopedSettings();
 
   return (
     <SettingsRow
       {...searchableSetting("browser-recording-frame-rate")}
-      description="Maximum recording rate. 30 fps saves CPU and storage; 60 fps is smoother."
+      devicePreference
+      description={gt("Maximum recording rate. 30 fps saves CPU and storage; 60 fps is smoother.")}
       resetAction={
         !disabled && frameRate !== DEFAULT_BROWSER_RECORDING_FRAME_RATE ? (
           <SettingResetButton
-            label="browser recording frame rate"
+            ariaLabel={gt("Reset browser recording frame rate to default")}
             onClick={() =>
               updateSettings({ browserRecordingFrameRate: DEFAULT_BROWSER_RECORDING_FRAME_RATE })
             }
@@ -562,7 +679,7 @@ function BrowserRecordingFrameRateSetting({ disabled }: { readonly disabled: boo
           <SelectTrigger
             size="sm"
             className="w-full sm:w-40"
-            aria-label="Browser recording frame rate"
+            aria-label={gt("Browser recording frame rate")}
           >
             <SelectValue>{frameRate} fps</SelectValue>
           </SelectTrigger>
@@ -580,22 +697,28 @@ function BrowserRecordingFrameRateSetting({ disabled }: { readonly disabled: boo
 }
 
 const LINK_TARGET_LABELS: Readonly<Record<BrowserLinkTarget, string>> = {
-  system: "Your default browser",
+  system: msg("Your default browser"),
   app: "T3 Code",
 };
 
 function BrowserLinkTargetSetting({ disabled }: { readonly disabled: boolean }) {
+  const searchableSetting = useSearchableSetting();
+  const gt = useGT();
+  const m = useMessages();
   const linkTarget = useClientSettings((settings) => settings.browserLinkTarget);
-  const updateSettings = useUpdatePrimarySettings();
+  const updateSettings = useUpdateScopedSettings();
 
   return (
     <SettingsRow
       {...searchableSetting("browser-link-target")}
-      description="Where links in the chat and terminal open. Hold ⌘ or Ctrl while clicking a link to open it in your default browser either way."
+      devicePreference
+      description={gt(
+        "Where links in the chat and terminal open. Hold ⌘ or Ctrl while clicking a link to open it in your default browser either way.",
+      )}
       resetAction={
         !disabled && linkTarget !== DEFAULT_BROWSER_LINK_TARGET ? (
           <SettingResetButton
-            label="link target"
+            ariaLabel={gt("Reset link target to default")}
             onClick={() => updateSettings({ browserLinkTarget: DEFAULT_BROWSER_LINK_TARGET })}
           />
         ) : null
@@ -610,13 +733,13 @@ function BrowserLinkTargetSetting({ disabled }: { readonly disabled: boolean }) 
             }
           }}
         >
-          <SelectTrigger size="sm" className="w-full sm:w-40" aria-label="Open links in">
-            <SelectValue>{LINK_TARGET_LABELS[linkTarget]}</SelectValue>
+          <SelectTrigger size="sm" className="w-full sm:w-40" aria-label={gt("Open links in")}>
+            <SelectValue>{m(LINK_TARGET_LABELS[linkTarget])}</SelectValue>
           </SelectTrigger>
           <SelectPopup align="end" alignItemWithTrigger={false}>
             {(Object.keys(LINK_TARGET_LABELS) as ReadonlyArray<BrowserLinkTarget>).map((target) => (
               <SelectItem hideIndicator key={target} value={target}>
-                {LINK_TARGET_LABELS[target]}
+                {m(LINK_TARGET_LABELS[target])}
               </SelectItem>
             ))}
           </SelectPopup>
@@ -626,27 +749,131 @@ function BrowserLinkTargetSetting({ disabled }: { readonly disabled: boolean }) 
   );
 }
 
-function AgentBrowserAccessSetting() {
+const SEARCH_ENGINE_LABELS: Readonly<Record<BrowserSearchEngine, string>> = {
+  duckduckgo: "DuckDuckGo",
+  google: "Google",
+  bing: "Bing",
+  brave: "Brave Search",
+  kagi: "Kagi",
+  ecosia: "Ecosia",
+  custom: msg("Custom", { $context: "custom search engine" }),
+};
+
+function BrowserSearchEngineSetting() {
+  const searchableSetting = useSearchableSetting();
+  const gt = useGT();
+  const m = useMessages();
+  const engine = useClientSettings((settings) => settings.browserSearchEngine);
+  const customUrl = useClientSettings((settings) => settings.browserCustomSearchUrl);
+  const updateSettings = useUpdateScopedSettings();
+
+  return (
+    <>
+      <SettingsRow
+        {...searchableSetting("browser-search-engine")}
+        devicePreference
+        description={gt("What the address bar searches when you type something that isn't a URL.")}
+        resetAction={
+          engine !== DEFAULT_BROWSER_SEARCH_ENGINE || customUrl !== "" ? (
+            <SettingResetButton
+              ariaLabel={gt("Reset search engine to default")}
+              onClick={() =>
+                updateSettings({
+                  browserSearchEngine: DEFAULT_BROWSER_SEARCH_ENGINE,
+                  browserCustomSearchUrl: "",
+                })
+              }
+            />
+          ) : null
+        }
+        control={
+          <Select
+            value={engine}
+            onValueChange={(value) => {
+              const next = BrowserSearchEngine.literals.find((literal) => literal === value);
+              if (next !== undefined) {
+                updateSettings({ browserSearchEngine: next });
+              }
+            }}
+          >
+            <SelectTrigger size="sm" className="w-full sm:w-40" aria-label={gt("Search engine")}>
+              <SelectValue>{m(SEARCH_ENGINE_LABELS[engine])}</SelectValue>
+            </SelectTrigger>
+            <SelectPopup align="end" alignItemWithTrigger={false}>
+              {BrowserSearchEngine.literals.map((literal) => (
+                <SelectItem hideIndicator key={literal} value={literal}>
+                  {m(SEARCH_ENGINE_LABELS[literal])}
+                </SelectItem>
+              ))}
+            </SelectPopup>
+          </Select>
+        }
+      />
+      {engine === "custom" ? (
+        <SettingsRow
+          title={gt("Custom search URL")}
+          devicePreference
+          description={gt("Use %s where the search terms go.")}
+          status={
+            isValidSearchUrlTemplate(customUrl)
+              ? undefined
+              : gt("Enter an http or https URL containing %s. Searches use DuckDuckGo until then.")
+          }
+          control={
+            <DraftInput
+              nativeInput
+              size="sm"
+              className="w-full sm:w-64"
+              aria-label={gt("Custom search URL")}
+              placeholder="https://example.com/search?q=%s"
+              autoCapitalize="none"
+              spellCheck={false}
+              maxLength={BROWSER_CUSTOM_SEARCH_URL_MAX_LENGTH}
+              value={customUrl}
+              onCommit={(next) => updateSettings({ browserCustomSearchUrl: next.trim() })}
+            />
+          }
+        />
+      ) : null}
+    </>
+  );
+}
+
+export function PullRequestLinksOpenInAppSetting() {
+  const searchableSetting = useSearchableSetting();
+  const gt = useGT();
+  const openInApp = useClientSettings((settings) => settings.pullRequestLinksOpenInApp);
+  const updateSettings = useUpdatePrimarySettings();
+
   return (
     <SettingsRow
-      {...searchableSetting("agent-browser-access")}
-      description="Choose whether agents can use the preview browser for all projects or a specific project."
+      {...searchableSetting("pull-request-links-open-in-app")}
+      description={gt(
+        "Clicking a pull request link opens it in T3 Code. Turn off to open pull request links like any other link, on your git host.",
+      )}
+      resetAction={
+        openInApp ? null : (
+          <SettingResetButton
+            ariaLabel={gt("Reset open pull requests in T3 Code to default")}
+            onClick={() => updateSettings({ pullRequestLinksOpenInApp: true })}
+          />
+        )
+      }
       control={
-        <Button
-          render={
-            <Link to="/settings/projects" search={{ project: undefined, machine: undefined }} />
+        <Switch
+          checked={openInApp}
+          onCheckedChange={(checked) =>
+            updateSettings({ pullRequestLinksOpenInApp: Boolean(checked) })
           }
-          size="sm"
-          variant="outline"
-        >
-          Project settings
-        </Button>
+          aria-label={gt("Open pull requests in T3 Code")}
+        />
       }
     />
   );
 }
 
 function HostedBrowserProxySetting() {
+  const searchableSetting = useSearchableSetting();
   const settings = usePrimarySettings();
   const updateSettings = useUpdatePrimarySettings();
   const serverConfig = useAtomValue(primaryServerConfigAtom);
@@ -696,7 +923,7 @@ function HostedBrowserProxySetting() {
         resetAction={
           proxy.enabled ? (
             <SettingResetButton
-              label="hosted browser proxy"
+              ariaLabel="Reset hosted browser proxy"
               onClick={() => updateSettings({ hostedBrowserProxy: { enabled: false } })}
             />
           ) : null
@@ -765,20 +992,29 @@ function HostedBrowserProxySetting() {
 }
 
 function DeviceIntegrationSettings() {
+  const gt = useGT();
   const { search, environment: selected } = useSettingsScope();
   const settings = useScopedSettings();
   const connected = selected?.connection.phase === "connected" && selected.serverConfig !== null;
   const environmentId = connected ? selected.environmentId : null;
 
+  const { state } = useDeviceState(environmentId);
+
   return (
-    <SettingsSection id="devices" title="Devices">
-      <DeviceIntegrationControls
-        key={`${environmentId}:${JSON.stringify(search)}`}
-        environmentId={environmentId}
-        enabled={settings.enableDeviceSupport}
-        agentAccessEnabled={settings.enableAgentDeviceAccess}
+    <>
+      <SettingsSection id="devices" title={gt("Devices")}>
+        <DeviceIntegrationControls
+          key={`${environmentId}:${JSON.stringify(search)}`}
+          environmentId={environmentId}
+          enabled={settings.enableDeviceSupport}
+          agentAccessEnabled={settings.enableAgentDeviceAccess}
+        />
+      </SettingsSection>
+      <DeviceSourcesSettings
+        supportsEas={state.supportsEasHosts === true}
+        supportsSimlock={state.supportsSimlockHosts === true}
       />
-    </SettingsSection>
+    </>
   );
 }
 
@@ -791,6 +1027,9 @@ function DeviceIntegrationControls({
   enabled: boolean;
   agentAccessEnabled: boolean;
 }) {
+  const searchableSetting = useSearchableSetting();
+  const gt = useGT();
+  const canConfigure = useEnvironmentScope(environmentId, AuthSettingsWriteScope);
   const { state, loaded } = useDeviceState(environmentId);
   const { scope, environments, connectedEnvironments } = useSettingsScope();
   const updateSettings = useUpdateScopedSettings();
@@ -803,53 +1042,41 @@ function DeviceIntegrationControls({
   const [pending, setPending] = useState<
     "hub" | "check" | "agent" | "update-hub" | "update-agent" | null
   >(null);
-  const busy = state.hostStatus === "installing" || state.hostStatus === "starting";
-  const localPlatformsUnavailable = state.hosts.some(
-    (host) => host.kind === "local" && !host.platforms.some((platform) => platform.available),
-  );
-  const [platformsRevealed, setPlatformsRevealed] = useState(false);
-  // Keep diagnostics visible through subsequent agent setup and refresh phases.
-  if (platformsRevealed && !enabled) setPlatformsRevealed(false);
-  if (
-    enabled &&
-    !platformsRevealed &&
-    (state.hostStatus === "ready" || localPlatformsUnavailable) &&
-    pending !== "hub"
-  ) {
-    setPlatformsRevealed(true);
-  }
+  const { busy } = deviceHubReadiness(state);
 
   const update = async (
     kind: NonNullable<typeof pending>,
     input: { enabled?: boolean; agentAccessEnabled?: boolean },
   ) => {
-    if (!environmentId) return;
+    if (!environmentId || !readEnvironmentScope(environmentId, AuthSettingsWriteScope)) return;
     setPending(kind);
-    try {
-      const results = await Promise.allSettled(
-        environments.map(async (environment) => {
-          if (environment.connection.phase !== "connected" || !environment.serverConfig) {
-            throw new Error("Environment disconnected");
-          }
-          return configure({
-            environmentId: environment.environmentId,
-            input: { ...input, ...(input.enabled ? { onboardingCompleted: true } : {}) },
-          });
-        }),
-      );
-      const failed = environments.filter((_, index) => {
-        const result = results[index];
-        return result?.status !== "fulfilled" || result.value._tag === "Failure";
-      });
-      if (failed.length > 0) {
-        toastManager.add({
-          type: "error",
-          title: "Device settings not saved on all environments",
-          description: `Could not update ${failed.map((environment) => environment.label).join(", ")}.`,
+    const results = await Promise.allSettled(
+      environments.map(async (environment) => {
+        if (environment.connection.phase !== "connected" || !environment.serverConfig) {
+          throw new Error("Environment disconnected");
+        }
+        if (!readEnvironmentScope(environment.environmentId, AuthSettingsWriteScope)) {
+          throw new Error("This connection cannot change device settings.");
+        }
+        return configure({
+          environmentId: environment.environmentId,
+          input: { ...input, ...(input.enabled ? { onboardingCompleted: true } : {}) },
         });
-      }
-    } finally {
-      setPending(null);
+      }),
+    );
+    setPending(null);
+    const failed = environments.filter((_, index) => {
+      const result = results[index];
+      return result?.status !== "fulfilled" || result.value._tag === "Failure";
+    });
+    if (failed.length > 0) {
+      toastManager.add({
+        type: "error",
+        title: gt("Device settings not saved on all environments"),
+        description: gt("Could not update {environments}.", {
+          environments: failed.map((environment) => environment.label).join(", "),
+        }),
+      });
     }
   };
 
@@ -874,16 +1101,12 @@ function DeviceIntegrationControls({
                 void list({ environmentId, input: { updateTool: tool } })
                   .then((result) => {
                     if (result._tag === "Failure")
-                      setUpdateError({
-                        tool,
-                        message:
-                          "Update failed. Check this host's network connection and try again.",
-                      });
+                      setUpdateError({ tool, message: formatEnvironmentQueryError(result.cause) });
                   })
                   .finally(() => setPending(null));
               }}
             >
-              {pending === `update-${tool}` ? "Updating…" : `Update to v${version.requiredVersion}`}
+              {pending === `update-${tool}` ? gt("Updating…") : gt("Update", { $context: "verb" })}
             </Button>
           ) : null}
           {state.supportsToolInspection ? (
@@ -899,7 +1122,7 @@ function DeviceIntegrationControls({
                 );
               }}
             >
-              {pending === "check" ? "Checking…" : "Check versions"}
+              {pending === "check" ? gt("Checking…") : gt("Check versions")}
             </Button>
           ) : null}
         </div>
@@ -918,20 +1141,31 @@ function DeviceIntegrationControls({
         {...searchableSetting("device-hub")}
         serverScoped
         settingKeys={["enableDeviceSupport"]}
-        description={deviceHubDescription}
-        control={
-          <>
+        description={
+          <T>
+            Open simulators and emulators in the Device panel. Hub:{" "}
             <DeviceToolVersions
               action={versionActions("hub")}
               kind="hub"
               tools={state.hosts.find((host) => host.kind === "local")?.tools}
             />
+          </T>
+        }
+        control={
+          <>
             {pending === "hub" ? <DeviceHubSetupStatus state={state} pending compact /> : null}
             <ScopedSwitch
               settingKeys={["enableDeviceSupport"]}
               checked={enabled}
-              disabled={projectScope || !loaded || !environmentId || busy || pending !== null}
-              aria-label="Device hub"
+              disabled={
+                !canConfigure ||
+                projectScope ||
+                !loaded ||
+                !environmentId ||
+                busy ||
+                pending !== null
+              }
+              aria-label={gt("Device hub")}
               onCheckedChange={(checked) =>
                 void update("hub", {
                   enabled: Boolean(checked),
@@ -942,64 +1176,33 @@ function DeviceIntegrationControls({
           </>
         }
       />
-      <AnimatedHeight>
-        {platformsRevealed ? (
-          <SettingsRow
-            {...searchableSetting("device-platform-support")}
-            description={
-              connectedEnvironments.length > 1
-                ? `Status for ${connectedEnvironments.find((environment) => environment.environmentId === environmentId)?.label}. Select an environment to inspect its simulator support.`
-                : undefined
-            }
-            status={
-              <div className="flex flex-wrap gap-x-5 gap-y-2">
-                <PlatformStatus compact platform="iOS" status={platformSetupStatus(state, "ios")} />
-                <PlatformStatus
-                  compact
-                  platform="Android"
-                  status={platformSetupStatus(state, "android")}
-                />
-              </div>
-            }
-            control={
-              <Button
-                size="sm"
-                variant="outline"
-                disabled={!environmentId || !enabled || busy || pending !== null}
-                onClick={() => {
-                  if (!environmentId) return;
-                  setPending("check");
-                  void list({ environmentId, input: {} }).finally(() => setPending(null));
-                }}
-              >
-                {pending === "check" ? "Checking…" : "Refresh"}
-              </Button>
-            }
-          />
-        ) : null}
-      </AnimatedHeight>
       <SettingsRow
         {...searchableSetting("agent-device-access")}
         serverScoped
         settingKeys={["enableAgentDeviceAccess"]}
-        description={agentDeviceDescription}
-        control={
-          <>
+        description={
+          <T>
+            New agent sessions can open and drive these devices. agent-device:{" "}
             <DeviceToolVersions
               action={versionActions("agent")}
               kind="agent"
               tools={state.hosts.find((host) => host.kind === "local")?.tools}
             />
+          </T>
+        }
+        control={
+          <>
             {pending === "agent" ? <AgentDeviceSetupStatus state={state} pending compact /> : null}
             <ScopedSwitch
               settingKeys={["enableAgentDeviceAccess"]}
               checked={agentAccessEnabled}
               disabled={
+                !canConfigure ||
                 connectedEnvironments.length === 0 ||
                 (!projectScope && (!loaded || !anyHubEnabled || busy)) ||
                 pending !== null
               }
-              aria-label="Agent device access"
+              aria-label={gt("Agent device access")}
               onCheckedChange={(checked) =>
                 projectScope
                   ? updateSettings({ enableAgentDeviceAccess: Boolean(checked) })
@@ -1015,23 +1218,71 @@ function DeviceIntegrationControls({
           environmentId={environmentId}
         />
       ) : null}
-      <DeviceHostsSettings environmentId={environmentId} />
     </>
   );
 }
 
+function AgentBrowserAccessSetting() {
+  const searchableSetting = useSearchableSetting();
+  const gt = useGT();
+  const { scope } = useSettingsScope();
+  const settings = useScopedSettings();
+  const updateSettings = useUpdateScopedSettings();
+  const isProjectScope = scope.kind === "project" || scope.kind === "checkout";
+
+  return (
+    <SettingsRow
+      serverScoped
+      settingKeys={["enableAgentBrowserAccess"]}
+      {...searchableSetting("agent-browser-access")}
+      description={
+        isProjectScope
+          ? gt(
+              "Allow agents in this project to use the shared browser. Applies when the agent session next starts.",
+            )
+          : gt("Allow agents to use the shared browser. Projects can override it.")
+      }
+      resetAction={
+        settings.enableAgentBrowserAccess !== DEFAULT_SERVER_SETTINGS.enableAgentBrowserAccess ? (
+          <SettingResetButton
+            ariaLabel={gt("Reset default browser access to default")}
+            onClick={() =>
+              updateSettings({
+                enableAgentBrowserAccess: DEFAULT_SERVER_SETTINGS.enableAgentBrowserAccess,
+              })
+            }
+          />
+        ) : null
+      }
+      control={
+        <ScopedSwitch
+          settingKeys={["enableAgentBrowserAccess"]}
+          aria-label={gt("Agent browser access")}
+          checked={settings.enableAgentBrowserAccess}
+          onCheckedChange={(enabled) => updateSettings({ enableAgentBrowserAccess: enabled })}
+        />
+      }
+    />
+  );
+}
+
 function BrowserAutoShowFloatingPreviewSetting({ disabled }: { readonly disabled: boolean }) {
+  const searchableSetting = useSearchableSetting();
+  const gt = useGT();
   const autoShow = useClientSettings((settings) => settings.browserAutoShowFloatingPreview);
-  const updateSettings = useUpdatePrimarySettings();
+  const updateSettings = useUpdateScopedSettings();
 
   return (
     <SettingsRow
       {...searchableSetting("browser-auto-show-floating-preview")}
-      description="Show the floating preview when an agent opens a browser or device unless the agent says otherwise."
+      devicePreference
+      description={gt(
+        "Show the floating preview when an agent opens a browser or device unless the agent says otherwise.",
+      )}
       resetAction={
         !disabled && autoShow !== DEFAULT_BROWSER_AUTO_SHOW_FLOATING_PREVIEW ? (
           <SettingResetButton
-            label="auto-show floating preview"
+            ariaLabel={gt("Reset auto-show floating preview to default")}
             onClick={() =>
               updateSettings({
                 browserAutoShowFloatingPreview: DEFAULT_BROWSER_AUTO_SHOW_FLOATING_PREVIEW,
@@ -1047,36 +1298,34 @@ function BrowserAutoShowFloatingPreviewSetting({ disabled }: { readonly disabled
           onCheckedChange={(checked) =>
             updateSettings({ browserAutoShowFloatingPreview: Boolean(checked) })
           }
-          aria-label="Auto-show floating preview"
+          aria-label={gt("Auto-show floating preview")}
         />
       }
     />
   );
 }
 
-/**
- * Profile list, its header menu, and the import flow.
- *
- * One menu creates profiles and imports into them, because the two are the
- * same decision from the user's side: "I want a profile that has my Helium
- * logins in it". Import targets include "New profile" so that case does not
- * require creating one first and then finding a second control.
- *
- * Built-ins render without a rename field: they are synthesized rather than
- * stored, so there is nothing to rename and removing them would strand every
- * tab that opened under them.
- *
- * Sources are listed lazily on open: detection touches the other browser's
- * files, and the answer changes while the app is running (quitting the browser
- * clears `browserRunning`), so a value cached at mount would go stale.
- */
 function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
+  const searchableSetting = useSearchableSetting();
+  const gt = useGT();
   const userProfiles = useClientSettings((settings) => settings.browserProfiles);
   const defaultProfileId = useClientSettings((settings) => settings.browserDefaultProfileId);
   const settingsHydrated = useClientSettingsHydrated();
+  // Profile edits pair with profile data on disk, so they save for this device in every scope.
   const updateSettings = useUpdatePrimarySettings();
+  const updateDefaultProfile = useUpdateScopedSettings();
+  const { scope } = useSettingsScope();
+  // The default profile is a device preference, which a project cannot override.
+  const defaultProfileReadOnly = scope.kind === "project" || scope.kind === "checkout";
   const { environments, isReady: environmentsReady } = useEnvironments();
   const primaryEnvironment = usePrimaryEnvironment();
+  // Cookie import runs on this desktop, whose policy the primary environment reports.
+  const messages = useMessages();
+  const cookieImportDenial = managedCapabilityDenial(
+    usePrimaryManagedPolicy(),
+    "browserCookieImport",
+    messages,
+  );
   const [sources, setSources] = useState<ReadonlyArray<BrowserImportSource> | null>(null);
   const [importSession, setImportSession] = useState<{
     readonly source: BrowserImportSource;
@@ -1114,10 +1363,6 @@ function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
   const profileWritesDisabled = disabled || !settingsHydrated;
 
   const profiles = resolveBrowserProfiles(userProfiles);
-  // Incognito is deliberately not a row — it holds nothing to manage — so the
-  // default has to resolve against the list that renders. A stored
-  // `browserDefaultProfileId` of "incognito" would otherwise leave the section
-  // with no Default badge at all.
   const listedProfiles = profiles.filter((profile) => profile.kind !== "incognito");
   const resolvedDefaultId =
     findBrowserProfile(listedProfiles, defaultProfileId)?.id ?? DEFAULT_BROWSER_PROFILE_ID;
@@ -1125,8 +1370,7 @@ function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
   const createProfile = (baseName: string) => {
     if (!settingsHydrated || importInFlightRef.current) return undefined;
     const currentProfiles = getClientSettings().browserProfiles;
-    // Checked against the live settings, not the rendered list: two clicks
-    // before a re-render would otherwise both pass the disabled control.
+    // Check live settings; repeated clicks before render can bypass the disabled control.
     if (currentProfiles.length >= BROWSER_PROFILE_MAX_COUNT) return undefined;
     const resolvedProfiles = resolveBrowserProfiles(currentProfiles);
     const taken = new Set(resolvedProfiles.map((profile) => profile.name));
@@ -1154,8 +1398,8 @@ function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
     if (!removalAvailable) {
       toastManager.add({
         type: "error",
-        title: `Could not clear ${name}'s data`,
-        description: "You're not connected to a server yet.",
+        title: gt("Could not clear {name}''s data", { name }),
+        description: gt("You're not connected to a server yet."),
       });
       return;
     }
@@ -1166,23 +1410,24 @@ function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
       serverProfileData,
     )
       .then(() => {
-        toastManager.add({ type: "success", title: `Cleared ${name}'s cookies and cache` });
+        toastManager.add({
+          type: "success",
+          title: gt("Cleared {name}''s cookies and cache", { name }),
+        });
       })
       .catch(() => {
-        toastManager.add({ type: "error", title: `Could not clear ${name}'s data` });
+        toastManager.add({ type: "error", title: gt("Could not clear {name}''s data", { name }) });
       });
   };
 
   const removeProfile = async (id: string) => {
     if (!settingsHydrated || importInFlightRef.current) return;
     if (!removalAvailable) {
-      setProfileRemovalError("Connect to an environment before removing this profile.");
+      setProfileRemovalError(gt("Connect to an environment before removing this profile."));
       return;
     }
     setProfileRemovalError(null);
     setProfileRemovalInFlight(true);
-    // Drop the partition's data too, otherwise a removed profile's cookies
-    // stay on disk with nothing in the UI pointing at them.
     try {
       await clearBrowserProfileData(
         previewBridge,
@@ -1191,14 +1436,13 @@ function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
         serverProfileData,
       );
     } catch {
-      setProfileRemovalError("Profile data could not be deleted. Try again.");
+      setProfileRemovalError(gt("Profile data could not be deleted. Try again."));
       setProfileRemovalInFlight(false);
       return;
     }
     const currentSettings = getClientSettings();
     updateSettings({
       browserProfiles: currentSettings.browserProfiles.filter((profile) => profile.id !== id),
-      // Reassign the default rather than leaving it pointing at nothing.
       ...(currentSettings.browserDefaultProfileId === id
         ? { browserDefaultProfileId: DEFAULT_BROWSER_PROFILE_ID }
         : {}),
@@ -1207,30 +1451,19 @@ function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
     setProfilePendingRemoval(null);
   };
 
-  // A browser that is not on this machine is left out rather than listed as a
-  // dead row: there is nothing to act on, and the menu is a list of things you
-  // can import from. An unsupported one is left out for the same reason — the
-  // blocked wizard step can't be fixed from here. Every other unavailable
-  // reason stays, since each names a step the user can take.
   const importableSources = (sources ?? []).filter(
     (source) =>
       source.unavailable !== "notInstalled" && source.unavailable !== "unsupportedPlatform",
   );
 
-  // Refreshed without blanking the last result: the menu shows the cached list
-  // straight away so it doesn't reflow on open, and the source list is stable
-  // (names only) since choosing what to import happens in the wizard, not here.
-  const loadSources = useCallback(() => {
+  const loadSources = () => {
     if (!previewBridge) return;
     void previewBridge
       .listBrowserImportSources()
       .then(setSources)
       .catch(() => setSources((previous) => previous ?? []));
-  }, []);
+  };
 
-  // Runs one import for the wizard. A new profile is registered only once the
-  // import succeeds — the cookies land in its partition first — so a blocked
-  // attempt never leaves an empty profile behind.
   const runWizardImport = async (
     source: BrowserImportSource,
     environmentId: EnvironmentId,
@@ -1249,93 +1482,14 @@ function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
     if (importInFlightRef.current) return { kind: "blocked", reason: "readFailed" };
     importInFlightRef.current = true;
     setImportInFlight(true);
-    try {
-      const result = await previewBridge.importBrowserCookies({
-        environmentId,
-        sourceId: source.id,
-        sourceProfileDirectory: input.sourceProfileDirectory,
-        targetProfileId: input.target.profileId,
-      });
-      if (
-        input.target.kind === "existing" &&
-        !resolveBrowserProfiles(getClientSettings().browserProfiles).some(
-          (profile) => profile.id === input.target.profileId,
-        )
-      ) {
-        return { kind: "blocked", reason: "readFailed" };
-      }
-      let targetName: string;
-      if (input.target.kind === "new") {
-        // Registered only when something actually came over: an import that
-        // found no cookies should not leave a new, empty profile behind.
-        if (result.imported > 0) {
-          try {
-            const persisted = await persistClientSettingsUpdate((current) => {
-              const existing = current.browserProfiles.find(
-                (profile) => profile.id === input.target.profileId,
-              );
-              if (existing) return current;
-              // The wizard refuses a new target at the cap, but the cap can be
-              // reached while the import runs; the updater sees the newest
-              // settings, so this is the check that holds.
-              if (current.browserProfiles.length >= BROWSER_PROFILE_MAX_COUNT) {
-                throw new ProfileLimitReachedError();
-              }
-              const taken = new Set(
-                resolveBrowserProfiles(current.browserProfiles).map((profile) => profile.name),
-              );
-              let name = source.name;
-              for (let index = 2; taken.has(name); index += 1) name = `${source.name} ${index}`;
-              return {
-                ...current,
-                browserProfiles: [
-                  ...current.browserProfiles,
-                  { id: input.target.profileId, name, kind: "persistent" as const },
-                ],
-              };
-            });
-            targetName =
-              persisted.browserProfiles.find((profile) => profile.id === input.target.profileId)
-                ?.name ?? source.name;
-          } catch (cause) {
-            // This target id belongs only to the attempted new profile. Clear
-            // its partition so a failed registration cannot strand imported
-            // cookies behind a profile that disappears on restart.
-            await clearBrowserProfileData(
-              previewBridge,
-              [environmentId],
-              input.target.profileId,
-            ).catch(() => undefined);
-            // Not a read failure: the cookies came over and were cleared again
-            // because the profile could not be kept. Name that, in the same
-            // token form `importFailureReason` recovers from a bridge error.
-            const reason =
-              cause instanceof ProfileLimitReachedError ? "profileLimitReached" : "profileNotSaved";
-            throw new Error(`Importing cookies from ${source.id} failed: ${reason}.`, { cause });
-          }
-        } else {
-          targetName = source.name;
-        }
-      } else {
-        targetName = input.target.name;
-      }
-      return {
-        kind: "imported",
-        imported: result.imported,
-        skipped: result.skipped,
-        skippedDomains: result.skippedDomains,
-        targetName,
-      };
-    } catch (cause) {
-      return { kind: "blocked", reason: importFailureReason(cause) };
-    } finally {
-      importInFlightRef.current = false;
-      setImportInFlight(false);
-    }
+    return importBrowserCookiesIntoTarget(previewBridge, source, environmentId, input).finally(
+      () => {
+        importInFlightRef.current = false;
+        setImportInFlight(false);
+      },
+    );
   };
 
-  // Re-checks a source's availability after the user quits the browser, and
-  // keeps the cached list in step so the menu reflects it too.
   const refreshImportSource = async (
     sourceId: BrowserImportSource["id"],
   ): Promise<BrowserImportSource | undefined> => {
@@ -1354,7 +1508,9 @@ function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
   return (
     <SettingsRow
       {...searchableSetting("browser-profiles")}
-      description="Profiles separate cookies and logins. Incognito data is cleared when the app closes."
+      description={gt(
+        "Profiles separate cookies and logins. Incognito data is cleared when the app closes.",
+      )}
       control={
         <Menu onOpenChange={(open) => open && loadSources()}>
           <MenuTrigger
@@ -1367,29 +1523,36 @@ function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
             }
           >
             <PlusIcon />
-            Add profile
+            <T>Add profile</T>
           </MenuTrigger>
           <MenuPopup align="end">
             <MenuItem
               disabled={!settingsHydrated || atProfileLimit}
-              onClick={() => createProfile("New profile")}
+              onClick={() => createProfile(gt("New profile"))}
             >
-              Blank profile
+              <T>Blank profile</T>
             </MenuItem>
             {atProfileLimit ? (
-              <MenuItem disabled>You&rsquo;ve reached the profile limit</MenuItem>
+              <MenuItem disabled>
+                <T>You&rsquo;ve reached the profile limit</T>
+              </MenuItem>
             ) : null}
             <MenuSeparator />
             <MenuGroup>
-              <MenuGroupLabel>Import from</MenuGroupLabel>
-              {sources === null ? (
-                <MenuItem disabled>Looking for browsers…</MenuItem>
+              <MenuGroupLabel>
+                <T>Import from</T>
+              </MenuGroupLabel>
+              {cookieImportDenial !== undefined ? (
+                <MenuItem disabled>{cookieImportDenial}</MenuItem>
+              ) : sources === null ? (
+                <MenuItem disabled>
+                  <T>Looking for browsers…</T>
+                </MenuItem>
               ) : importableSources.length === 0 ? (
-                <MenuItem disabled>No supported browsers found</MenuItem>
+                <MenuItem disabled>
+                  <T>No supported browsers found</T>
+                </MenuItem>
               ) : (
-                // Every source is a plain row — running, needs-permission and
-                // ready all look the same here. The wizard picks up whatever
-                // state the source is in and walks the user forward from there.
                 <>
                   {importableSources.map((source) => (
                     <MenuItem
@@ -1412,7 +1575,9 @@ function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
                     </MenuItem>
                   ))}
                   {primaryEnvironment == null ? (
-                    <MenuItem disabled>Connect to an environment to import cookies</MenuItem>
+                    <MenuItem disabled>
+                      <T>Connect to an environment to import cookies</T>
+                    </MenuItem>
                   ) : null}
                 </>
               )}
@@ -1421,11 +1586,6 @@ function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
         </Menu>
       }
     >
-      {/*
-        The bordered container groups rows unambiguously at any width, and
-        carries the bottom spacing `SettingsRow` leaves to its children
-        (`pt-3 pb-1`).
-      */}
       <div className="mt-2 mb-2 overflow-hidden rounded-lg border border-border/60">
         {listedProfiles.map((profile, index) => {
           const builtIn = isBuiltInBrowserProfileId(profile.id);
@@ -1440,10 +1600,6 @@ function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
             >
               <span className="flex min-w-0 flex-1 items-center gap-2">
                 {builtIn ? (
-                  // Dimmed here rather than on the table: a wrapper-level dim
-                  // stacks with the rename field's and the row menu button's
-                  // own, landing them near 0.41 while every other disabled
-                  // control in the block sits at 0.64.
                   <span
                     className={cn(
                       "truncate text-sm text-foreground",
@@ -1457,17 +1613,16 @@ function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
                     nativeInput
                     size="sm"
                     className="w-full max-w-56"
-                    aria-label={`Rename ${profile.name}`}
+                    aria-label={gt("Rename {name}", { name: profile.name })}
                     disabled={profileWritesDisabled || importInFlight}
                     maxLength={BROWSER_PROFILE_NAME_MAX_LENGTH}
                     value={profile.name}
                     onCommit={(next) => renameProfile(profile.id, next)}
                   />
                 )}
-                {/* Dimmed with the rest of the row, whose controls are all disabled. */}
                 {isDefault ? (
                   <span className={cn("flex", profileWritesDisabled && "opacity-64")}>
-                    <Badge>Default</Badge>
+                    <Badge>{gt("Default", { $context: "default browser profile badge" })}</Badge>
                   </span>
                 ) : null}
               </span>
@@ -1478,7 +1633,7 @@ function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
                       size="icon-xs"
                       variant="ghost-muted"
                       disabled={profileWritesDisabled || importInFlight}
-                      aria-label={`${profile.name} options`}
+                      aria-label={gt("{name} options", { name: profile.name })}
                     />
                   }
                 >
@@ -1486,25 +1641,24 @@ function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
                 </MenuTrigger>
                 <MenuPopup align="end">
                   <MenuItem
-                    disabled={!settingsHydrated || isDefault}
+                    disabled={!settingsHydrated || isDefault || defaultProfileReadOnly}
                     onClick={() => {
                       if (settingsHydrated) {
-                        updateSettings({ browserDefaultProfileId: profile.id });
+                        updateDefaultProfile({ browserDefaultProfileId: profile.id });
                       }
                     }}
                   >
-                    Set as default
+                    <T>Set as default</T>
                   </MenuItem>
                   <MenuItem
                     disabled={!settingsHydrated || !removalAvailable}
                     onClick={() => {
-                      // Clearing a server copy closes its open tabs, so it asks first.
                       if (serverProfileData.environmentIds.length > 0) {
                         setProfilePendingClear(profile);
                       } else clearProfileData(profile.id, profile.name);
                     }}
                   >
-                    Clear cookies and cache
+                    <T>Clear cookies and cache</T>
                   </MenuItem>
                   {builtIn ? null : (
                     <MenuItem
@@ -1514,7 +1668,7 @@ function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
                         if (settingsHydrated) setProfilePendingRemoval(profile);
                       }}
                     >
-                      Remove profile and data
+                      <T>Remove profile and data</T>
                     </MenuItem>
                   )}
                   {!removalAvailable ? (
@@ -1522,8 +1676,8 @@ function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
                       <MenuSeparator />
                       <MenuItem disabled>
                         {environmentsReady
-                          ? "Connect to an environment to clear profile data"
-                          : "Checking environments…"}
+                          ? gt("Connect to an environment to clear profile data")
+                          : gt("Checking environments…")}
                       </MenuItem>
                     </>
                   ) : null}
@@ -1544,10 +1698,16 @@ function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
       >
         <AlertDialogPopup>
           <AlertDialogHeader>
-            <AlertDialogTitle>Remove “{profilePendingRemoval?.name}”?</AlertDialogTitle>
+            <AlertDialogTitle>
+              <T>
+                Remove “<Var>{profilePendingRemoval?.name}</Var>”?
+              </T>
+            </AlertDialogTitle>
             <AlertDialogDescription>
-              Its cookies and logins are deleted. Desktop tabs already open in this profile stay
-              open until you close them; server browser tabs close now.
+              <T>
+                Its cookies and logins are deleted. Desktop tabs already open in this profile stay
+                open until you close them; server browser tabs close now.
+              </T>
             </AlertDialogDescription>
             {profileRemovalError ? (
               <p aria-live="polite" className="text-sm text-destructive">
@@ -1556,7 +1716,7 @@ function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
             ) : null}
             {!removalAvailable ? (
               <p className="text-sm text-muted-foreground">
-                Connect to an environment to remove this profile and its data.
+                <T>Connect to an environment to remove this profile and its data.</T>
               </p>
             ) : null}
           </AlertDialogHeader>
@@ -1565,7 +1725,7 @@ function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
               disabled={profileRemovalInFlight}
               render={<Button variant="outline" disabled={profileRemovalInFlight} />}
             >
-              Cancel
+              <T>Cancel</T>
             </AlertDialogClose>
             <Button
               variant="destructive"
@@ -1576,7 +1736,7 @@ function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
                 }
               }}
             >
-              {profileRemovalInFlight ? "Removing…" : "Remove profile"}
+              {profileRemovalInFlight ? gt("Removing…") : gt("Remove profile")}
             </Button>
           </AlertDialogFooter>
         </AlertDialogPopup>
@@ -1590,14 +1750,20 @@ function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
         <AlertDialogPopup>
           <AlertDialogHeader>
             <AlertDialogTitle>
-              Clear “{profilePendingClear?.name}”’s cookies and cache?
+              <T>
+                Clear “<Var>{profilePendingClear?.name}</Var>”’s cookies and cache?
+              </T>
             </AlertDialogTitle>
             <AlertDialogDescription>
-              You are signed out of its sites. Server browser tabs open in this profile close now.
+              <T>
+                You are signed out of its sites. Server browser tabs open in this profile close now.
+              </T>
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogClose render={<Button variant="outline" />}>Cancel</AlertDialogClose>
+            <AlertDialogClose render={<Button variant="outline" />}>
+              <T>Cancel</T>
+            </AlertDialogClose>
             <Button
               variant="destructive"
               onClick={() => {
@@ -1606,7 +1772,7 @@ function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
                 setProfilePendingClear(null);
               }}
             >
-              Clear data
+              <T>Clear data</T>
             </Button>
           </AlertDialogFooter>
         </AlertDialogPopup>
@@ -1622,20 +1788,18 @@ function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
           }
           onRefreshSource={() => refreshImportSource(importSession.source.id)}
           onCheckFullDiskAccess={
-            window.desktopBridge?.checkSystemPermission
-              ? () => window.desktopBridge!.checkSystemPermission!("full-disk-access")
+            window.desktopBridge
+              ? () => window.desktopBridge!.checkSystemPermission("full-disk-access")
               : undefined
           }
           onOpenFullDiskAccessSettings={async () => {
-            // Rejects outside the desktop shell (and on shells that predate the
-            // method), so the one toast covers every way the link can fail.
             await readLocalApi()
               ?.shell.openSystemSettings("full-disk-access")
               .catch(() => {
                 toastManager.add({
                   type: "error",
-                  title: "Could not open System Settings",
-                  description: "Open Privacy & Security → Full Disk Access manually.",
+                  title: gt("Could not open System Settings"),
+                  description: gt("Open Privacy & Security → Full Disk Access manually."),
                 });
               });
           }}
@@ -1646,41 +1810,53 @@ function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
   );
 }
 
-export function IntegrationsSettingsPanel() {
-  // Client-local preview defaults are editable only where the preview exists.
-  const previewDefaultsDisabled = !isElectron;
-  const previewDefaults = (
-    <>
-      <BrowserProfilesSetting disabled={previewDefaultsDisabled} />
-      <BrowserViewportSetting disabled={previewDefaultsDisabled} />
-      <BrowserZoomSetting disabled={previewDefaultsDisabled} />
-      <BrowserAppearanceSetting disabled={previewDefaultsDisabled} />
-      <BrowserRecordingFrameRateSetting disabled={previewDefaultsDisabled} />
-      <BrowserRecordingInputSettings disabled={previewDefaultsDisabled} />
-      <BrowserLinkTargetSetting disabled={previewDefaultsDisabled} />
-      <BrowserAutoShowFloatingPreviewSetting disabled={previewDefaultsDisabled} />
-    </>
-  );
+export function BrowserSettingsPanel() {
+  const searchableSetting = useSearchableSetting();
+  const gt = useGT();
+  const desktopOnly = !isElectron;
+  const desktopOnlyMessage = desktopOnly ? gt("Only available in the desktop app.") : undefined;
 
   return (
     <SettingsPageContainer>
-      {/* Server-authoritative agent access is scoped by the header selection;
-          the preview defaults below are device-local and ignore it. */}
-      <ProjectDefaultsSettings category="integrations" />
-      <SettingsSection id="browser" title="Browser">
-        {/* Server-authoritative, so it stays editable on any client anchored to
-            a server; `serverScoped` covers the hosted app, which has none. It
-            sits outside the block covering the desktop-only defaults. */}
+      <SettingsSection id="browser-agent-access" title={gt("Agent access")}>
         <AgentBrowserAccessSetting />
         <HostedBrowserProxySetting />
-        {previewDefaultsDisabled ? (
-          <SettingsUnavailableGroup message="Only available in the desktop app.">
-            {previewDefaults}
-          </SettingsUnavailableGroup>
-        ) : (
-          previewDefaults
-        )}
       </SettingsSection>
+      <SettingsSection id="browser" title={gt("Browsing")}>
+        <SettingsUnavailableGroup message={desktopOnlyMessage}>
+          <BrowserProfilesSetting disabled={desktopOnly} />
+          <BrowserLinkTargetSetting disabled={desktopOnly} />
+          <BrowserAutoShowFloatingPreviewSetting disabled={desktopOnly} />
+        </SettingsUnavailableGroup>
+        {/* Not desktop-only: web clients search from server-run browser tabs too. */}
+        <BrowserSearchEngineSetting />
+        <AdvancedSettings
+          targetIds={[
+            searchableSetting("browser-default-viewport").id,
+            searchableSetting("browser-default-zoom").id,
+            searchableSetting("browser-default-appearance").id,
+          ]}
+        >
+          <SettingsUnavailableGroup message={desktopOnlyMessage}>
+            <BrowserViewportSetting disabled={desktopOnly} />
+            <BrowserZoomSetting disabled={desktopOnly} />
+            <BrowserAppearanceSetting disabled={desktopOnly} />
+          </SettingsUnavailableGroup>
+        </AdvancedSettings>
+      </SettingsSection>
+      <SettingsSection id="browser-recordings" title={gt("Recordings")}>
+        <SettingsUnavailableGroup message={desktopOnlyMessage}>
+          <BrowserRecordingFrameRateSetting disabled={desktopOnly} />
+          <BrowserRecordingInputSettings disabled={desktopOnly} />
+        </SettingsUnavailableGroup>
+      </SettingsSection>
+    </SettingsPageContainer>
+  );
+}
+
+export function DevicesSettingsPanel() {
+  return (
+    <SettingsPageContainer>
       <DeviceIntegrationSettings />
     </SettingsPageContainer>
   );

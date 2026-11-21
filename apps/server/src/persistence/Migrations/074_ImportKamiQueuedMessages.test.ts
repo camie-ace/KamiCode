@@ -5,6 +5,10 @@ import * as SqlClient from "effect/sql/SqlClient";
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 import { runMigrations } from "../Migrations.ts";
 
+const decodeEffectJsonValue = Schema.decodeEffect(
+  Schema.fromJsonString(Schema.Array(Schema.Struct({ type: Schema.String }))),
+);
+
 it.layer(NodeSqliteClient.layerMemory())("Kami queue migration", (it) => {
   it.effect(
     "preserves reordered and delayed prompts, attachments and ambiguous dispatches without changing old rows",
@@ -57,9 +61,7 @@ it.layer(NodeSqliteClient.layerMemory())("Kami queue migration", (it) => {
         assert.strictEqual(rows.find((row) => row.prompt === "uncertain")?.enabled, 0);
         assert.strictEqual(rows[0]?.runtime_mode, "approval-required");
         assert.strictEqual(rows[0]?.target_thread_id, "thread");
-        const attachments = yield* Schema.decodeUnknownEffect(
-          Schema.fromJsonString(Schema.Array(Schema.Struct({ type: Schema.String }))),
-        )(rows[0]!.attachments_json);
+        const attachments = yield* decodeEffectJsonValue(rows[0]!.attachments_json);
         assert.strictEqual(attachments[0]?.type, "video");
         const original = yield* sql<{
           count: number;

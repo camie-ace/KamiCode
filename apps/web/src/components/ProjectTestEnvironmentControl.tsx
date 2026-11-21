@@ -1,6 +1,6 @@
 import type { ProjectTestEnvironment } from "@t3tools/contracts";
 import { Globe2Icon } from "lucide-react";
-import React, { type FormEvent, useMemo, useState } from "react";
+import React, { type FormEvent, useState } from "react";
 
 import { Button } from "./ui/button";
 import {
@@ -81,10 +81,7 @@ export default function ProjectTestEnvironmentControl({
   const [baseUrl, setBaseUrl] = useState("");
   const [validationError, setValidationError] = useState<string | null>(null);
 
-  const defaultEnvironment = useMemo(
-    () => resolveDefaultTestEnvironment(testEnvironments),
-    [testEnvironments],
-  );
+  const defaultEnvironment = (() => resolveDefaultTestEnvironment(testEnvironments))();
   const defaultBaseUrl = defaultEnvironment?.baseUrl ?? "";
   const testUrlLabel = defaultBaseUrl ? readableUrlLabel(defaultBaseUrl) : "Test URL";
 

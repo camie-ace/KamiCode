@@ -1,6 +1,6 @@
 import type { EnvironmentId, ScopedThreadRef } from "@t3tools/contracts";
 import { ImagesIcon } from "lucide-react";
-import { memo, useCallback, useEffect, useMemo, useState } from "react";
+import { memo, useState } from "react";
 
 import type { DraftId } from "~/composerDraftStore";
 import { cn } from "~/lib/utils";
@@ -28,39 +28,25 @@ export const MediaPanel = memo(function MediaPanel({
   className,
 }: MediaPanelProps) {
   const [localActiveKey, setLocalActiveKey] = useState<string | null>(null);
-  const activeKey = activeArtifactKey !== undefined ? activeArtifactKey : localActiveKey;
-  const artifactKeys = useMemo(
-    () => new Set(artifacts.map((artifact) => artifact.dedupeKey)),
-    [artifacts],
-  );
-  const setActiveKey = useCallback(
-    (artifactKey: string | null) => {
-      setLocalActiveKey(artifactKey);
-      onActiveArtifactKeyChange?.(artifactKey);
-    },
-    [onActiveArtifactKeyChange],
-  );
+  const requestedKey = activeArtifactKey !== undefined ? activeArtifactKey : localActiveKey;
+  const artifactKeys = (() => new Set(artifacts.map((artifact) => artifact.dedupeKey)))();
+  const activeKey =
+    requestedKey && artifactKeys.has(requestedKey)
+      ? requestedKey
+      : (artifacts[0]?.dedupeKey ?? null);
+  const setActiveKey = (artifactKey: string | null) => {
+    setLocalActiveKey(artifactKey);
+    onActiveArtifactKeyChange?.(artifactKey);
+  };
 
-  useEffect(() => {
-    const latestKey = artifacts[0]?.dedupeKey ?? null;
-    if (!activeKey || !artifactKeys.has(activeKey)) {
-      setActiveKey(latestKey);
-    }
-  }, [activeKey, artifactKeys, artifacts, setActiveKey]);
-
-  const activeArtifact = useMemo(
-    () => artifacts.find((artifact) => artifact.dedupeKey === activeKey) ?? artifacts[0] ?? null,
-    [activeKey, artifacts],
-  );
-  const markActive = useCallback(
-    (artifact: MediaArtifact) => {
-      const threadArtifactKey = (artifact as Partial<ThreadMediaArtifact>).dedupeKey;
-      setActiveKey(
-        typeof threadArtifactKey === "string" ? threadArtifactKey : mediaArtifactDedupKey(artifact),
-      );
-    },
-    [setActiveKey],
-  );
+  const activeArtifact = (() =>
+    artifacts.find((artifact) => artifact.dedupeKey === activeKey) ?? artifacts[0] ?? null)();
+  const markActive = (artifact: MediaArtifact) => {
+    const threadArtifactKey = (artifact as Partial<ThreadMediaArtifact>).dedupeKey;
+    setActiveKey(
+      typeof threadArtifactKey === "string" ? threadArtifactKey : mediaArtifactDedupKey(artifact),
+    );
+  };
 
   return (
     <section className={cn("flex min-h-0 flex-1 flex-col bg-background", className)}>

@@ -1,0 +1,113 @@
+import { assert, describe, it } from "@effect/vitest";
+
+import { cursorFetchRange, isCursorCacheFresh, mergeCursorFetch } from "./accountCache.ts";
+import type { UsageRecord } from "@t3tools/provider-core/server/usage";
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+const record = (timestampMs: number): UsageRecord => ({
+  provider: "cursor",
+  timestampMs,
+  model: "claude-fable-5",
+  sessionId: "conversation-1",
+  totals: {
+    uncachedInputTokens: 0,
+    cachedInputTokens: 0,
+    cacheCreationTokens: 0,
+    outputTokens: 1,
+    reasoningTokens: 0,
+  },
+  reportedCostUsd: null,
+  speed: "standard",
+  dedupeKey: `cursor-account:a:${timestampMs}:0`,
+});
+
+describe("cursorAccountCache", () => {
+  it("reads only the history the cache is missing", () => {
+    const cache = {
+      accountKey: "a",
+      sinceMs: 0,
+      untilMs: 10 * DAY_MS,
+      fetchedAtMs: 10 * DAY_MS,
+      records: [record(5 * DAY_MS)],
+    };
+    assert.isTrue(isCursorCacheFresh(cache, 10 * DAY_MS, 0));
+    const narrow = { ...cache, sinceMs: DAY_MS };
+    assert.isFalse(isCursorCacheFresh(narrow, 10 * DAY_MS, 0));
+    const widenedRange = cursorFetchRange(narrow, 0, 10 * DAY_MS);
+    assert.deepStrictEqual(widenedRange, { sinceMs: 0, untilMs: DAY_MS });
+    const widened = mergeCursorFetch(narrow, "a", widenedRange, cache.records, 10 * DAY_MS, 0);
+    assert.isTrue(isCursorCacheFresh(widened.cache, 10 * DAY_MS, 0));
+    assert.deepStrictEqual(cursorFetchRange(widened.cache, 0, 11 * DAY_MS), {
+      sinceMs: 10 * DAY_MS - 60 * 60 * 1000,
+      untilMs: 11 * DAY_MS,
+    });
+    const nowMs = 100 * DAY_MS;
+    const range = cursorFetchRange(cache, 10 * DAY_MS, nowMs);
+    assert.deepStrictEqual(range, { sinceMs: 10 * DAY_MS, untilMs: nowMs });
+
+    const { cache: merged } = mergeCursorFetch(
+      cache,
+      "a",
+      range,
+      [record(50 * DAY_MS)],
+      nowMs,
+      10 * DAY_MS,
+    );
+    assert.deepStrictEqual(
+      merged.records.map((entry) => entry.timestampMs),
+      [50 * DAY_MS],
+    );
+    assert.deepStrictEqual(cursorFetchRange(merged, 11 * DAY_MS, nowMs + DAY_MS), {
+      sinceMs: nowMs - 60 * 60 * 1000,
+      untilMs: nowMs + DAY_MS,
+    });
+  });
+
+  it("reports an edge that only confirms the cache as unchanged", () => {
+    const cache = {
+      accountKey: "a",
+      sinceMs: 0,
+      untilMs: 10 * DAY_MS,
+      fetchedAtMs: 10 * DAY_MS,
+      records: [record(DAY_MS), record(10 * DAY_MS)],
+    };
+    const range = cursorFetchRange(cache, 0, 11 * DAY_MS);
+    assert.isFalse(
+      mergeCursorFetch(cache, "a", range, [record(10 * DAY_MS)], 11 * DAY_MS, 0).changed,
+    );
+    const pruned = mergeCursorFetch(
+      cache,
+      "a",
+      range,
+      [record(10 * DAY_MS)],
+      11 * DAY_MS,
+      2 * DAY_MS,
+    );
+    assert.isTrue(pruned.changed);
+    assert.deepStrictEqual(pruned.cache.records, [record(10 * DAY_MS)]);
+    assert.isTrue(
+      mergeCursorFetch(cache, "a", range, [record(10 * DAY_MS)], 11 * DAY_MS, 2 * DAY_MS).changed,
+    );
+    assert.isTrue(
+      mergeCursorFetch(
+        { ...cache, sinceMs: DAY_MS, records: [] },
+        "a",
+        { sinceMs: 0, untilMs: 11 * DAY_MS },
+        [],
+        11 * DAY_MS,
+        0,
+      ).changed,
+    );
+    assert.isTrue(
+      mergeCursorFetch(
+        cache,
+        "a",
+        range,
+        [record(10 * DAY_MS), record(10.5 * DAY_MS)],
+        11 * DAY_MS,
+        0,
+      ).changed,
+    );
+  });
+});

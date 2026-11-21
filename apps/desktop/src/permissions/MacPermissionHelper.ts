@@ -1,5 +1,8 @@
 // @effect-diagnostics globalTimers:off -- Poll TCC only while the native permission helper is open.
 import * as Electron from "electron";
+import { msg } from "gt-i18n";
+
+import { m } from "../i18n/messages.ts";
 import { MAC_PERMISSION_HELPER_CHANNEL } from "../ipc/channels.ts";
 
 import {
@@ -8,7 +11,7 @@ import {
   type SettingsWindow,
 } from "./MacSettingsWindow.ts";
 
-import { MAC_PERMISSION_TITLES, type MacPermission } from "./MacPermission.ts";
+import { MAC_PERMISSION_SETUP_TITLES, type MacPermission } from "./MacPermission.ts";
 
 const permissionGranted = (permission: MacPermission) => {
   if (permission === "screen-recording")
@@ -18,8 +21,7 @@ const permissionGranted = (permission: MacPermission) => {
   return false;
 };
 
-/** Resolve the outer app bundle, never the executable or the ASAR inside it. */
-export function macAppBundlePath(executable: string): string | undefined {
+function macAppBundlePath(executable: string): string | undefined {
   return /^(.+\.app)\/Contents\/MacOS\/[^/]+$/.exec(executable)?.[1];
 }
 
@@ -40,10 +42,10 @@ const escapeHtml = (value: string) =>
   });
 
 function helperHtml(permission: MacPermission, icon: string) {
-  const title = MAC_PERMISSION_TITLES[permission];
+  const title = escapeHtml(m(MAC_PERMISSION_SETUP_TITLES[permission]));
   return `<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline'">
-<title>Set up ${title}</title><style>
+<title>${title}</title><style>
 :root { color-scheme: light dark; --base: #fff; --row: #e7e7e7; --text: #292929; --line: #e3e3e3; }
 @media (prefers-color-scheme: dark) { :root { --base: #242424; --row: #383838; --text: #f5f5f5; --line: #484848; } }
 * { box-sizing: border-box; }
@@ -52,20 +54,19 @@ body { margin: 0; background: transparent; color: var(--text); font: 15px/22px -
 #panel { position: relative; margin: 2px; padding: 20px; height: 136px; border: 1px solid var(--line); border-radius: 24px; background: var(--base); }
 header { font-weight: 600; white-space: nowrap; }
 button { font: inherit; color: inherit; }
-button:focus-visible { outline: 2px solid #007aff; outline-offset: 3px; }
+button:focus-visible { outline: 2px solid #007aff; outline-offset: -2px; }
 #close { position: absolute; right: 8px; top: 6px; width: 22px; height: 22px; padding: 0; border: 0; border-radius: 50%; background: var(--base); font-size: 18px; cursor: pointer; opacity: 0; }
 #panel:hover #close, #close:focus-visible { opacity: 1; }
 #app { display: flex; align-items: center; gap: 12px; width: 100%; height: 52px; margin-top: 20px; padding: 8px 12px; border: 0; border-radius: 10px; background: var(--row); cursor: grab; text-align: left; font-size: 16px; font-weight: 600; }
 #app:active { cursor: grabbing; }
 img { width: 32px; height: 32px; pointer-events: none; }
 </style></head><body><main id="panel">
-<button id="close" aria-label="Close permission helper">×</button>
-<header>↑ Drag T3 Code into the list above</header>
-<button id="app" draggable="true" aria-label="Drag T3 Code to System Settings, or click to reveal in Finder"><img src="${escapeHtml(icon)}" alt="" draggable="false">T3 Code</button>
+<button id="close" aria-label="${escapeHtml(m(msg("Close permission helper")))}">×</button>
+<header>${escapeHtml(m(msg("↑ Drag T3 Code into the list above")))}</header>
+<button id="app" draggable="true" aria-label="${escapeHtml(m(msg("Drag T3 Code to System Settings, or click to reveal in Finder")))}"><img src="${escapeHtml(icon)}" alt="" draggable="false">T3 Code</button>
 </main></body></html>`;
 }
 
-/** Owns one temporary panel and its IPC listener. Closing it releases all resources. */
 export class MacPermissionHelper {
   private generation = 0;
   private window: Electron.BrowserWindow | undefined;
@@ -90,8 +91,7 @@ export class MacPermissionHelper {
     const bundle = macAppBundlePath(Electron.app.getPath("exe"));
     if (!bundle) return;
     if (owner?.isDestroyed()) return;
-    // Finder's bundle-icon lookup can return the generic app icon for mounted artifacts.
-    // Use the same PNG that packaging uses to generate the app's macOS icon.
+    // Finder can return generic icons for mounted artifacts; use the packaging PNG.
     const appIcon = iconPaths
       .map((iconPath) => Electron.nativeImage.createFromPath(iconPath))
       .find((image) => !image.isEmpty());
@@ -112,7 +112,7 @@ export class MacPermissionHelper {
       fullscreenable: false,
       alwaysOnTop: true,
       skipTaskbar: true,
-      title: `Set up ${MAC_PERMISSION_TITLES[permission]}`,
+      title: m(MAC_PERMISSION_SETUP_TITLES[permission]),
       webPreferences: { preload, sandbox: true, contextIsolation: true, nodeIntegration: false },
     });
     this.window = window;
@@ -130,7 +130,6 @@ export class MacPermissionHelper {
       try {
         if ((await isGranted()) && !window.isDestroyed()) finish();
       } catch {
-        // An unavailable probe is not evidence of a grant; the wizard can retry.
       } finally {
         checking = false;
       }

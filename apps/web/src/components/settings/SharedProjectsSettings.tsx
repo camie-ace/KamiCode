@@ -1,3 +1,4 @@
+import * as Option from "effect/Option";
 import type {
   ProjectId,
   SharedDeployAssociation,
@@ -44,7 +45,7 @@ import {
   TriangleAlertIcon,
   UsersRoundIcon,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useEffectEvent, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
 import {
@@ -81,7 +82,7 @@ import {
   toSharedThreadMessages,
 } from "../../sharedSessionSnapshot";
 import { ensureLocalApi } from "../../localApi";
-import { resolveInitialPrimaryEnvironmentDescriptor } from "../../environments/primary";
+import { useEnvironments, usePrimaryEnvironmentId } from "../../state/environments";
 import { usePrimarySettings, useUpdatePrimarySettings } from "../../hooks/useSettings";
 import { newMessageId, newProjectId, newThreadId } from "../../lib/utils";
 import { projectEnvironment } from "../../state/projects";
@@ -97,7 +98,7 @@ import { Textarea } from "../ui/textarea";
 import { SettingsPageContainer, SettingsRow, SettingsSection } from "./settingsLayout";
 
 const SELECT_CLASS =
-  "h-7 rounded-md border border-input bg-background px-2 text-xs text-foreground shadow-xs/5 outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/24";
+  "h-7 rounded-md border border-input bg-background px-2 text-xs text-foreground shadow-xs/5 outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/24";
 
 type LoadState =
   | { readonly status: "loading" }
@@ -135,7 +136,10 @@ const runtimeTypes: readonly SharedRuntimeType[] = ["local", "ssh-vps", "hosted-
 const runtimeHealthOptions: readonly SharedRuntimeHealth[] = ["healthy", "unknown", "unavailable"];
 const sshAuthTypes: readonly SharedSshAuthType[] = ["agent", "password", "private-key"];
 const COLLAB_DEPLOY_REPAIR_PROJECT_TITLE = "KamiCode deploy repair";
-type SavedEnvironmentRecord = PersistedSavedEnvironmentRecord;
+type SavedEnvironmentRecord = Pick<
+  PersistedSavedEnvironmentRecord,
+  "environmentId" | "label" | "desktopSsh"
+>;
 
 function isSharedProjectNotFoundError(error: unknown): boolean {
   return error instanceof Error && /\b404\b|not found/i.test(error.message);
@@ -380,6 +384,7 @@ function EmptyRow({ children }: { readonly children: ReactNode }) {
 export function SharedProjectsSettings() {
   const navigate = useNavigate();
   const primaryServerConfig = useAtomValue(primaryServerConfigAtom);
+  const primaryEnvironmentId = usePrimaryEnvironmentId();
   const hostedCollaboration = usePrimarySettings((settings) => settings.hostedCollaboration);
   const updatePrimarySettings = useUpdatePrimarySettings();
   const createProject = useAtomCommand(projectEnvironment.create, {
@@ -393,7 +398,7 @@ export function SharedProjectsSettings() {
   });
   const localProjects = useProjects();
   const localThreads = useThreadShells();
-  const savedEnvironmentById = useMemo<Record<string, SavedEnvironmentRecord>>(() => ({}), []);
+  const { environments } = useEnvironments();
   const [currentUser, setCurrentUser] = useState<CurrentSharedUser | null>(null);
   const [githubSessionState, setGitHubSessionState] = useState<GitHubSessionLoadState>({
     status: "loading",
@@ -441,7 +446,7 @@ export function SharedProjectsSettings() {
     deployUrl: "",
     deployedSha: "",
   });
-  const [importTargetProjectId, setImportTargetProjectId] = useState<ProjectId | "">("");
+  const [requestedImportTargetProjectId, setImportTargetProjectId] = useState<ProjectId | "">("");
   const [acceptedBootstrap, setAcceptedBootstrap] = useState<
     Awaited<ReturnType<typeof claimSharedProjectInvite>>["bootstrap"] | null
   >(null);
@@ -466,62 +471,61 @@ export function SharedProjectsSettings() {
     status: "idle",
   });
 
-  const selectedLocalProject = useMemo(
-    () =>
-      localProjects.find((project) => project.id === detail?.project.sourceProjectId) ??
-      localProjects.find((project) =>
-        localProjectMatchesSharedProject(project, detail?.project ?? null),
-      ) ??
-      null,
-    [detail?.project, localProjects],
-  );
-  const preferredImportTargetProject = useMemo(
-    () =>
-      localProjects.find((project) =>
-        localProjectMatchesSharedProject(project, detail?.project ?? null),
-      ) ??
-      localProjects[0] ??
-      null,
-    [detail?.project, localProjects],
-  );
-  const importTargetProject = useMemo(
-    () =>
-      localProjects.find((project) => project.id === importTargetProjectId) ??
-      preferredImportTargetProject,
-    [importTargetProjectId, localProjects, preferredImportTargetProject],
-  );
-  const sharedProjectBySourceProjectId = useMemo(
-    () => new Map(sharedProjects.map((project) => [project.sourceProjectId, project] as const)),
-    [sharedProjects],
-  );
-  const activeLocalThreads = useMemo(
-    () => localThreadsForProject(localThreads, selectedLocalProject?.id ?? null),
-    [localThreads, selectedLocalProject?.id],
-  );
-  const sharedThreadsByLocalId = useMemo(() => {
+  const selectedLocalProject = (() =>
+    localProjects.find((project) => project.id === detail?.project.sourceProjectId) ??
+    localProjects.find((project) =>
+      localProjectMatchesSharedProject(project, detail?.project ?? null),
+    ) ??
+    null)();
+  const preferredImportTargetProject = (() =>
+    localProjects.find((project) =>
+      localProjectMatchesSharedProject(project, detail?.project ?? null),
+    ) ??
+    localProjects[0] ??
+    null)();
+  const importTargetProjectId = localProjects.some(
+    (project) => project.id === requestedImportTargetProjectId,
+  )
+    ? requestedImportTargetProjectId
+    : (preferredImportTargetProject?.id ?? "");
+  const importTargetProject = (() =>
+    localProjects.find((project) => project.id === importTargetProjectId) ??
+    preferredImportTargetProject)();
+  const sharedProjectBySourceProjectId = (() =>
+    new Map(sharedProjects.map((project) => [project.sourceProjectId, project] as const)))();
+  const activeLocalThreads = (() =>
+    localThreadsForProject(localThreads, selectedLocalProject?.id ?? null))();
+  const sharedThreadsByLocalId = (() => {
     const result = new Map<string, SharedThread[]>();
     for (const thread of detail?.threads ?? []) {
       if (thread.localThreadId === null) continue;
       result.set(thread.localThreadId, [...(result.get(thread.localThreadId) ?? []), thread]);
     }
     return result;
-  }, [detail?.threads]);
+  })();
   const defaultEnvironment =
     detail?.environments.find((environment) => environment.isDefault) ?? null;
-  const sshCredentialById = useMemo(
-    () =>
-      new Map<string, SharedProjectDetail["sshCredentials"][number]>(
-        (detail?.sshCredentials ?? []).map((credential) => [credential.id, credential] as const),
-      ),
-    [detail?.sshCredentials],
-  );
-  const savedSshConnections = useMemo(
-    () =>
-      Object.values(savedEnvironmentById)
-        .filter((record) => record.desktopSsh)
-        .toSorted((left, right) => left.label.localeCompare(right.label)),
-    [savedEnvironmentById],
-  );
+  const sshCredentialById = (() =>
+    new Map<string, SharedProjectDetail["sshCredentials"][number]>(
+      (detail?.sshCredentials ?? []).map((credential) => [credential.id, credential] as const),
+    ))();
+  const savedSshConnections: SavedEnvironmentRecord[] = environments
+    .flatMap((environment) => {
+      for (const route of [environment.entry, ...(environment.entry.alternateRoutes ?? [])]) {
+        const profile = Option.getOrNull(route.profile);
+        if (profile?._tag === "SshConnectionProfile") {
+          return [
+            {
+              environmentId: environment.environmentId,
+              label: environment.label,
+              desktopSsh: profile.target,
+            },
+          ];
+        }
+      }
+      return [];
+    })
+    .toSorted((left, right) => left.label.localeCompare(right.label));
   const selectedDeployConnection =
     savedSshConnections.find(
       (record) => record.environmentId === collabServerForm.selectedEnvironmentId,
@@ -552,7 +556,7 @@ export function SharedProjectsSettings() {
       })
     : "";
 
-  const commitDetail = useCallback((nextDetail: SharedProjectDetail) => {
+  const commitDetail = (nextDetail: SharedProjectDetail) => {
     setDetail(nextDetail);
     setSelectedProjectId(nextDetail.project.id);
     setSharedProjects((current) => {
@@ -561,109 +565,90 @@ export function SharedProjectsSettings() {
         right.updatedAt.localeCompare(left.updatedAt),
       );
     });
-  }, []);
+  };
 
-  const load = useCallback(
-    async (preferredProjectId?: SharedProjectId | null) => {
-      setLoadState({ status: "loading" });
-      try {
-        const session = await fetchUserAuthSessionState();
-        setGitHubSessionState({ status: "loaded", session });
-        if (!session.enabled || !session.authenticated) {
-          setCurrentUser(null);
-          setSharedProjects([]);
-          setSelectedProjectId(null);
-          setDetail(null);
-          setLoadState({ status: "loaded" });
-          return;
-        }
-        setCurrentUser(session.user);
-        const listResult = await listSharedProjects();
-        setSharedProjects(listResult.projects);
-        const projectIds = new Set(listResult.projects.map((project) => project.id));
-        const requestedProjectId = preferredProjectId ?? selectedProjectId;
-        const nextSelectedId =
-          requestedProjectId && projectIds.has(requestedProjectId)
-            ? requestedProjectId
-            : (listResult.projects[0]?.id ?? null);
-        setSelectedProjectId(nextSelectedId);
-        if (nextSelectedId) {
-          try {
-            setDetail(await fetchSharedProjectDetail(nextSelectedId));
-          } catch (error) {
-            if (!isSharedProjectNotFoundError(error)) {
-              throw error;
-            }
-            setSelectedProjectId(null);
-            setDetail(null);
-          }
-        } else {
-          setDetail(null);
-        }
-        setLoadState({ status: "loaded" });
-      } catch (error) {
-        const message = error instanceof Error ? error.message : "Failed to load shared projects.";
-        if (currentUser === null) {
-          setGitHubSessionState({ status: "error", message });
-          setSharedProjects([]);
-          setSelectedProjectId(null);
-          setDetail(null);
-          setLoadState({ status: "loaded" });
-          return;
-        }
-        setLoadState({
-          status: "error",
-          message,
-        });
-      }
-    },
-    [currentUser, selectedProjectId],
-  );
-
+  const applyLoadedProjects = (result: Awaited<ReturnType<typeof readSharedProjectSelection>>) => {
+    const { session, projects, selectedId, detail: nextDetail } = result;
+    setGitHubSessionState({ status: "loaded", session });
+    setCurrentUser(session.enabled && session.authenticated ? session.user : null);
+    setSharedProjects(projects);
+    setSelectedProjectId(selectedId);
+    setDetail(nextDetail);
+    setLoadState({ status: "loaded" });
+  };
+  const reportLoadFailure = (error: unknown) => {
+    const message = error instanceof Error ? error.message : "Failed to load shared projects.";
+    if (currentUser === null) {
+      setGitHubSessionState({ status: "error", message });
+      setSharedProjects([]);
+      setSelectedProjectId(null);
+      setDetail(null);
+      setLoadState({ status: "loaded" });
+      return;
+    }
+    setLoadState({ status: "error", message });
+  };
+  const load = async (preferredProjectId?: SharedProjectId | null) => {
+    setLoadState({ status: "loading" });
+    try {
+      applyLoadedProjects(
+        await readSharedProjectSelection(preferredProjectId ?? selectedProjectId),
+      );
+    } catch (error) {
+      reportLoadFailure(error);
+    }
+  };
+  const receiveProjects = useEffectEvent(applyLoadedProjects);
+  const receiveLoadFailure = useEffectEvent(reportLoadFailure);
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- Fetch collaboration state for this connection and discard responses after it changes.
   useEffect(() => {
-    void load();
-  }, [load]);
-
-  useEffect(() => {
-    setCollabServerForm((current) => ({
-      ...current,
-      url: hostedCollaboration.url,
-      token: "",
-    }));
+    let canceled = false;
+    void readSharedProjectSelection(null).then(
+      (result) => {
+        if (!canceled) receiveProjects(result);
+      },
+      (error: unknown) => {
+        if (!canceled) receiveLoadFailure(error);
+      },
+    );
+    return () => {
+      canceled = true;
+    };
+    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- The API client reads global collaboration settings; changing either value invalidates this request.
   }, [hostedCollaboration.url, hostedCollaboration.tokenRedacted]);
 
-  useEffect(() => {
-    if (
-      collabServerForm.selectedEnvironmentId &&
-      savedSshConnections.some(
-        (record) => record.environmentId === collabServerForm.selectedEnvironmentId,
-      )
-    ) {
-      return;
-    }
-    const nextConnection = savedSshConnections[0] ?? null;
+  const connectionKey = JSON.stringify([
+    hostedCollaboration.url,
+    hostedCollaboration.tokenRedacted,
+  ]);
+  const [formConnectionKey, setFormConnectionKey] = useState(connectionKey);
+  if (formConnectionKey !== connectionKey) {
+    setFormConnectionKey(connectionKey);
+    setCollabServerForm((current) => ({ ...current, url: hostedCollaboration.url, token: "" }));
+  }
+  const validDeploySelection = savedSshConnections.some(
+    (record) => record.environmentId === collabServerForm.selectedEnvironmentId,
+  );
+  const fallbackDeployConnection = savedSshConnections[0] ?? null;
+  if (
+    !validDeploySelection &&
+    collabServerForm.selectedEnvironmentId !== (fallbackDeployConnection?.environmentId ?? "")
+  ) {
     setCollabServerForm((current) => ({
       ...current,
-      selectedEnvironmentId: nextConnection?.environmentId ?? "",
-      publicBaseUrl: current.publicBaseUrl || defaultCollabPublicBaseUrl(nextConnection),
+      selectedEnvironmentId: fallbackDeployConnection?.environmentId ?? "",
+      publicBaseUrl: current.publicBaseUrl || defaultCollabPublicBaseUrl(fallbackDeployConnection),
     }));
-  }, [collabServerForm.selectedEnvironmentId, savedSshConnections]);
+  }
 
-  useEffect(() => {
+  const detailProjectId = detail?.project.id ?? null;
+  const [confirmationProjectId, setConfirmationProjectId] = useState(detailProjectId);
+  if (confirmationProjectId !== detailProjectId) {
+    setConfirmationProjectId(detailProjectId);
     setStopSharingConfirmationProjectId(null);
-  }, [detail?.project.id]);
+  }
 
-  useEffect(() => {
-    if (
-      importTargetProjectId &&
-      localProjects.some((project) => project.id === importTargetProjectId)
-    ) {
-      return;
-    }
-    setImportTargetProjectId(preferredImportTargetProject?.id ?? "");
-  }, [importTargetProjectId, localProjects, preferredImportTargetProject?.id]);
-
-  const runAction = useCallback(async (key: string, action: () => Promise<void>) => {
+  const runAction = async (key: string, action: () => Promise<void>) => {
     setPendingAction(key);
     setLoadState({ status: "loaded" });
     try {
@@ -685,6 +670,7 @@ export function SharedProjectsSettings() {
           rawMessage: rawErrorMessage(error),
           displayMessage,
           mode,
+          // oxlint-disable-next-line react/purity -- Timestamp the async deployment failure when it occurs, never during render.
           occurredAt: new Date().toISOString(),
         });
         setCollabDeployRepairPromptCopied(false);
@@ -696,24 +682,23 @@ export function SharedProjectsSettings() {
     } finally {
       setPendingAction(null);
     }
-  }, []);
+  };
 
-  const updateHostedCollaborationSettings = useCallback(
-    async (hostedCollaborationPatch: NonNullable<ServerSettingsPatch["hostedCollaboration"]>) => {
-      const nextHostedCollaboration = {
-        ...hostedCollaboration,
-        ...hostedCollaborationPatch,
-      };
-      updatePrimarySettings({
-        hostedCollaboration: {
-          ...nextHostedCollaboration,
-        },
-      });
-    },
-    [hostedCollaboration, updatePrimarySettings],
-  );
+  const updateHostedCollaborationSettings = async (
+    hostedCollaborationPatch: NonNullable<ServerSettingsPatch["hostedCollaboration"]>,
+  ) => {
+    const nextHostedCollaboration = {
+      ...hostedCollaboration,
+      ...hostedCollaborationPatch,
+    };
+    updatePrimarySettings({
+      hostedCollaboration: {
+        ...nextHostedCollaboration,
+      },
+    });
+  };
 
-  const connectGitHub = useCallback(async () => {
+  const connectGitHub = async () => {
     setPendingAction("connect-github");
     setGitHubSessionState({ status: "loading" });
     try {
@@ -725,23 +710,20 @@ export function SharedProjectsSettings() {
       });
       setPendingAction(null);
     }
-  }, []);
+  };
 
-  const signOutGitHub = useCallback(
-    () =>
-      runAction("sign-out-github", async () => {
-        await logoutGitHubUser();
-        setCurrentUser(null);
-        setSharedProjects([]);
-        setSelectedProjectId(null);
-        setDetail(null);
-        setAcceptedBootstrap(null);
-        await load();
-      }),
-    [load, runAction],
-  );
+  const signOutGitHub = () =>
+    runAction("sign-out-github", async () => {
+      await logoutGitHubUser();
+      setCurrentUser(null);
+      setSharedProjects([]);
+      setSelectedProjectId(null);
+      setDetail(null);
+      setAcceptedBootstrap(null);
+      await load();
+    });
 
-  const openGitHubProfile = useCallback(async (githubLogin: string) => {
+  const openGitHubProfile = async (githubLogin: string) => {
     const url = `https://github.com/${githubLogin}`;
     if (window.desktopBridge) {
       const opened = await window.desktopBridge.openExternal(url);
@@ -750,427 +732,357 @@ export function SharedProjectsSettings() {
       }
     }
     window.open(url, "_blank", "noopener,noreferrer");
-  }, []);
+  };
 
-  const testCollabServerReachability = useCallback(
-    () =>
-      runAction("test-collab-server", async () => {
-        const rawUrl = effectiveCollabUrl;
-        if (!rawUrl) {
-          throw new Error("Enter or save a collaboration server URL first.");
+  const testCollabServerReachability = () =>
+    runAction("test-collab-server", async () => {
+      const rawUrl = effectiveCollabUrl;
+      if (!rawUrl) {
+        throw new Error("Enter or save a collaboration server URL first.");
+      }
+      let healthUrl: string;
+      try {
+        healthUrl = new URL("/healthz", rawUrl).toString();
+      } catch {
+        throw new Error("The collaboration server URL is not valid.");
+      }
+      setCollabReachability({ status: "pending" });
+      const response = await fetch(healthUrl, {
+        credentials: "omit",
+        redirect: "follow",
+      });
+      if (!response.ok) {
+        throw new Error(`Health check failed with status ${response.status}.`);
+      }
+      setCollabReachability({
+        status: "success",
+        message: `Reachable at ${healthUrl}.`,
+      });
+    });
+
+  const publishProject = (project: Project) =>
+    runAction(`publish:${project.id}`, async () => {
+      const nextDetail = await publishLocalProject({
+        sourceProjectId: project.id,
+        name: project.title,
+        cwd: project.workspaceRoot,
+      });
+      commitDetail(nextDetail);
+    });
+
+  const claimInvite = () =>
+    runAction("claim-invite", async () => {
+      const result = await claimSharedProjectInvite({
+        code: SharedProjectInviteCode.make(claimCode.trim()),
+      });
+      setClaimCode("");
+      setAcceptedBootstrap(result.bootstrap);
+      await load(result.project.id);
+    });
+
+  const createInvite = () =>
+    detail
+      ? runAction("create-invite", async () => {
+          const invite = await createSharedProjectInvite({
+            projectId: detail.project.id,
+            githubLogin: inviteLogin.trim(),
+            role: inviteRole,
+          });
+          setInviteLogin("");
+          setLastInviteCode(invite.code);
+          commitDetail(await fetchSharedProjectDetail(detail.project.id));
+        })
+      : undefined;
+
+  const saveCollabServerConfig = () =>
+    runAction("save-collab-server", async () => {
+      const token = collabServerForm.token.trim();
+      await updateHostedCollaborationSettings({
+        url: collabServerForm.url.trim(),
+        ...(token.length > 0
+          ? { token, tokenRedacted: false }
+          : hostedCollaboration.tokenRedacted
+            ? { tokenRedacted: true }
+            : { token: "", tokenRedacted: false }),
+      });
+      setCollabServerForm((current) => ({ ...current, token: "" }));
+      await load();
+    });
+
+  const clearCollabServerConfig = () =>
+    runAction("clear-collab-server", async () => {
+      await updateHostedCollaborationSettings({
+        url: "",
+        token: "",
+        tokenRedacted: false,
+        deploymentTargetKey: "",
+      });
+      setCollabServerForm((current) => ({
+        ...current,
+        url: "",
+        token: "",
+        publicBaseUrl: "",
+        password: "",
+      }));
+      await load();
+    });
+
+  const deployCollabServer = (options?: {
+    readonly installDocker?: boolean;
+    readonly confirmRepair?: boolean;
+  }) => {
+    if (!selectedDeployConnection) return undefined;
+    const mode = options?.installDocker ? "install-docker" : "deploy";
+    collabDeployPendingModeRef.current = mode;
+    setCollabDeployPendingMode(mode);
+    return runAction("deploy-collab-server", async () => {
+      if (!window.desktopBridge) {
+        throw new Error("Desktop SSH deployment is only available in the desktop app.");
+      }
+      const target = selectedDeployConnection.desktopSsh;
+      if (!target) {
+        throw new Error("Select a saved SSH connection before deploying.");
+      }
+      if (options?.installDocker && options.confirmRepair !== false) {
+        const accepted = await ensureLocalApi().dialogs.confirm(
+          "Run guided deploy repair on the selected SSH server and then deploy the collaboration server? KamiCode will only run allowlisted prerequisite fixes, and this may use sudo/root privileges on that server.",
+        );
+        if (!accepted) {
+          return;
         }
-        let healthUrl: string;
-        try {
-          healthUrl = new URL("/healthz", rawUrl).toString();
-        } catch {
-          throw new Error("The collaboration server URL is not valid.");
+      }
+      const result = await window.desktopBridge.deployCollabServer({
+        target,
+        options: {
+          installDocker: options?.installDocker ?? false,
+          password: collabServerForm.password || null,
+          publicBaseUrl:
+            collabServerForm.publicBaseUrl.trim() ||
+            defaultCollabPublicBaseUrl(selectedDeployConnection) ||
+            null,
+        },
+      });
+      await updateHostedCollaborationSettings({
+        url: result.baseUrl,
+        token: result.token,
+        tokenRedacted: false,
+        deploymentTargetKey: result.targetKey,
+      });
+      setCollabServerForm((current) => ({
+        ...current,
+        url: result.baseUrl,
+        token: "",
+        password: "",
+        publicBaseUrl: result.baseUrl,
+      }));
+      await load();
+    });
+  };
+
+  const copyCollabDeployAiRepairPrompt = () =>
+    runAction("copy-collab-deploy-ai-repair-prompt", async () => {
+      if (!collabDeployAiRepairPrompt) {
+        throw new Error("No collaboration deploy failure is available to copy.");
+      }
+      await navigator.clipboard.writeText(collabDeployAiRepairPrompt);
+      setCollabDeployRepairPromptCopied(true);
+    });
+
+  const openCollabDeployAiRepairThread = () =>
+    runAction("open-collab-deploy-ai-repair-thread", async () => {
+      if (!lastCollabDeployFailure || !collabDeployAiRepairPrompt) {
+        throw new Error("No collaboration deploy failure is available for AI repair.");
+      }
+      const workspaceProject = collabDeployAiRepairProject;
+      const environmentId = workspaceProject?.environmentId ?? primaryEnvironmentId;
+      const workspaceRoot = workspaceProject?.workspaceRoot ?? primaryServerConfig?.cwd ?? null;
+      if (!environmentId || !workspaceRoot) {
+        throw new Error(
+          "Cannot find a workspace for the AI repair thread. Open any local project once, then click Ask AI to repair again.",
+        );
+      }
+      const threadId = newThreadId();
+      const createdAt = new Date().toISOString();
+      const title = "Repair collaboration server deploy";
+      const modelSelection = workspaceProject?.defaultModelSelection ?? {
+        instanceId: ProviderInstanceId.make("codex"),
+        model: DEFAULT_MODEL,
+      };
+      const standaloneProject =
+        localProjects.find(
+          (project) =>
+            project.environmentId === environmentId &&
+            project.title === COLLAB_DEPLOY_REPAIR_PROJECT_TITLE &&
+            project.workspaceRoot === workspaceRoot,
+        ) ?? null;
+      const repairProjectId = standaloneProject?.id ?? newProjectId();
+      if (!standaloneProject) {
+        const createProjectResult = await createProject({
+          environmentId,
+          input: {
+            projectId: repairProjectId,
+            title: COLLAB_DEPLOY_REPAIR_PROJECT_TITLE,
+            workspaceRoot,
+            createWorkspaceRootIfMissing: false,
+            defaultModelSelection: modelSelection,
+            createdAt,
+          },
+        });
+        if (createProjectResult._tag === "Failure") {
+          throw new Error("Could not create the AI repair project.");
         }
-        setCollabReachability({ status: "pending" });
-        const response = await fetch(healthUrl, {
-          credentials: "omit",
-          redirect: "follow",
-        });
-        if (!response.ok) {
-          throw new Error(`Health check failed with status ${response.status}.`);
-        }
-        setCollabReachability({
-          status: "success",
-          message: `Reachable at ${healthUrl}.`,
-        });
-      }),
-    [effectiveCollabUrl, runAction],
-  );
+      }
+      const createThreadResult = await createThread({
+        environmentId,
+        input: {
+          threadId,
+          projectId: repairProjectId,
+          title,
+          modelSelection,
+          runtimeMode: DEFAULT_RUNTIME_MODE,
+          interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+          branch: null,
+          worktreePath: null,
+          createdAt,
+        },
+      });
+      if (createThreadResult._tag === "Failure") {
+        throw new Error("Could not create the AI repair thread.");
+      }
+      const startThreadResult = await startThreadTurn({
+        environmentId,
+        input: {
+          threadId,
+          message: {
+            messageId: newMessageId(),
+            role: "user",
+            text: collabDeployAiRepairPrompt,
+            attachments: [],
+          },
+          modelSelection,
+          titleSeed: title,
+          runtimeMode: DEFAULT_RUNTIME_MODE,
+          interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+          createdAt,
+        },
+      });
+      if (startThreadResult._tag === "Failure") {
+        throw new Error("Could not start the AI repair thread.");
+      }
+      await navigate({
+        to: "/$environmentId/$threadId",
+        params: buildThreadRouteParams(scopeThreadRef(environmentId, threadId)),
+      });
+    });
 
-  const publishProject = useCallback(
-    (project: Project) =>
-      runAction(`publish:${project.id}`, async () => {
-        const nextDetail = await publishLocalProject({
-          sourceProjectId: project.id,
-          name: project.title,
-          cwd: project.workspaceRoot,
-        });
-        commitDetail(nextDetail);
-      }),
-    [commitDetail, runAction],
-  );
-
-  const claimInvite = useCallback(
-    () =>
-      runAction("claim-invite", async () => {
-        const result = await claimSharedProjectInvite({
-          code: SharedProjectInviteCode.make(claimCode.trim()),
-        });
-        setClaimCode("");
-        setAcceptedBootstrap(result.bootstrap);
-        await load(result.project.id);
-      }),
-    [claimCode, load, runAction],
-  );
-
-  const createInvite = useCallback(
-    () =>
-      detail
-        ? runAction("create-invite", async () => {
-            const invite = await createSharedProjectInvite({
-              projectId: detail.project.id,
-              githubLogin: inviteLogin.trim(),
-              role: inviteRole,
-            });
-            setInviteLogin("");
-            setLastInviteCode(invite.code);
-            commitDetail(await fetchSharedProjectDetail(detail.project.id));
-          })
-        : undefined,
-    [commitDetail, detail, inviteLogin, inviteRole, runAction],
-  );
-
-  const saveCollabServerConfig = useCallback(
-    () =>
-      runAction("save-collab-server", async () => {
-        const token = collabServerForm.token.trim();
-        await updateHostedCollaborationSettings({
-          url: collabServerForm.url.trim(),
-          ...(token.length > 0
-            ? { token, tokenRedacted: false }
-            : hostedCollaboration.tokenRedacted
-              ? { tokenRedacted: true }
-              : { token: "", tokenRedacted: false }),
-        });
-        setCollabServerForm((current) => ({ ...current, token: "" }));
-        await load();
-      }),
-    [
-      collabServerForm.token,
-      collabServerForm.url,
-      hostedCollaboration,
-      load,
-      runAction,
-      updateHostedCollaborationSettings,
-    ],
-  );
-
-  const clearCollabServerConfig = useCallback(
-    () =>
-      runAction("clear-collab-server", async () => {
-        await updateHostedCollaborationSettings({
-          url: "",
-          token: "",
-          tokenRedacted: false,
-          deploymentTargetKey: "",
-        });
-        setCollabServerForm((current) => ({
-          ...current,
-          url: "",
-          token: "",
-          publicBaseUrl: "",
-          password: "",
-        }));
-        await load();
-      }),
-    [load, runAction, updateHostedCollaborationSettings],
-  );
-
-  const deployCollabServer = useCallback(
-    (options?: { readonly installDocker?: boolean; readonly confirmRepair?: boolean }) => {
-      if (!selectedDeployConnection) return undefined;
-      const mode = options?.installDocker ? "install-docker" : "deploy";
-      collabDeployPendingModeRef.current = mode;
-      setCollabDeployPendingMode(mode);
-      return runAction("deploy-collab-server", async () => {
-        if (!window.desktopBridge) {
-          throw new Error("Desktop SSH deployment is only available in the desktop app.");
-        }
-        const target = selectedDeployConnection.desktopSsh;
-        if (!target) {
-          throw new Error("Select a saved SSH connection before deploying.");
-        }
-        if (options?.installDocker && options.confirmRepair !== false) {
-          const accepted = await ensureLocalApi().dialogs.confirm(
-            "Run guided deploy repair on the selected SSH server and then deploy the collaboration server? KamiCode will only run allowlisted prerequisite fixes, and this may use sudo/root privileges on that server.",
-          );
-          if (!accepted) {
+  const stopSharingProject = () =>
+    detail
+      ? runAction("stop-sharing", async () => {
+          if (stopSharingConfirmationProjectId !== detail.project.id) {
+            setStopSharingConfirmationProjectId(detail.project.id);
             return;
           }
-        }
-        const result = await window.desktopBridge.deployCollabServer({
-          target,
-          options: {
-            installDocker: options?.installDocker ?? false,
-            password: collabServerForm.password || null,
-            publicBaseUrl:
-              collabServerForm.publicBaseUrl.trim() ||
-              defaultCollabPublicBaseUrl(selectedDeployConnection) ||
-              null,
-          },
-        });
-        await updateHostedCollaborationSettings({
-          url: result.baseUrl,
-          token: result.token,
-          tokenRedacted: false,
-          deploymentTargetKey: result.targetKey,
-        });
-        setCollabServerForm((current) => ({
-          ...current,
-          url: result.baseUrl,
-          token: "",
-          password: "",
-          publicBaseUrl: result.baseUrl,
-        }));
-        await load();
-      });
-    },
-    [
-      collabServerForm.password,
-      collabServerForm.publicBaseUrl,
-      load,
-      runAction,
-      selectedDeployConnection,
-      updateHostedCollaborationSettings,
-    ],
-  );
-
-  const copyCollabDeployAiRepairPrompt = useCallback(
-    () =>
-      runAction("copy-collab-deploy-ai-repair-prompt", async () => {
-        if (!collabDeployAiRepairPrompt) {
-          throw new Error("No collaboration deploy failure is available to copy.");
-        }
-        await navigator.clipboard.writeText(collabDeployAiRepairPrompt);
-        setCollabDeployRepairPromptCopied(true);
-      }),
-    [collabDeployAiRepairPrompt, runAction],
-  );
-
-  const openCollabDeployAiRepairThread = useCallback(
-    () =>
-      runAction("open-collab-deploy-ai-repair-thread", async () => {
-        if (!lastCollabDeployFailure || !collabDeployAiRepairPrompt) {
-          throw new Error("No collaboration deploy failure is available for AI repair.");
-        }
-        const workspaceProject = collabDeployAiRepairProject;
-        const descriptor = workspaceProject
-          ? null
-          : await resolveInitialPrimaryEnvironmentDescriptor();
-        const environmentId = workspaceProject?.environmentId ?? descriptor?.environmentId ?? null;
-        const workspaceRoot = workspaceProject?.workspaceRoot ?? primaryServerConfig?.cwd ?? null;
-        if (!environmentId || !workspaceRoot) {
-          throw new Error(
-            "Cannot find a workspace for the AI repair thread. Open any local project once, then click Ask AI to repair again.",
-          );
-        }
-        const threadId = newThreadId();
-        const createdAt = new Date().toISOString();
-        const title = "Repair collaboration server deploy";
-        const modelSelection = workspaceProject?.defaultModelSelection ?? {
-          instanceId: ProviderInstanceId.make("codex"),
-          model: DEFAULT_MODEL,
-        };
-        const standaloneProject =
-          localProjects.find(
-            (project) =>
-              project.environmentId === environmentId &&
-              project.title === COLLAB_DEPLOY_REPAIR_PROJECT_TITLE &&
-              project.workspaceRoot === workspaceRoot,
-          ) ?? null;
-        const repairProjectId = standaloneProject?.id ?? newProjectId();
-        if (!standaloneProject) {
-          const createProjectResult = await createProject({
-            environmentId,
-            input: {
-              projectId: repairProjectId,
-              title: COLLAB_DEPLOY_REPAIR_PROJECT_TITLE,
-              workspaceRoot,
-              createWorkspaceRootIfMissing: false,
-              defaultModelSelection: modelSelection,
-              createdAt,
-            },
-          });
-          if (createProjectResult._tag === "Failure") {
-            throw new Error("Could not create the AI repair project.");
+          try {
+            await deleteSharedProject({ projectId: detail.project.id });
+          } catch (error) {
+            if (!isSharedProjectNotFoundError(error)) {
+              throw error;
+            }
           }
-        }
-        const createThreadResult = await createThread({
-          environmentId,
-          input: {
-            threadId,
-            projectId: repairProjectId,
-            title,
-            modelSelection,
-            runtimeMode: DEFAULT_RUNTIME_MODE,
-            interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
-            branch: null,
-            worktreePath: null,
-            createdAt,
-          },
-        });
-        if (createThreadResult._tag === "Failure") {
-          throw new Error("Could not create the AI repair thread.");
-        }
-        const startThreadResult = await startThreadTurn({
-          environmentId,
-          input: {
-            threadId,
-            message: {
-              messageId: newMessageId(),
-              role: "user",
-              text: collabDeployAiRepairPrompt,
-              attachments: [],
+          setStopSharingConfirmationProjectId(null);
+          setSelectedProjectId(null);
+          setDetail(null);
+          const listResult = await listSharedProjects();
+          setSharedProjects(listResult.projects);
+          const nextProjectId = listResult.projects[0]?.id ?? null;
+          setSelectedProjectId(nextProjectId);
+          setDetail(nextProjectId ? await fetchSharedProjectDetail(nextProjectId) : null);
+        })
+      : undefined;
+
+  const syncContext = () =>
+    detail && selectedLocalProject
+      ? runAction("sync-context", async () => {
+          commitDetail(
+            await syncSharedProjectContext({
+              projectId: detail.project.id,
+              cwd: selectedLocalProject.workspaceRoot,
+            }),
+          );
+        })
+      : undefined;
+
+  const shareThread = (thread: ThreadShell, visibility: SharedThreadVisibility) =>
+    detail
+      ? runAction(`share-thread:${thread.id}`, async () => {
+          const threadDetail = await loadThreadDetailForSharing(
+            scopeThreadRef(thread.environmentId, thread.id),
+          );
+          const sessionSnapshot = toSharedSessionSnapshot(threadDetail, detail.project.repository);
+          const shared = await publishSharedThread({
+            projectId: detail.project.id,
+            localThreadId: threadDetail.id,
+            title: threadDetail.title,
+            visibility,
+            codeState: {
+              branch: threadDetail.branch ?? detail.project.repository.currentBranch,
+              headSha: detail.project.repository.headSha,
+              dirty: detail.project.repository.dirty,
+              patchAttached: false,
             },
-            modelSelection,
-            titleSeed: title,
-            runtimeMode: DEFAULT_RUNTIME_MODE,
-            interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
-            createdAt,
-          },
-        });
-        if (startThreadResult._tag === "Failure") {
-          throw new Error("Could not start the AI repair thread.");
-        }
-        await navigate({
-          to: "/$environmentId/$threadId",
-          params: buildThreadRouteParams(scopeThreadRef(environmentId, threadId)),
-        });
-      }),
-    [
-      collabDeployAiRepairProject,
-      collabDeployAiRepairPrompt,
-      createProject,
-      createThread,
-      lastCollabDeployFailure,
-      localProjects,
-      navigate,
-      primaryServerConfig,
-      runAction,
-      startThreadTurn,
-    ],
-  );
+            messages: toSharedThreadMessages(threadDetail),
+            sessionSnapshot,
+          });
+          setDetail((current) =>
+            current
+              ? {
+                  ...current,
+                  threads: [shared, ...current.threads.filter((entry) => entry.id !== shared.id)],
+                }
+              : current,
+          );
+        })
+      : undefined;
 
-  const stopSharingProject = useCallback(
-    () =>
-      detail
-        ? runAction("stop-sharing", async () => {
-            if (stopSharingConfirmationProjectId !== detail.project.id) {
-              setStopSharingConfirmationProjectId(detail.project.id);
-              return;
-            }
-            try {
-              await deleteSharedProject({ projectId: detail.project.id });
-            } catch (error) {
-              if (!isSharedProjectNotFoundError(error)) {
-                throw error;
-              }
-            }
-            setStopSharingConfirmationProjectId(null);
-            setSelectedProjectId(null);
-            setDetail(null);
-            const listResult = await listSharedProjects();
-            setSharedProjects(listResult.projects);
-            const nextProjectId = listResult.projects[0]?.id ?? null;
-            setSelectedProjectId(nextProjectId);
-            setDetail(nextProjectId ? await fetchSharedProjectDetail(nextProjectId) : null);
-          })
-        : undefined,
-    [detail, runAction, stopSharingConfirmationProjectId],
-  );
+  const importSharedSession = (thread: SharedThread) =>
+    detail && importTargetProject
+      ? runAction(`import-thread:${thread.id}`, async () => {
+          const result = await importSharedThread({
+            projectId: detail.project.id,
+            threadId: thread.id,
+            targetProjectId: importTargetProject.id,
+          });
+          await navigate({
+            to: "/$environmentId/$threadId",
+            params: buildThreadRouteParams(
+              scopeThreadRef(importTargetProject.environmentId, result.threadId),
+            ),
+          });
+        })
+      : undefined;
 
-  const syncContext = useCallback(
-    () =>
-      detail && selectedLocalProject
-        ? runAction("sync-context", async () => {
-            commitDetail(
-              await syncSharedProjectContext({
-                projectId: detail.project.id,
-                cwd: selectedLocalProject.workspaceRoot,
-              }),
-            );
-          })
-        : undefined,
-    [commitDetail, detail, runAction, selectedLocalProject],
-  );
+  const setThreadVisibility = (thread: SharedThread, visibility: SharedThreadVisibility) =>
+    detail
+      ? runAction(`thread-visibility:${thread.id}`, async () => {
+          const nextThread = await updateSharedThreadVisibility({
+            projectId: detail.project.id,
+            threadId: thread.id,
+            visibility,
+          });
+          setDetail((current) =>
+            current
+              ? {
+                  ...current,
+                  threads: current.threads.map((entry) =>
+                    entry.id === nextThread.id ? nextThread : entry,
+                  ),
+                }
+              : current,
+          );
+        })
+      : undefined;
 
-  const shareThread = useCallback(
-    (thread: ThreadShell, visibility: SharedThreadVisibility) =>
-      detail
-        ? runAction(`share-thread:${thread.id}`, async () => {
-            const threadDetail = await loadThreadDetailForSharing(
-              scopeThreadRef(thread.environmentId, thread.id),
-            );
-            const sessionSnapshot = toSharedSessionSnapshot(
-              threadDetail,
-              detail.project.repository,
-            );
-            const shared = await publishSharedThread({
-              projectId: detail.project.id,
-              localThreadId: threadDetail.id,
-              title: threadDetail.title,
-              visibility,
-              codeState: {
-                branch: threadDetail.branch ?? detail.project.repository.currentBranch,
-                headSha: detail.project.repository.headSha,
-                dirty: detail.project.repository.dirty,
-                patchAttached: false,
-              },
-              messages: toSharedThreadMessages(threadDetail),
-              sessionSnapshot,
-            });
-            setDetail((current) =>
-              current
-                ? {
-                    ...current,
-                    threads: [shared, ...current.threads.filter((entry) => entry.id !== shared.id)],
-                  }
-                : current,
-            );
-          })
-        : undefined,
-    [detail, runAction],
-  );
-
-  const importSharedSession = useCallback(
-    (thread: SharedThread) =>
-      detail && importTargetProject
-        ? runAction(`import-thread:${thread.id}`, async () => {
-            const result = await importSharedThread({
-              projectId: detail.project.id,
-              threadId: thread.id,
-              targetProjectId: importTargetProject.id,
-            });
-            await navigate({
-              to: "/$environmentId/$threadId",
-              params: buildThreadRouteParams(
-                scopeThreadRef(importTargetProject.environmentId, result.threadId),
-              ),
-            });
-          })
-        : undefined,
-    [detail, importTargetProject, navigate, runAction],
-  );
-
-  const setThreadVisibility = useCallback(
-    (thread: SharedThread, visibility: SharedThreadVisibility) =>
-      detail
-        ? runAction(`thread-visibility:${thread.id}`, async () => {
-            const nextThread = await updateSharedThreadVisibility({
-              projectId: detail.project.id,
-              threadId: thread.id,
-              visibility,
-            });
-            setDetail((current) =>
-              current
-                ? {
-                    ...current,
-                    threads: current.threads.map((entry) =>
-                      entry.id === nextThread.id ? nextThread : entry,
-                    ),
-                  }
-                : current,
-            );
-          })
-        : undefined,
-    [detail, runAction],
-  );
-
-  const resetSshCredentialForm = useCallback(() => {
+  const resetSshCredentialForm = () => {
     setEditingSshCredentialId(null);
     setSshCredentialForm({
       label: "VPS SSH",
@@ -1182,153 +1094,130 @@ export function SharedProjectsSettings() {
       privateKey: "",
       passphrase: "",
     });
-  }, []);
+  };
 
-  const editSshCredential = useCallback(
-    (credential: SharedProjectDetail["sshCredentials"][number]) => {
-      setEditingSshCredentialId(credential.id);
-      setSshCredentialForm({
-        label: credential.label,
-        host: credential.host,
-        port: String(credential.port),
-        username: credential.username,
-        authType: credential.authType,
-        password: "",
-        privateKey: "",
-        passphrase: "",
-      });
-    },
-    [],
-  );
+  const editSshCredential = (credential: SharedProjectDetail["sshCredentials"][number]) => {
+    setEditingSshCredentialId(credential.id);
+    setSshCredentialForm({
+      label: credential.label,
+      host: credential.host,
+      port: String(credential.port),
+      username: credential.username,
+      authType: credential.authType,
+      password: "",
+      privateKey: "",
+      passphrase: "",
+    });
+  };
 
-  const saveSshCredential = useCallback(
-    () =>
-      detail
-        ? runAction("save-ssh-credential", async () => {
-            const port = Number.parseInt(sshCredentialForm.port, 10);
-            if (!Number.isInteger(port) || port < 1 || port > 65_535) {
-              throw new Error("SSH port must be between 1 and 65535.");
-            }
-            await upsertSharedSshCredential({
+  const saveSshCredential = () =>
+    detail
+      ? runAction("save-ssh-credential", async () => {
+          const port = Number.parseInt(sshCredentialForm.port, 10);
+          if (!Number.isInteger(port) || port < 1 || port > 65_535) {
+            throw new Error("SSH port must be between 1 and 65535.");
+          }
+          await upsertSharedSshCredential({
+            projectId: detail.project.id,
+            ...(editingSshCredentialId
+              ? {
+                  credentialId: SharedSshCredentialId.make(editingSshCredentialId),
+                }
+              : {}),
+            label: sshCredentialForm.label.trim(),
+            host: sshCredentialForm.host.trim(),
+            port,
+            username: sshCredentialForm.username.trim(),
+            authType: sshCredentialForm.authType,
+            ...(sshCredentialForm.authType === "password" &&
+            (!editingSshCredentialId || sshCredentialForm.password.trim().length > 0)
+              ? { password: sshCredentialForm.password }
+              : {}),
+            ...(sshCredentialForm.authType === "private-key" &&
+            (!editingSshCredentialId || sshCredentialForm.privateKey.trim().length > 0)
+              ? { privateKey: sshCredentialForm.privateKey }
+              : {}),
+            ...(sshCredentialForm.authType === "private-key" &&
+            sshCredentialForm.passphrase.trim().length > 0
+              ? { passphrase: sshCredentialForm.passphrase }
+              : {}),
+          });
+          resetSshCredentialForm();
+          commitDetail(await fetchSharedProjectDetail(detail.project.id));
+        })
+      : undefined;
+
+  const addRuntime = () =>
+    detail
+      ? runAction("add-runtime", async () => {
+          await upsertSharedRuntime({
+            projectId: detail.project.id,
+            type: newRuntime.type,
+            label: newRuntime.label,
+            endpointLabel: newRuntime.endpoint.trim() || null,
+            health: newRuntime.health,
+            capabilities: ["execute", "test"],
+            providerLabel: "User-local provider profile",
+            sshCredentialId:
+              newRuntime.type === "ssh-vps" && newRuntime.sshCredentialId
+                ? SharedSshCredentialId.make(newRuntime.sshCredentialId)
+                : null,
+            unavailableReason:
+              newRuntime.health === "unavailable" ? "Provider or runtime unavailable" : null,
+          });
+          setNewRuntime({
+            type: "ssh-vps",
+            label: "VPS runtime",
+            endpoint: "",
+            health: "healthy",
+            sshCredentialId: "",
+          });
+          commitDetail(await fetchSharedProjectDetail(detail.project.id));
+        })
+      : undefined;
+
+  const addEnvironment = () =>
+    detail
+      ? runAction("add-environment", async () => {
+          await upsertSharedEnvironment({
+            projectId: detail.project.id,
+            name: newEnvironment.name,
+            type: newEnvironment.type,
+            baseUrl: newEnvironment.baseUrl,
+            isDefault: newEnvironment.isDefault,
+          });
+          setNewEnvironment({
+            name: "VPS Staging",
+            type: "vps-staging",
+            baseUrl: "",
+            isDefault: false,
+          });
+          commitDetail(await fetchSharedProjectDetail(detail.project.id));
+        })
+      : undefined;
+
+  const addDeploy = () =>
+    detail
+      ? runAction("add-deploy", async () => {
+          const environmentId = deployForm.environmentId || defaultEnvironment?.id;
+          if (!environmentId) return;
+          commitDetail(
+            await upsertSharedDeployAssociation({
               projectId: detail.project.id,
-              ...(editingSshCredentialId
-                ? {
-                    credentialId: SharedSshCredentialId.make(editingSshCredentialId),
-                  }
-                : {}),
-              label: sshCredentialForm.label.trim(),
-              host: sshCredentialForm.host.trim(),
-              port,
-              username: sshCredentialForm.username.trim(),
-              authType: sshCredentialForm.authType,
-              ...(sshCredentialForm.authType === "password" &&
-              (!editingSshCredentialId || sshCredentialForm.password.trim().length > 0)
-                ? { password: sshCredentialForm.password }
-                : {}),
-              ...(sshCredentialForm.authType === "private-key" &&
-              (!editingSshCredentialId || sshCredentialForm.privateKey.trim().length > 0)
-                ? { privateKey: sshCredentialForm.privateKey }
-                : {}),
-              ...(sshCredentialForm.authType === "private-key" &&
-              sshCredentialForm.passphrase.trim().length > 0
-                ? { passphrase: sshCredentialForm.passphrase }
-                : {}),
-            });
-            resetSshCredentialForm();
-            commitDetail(await fetchSharedProjectDetail(detail.project.id));
-          })
-        : undefined,
-    [
-      commitDetail,
-      detail,
-      editingSshCredentialId,
-      resetSshCredentialForm,
-      runAction,
-      sshCredentialForm,
-    ],
-  );
-
-  const addRuntime = useCallback(
-    () =>
-      detail
-        ? runAction("add-runtime", async () => {
-            await upsertSharedRuntime({
-              projectId: detail.project.id,
-              type: newRuntime.type,
-              label: newRuntime.label,
-              endpointLabel: newRuntime.endpoint.trim() || null,
-              health: newRuntime.health,
-              capabilities: ["execute", "test"],
-              providerLabel: "User-local provider profile",
-              sshCredentialId:
-                newRuntime.type === "ssh-vps" && newRuntime.sshCredentialId
-                  ? SharedSshCredentialId.make(newRuntime.sshCredentialId)
-                  : null,
-              unavailableReason:
-                newRuntime.health === "unavailable" ? "Provider or runtime unavailable" : null,
-            });
-            setNewRuntime({
-              type: "ssh-vps",
-              label: "VPS runtime",
-              endpoint: "",
-              health: "healthy",
-              sshCredentialId: "",
-            });
-            commitDetail(await fetchSharedProjectDetail(detail.project.id));
-          })
-        : undefined,
-    [commitDetail, detail, newRuntime, runAction],
-  );
-
-  const addEnvironment = useCallback(
-    () =>
-      detail
-        ? runAction("add-environment", async () => {
-            await upsertSharedEnvironment({
-              projectId: detail.project.id,
-              name: newEnvironment.name,
-              type: newEnvironment.type,
-              baseUrl: newEnvironment.baseUrl,
-              isDefault: newEnvironment.isDefault,
-            });
-            setNewEnvironment({
-              name: "VPS Staging",
-              type: "vps-staging",
-              baseUrl: "",
-              isDefault: false,
-            });
-            commitDetail(await fetchSharedProjectDetail(detail.project.id));
-          })
-        : undefined,
-    [commitDetail, detail, newEnvironment, runAction],
-  );
-
-  const addDeploy = useCallback(
-    () =>
-      detail
-        ? runAction("add-deploy", async () => {
-            const environmentId = deployForm.environmentId || defaultEnvironment?.id;
-            if (!environmentId) return;
-            commitDetail(
-              await upsertSharedDeployAssociation({
-                projectId: detail.project.id,
-                branch:
-                  deployForm.branch.trim() || detail.project.repository.currentBranch || "main",
-                environmentId: SharedProjectEnvironmentId.make(environmentId),
-                deployUrl: deployForm.deployUrl,
-                deployedSha: deployForm.deployedSha.trim() || null,
-              }),
-            );
-            setDeployForm({
-              branch: "",
-              environmentId: "",
-              deployUrl: "",
-              deployedSha: "",
-            });
-          })
-        : undefined,
-    [commitDetail, defaultEnvironment?.id, deployForm, detail, runAction],
-  );
+              branch: deployForm.branch.trim() || detail.project.repository.currentBranch || "main",
+              environmentId: SharedProjectEnvironmentId.make(environmentId),
+              deployUrl: deployForm.deployUrl,
+              deployedSha: deployForm.deployedSha.trim() || null,
+            }),
+          );
+          setDeployForm({
+            branch: "",
+            environmentId: "",
+            deployUrl: "",
+            deployedSha: "",
+          });
+        })
+      : undefined;
 
   const canManage = detailCanManage(detail);
   const canEdit = detailCanEdit(detail);
@@ -2722,4 +2611,30 @@ function DeployRow({
       }
     />
   );
+}
+
+async function readSharedProjectSelection(requestedProjectId: SharedProjectId | null) {
+  const session = await fetchUserAuthSessionState();
+  const result: {
+    session: UserAuthSessionState;
+    projects: ReadonlyArray<SharedProjectDetail["project"]>;
+    selectedId: SharedProjectId | null;
+    detail: SharedProjectDetail | null;
+  } = { session, projects: [], selectedId: null, detail: null };
+  if (!session.enabled || !session.authenticated) return result;
+  const { projects } = await listSharedProjects();
+  result.projects = projects;
+  result.selectedId =
+    requestedProjectId && projects.some((project) => project.id === requestedProjectId)
+      ? requestedProjectId
+      : (projects[0]?.id ?? null);
+  if (result.selectedId) {
+    try {
+      result.detail = await fetchSharedProjectDetail(result.selectedId);
+    } catch (error) {
+      if (!isSharedProjectNotFoundError(error)) throw error;
+      result.selectedId = null;
+    }
+  }
+  return result;
 }

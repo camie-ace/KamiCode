@@ -4,27 +4,10 @@ import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import * as NodeURL from "node:url";
-import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
 import * as Console from "effect/Console";
 import * as Effect from "effect/Effect";
 
 const repoRoot = NodePath.resolve(NodePath.dirname(NodeURL.fileURLToPath(import.meta.url)), "..");
-const hostProcessPlatform = Effect.runSync(HostProcessPlatform);
-const VP_INSTALL_COMMAND =
-  hostProcessPlatform === "win32"
-    ? {
-        file: process.execPath,
-        args: [
-          NodePath.resolve(repoRoot, "node_modules/vite-plus/bin/vp"),
-          "install",
-          "--lockfile-only",
-          "--ignore-scripts",
-        ],
-      }
-    : {
-        file: "vp",
-        args: ["install", "--lockfile-only", "--ignore-scripts"],
-      };
 
 const workspaceFiles = [
   "package.json",
@@ -34,7 +17,8 @@ const workspaceFiles = [
   "apps/desktop/package.json",
   "apps/web/package.json",
   "apps/mobile/package.json",
-  "apps/mobile/modules/t3-markdown-text/package.json",
+  "apps/mobile/modules/t3-highlights/package.json",
+  "apps/mobile/modules/t3-source-text/package.json",
   "apps/mobile/modules/t3-review-diff/package.json",
   "apps/mobile/modules/t3-terminal/package.json",
   "apps/marketing/package.json",
@@ -45,6 +29,31 @@ const workspaceFiles = [
   "packages/shared/package.json",
   "packages/ssh/package.json",
   "packages/tailscale/package.json",
+  "packages/provider-core/package.json",
+  "packages/provider-testing/package.json",
+  "packages/provider-pi/package.json",
+  "packages/provider-acp/package.json",
+  "packages/provider-acp-registry/package.json",
+  "packages/provider-cursor/package.json",
+  "packages/provider-fx/package.json",
+  "packages/provider-grok/package.json",
+  "packages/provider-kiro/package.json",
+  "packages/provider-muse/package.json",
+  "packages/provider-opencode/package.json",
+  "packages/issue-tracker-linear/package.json",
+  "packages/secret-provider-core/package.json",
+  "packages/secret-provider-definitions/package.json",
+  "packages/secret-provider-onepassword/package.json",
+  "packages/source-control-azure-devops/package.json",
+  "packages/source-control-bitbucket/package.json",
+  "packages/source-control-core/package.json",
+  "packages/source-control-cursor-origin/package.json",
+  "packages/source-control-definitions/package.json",
+  "packages/source-control-forgejo/package.json",
+  "packages/source-control-gitcafe/package.json",
+  "packages/source-control-github/package.json",
+  "packages/source-control-gitlab/package.json",
+  "packages/source-control-testing/package.json",
   "packages/effect-acp/package.json",
   "packages/effect-codex-app-server/package.json",
   "scripts/package.json",
@@ -56,6 +65,13 @@ function copyWorkspaceManifestFixture(targetRoot: string): void {
     const destinationPath = NodePath.resolve(targetRoot, relativePath);
     NodeFS.mkdirSync(NodePath.dirname(destinationPath), { recursive: true });
     NodeFS.cpSync(sourcePath, destinationPath);
+  }
+
+  const mobileDependencies = NodePath.resolve(repoRoot, "apps/mobile/deps");
+  if (NodeFS.existsSync(mobileDependencies)) {
+    NodeFS.cpSync(mobileDependencies, NodePath.resolve(targetRoot, "apps/mobile/deps"), {
+      recursive: true,
+    });
   }
 
   const patchesDirectory = NodePath.resolve(repoRoot, "patches");
@@ -226,9 +242,7 @@ try {
     },
   );
 
-  NodeFS.rmSync(NodePath.resolve(tempRoot, "pnpm-lock.yaml"), { force: true });
-
-  NodeChildProcess.execFileSync(VP_INSTALL_COMMAND.file, VP_INSTALL_COMMAND.args, {
+  NodeChildProcess.execFileSync("vp", ["install", "--lockfile-only", "--ignore-scripts"], {
     cwd: tempRoot,
     stdio: "inherit",
   });
@@ -283,11 +297,8 @@ try {
   NodeChildProcess.execFileSync(
     process.execPath,
     [
-      NodePath.resolve(repoRoot, "scripts/merge-update-manifests.ts"),
-      "--platform",
-      "mac",
-      arm64Path,
-      x64Path,
+      NodePath.resolve(repoRoot, "scripts/merge-release-update-manifests.ts"),
+      NodePath.resolve(tempRoot, "release-assets"),
     ],
     {
       cwd: repoRoot,
@@ -352,6 +363,7 @@ try {
     NodeFS.rmSync(arm64ManifestPath, { force: true });
     NodeFS.rmSync(x64ManifestPath, { force: true });
   }
+  assertMissing(x64Path, "Release smoke unexpectedly kept the x64 macOS updater manifest.");
 
   const mergedWindowsManifest = NodeFS.readFileSync(mergedWindowsManifestPath, "utf8");
   assertContains(

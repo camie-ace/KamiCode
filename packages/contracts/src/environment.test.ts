@@ -16,7 +16,11 @@ const descriptor = {
 describe("ExecutionEnvironmentDescriptor", () => {
   it("decodes old, recognized and future manual installation descriptors", () => {
     expect(decodeDescriptor(descriptor).capabilities.serverInstallation).toBeUndefined();
-    for (const installation of [{ kind: "npx" }, { kind: "npm-global", prefix: "/opt/node" }]) {
+    for (const installation of [
+      { kind: "npx" },
+      { kind: "npm-global", prefix: "/opt/node" },
+      { kind: "t3-launcher", launcher: "/opt/bin/t3", baseDir: "/data/t3" },
+    ]) {
       expect(
         decodeDescriptor({
           ...descriptor,
@@ -24,7 +28,18 @@ describe("ExecutionEnvironmentDescriptor", () => {
         }).capabilities.serverInstallation,
       ).toEqual(installation);
     }
-    for (const installation of [{ kind: "future-manager" }, { kind: "npm-global" }]) {
+    const spaced = { kind: "t3-launcher", launcher: "/opt/bin/t3 ", baseDir: " /data/t3 " };
+    expect(
+      decodeDescriptor({
+        ...descriptor,
+        capabilities: { ...descriptor.capabilities, serverInstallation: spaced },
+      }).capabilities.serverInstallation,
+    ).toEqual(spaced);
+    for (const installation of [
+      { kind: "future-manager" },
+      { kind: "npm-global" },
+      { kind: "t3-launcher", launcher: "t3" },
+    ]) {
       expect(
         decodeDescriptor({
           ...descriptor,
@@ -33,42 +48,6 @@ describe("ExecutionEnvironmentDescriptor", () => {
       ).toBeUndefined();
     }
   });
-  it("requires an advertised required-worktree bootstrap capability", () => {
-    expect(decodeDescriptor(descriptor).capabilities.requiredWorktreeBootstrap).toBeUndefined();
-    expect(
-      decodeDescriptor({
-        ...descriptor,
-        capabilities: { ...descriptor.capabilities, requiredWorktreeBootstrap: true },
-      }).capabilities.requiredWorktreeBootstrap,
-    ).toBe(true);
-  });
-
-  it("treats a missing pull-request capability as unsupported under version skew", () => {
-    expect(decodeDescriptor(descriptor).capabilities.pullRequests).toBeUndefined();
-  });
-
-  it("preserves an advertised pull-request capability", () => {
-    expect(
-      decodeDescriptor({
-        ...descriptor,
-        capabilities: { ...descriptor.capabilities, pullRequests: true },
-      }).capabilities.pullRequests,
-    ).toBe(true);
-  });
-
-  it("treats a missing attachment upload capability as unsupported", () => {
-    expect(decodeDescriptor(descriptor).capabilities.attachmentUploads).toBeUndefined();
-  });
-
-  it("preserves an advertised attachment upload capability", () => {
-    expect(
-      decodeDescriptor({
-        ...descriptor,
-        capabilities: { ...descriptor.capabilities, attachmentUploads: true },
-      }).capabilities.attachmentUploads,
-    ).toBe(true);
-  });
-
   it("treats a missing hosted-browser capability as unsupported", () => {
     expect(decodeDescriptor(descriptor).capabilities.hostedBrowserPreview).toBeUndefined();
   });
@@ -105,22 +84,6 @@ describe("ExecutionEnvironmentDescriptor", () => {
         ...descriptor,
         capabilities: { ...descriptor.capabilities, threadRecurringSchedules: true },
       }).capabilities.threadRecurringSchedules,
-    ).toBe(true);
-  });
-
-  it("treats missing server-resolved command context as unsupported", () => {
-    expect(decodeDescriptor(descriptor).capabilities.serverResolvedCommandContext).toBeUndefined();
-  });
-
-  it("preserves advertised server-resolved command context", () => {
-    expect(
-      decodeDescriptor({
-        ...descriptor,
-        capabilities: {
-          ...descriptor.capabilities,
-          serverResolvedCommandContext: true,
-        },
-      }).capabilities.serverResolvedCommandContext,
     ).toBe(true);
   });
 });

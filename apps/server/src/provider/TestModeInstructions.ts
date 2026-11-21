@@ -1,5 +1,3 @@
-import type { ProviderInteractionMode } from "@t3tools/contracts";
-
 export const TEST_MODE_DEVELOPER_INSTRUCTIONS = `# Test Mode
 
 You are in Test mode. Your job is to validate behavior, not to continue building by default.
@@ -28,18 +26,3 @@ Rules:
 - End with PASS, FAIL, or BLOCKED.
 - Do not claim visual or browser validation unless you actually performed it.
 - If the browser harness cannot run, say that plainly and use the best available deterministic checks without overstating coverage.`;
-
-function applyTestModePromptPrefix(input: {
-  readonly interactionMode?: ProviderInteractionMode | undefined;
-  readonly prompt: string;
-}): string {
-  const prompt = input.prompt.trim();
-  if (input.interactionMode !== "test") {
-    return prompt;
-  }
-
-  return `${TEST_MODE_DEVELOPER_INSTRUCTIONS}
-
-User test request:
-${prompt.length > 0 ? prompt : "Test the current work based on the conversation context."}`;
-}

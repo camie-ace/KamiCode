@@ -1,4 +1,5 @@
-import * as Crypto from "effect/Crypto";
+import * as Digest from "effect/crypto/Digest";
+import * as SecureRandom from "effect/crypto/SecureRandom";
 import type {
   DesktopCollabServerDeployResult,
   DesktopSshEnvironmentTarget,
@@ -27,30 +28,32 @@ const COLLAB_DEFAULT_PORT = 8787;
 
 type DeployCollabServerError = SshCommandError | SshInvalidTargetError | SshPasswordPromptError;
 
-function readLocalCollabServerBundleBase64(): Effect.Effect<
-  string,
-  never,
-  FileSystem.FileSystem | Path.Path
-> {
-  return Effect.gen(function* () {
-    const fs = yield* FileSystem.FileSystem;
-    const path = yield* Path.Path;
+const readLocalCollabServerBundleBase64 = Effect.fn("readLocalCollabServerBundleBase64")(
+  function readLocalCollabServerBundleBase64(): Effect.Effect<
+    string,
+    never,
+    FileSystem.FileSystem | Path.Path
+  > {
+    return Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
 
-    const candidates = [
-      path.join(process.cwd(), "apps", "collab-server", "dist", "index.mjs"),
-      path.join(__dirname, "..", "..", "collab-server", "dist", "index.mjs"),
-    ];
-    for (const candidate of candidates) {
-      const content = yield* fs
-        .readFileString(candidate)
-        .pipe(Effect.orElseSucceed((): string | null => null));
-      if (content !== null) {
-        return Buffer.from(content).toString("base64");
+      const candidates = [
+        path.join(process.cwd(), "apps", "collab-server", "dist", "index.mjs"),
+        path.join(__dirname, "..", "..", "collab-server", "dist", "index.mjs"),
+      ];
+      for (const candidate of candidates) {
+        const content = yield* fs
+          .readFileString(candidate)
+          .pipe(Effect.orElseSucceed((): string | null => null));
+        if (content !== null) {
+          return Buffer.from(content).toString("base64");
+        }
       }
-    }
-    return "";
-  });
-}
+      return "";
+    });
+  },
+);
 
 function buildDeployScript(localCollabServerBundleBase64: string): string {
   return `#!/usr/bin/env bash
@@ -416,7 +419,8 @@ export const deployCollabServer = Effect.fn("desktop.collabServer.deploy")(funct
   DesktopCollabServerDeployResult,
   DeployCollabServerError,
   | ChildProcessSpawner.ChildProcessSpawner
-  | Crypto.Crypto
+  | SecureRandom.SecureRandom
+  | Digest.Digest
   | FileSystem.FileSystem
   | Path.Path
   | DesktopSshPasswordPrompts.DesktopSshPasswordPrompts

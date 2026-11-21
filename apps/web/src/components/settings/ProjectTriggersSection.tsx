@@ -8,7 +8,7 @@ import {
   RefreshCwIcon,
   Trash2Icon,
 } from "lucide-react";
-import React, { type FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import React, { type FormEvent, useEffect, useState } from "react";
 
 import { usePrimaryEnvironmentId } from "../../state/environments";
 import {
@@ -51,7 +51,7 @@ import { stackedThreadToast, toastManager } from "../ui/toast";
 import { SettingsRow, SettingsSection } from "./settingsLayout";
 
 const SELECT_CLASS =
-  "h-7 rounded-md border border-input bg-background px-2 text-xs text-foreground shadow-xs/5 outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/24";
+  "h-7 rounded-md border border-input bg-background px-2 text-xs text-foreground shadow-xs/5 outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/24";
 
 type LoadState =
   | { readonly status: "idle" | "loading" | "loaded" }
@@ -212,10 +212,10 @@ export default function ProjectTriggersSection({
     listProjectTriggerRuns,
   } = useProjectTriggerActions();
   const [settingsFocus] = useState(readProjectTriggersSettingsFocus);
-  const [settingsFocusApplied, setSettingsFocusApplied] = useState(false);
-  const [selectedProjectKey, setSelectedProjectKey] = useState<string | null>(null);
-  const [triggers, setTriggers] = useState<readonly ProjectTrigger[]>([]);
-  const [loadState, setLoadState] = useState<LoadState>({ status: "idle" });
+  const [requestedProjectKey, setSelectedProjectKey] = useState<string | null>(null);
+  const [projectResults, setProjectResults] = useState<
+    Record<string, { triggers: readonly ProjectTrigger[]; loadState: LoadState }>
+  >({});
   const [pendingAction, setPendingAction] = useState<string | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingTrigger, setEditingTrigger] = useState<ProjectTrigger | null>(null);
@@ -226,38 +226,32 @@ export default function ProjectTriggersSection({
   const [form, setForm] = useState<TriggerFormState>(() => defaultTriggerForm("this-runtime"));
   const [validationError, setValidationError] = useState<string | null>(null);
 
-  const projectOptions = useMemo(
-    () =>
-      projects.map((project) => ({
-        key: projectOptionKey(project),
-        project,
-      })),
-    [projects],
-  );
-  const projectByKey = useMemo(
-    () => new Map(projectOptions.map((entry) => [entry.key, entry.project] as const)),
-    [projectOptions],
-  );
+  const projectOptions = (() =>
+    projects.map((project) => ({
+      key: projectOptionKey(project),
+      project,
+    })))();
+  const projectByKey = (() =>
+    new Map(projectOptions.map((entry) => [entry.key, entry.project] as const)))();
   const settingsFocusKey = settingsFocus ? projectTriggersProjectKey(settingsFocus) : null;
-  const preferredProjectKey = useMemo(() => {
+  const preferredProjectKey = (() => {
     if (!preferredProjectId) return null;
     return projectOptions.find((entry) => entry.project.id === preferredProjectId)?.key ?? null;
-  }, [preferredProjectId, projectOptions]);
+  })();
 
+  const selectedProjectKey =
+    requestedProjectKey && projectByKey.has(requestedProjectKey)
+      ? requestedProjectKey
+      : settingsFocusKey && projectByKey.has(settingsFocusKey)
+        ? settingsFocusKey
+        : preferredProjectKey && projectByKey.has(preferredProjectKey)
+          ? preferredProjectKey
+          : (projectOptions[0]?.key ?? null);
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- Consume the persisted settings navigation handoff once its project is available.
   useEffect(() => {
-    if (settingsFocusKey && !settingsFocusApplied && projectByKey.has(settingsFocusKey)) {
-      setSelectedProjectKey(settingsFocusKey);
-      setSettingsFocusApplied(true);
+    if (settingsFocusKey && selectedProjectKey === settingsFocusKey)
       clearProjectTriggersSettingsFocus();
-      return;
-    }
-
-    setSelectedProjectKey((current) => {
-      if (current && projectByKey.has(current)) return current;
-      if (preferredProjectKey && projectByKey.has(preferredProjectKey)) return preferredProjectKey;
-      return projectOptions[0]?.key ?? null;
-    });
-  }, [preferredProjectKey, projectByKey, projectOptions, settingsFocusApplied, settingsFocusKey]);
+  }, [settingsFocusKey, selectedProjectKey]);
 
   const selectedProject = selectedProjectKey
     ? (projectByKey.get(selectedProjectKey) ?? null)
@@ -266,7 +260,26 @@ export default function ProjectTriggersSection({
     ? resolveProjectTriggerExecutionLocation(selectedProject.environmentId, primaryEnvironmentId)
     : "this-runtime";
 
-  const reloadTriggers = useCallback(async () => {
+  const resultKey = selectedProjectKey ?? "";
+  const triggers = projectResults[resultKey]?.triggers ?? [];
+  const loadState: LoadState = projectResults[resultKey]?.loadState ?? {
+    status: selectedProject ? "loading" : "idle",
+  };
+  const setTriggers = (next: readonly ProjectTrigger[]) =>
+    setProjectResults((previous) => ({
+      ...previous,
+      [resultKey]: {
+        loadState: previous[resultKey]?.loadState ?? { status: "loading" },
+        triggers: next,
+      },
+    }));
+  const setLoadState = (next: LoadState) =>
+    setProjectResults((previous) => ({
+      ...previous,
+      [resultKey]: { triggers: previous[resultKey]?.triggers ?? [], loadState: next },
+    }));
+
+  const reloadTriggers = async () => {
     if (!selectedProject) {
       setTriggers([]);
       setLoadState({ status: "idle" });
@@ -285,163 +298,159 @@ export default function ProjectTriggersSection({
       setTriggers([]);
       setLoadState({
         status: "error",
-        message: error instanceof Error ? error.message : "Failed to load project triggers.",
+        message: projectTriggerLoadError(error),
       });
     }
-  }, [listProjectTriggers, selectedProject]);
+  };
 
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- Fetch the selected project's trigger list and discard obsolete responses.
   useEffect(() => {
-    void reloadTriggers();
-  }, [reloadTriggers]);
+    if (!selectedProject) return;
+    let canceled = false;
+    void listProjectTriggers({
+      environmentId: selectedProject.environmentId,
+      projectId: selectedProject.id,
+    }).then(
+      (next) => {
+        if (canceled) return;
+        setProjectResults((previous) => ({
+          ...previous,
+          [resultKey]: { triggers: [...next], loadState: { status: "loaded" } },
+        }));
+      },
+      (error: unknown) => {
+        if (canceled) return;
+        setProjectResults((previous) => ({
+          ...previous,
+          [resultKey]: {
+            triggers: [],
+            loadState: { status: "error", message: projectTriggerLoadError(error) },
+          },
+        }));
+      },
+    );
+    return () => {
+      canceled = true;
+    };
+  }, [selectedProject, resultKey, listProjectTriggers]);
 
-  const openCreateDialog = useCallback(() => {
+  const openCreateDialog = () => {
     setEditingTrigger(null);
     setForm(defaultTriggerForm(selectedExecutionLocation));
     setValidationError(null);
     setDialogOpen(true);
-  }, [selectedExecutionLocation]);
+  };
 
-  const openEditDialog = useCallback(
-    (trigger: ProjectTrigger) => {
-      setEditingTrigger(trigger);
-      setForm(triggerFormFromTrigger(trigger, selectedExecutionLocation));
-      setValidationError(null);
-      setDialogOpen(true);
-    },
-    [selectedExecutionLocation],
-  );
+  const openEditDialog = (trigger: ProjectTrigger) => {
+    setEditingTrigger(trigger);
+    setForm(triggerFormFromTrigger(trigger, selectedExecutionLocation));
+    setValidationError(null);
+    setDialogOpen(true);
+  };
 
-  const submitForm = useCallback(
-    async (event: FormEvent) => {
-      event.preventDefault();
-      if (!selectedProject) return;
+  const submitForm = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!selectedProject) return;
 
-      const mutation = mutationFromForm(form);
-      if (!mutation.name) {
-        setValidationError("Name is required.");
-        return;
-      }
-      if (!mutation.schedule && !mutation.onceAt) {
-        setValidationError("Schedule is required.");
-        return;
-      }
-      if (mutation.onceAt && !Number.isFinite(Date.parse(mutation.onceAt))) {
-        setValidationError("Enter a valid date and time with timezone.");
-        return;
-      }
-      if (!mutation.prompt) {
-        setValidationError("Prompt is required.");
-        return;
-      }
+    const mutation = mutationFromForm(form);
+    if (!mutation.name) {
+      setValidationError("Name is required.");
+      return;
+    }
+    if (!mutation.schedule && !mutation.onceAt) {
+      setValidationError("Schedule is required.");
+      return;
+    }
+    if (mutation.onceAt && !Number.isFinite(Date.parse(mutation.onceAt))) {
+      setValidationError("Enter a valid date and time with timezone.");
+      return;
+    }
+    if (!mutation.prompt) {
+      setValidationError("Prompt is required.");
+      return;
+    }
 
-      setPendingAction(editingTrigger ? `update:${editingTrigger.id}` : "create");
-      setValidationError(null);
-      try {
-        if (editingTrigger) {
-          await updateProjectTrigger({
-            environmentId: selectedProject.environmentId,
-            trigger: {
-              projectId: selectedProject.id,
-              triggerId: editingTrigger.id,
-              patch: mutation,
-            },
-          });
-        } else {
-          await createProjectTrigger({
-            environmentId: selectedProject.environmentId,
-            trigger: {
-              projectId: selectedProject.id,
-              ...mutation,
-            },
-          });
-        }
-        setDialogOpen(false);
-        await reloadTriggers();
-      } catch (error) {
-        setValidationError(error instanceof Error ? error.message : "Failed to save trigger.");
-      } finally {
-        setPendingAction(null);
-      }
-    },
-    [
-      createProjectTrigger,
-      editingTrigger,
-      form,
-      reloadTriggers,
-      selectedProject,
-      updateProjectTrigger,
-    ],
-  );
-
-  const toggleTriggerEnabled = useCallback(
-    async (trigger: ProjectTrigger, enabled: boolean) => {
-      if (!selectedProject || pendingAction !== null) return;
-      setPendingAction(`toggle:${trigger.id}`);
-      try {
+    setPendingAction(editingTrigger ? `update:${editingTrigger.id}` : "create");
+    setValidationError(null);
+    try {
+      if (editingTrigger) {
         await updateProjectTrigger({
           environmentId: selectedProject.environmentId,
           trigger: {
             projectId: selectedProject.id,
-            triggerId: trigger.id,
-            patch: mutationFromTrigger(
-              trigger,
-              trigger.executionLocation ?? selectedExecutionLocation,
-              enabled,
-            ),
+            triggerId: editingTrigger.id,
+            patch: mutation,
           },
         });
-        await reloadTriggers();
-      } catch (error) {
-        toastTriggerError("Failed to update trigger", error);
-      } finally {
-        setPendingAction(null);
-      }
-    },
-    [
-      pendingAction,
-      reloadTriggers,
-      selectedExecutionLocation,
-      selectedProject,
-      updateProjectTrigger,
-    ],
-  );
-
-  const runTrigger = useCallback(
-    async (trigger: ProjectTrigger) => {
-      if (!selectedProject || pendingAction !== null) return;
-      setPendingAction(`run:${trigger.id}`);
-      try {
-        await runProjectTriggerNow({
+      } else {
+        await createProjectTrigger({
           environmentId: selectedProject.environmentId,
           trigger: {
             projectId: selectedProject.id,
-            triggerId: trigger.id,
+            ...mutation,
           },
         });
-        toastManager.add({
-          type: "success",
-          title: "Trigger started",
-          description: `${trigger.name} was sent to ${projectTriggerExecutionLocationLabel(
-            trigger.executionLocation ?? selectedExecutionLocation,
-          )}.`,
-        });
-        await reloadTriggers();
-      } catch (error) {
-        toastTriggerError("Failed to run trigger", error);
-      } finally {
-        setPendingAction(null);
       }
-    },
-    [
-      pendingAction,
-      reloadTriggers,
-      runProjectTriggerNow,
-      selectedExecutionLocation,
-      selectedProject,
-    ],
-  );
+      setDialogOpen(false);
+      await reloadTriggers();
+    } catch (error) {
+      setValidationError(error instanceof Error ? error.message : "Failed to save trigger.");
+    } finally {
+      setPendingAction(null);
+    }
+  };
 
-  const confirmDelete = useCallback(async () => {
+  const toggleTriggerEnabled = async (trigger: ProjectTrigger, enabled: boolean) => {
+    if (!selectedProject || pendingAction !== null) return;
+    setPendingAction(`toggle:${trigger.id}`);
+    try {
+      await updateProjectTrigger({
+        environmentId: selectedProject.environmentId,
+        trigger: {
+          projectId: selectedProject.id,
+          triggerId: trigger.id,
+          patch: mutationFromTrigger(
+            trigger,
+            trigger.executionLocation ?? selectedExecutionLocation,
+            enabled,
+          ),
+        },
+      });
+      await reloadTriggers();
+    } catch (error) {
+      toastTriggerError("Failed to update trigger", error);
+    } finally {
+      setPendingAction(null);
+    }
+  };
+
+  const runTrigger = async (trigger: ProjectTrigger) => {
+    if (!selectedProject || pendingAction !== null) return;
+    setPendingAction(`run:${trigger.id}`);
+    try {
+      await runProjectTriggerNow({
+        environmentId: selectedProject.environmentId,
+        trigger: {
+          projectId: selectedProject.id,
+          triggerId: trigger.id,
+        },
+      });
+      toastManager.add({
+        type: "success",
+        title: "Trigger started",
+        description: `${trigger.name} was sent to ${projectTriggerExecutionLocationLabel(
+          trigger.executionLocation ?? selectedExecutionLocation,
+        )}.`,
+      });
+      await reloadTriggers();
+    } catch (error) {
+      toastTriggerError("Failed to run trigger", error);
+    } finally {
+      setPendingAction(null);
+    }
+  };
+
+  const confirmDelete = async () => {
     if (!selectedProject || !deleteTarget || pendingAction !== null) return;
     setPendingAction(`delete:${deleteTarget.id}`);
     try {
@@ -459,39 +468,33 @@ export default function ProjectTriggersSection({
     } finally {
       setPendingAction(null);
     }
-  }, [deleteProjectTrigger, deleteTarget, pendingAction, reloadTriggers, selectedProject]);
+  };
 
-  const loadHistory = useCallback(
-    async (trigger: ProjectTrigger) => {
-      if (!selectedProject) return;
-      setHistoryState({ status: "loading" });
-      try {
-        const runs = await listProjectTriggerRuns({
-          environmentId: selectedProject.environmentId,
-          triggerId: trigger.id,
-          limit: 25,
-        });
-        setHistoryRuns(runs);
-        setHistoryState({ status: "loaded" });
-      } catch (error) {
-        setHistoryRuns([]);
-        setHistoryState({
-          status: "error",
-          message: error instanceof Error ? error.message : "Failed to load automation history.",
-        });
-      }
-    },
-    [listProjectTriggerRuns, selectedProject],
-  );
-
-  const openHistory = useCallback(
-    (trigger: ProjectTrigger) => {
-      setHistoryTarget(trigger);
+  const loadHistory = async (trigger: ProjectTrigger) => {
+    if (!selectedProject) return;
+    setHistoryState({ status: "loading" });
+    try {
+      const runs = await listProjectTriggerRuns({
+        environmentId: selectedProject.environmentId,
+        triggerId: trigger.id,
+        limit: 25,
+      });
+      setHistoryRuns(runs);
+      setHistoryState({ status: "loaded" });
+    } catch (error) {
       setHistoryRuns([]);
-      void loadHistory(trigger);
-    },
-    [loadHistory],
-  );
+      setHistoryState({
+        status: "error",
+        message: error instanceof Error ? error.message : "Failed to load automation history.",
+      });
+    }
+  };
+
+  const openHistory = (trigger: ProjectTrigger) => {
+    setHistoryTarget(trigger);
+    setHistoryRuns([]);
+    void loadHistory(trigger);
+  };
 
   return (
     <>
@@ -903,4 +906,8 @@ export default function ProjectTriggersSection({
       </AlertDialog>
     </>
   );
+}
+
+function projectTriggerLoadError(error: unknown) {
+  return error instanceof Error ? error.message : "Failed to load project triggers.";
 }

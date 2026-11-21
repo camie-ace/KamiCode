@@ -1,3 +1,5 @@
+import { msg } from "gt-i18n";
+import { detailFromError, translatableDetail } from "../errors/translatable.ts";
 import type { DesktopSshEnvironmentTarget, EnvironmentId } from "@t3tools/contracts";
 import { resolveRemotePairingTarget } from "@t3tools/shared/remote";
 import * as Context from "effect/Context";
@@ -38,17 +40,12 @@ export interface PairingConnectionInput {
   readonly pairingUrl?: string;
   readonly host?: string;
   readonly pairingCode?: string;
-  /**
-   * Set when adding a route to a saved machine: the pairing must reach this
-   * environment, or nothing is saved.
-   */
   readonly expectedEnvironmentId?: EnvironmentId;
 }
 
 export interface SshConnectionInput {
   readonly target: DesktopSshEnvironmentTarget;
   readonly label?: string;
-  /** Set when adding a route to a saved machine; see `PairingConnectionInput`. */
   readonly expectedEnvironmentId?: EnvironmentId;
 }
 
@@ -86,17 +83,14 @@ const resolvePairingTarget = Effect.fn("clientRuntime.connection.onboarding.reso
       catch: (cause) =>
         new ConnectionBlockedError({
           reason: "configuration",
-          detail: cause instanceof Error ? cause.message : "The pairing details are invalid.",
+          ...(cause instanceof Error
+            ? detailFromError(cause)
+            : translatableDetail(msg("The pairing details are invalid."))),
         }),
     });
   },
 );
 
-/**
- * One bearer route per address, so pairing over Tailscale adds a route next
- * to the LAN one instead of replacing it. Pairing the same address again
- * reuses the id and replaces that route.
- */
 function bearerConnectionId(environmentId: EnvironmentId, httpBaseUrl: string): string {
   return `bearer:${environmentId}:${new URL(httpBaseUrl).origin}`;
 }
@@ -104,7 +98,12 @@ function bearerConnectionId(environmentId: EnvironmentId, httpBaseUrl: string): 
 function differentMachineError(label: string) {
   return new ConnectionBlockedError({
     reason: "configuration",
-    detail: `That address reaches ${label}, a different machine. Add it as its own environment instead.`,
+    ...translatableDetail(
+      msg(
+        "That address reaches {host}, a different machine. Add it as its own environment instead.",
+        { host: label },
+      ),
+    ),
   });
 }
 
@@ -123,20 +122,8 @@ export const preparePairingRegistration = Effect.fn(
   ) {
     return yield* differentMachineError(descriptor.label);
   }
-  const compatibilityError = orchestrationProtocolCompatibilityError(descriptor);
-  // An outdated server is still saved so it can be updated from this client.
-  if (compatibilityError !== null && compatibilityError.serverUpdateRequired !== true) {
-    return yield* compatibilityError;
-  }
-  const access = yield* bootstrapRemoteBearerSession({
-    httpBaseUrl: target.httpBaseUrl,
-    credential: target.credential,
-    scopes: presentation.scopes,
-    clientMetadata: presentation.metadata,
-  }).pipe(Effect.mapError(mapRemoteEnvironmentError));
   const connectionId = bearerConnectionId(descriptor.environmentId, target.httpBaseUrl);
-
-  return new BearerConnectionRegistration({
+  const route = {
     target: new BearerConnectionTarget({
       environmentId: descriptor.environmentId,
       label: descriptor.label,
@@ -149,6 +136,25 @@ export const preparePairingRegistration = Effect.fn(
       httpBaseUrl: target.httpBaseUrl,
       wsBaseUrl: target.wsBaseUrl,
     }),
+  };
+  // The registry checks again under its lease; this early check keeps a refused code unspent.
+  if (input.expectedEnvironmentId === undefined) {
+    const registry = yield* EnvironmentRegistry.EnvironmentRegistry;
+    yield* registry.assertKnownAddress({ ...route, profile: Option.some(route.profile) });
+  }
+  const compatibilityError = orchestrationProtocolCompatibilityError(descriptor);
+  // An outdated server is still saved so it can be updated from this client.
+  if (compatibilityError !== null && compatibilityError.serverUpdateRequired !== true) {
+    return yield* compatibilityError;
+  }
+  const access = yield* bootstrapRemoteBearerSession({
+    httpBaseUrl: target.httpBaseUrl,
+    credential: target.credential,
+    clientMetadata: presentation.metadata,
+  }).pipe(Effect.mapError(mapRemoteEnvironmentError));
+
+  return new BearerConnectionRegistration({
+    ...route,
     credential: new BearerConnectionCredential({
       token: access.access_token,
     }),
@@ -160,7 +166,14 @@ const registerPairingConnection = Effect.fn(
 )(function* (input: PairingConnectionInput) {
   const registration = yield* preparePairingRegistration(input);
   const registry = yield* EnvironmentRegistry.EnvironmentRegistry;
-  yield* registry.register(registration);
+  const knownAddressOnly = input.expectedEnvironmentId === undefined;
+  if (!(yield* registry.register(registration, { knownAddressOnly }))) {
+    return registration.target.environmentId;
+  }
+  yield* registry.setCompatibility(registration.target.environmentId, null);
+  yield* registry
+    .setEnabled(registration.target.environmentId, true)
+    .pipe(Effect.catchTags({ EnvironmentNotRegisteredError: () => Effect.void }));
   return registration.target.environmentId;
 });
 
@@ -173,7 +186,6 @@ const updateBearerConnection = Effect.fn(
   const registry = yield* EnvironmentRegistry.EnvironmentRegistry;
   const credentials = yield* ConnectionCredentialStore.ConnectionCredentialStore;
   const saved = (yield* SubscriptionRef.get(registry.entries)).get(input.environmentId);
-  // Editing changes the environment's first direct route; others stay as saved.
   const route =
     saved === undefined
       ? undefined
@@ -210,7 +222,7 @@ export const prepareBearerConnectionUpdate = Effect.fn(
   ) {
     return yield* new ConnectionBlockedError({
       reason: "configuration",
-      detail: "Only saved bearer environments can be edited.",
+      ...translatableDetail(msg("Only saved bearer environments can be edited.")),
     });
   }
 
@@ -218,7 +230,7 @@ export const prepareBearerConnectionUpdate = Effect.fn(
   if (Option.isNone(credential) || !isBearerCredential(credential.value)) {
     return yield* new ConnectionBlockedError({
       reason: "authentication",
-      detail: "The saved bearer credential is unavailable.",
+      ...translatableDetail(msg("The saved bearer credential is unavailable.")),
     });
   }
 
@@ -226,7 +238,7 @@ export const prepareBearerConnectionUpdate = Effect.fn(
   if (label === "") {
     return yield* new ConnectionBlockedError({
       reason: "configuration",
-      detail: "Environment label cannot be empty.",
+      ...translatableDetail(msg("Environment label cannot be empty.")),
     });
   }
   const httpBaseUrl = yield* Effect.try({
@@ -234,7 +246,9 @@ export const prepareBearerConnectionUpdate = Effect.fn(
     catch: (cause) =>
       new ConnectionBlockedError({
         reason: "configuration",
-        detail: cause instanceof Error ? cause.message : "The environment URL is invalid.",
+        ...(cause instanceof Error
+          ? detailFromError(cause)
+          : translatableDetail(msg("The environment URL is invalid."))),
       }),
   });
   const connectionId = entry.target.connectionId;
@@ -260,8 +274,6 @@ export const prepareSshRegistration = Effect.fn(
 )(function* (input: SshConnectionInput) {
   const gateway = yield* ClientCapabilities.SshEnvironmentGateway;
   const provisioned = yield* gateway.provision(input.target, input.expectedEnvironmentId);
-  // One id per SSH target, so a second host or alias for the same machine
-  // adds a route instead of replacing the first.
   const connectionId = `ssh:${provisioned.environmentId}:${sshTargetKey(provisioned.bootstrap.target)}`;
   const label = input.label?.trim() || provisioned.label || provisioned.bootstrap.target.alias;
 
@@ -277,6 +289,7 @@ export const prepareSshRegistration = Effect.fn(
       label,
       target: provisioned.bootstrap.target,
     }),
+    credential: new BearerConnectionCredential({ token: provisioned.bearerToken }),
   });
 });
 
@@ -291,11 +304,13 @@ const registerSshConnection = Effect.fn(
     return yield* differentMachineError(registration.target.label);
   }
   const registry = yield* EnvironmentRegistry.EnvironmentRegistry;
-  yield* registry.register(registration);
+  yield* registry.register(registration, {
+    knownAddressOnly: input.expectedEnvironmentId === undefined,
+  });
   return registration.target.environmentId;
 });
 
-/** @public Service construction is part of the canonical Effect module API. */
+/** @public */
 export const make = Effect.gen(function* () {
   const registry = yield* EnvironmentRegistry.EnvironmentRegistry;
   const presentation = yield* ClientCapabilities.ClientPresentation;
@@ -303,23 +318,30 @@ export const make = Effect.gen(function* () {
   const ssh = yield* ClientCapabilities.SshEnvironmentGateway;
   const credentials = yield* ConnectionCredentialStore.ConnectionCredentialStore;
 
+  // Provisioning retains the delegated onboarding operation spans.
   return ConnectionOnboarding.of({
-    registerPairing: (input) =>
-      registerPairingConnection(input).pipe(
-        Effect.provideService(EnvironmentRegistry.EnvironmentRegistry, registry),
-        Effect.provideService(ClientCapabilities.ClientPresentation, presentation),
-        Effect.provideService(HttpClient.HttpClient, httpClient),
-      ),
-    registerSsh: (input) =>
-      registerSshConnection(input).pipe(
-        Effect.provideService(EnvironmentRegistry.EnvironmentRegistry, registry),
-        Effect.provideService(ClientCapabilities.SshEnvironmentGateway, ssh),
-      ),
-    updateBearer: (input) =>
-      updateBearerConnection(input).pipe(
-        Effect.provideService(EnvironmentRegistry.EnvironmentRegistry, registry),
-        Effect.provideService(ConnectionCredentialStore.ConnectionCredentialStore, credentials),
-      ),
+    registerPairing: Effect.fnUntraced(
+      function* (input) {
+        return yield* registerPairingConnection(input);
+      },
+      Effect.provideService(EnvironmentRegistry.EnvironmentRegistry, registry),
+      Effect.provideService(ClientCapabilities.ClientPresentation, presentation),
+      Effect.provideService(HttpClient.HttpClient, httpClient),
+    ),
+    registerSsh: Effect.fnUntraced(
+      function* (input) {
+        return yield* registerSshConnection(input);
+      },
+      Effect.provideService(EnvironmentRegistry.EnvironmentRegistry, registry),
+      Effect.provideService(ClientCapabilities.SshEnvironmentGateway, ssh),
+    ),
+    updateBearer: Effect.fnUntraced(
+      function* (input) {
+        return yield* updateBearerConnection(input);
+      },
+      Effect.provideService(EnvironmentRegistry.EnvironmentRegistry, registry),
+      Effect.provideService(ConnectionCredentialStore.ConnectionCredentialStore, credentials),
+    ),
   });
 });
 

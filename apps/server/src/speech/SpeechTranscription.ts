@@ -127,7 +127,7 @@ export class SpeechTranscription extends Context.Service<
   }
 >()("t3/speech/SpeechTranscription") {}
 
-export const makeWithEndpoint = (
+export const makeWithEndpoint = Effect.fn("execute")(function* (
   configuredEndpoint: URL | undefined,
   configuredPrompt?: string,
   configuredModel?: string,
@@ -136,78 +136,77 @@ export const makeWithEndpoint = (
     Redacted.Redacted<string> | undefined,
     SpeechTranscriptionServiceError
   > = Effect.succeed(apiKey),
-) =>
-  Effect.gen(function* () {
-    const fileSystem = yield* FileSystem.FileSystem;
-    const httpClient = yield* HttpClient.HttpClient;
-    const endpoint = configuredEndpoint ?? DEFAULT_TRANSCRIPTION_ENDPOINT;
-    const initialPrompt = normalizeInitialPrompt(configuredPrompt);
-    const model = normalizeModel(configuredModel) ?? DEFAULT_TRANSCRIPTION_MODEL;
+) {
+  const fileSystem = yield* FileSystem.FileSystem;
+  const httpClient = yield* HttpClient.HttpClient;
+  const endpoint = configuredEndpoint ?? DEFAULT_TRANSCRIPTION_ENDPOINT;
+  const initialPrompt = normalizeInitialPrompt(configuredPrompt);
+  const model = normalizeModel(configuredModel) ?? DEFAULT_TRANSCRIPTION_MODEL;
 
-    const transcribeRequest = Effect.fn("SpeechTranscription.transcribeRequest")(function* (
-      recording: SpeechRecording,
-    ) {
-      const requestApiKey = yield* resolveApiKey;
-      if (requestApiKey === undefined) {
-        return yield* new SpeechTranscriptionServiceError({ reason: "not_configured" });
-      }
+  const transcribeRequest = Effect.fn("SpeechTranscription.transcribeRequest")(function* (
+    recording: SpeechRecording,
+  ) {
+    const requestApiKey = yield* resolveApiKey;
+    if (requestApiKey === undefined) {
+      return yield* new SpeechTranscriptionServiceError({ reason: "not_configured" });
+    }
 
-      const contentType = baseContentType(recording.contentType);
-      const extension = supportedAudioTypes.get(contentType);
-      if (extension === undefined) {
-        return yield* new SpeechTranscriptionInputError({
-          reason: "unsupported_media_type",
-          contentType,
-        });
-      }
+    const contentType = baseContentType(recording.contentType);
+    const extension = supportedAudioTypes.get(contentType);
+    if (extension === undefined) {
+      return yield* new SpeechTranscriptionInputError({
+        reason: "unsupported_media_type",
+        contentType,
+      });
+    }
 
-      const bytes = yield* fileSystem
-        .readFile(recording.path)
-        .pipe(
-          Effect.mapError(
-            (cause) => new SpeechTranscriptionServiceError({ reason: "request_failed", cause }),
-          ),
-        );
-      if (bytes.byteLength === 0) {
-        return yield* new SpeechTranscriptionInputError({
-          reason: "empty_audio",
-          contentType,
-        });
-      }
-      if (!hasSupportedAudioSignature(bytes, contentType)) {
-        return yield* new SpeechTranscriptionInputError({
-          reason: "invalid_audio",
-          contentType,
-        });
-      }
-
-      const payload = new FormData();
-      payload.append("file", new Blob([bytes], { type: contentType }), `recording.${extension}`);
-      payload.append("response_format", "json");
-      payload.append("temperature", "0.0");
-      payload.append("model", model);
-      if (initialPrompt !== undefined) {
-        payload.append("prompt", initialPrompt);
-      }
-
-      const response = yield* HttpClientRequest.post(endpoint.toString()).pipe(
-        HttpClientRequest.bearerToken(Redacted.value(requestApiKey)),
-        HttpClientRequest.bodyFormData(payload),
-        httpClient.execute,
-        Effect.flatMap(HttpClientResponse.filterStatusOk),
-        Effect.flatMap(decodeTranscriptionResponse),
-        Effect.timeout(TRANSCRIPTION_TIMEOUT),
+    const bytes = yield* fileSystem
+      .readFile(recording.path)
+      .pipe(
         Effect.mapError(
           (cause) => new SpeechTranscriptionServiceError({ reason: "request_failed", cause }),
         ),
       );
-      return response.text.trim();
-    });
+    if (bytes.byteLength === 0) {
+      return yield* new SpeechTranscriptionInputError({
+        reason: "empty_audio",
+        contentType,
+      });
+    }
+    if (!hasSupportedAudioSignature(bytes, contentType)) {
+      return yield* new SpeechTranscriptionInputError({
+        reason: "invalid_audio",
+        contentType,
+      });
+    }
 
-    return SpeechTranscription.of({
-      transcribe: transcribeRequest,
-    });
+    const payload = new FormData();
+    payload.append("file", new Blob([bytes], { type: contentType }), `recording.${extension}`);
+    payload.append("response_format", "json");
+    payload.append("temperature", "0.0");
+    payload.append("model", model);
+    if (initialPrompt !== undefined) {
+      payload.append("prompt", initialPrompt);
+    }
+
+    const response = yield* HttpClientRequest.post(endpoint.toString()).pipe(
+      HttpClientRequest.bearerToken(Redacted.value(requestApiKey)),
+      HttpClientRequest.bodyFormData(payload),
+      httpClient.execute,
+      Effect.flatMap(HttpClientResponse.filterStatusOk),
+      Effect.flatMap(decodeTranscriptionResponse),
+      Effect.timeout(TRANSCRIPTION_TIMEOUT),
+      Effect.mapError(
+        (cause) => new SpeechTranscriptionServiceError({ reason: "request_failed", cause }),
+      ),
+    );
+    return response.text.trim();
   });
+
+  return SpeechTranscription.of({
+    transcribe: transcribeRequest,
+  });
+});
 
 const make = Effect.gen(function* () {
   const config = yield* ServerConfig.ServerConfig;

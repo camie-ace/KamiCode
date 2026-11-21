@@ -1,3 +1,4 @@
+import { type LucideIcon } from "lucide-react";
 import {
   AlertTriangleIcon,
   CameraIcon,
@@ -11,9 +12,8 @@ import {
   RefreshCwIcon,
   VideoIcon,
   XCircleIcon,
-  type LucideIcon,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 
 import {
   artifactFileName,
@@ -98,18 +98,6 @@ function statusLabel(status: TestHarnessRunStatus): string {
       return "BLOCKED";
     case "error":
       return "ERROR";
-  }
-}
-
-function statusIcon(status: TestHarnessRunStatus) {
-  switch (status) {
-    case "pass":
-      return CheckCircle2Icon;
-    case "fail":
-    case "error":
-      return XCircleIcon;
-    case "blocked":
-      return AlertTriangleIcon;
   }
 }
 
@@ -219,7 +207,6 @@ function ArtifactLink(props: {
 }
 
 function StatusPill({ status }: { readonly status: TestHarnessRunStatus }) {
-  const StatusIcon = statusIcon(status);
   return (
     <span
       className={cn(
@@ -227,7 +214,13 @@ function StatusPill({ status }: { readonly status: TestHarnessRunStatus }) {
         statusClass(status),
       )}
     >
-      <StatusIcon className="size-3" />
+      {status === "pass" ? (
+        <CheckCircle2Icon className="size-3" />
+      ) : status === "blocked" ? (
+        <AlertTriangleIcon className="size-3" />
+      ) : (
+        <XCircleIcon className="size-3" />
+      )}
       {statusLabel(status)}
     </span>
   );
@@ -454,6 +447,68 @@ function RunHistoryList({
   );
 }
 
+function useRunHistory(
+  projectId: string | undefined,
+  projectCwd: string | undefined,
+  visible: boolean,
+) {
+  const key = JSON.stringify([projectId, projectCwd]);
+  const [refreshNonce, setRefreshNonce] = useState(0);
+  const [result, setResult] = useState<{
+    key: string;
+    generation: number;
+    runs: ReadonlyArray<TestHarnessRunHistoryItem>;
+    error: string | null;
+    lastLoadedAt: string | null;
+  } | null>(null);
+  const current = result?.key === key ? result : null;
+  const enabled = Boolean(projectCwd) && (visible || current === null);
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- Fetch persisted test evidence; abort obsolete requests when the project or refresh generation changes.
+  useEffect(() => {
+    if (!enabled || !projectCwd) return;
+    const abortController = new AbortController();
+    void fetchTestHarnessRuns({ projectId, projectCwd, signal: abortController.signal }).then(
+      (response) => {
+        if (abortController.signal.aborted) return;
+        setResult({
+          key,
+          generation: refreshNonce,
+          runs: response.runs,
+          error: null,
+          lastLoadedAt: new Date().toISOString(),
+        });
+      },
+      (cause: unknown) => {
+        if (abortController.signal.aborted) return;
+        setResult((previous) => ({
+          key,
+          generation: refreshNonce,
+          runs: previous?.key === key ? previous.runs : [],
+          error: cause instanceof Error ? cause.message : String(cause),
+          lastLoadedAt: previous?.key === key ? previous.lastLoadedAt : null,
+        }));
+      },
+    );
+    return () => abortController.abort();
+  }, [enabled, key, projectId, projectCwd, refreshNonce]);
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- Refresh visible test evidence while external runs can still update it.
+  useEffect(() => {
+    if (!visible || !projectCwd) return;
+    const timer = window.setInterval(
+      () => setRefreshNonce((value) => value + 1),
+      RUN_HISTORY_REFRESH_INTERVAL_MS,
+    );
+    return () => window.clearInterval(timer);
+  }, [visible, projectCwd]);
+  return {
+    runs: current?.runs ?? [],
+    loading: enabled && current?.generation !== refreshNonce,
+    error: current?.error ?? null,
+    lastLoadedAt: current?.lastLoadedAt ?? null,
+    refresh: () => setRefreshNonce((value) => value + 1),
+  };
+}
+
 export default function TestHarnessRunsControl({
   projectId,
   projectCwd,
@@ -461,74 +516,15 @@ export default function TestHarnessRunsControl({
 }: TestHarnessRunsControlProps) {
   const [open, setOpen] = useState(false);
   const [sheetOpen, setSheetOpen] = useState(false);
-  const [runs, setRuns] = useState<ReadonlyArray<TestHarnessRunHistoryItem>>([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [lastLoadedAt, setLastLoadedAt] = useState<string | null>(null);
-  const [refreshNonce, setRefreshNonce] = useState(0);
-  const latestRun = runs[0];
   const visible = open || sheetOpen;
-  const shouldFetchRuns = Boolean(projectCwd) && (visible || runs.length === 0);
+  const { runs, loading, error, lastLoadedAt, refresh } = useRunHistory(
+    projectId,
+    projectCwd,
+    visible,
+  );
+  const latestRun = runs[0];
 
-  const refresh = useCallback(() => {
-    setRefreshNonce((value) => value + 1);
-  }, []);
-
-  useEffect(() => {
-    setRuns([]);
-    setError(null);
-    setLastLoadedAt(null);
-  }, [projectCwd, projectId]);
-
-  useEffect(() => {
-    if (!shouldFetchRuns || !projectCwd) {
-      return;
-    }
-
-    const abortController = new AbortController();
-    setLoading(true);
-    setError(null);
-    void fetchTestHarnessRuns({
-      projectId,
-      projectCwd,
-      signal: abortController.signal,
-    })
-      .then((response) => {
-        setRuns(response.runs);
-        setLastLoadedAt(new Date().toISOString());
-      })
-      .catch((cause: unknown) => {
-        if (abortController.signal.aborted) {
-          return;
-        }
-        setError(cause instanceof Error ? cause.message : String(cause));
-      })
-      .finally(() => {
-        if (!abortController.signal.aborted) {
-          setLoading(false);
-        }
-      });
-
-    return () => {
-      abortController.abort();
-    };
-  }, [shouldFetchRuns, projectCwd, projectId, refreshNonce]);
-
-  useEffect(() => {
-    if (!visible || !projectCwd) {
-      return;
-    }
-
-    const intervalId = window.setInterval(() => {
-      setRefreshNonce((value) => value + 1);
-    }, RUN_HISTORY_REFRESH_INTERVAL_MS);
-
-    return () => {
-      window.clearInterval(intervalId);
-    };
-  }, [visible, projectCwd]);
-
-  const headerMeta = useMemo(() => {
+  const headerMeta = (() => {
     if (loading && runs.length === 0) {
       return "Loading recent evidence...";
     }
@@ -536,7 +532,7 @@ export default function TestHarnessRunsControl({
       return `${statusLabel(latestRun.status)} latest - ${formatRunTime(latestRun.completedAt)}`;
     }
     return "Recent visible harness evidence for this project.";
-  }, [latestRun, loading, runs.length]);
+  })();
 
   const historyBody = (
     <>
@@ -675,7 +671,9 @@ export default function TestHarnessRunsControl({
               </div>
             </div>
 
-            <div className="max-h-[65vh] space-y-2 overflow-y-auto pr-1">{historyBody}</div>
+            <div className="max-h-[65vh] space-y-2 overflow-y-auto scrollbar-gutter-both pr-1">
+              {historyBody}
+            </div>
           </div>
         </PopoverPopup>
       </Popover>
@@ -740,72 +738,14 @@ export function TestHarnessRunsPanel({
   projectId,
   projectCwd,
 }: Pick<TestHarnessRunsControlProps, "projectId" | "projectCwd">) {
-  const [runs, setRuns] = useState<ReadonlyArray<TestHarnessRunHistoryItem>>([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [lastLoadedAt, setLastLoadedAt] = useState<string | null>(null);
-  const [refreshNonce, setRefreshNonce] = useState(0);
+  const { runs, loading, error, lastLoadedAt, refresh } = useRunHistory(
+    projectId,
+    projectCwd,
+    true,
+  );
   const latestRun = runs[0];
 
-  const refresh = useCallback(() => {
-    setRefreshNonce((value) => value + 1);
-  }, []);
-
-  useEffect(() => {
-    setRuns([]);
-    setError(null);
-    setLastLoadedAt(null);
-  }, [projectCwd, projectId]);
-
-  useEffect(() => {
-    if (!projectCwd) {
-      return;
-    }
-
-    const abortController = new AbortController();
-    setLoading(true);
-    setError(null);
-    void fetchTestHarnessRuns({
-      projectId,
-      projectCwd,
-      signal: abortController.signal,
-    })
-      .then((response) => {
-        setRuns(response.runs);
-        setLastLoadedAt(new Date().toISOString());
-      })
-      .catch((cause: unknown) => {
-        if (abortController.signal.aborted) {
-          return;
-        }
-        setError(cause instanceof Error ? cause.message : String(cause));
-      })
-      .finally(() => {
-        if (!abortController.signal.aborted) {
-          setLoading(false);
-        }
-      });
-
-    return () => {
-      abortController.abort();
-    };
-  }, [projectCwd, projectId, refreshNonce]);
-
-  useEffect(() => {
-    if (!projectCwd) {
-      return;
-    }
-
-    const intervalId = window.setInterval(() => {
-      setRefreshNonce((value) => value + 1);
-    }, RUN_HISTORY_REFRESH_INTERVAL_MS);
-
-    return () => {
-      window.clearInterval(intervalId);
-    };
-  }, [projectCwd]);
-
-  const headerMeta = useMemo(() => {
+  const headerMeta = (() => {
     if (!projectCwd) {
       return "Select a project to inspect visible test evidence.";
     }
@@ -816,7 +756,7 @@ export function TestHarnessRunsPanel({
       return `${statusLabel(latestRun.status)} latest - ${formatRunTime(latestRun.completedAt)}`;
     }
     return "Recent visible harness evidence for this project.";
-  }, [latestRun, loading, projectCwd, runs.length]);
+  })();
 
   return (
     <div className="flex min-h-0 flex-1 flex-col bg-background">
@@ -843,7 +783,7 @@ export function TestHarnessRunsPanel({
           </Button>
         </div>
       </div>
-      <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-3">
+      <div className="min-h-0 flex-1 space-y-3 overflow-y-auto scrollbar-gutter-both p-3">
         {!projectCwd ? (
           <div className="rounded-xl border border-dashed border-border/70 bg-muted/15 p-5 text-center">
             <div className="mx-auto flex size-9 items-center justify-center rounded-lg border border-border/70 bg-background/70 text-muted-foreground">

@@ -1,5 +1,4 @@
 import type { AssetResource, EnvironmentId, ScopedThreadRef } from "@t3tools/contracts";
-import { useMemo } from "react";
 
 import { useAssetUrls } from "~/assets/assetUrls";
 import type { MediaArtifact } from "~/mediaArtifacts";
@@ -64,15 +63,9 @@ export function useDisplayableMediaArtifacts<T extends MediaArtifact>(input: {
   readonly threadRef: ScopedThreadRef | null;
   readonly artifacts: ReadonlyArray<T>;
 }): ReadonlyArray<T> {
-  const targets = useMemo(
-    () => mediaArtifactAssetResolutionTargets(input.artifacts, input.threadRef),
-    [input.artifacts, input.threadRef],
-  );
-  const resources = useMemo(() => targets.map((target) => target.resource), [targets]);
+  const targets = (() => mediaArtifactAssetResolutionTargets(input.artifacts, input.threadRef))();
+  const resources = (() => targets.map((target) => target.resource))();
   const urls = useAssetUrls(input.environmentId, resources);
 
-  return useMemo(
-    () => applyResolvedMediaArtifactUrls(input.artifacts, targets, urls),
-    [input.artifacts, targets, urls],
-  );
+  return (() => applyResolvedMediaArtifactUrls(input.artifacts, targets, urls))();
 }

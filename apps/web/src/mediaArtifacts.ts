@@ -305,56 +305,6 @@ export function extractMediaArtifactsFromText(text: string): MediaArtifact[] {
   return artifacts;
 }
 
-function normalizeMediaArtifact(value: unknown): MediaArtifact | null {
-  const record = asRecord(value);
-  if (!record) return null;
-
-  const path = asNonEmptyString(record.path);
-  const url = asNonEmptyString(record.url);
-  const previewUrl = asNonEmptyString(record.previewUrl);
-  const target = url ?? path ?? previewUrl;
-  if (!target) return null;
-
-  const extension = asNonEmptyString(record.extension) ?? extensionFromMediaTarget(target);
-  if (!extension || !isSupportedMediaExtension(extension)) return null;
-
-  const source = normalizeMediaArtifactSource(
-    record.source,
-    sourceForMediaTarget(target, Boolean(url)),
-  );
-  const id = asNonEmptyString(record.id) ?? `media:${source}:${target}`;
-  const title = asNonEmptyString(record.title) ?? basenameFromMediaTarget(target);
-  const sizeBytes = asNonNegativeFiniteNumber(record.sizeBytes);
-  const width = asNonNegativeFiniteNumber(record.width);
-  const height = asNonNegativeFiniteNumber(record.height);
-  const durationMs = asNonNegativeFiniteNumber(record.durationMs);
-  const score = asFiniteNumber(record.score);
-  const modifiedAt = asNonEmptyString(record.modifiedAt);
-
-  return {
-    id,
-    kind: mediaKindForExtension(extension),
-    source,
-    title,
-    extension: normalizeMediaExtension(extension),
-    ...(url ? { url } : path ? { path } : {}),
-    ...(previewUrl ? { previewUrl } : {}),
-    ...(sizeBytes !== null ? { sizeBytes } : {}),
-    ...(width !== null ? { width } : {}),
-    ...(height !== null ? { height } : {}),
-    ...(durationMs !== null ? { durationMs } : {}),
-    ...(modifiedAt ? { modifiedAt } : {}),
-    ...(score !== null ? { score } : {}),
-  };
-}
-
-function normalizeMediaArtifacts(value: unknown): MediaArtifact[] {
-  if (!Array.isArray(value)) return [];
-  return value
-    .map((entry) => normalizeMediaArtifact(entry))
-    .filter((entry): entry is MediaArtifact => entry !== null);
-}
-
 export function normalizeLocalMediaSearchResultSet(
   value: unknown,
 ): LocalMediaSearchResultSet | null {
@@ -698,10 +648,6 @@ export function mediaArtifactReference(artifact: MediaArtifact): string {
   return artifact.path ?? artifact.url ?? artifact.previewUrl ?? artifact.title;
 }
 
-function isImageLikeMediaArtifact(artifact: Pick<MediaArtifact, "kind">): boolean {
-  return artifact.kind === "image" || artifact.kind === "gif";
-}
-
 function isGeneratedMediaTarget(target: string): boolean {
   const normalized = target.replace(/\\/g, "/").toLowerCase();
   return /(?:^|\/)\.kamicode\/generated-media(?:\/|$)/u.test(normalized);
@@ -736,19 +682,6 @@ export function mediaArtifactExternalTarget(
   }
 
   return null;
-}
-
-function localFilesystemPathToFileUrl(target: string): string {
-  const trimmed = target.trim();
-  if (/^file:\/\//i.test(trimmed)) {
-    return trimmed;
-  }
-
-  const normalized = trimmed.replace(/\\/g, "/");
-  if (/^\/\/[^/]+\/[^/]+/.test(normalized)) {
-    return `file:${encodePathname(normalized)}`;
-  }
-  return `file://${encodePathname(normalized.startsWith("/") ? normalized : `/${normalized}`)}`;
 }
 
 export function mediaArtifactDedupKey(artifact: MediaArtifact): string {
@@ -856,14 +789,6 @@ function isSafeBrowserExternalUrl(target: string): boolean {
   } catch {
     return false;
   }
-}
-
-function encodePathname(pathname: string): string {
-  const encoded = pathname
-    .split("/")
-    .map((part) => encodeURIComponent(part))
-    .join("/");
-  return encoded.replace(/^\/([A-Za-z])%3A\//u, "/$1:/");
 }
 
 function normalizeProsePrefixedTarget(target: string): string {
@@ -1352,15 +1277,6 @@ function asNonEmptyString(value: unknown): string | null {
   if (typeof value !== "string") return null;
   const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed : null;
-}
-
-function asFiniteNumber(value: unknown): number | null {
-  return typeof value === "number" && Number.isFinite(value) ? value : null;
-}
-
-function asNonNegativeFiniteNumber(value: unknown): number | null {
-  const number = asFiniteNumber(value);
-  return number !== null && number >= 0 ? number : null;
 }
 
 function normalizeMediaArtifactSource(

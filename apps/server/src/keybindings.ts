@@ -1,14 +1,5 @@
-/**
- * Keybindings - Keybinding configuration service definitions.
- *
- * Owns parsing, validation, merge, and persistence of user keybinding
- * configuration consumed by the server runtime.
- *
- * @module Keybindings
- */
 import {
   KeybindingRule,
-  KeybindingsConfig,
   KeybindingsConfigError,
   KeybindingShortcut,
   KeybindingWhenNode,
@@ -17,7 +8,7 @@ import {
   ResolvedKeybindingsConfig,
   type ServerRemoveKeybindingInput,
   type ServerUpsertKeybindingInput,
-  type ServerConfigIssue,
+  ServerConfigIssue,
 } from "@t3tools/contracts";
 import * as Array from "effect/Array";
 import * as Cache from "effect/Cache";
@@ -41,7 +32,7 @@ import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 import * as Semaphore from "effect/Semaphore";
 import * as ServerConfig from "./config.ts";
-import { writeFileStringAtomically } from "./atomicWrite.ts";
+import { writeFileStringAtomically } from "@t3tools/shared/atomicWrite";
 import { fromJsonStringPretty, fromLenientJson } from "@t3tools/shared/schemaJson";
 import {
   DEFAULT_KEYBINDINGS,
@@ -49,14 +40,8 @@ import {
   compileResolvedKeybindingRule,
   compileResolvedKeybindingsConfig,
   parseKeybindingShortcut,
+  parseKeybindingWhenExpression,
 } from "@t3tools/shared/keybindings";
-
-export {
-  DEFAULT_KEYBINDINGS,
-  compileResolvedKeybindingRule,
-  compileResolvedKeybindingsConfig,
-  parseKeybindingShortcut,
-};
 
 export const ResolvedKeybindingFromConfig = KeybindingRule.pipe(
   Schema.decodeTo(
@@ -74,41 +59,41 @@ export const ResolvedKeybindingFromConfig = KeybindingRule.pipe(
           Effect.map((resolved) => resolved),
         ),
 
-      encode: (resolved) =>
-        Effect.gen(function* () {
-          const key = encodeShortcut(resolved.shortcut);
-          if (!key) {
-            return yield* Effect.fail(
-              new SchemaIssue.InvalidValue({
-                message: "Resolved shortcut cannot be encoded to key string",
-              }),
-            );
-          }
+      encode: Effect.fn("keybindings.encode")(function* (resolved) {
+        const key = encodeShortcut(resolved.shortcut);
+        if (!key) {
+          return yield* Effect.fail(
+            new SchemaIssue.InvalidValue({
+              message: "Resolved shortcut cannot be encoded to key string",
+            }),
+          );
+        }
 
-          const when = resolved.whenAst ? encodeWhenAst(resolved.whenAst) : undefined;
-          return {
-            key,
-            command: resolved.command,
-            when,
-          };
-        }),
+        const when = resolved.whenAst ? encodeWhenAst(resolved.whenAst) : undefined;
+        return {
+          key,
+          command: resolved.command,
+          when,
+        };
+      }),
     }),
   ),
 );
 
-function isSameKeybindingRule(left: KeybindingRule, right: KeybindingRule): boolean {
-  return (
-    left.command === right.command &&
-    left.key === right.key &&
-    (left.when ?? undefined) === (right.when ?? undefined)
-  );
+// Settings sends replace/remove targets in its own normalized spelling, which can differ from a
+// hand-edited file ("cmd+k" vs "meta+k", "a&&b" vs "a && b"), so compare parsed forms.
+function keybindingRuleIdentity(rule: KeybindingRule): string {
+  const shortcut = parseKeybindingShortcut(rule.key);
+  const key = (shortcut && encodeShortcut(shortcut)) ?? rule.key;
+  if (rule.when === undefined) return JSON.stringify([rule.command, key, null]);
+  const whenAst = parseKeybindingWhenExpression(rule.when);
+  return JSON.stringify([rule.command, key, whenAst ? encodeWhenAst(whenAst) : rule.when]);
 }
 
-// Default rules added to a command after startup sync had already persisted
-// that command. Backfill skips commands a config already has, so startup adds
-// each rule once per config, only next to the untouched earlier default
-// (`alongside`), and records its id. Customized commands and later removals
-// stay as the user set them.
+function isSameKeybindingRule(left: KeybindingRule, right: KeybindingRule): boolean {
+  return keybindingRuleIdentity(left) === keybindingRuleIdentity(right);
+}
+
 const LATE_DEFAULT_KEYBINDINGS: ReadonlyArray<{
   readonly id: string;
   readonly alongside: KeybindingRule;
@@ -144,7 +129,7 @@ function hasSameShortcutContext(left: KeybindingRule, right: KeybindingRule): bo
   return leftContext === rightContext;
 }
 
-function keybindingRuleFromUpsertInput(input: ServerUpsertKeybindingInput): KeybindingRule {
+function keybindingRuleFromInput(input: ServerRemoveKeybindingInput): KeybindingRule {
   return input.when === undefined
     ? { key: input.key, command: input.command }
     : { key: input.key, command: input.command, when: input.when };
@@ -155,12 +140,6 @@ function replaceTargetFromUpsertInput(input: ServerUpsertKeybindingInput): Keybi
   return input.replace.when === undefined
     ? { key: input.replace.key, command: input.replace.command }
     : { key: input.replace.key, command: input.replace.command, when: input.replace.when };
-}
-
-function keybindingRuleFromRemoveInput(input: ServerRemoveKeybindingInput): KeybindingRule {
-  return input.when === undefined
-    ? { key: input.key, command: input.command }
-    : { key: input.key, command: input.command, when: input.when };
 }
 
 function encodeShortcut(shortcut: KeybindingShortcut): string | null {
@@ -190,16 +169,23 @@ function encodeWhenAst(node: KeybindingWhenNode): string {
 }
 
 const RawKeybindingsEntries = fromLenientJson(Schema.Array(Schema.Unknown));
-const KeybindingsConfigPrettyJson = fromJsonStringPretty(KeybindingsConfig);
+const RawKeybindingsEntriesPrettyJson = fromJsonStringPretty(Schema.Array(Schema.Unknown));
 const decodeKeybindingRuleExit = Schema.decodeUnknownExit(KeybindingRule);
 const decodeResolvedKeybindingFromConfigExit = Schema.decodeExit(ResolvedKeybindingFromConfig);
 const decodeRawKeybindingsEntriesExit = Schema.decodeUnknownExit(RawKeybindingsEntries);
-const encodeKeybindingsConfigPrettyJson = Schema.encodeEffect(KeybindingsConfigPrettyJson);
+const encodeRawKeybindingsEntriesPrettyJson = Schema.encodeEffect(RawKeybindingsEntriesPrettyJson);
 
 export interface KeybindingsConfigState {
   readonly keybindings: ResolvedKeybindingsConfig;
   readonly issues: readonly ServerConfigIssue[];
 }
+
+const isSameKeybindingsConfigState = Schema.toEquivalence(
+  Schema.Struct({
+    keybindings: ResolvedKeybindingsConfig,
+    issues: Schema.Array(ServerConfigIssue),
+  }),
+);
 
 export interface KeybindingsChangeEvent {
   readonly keybindings: ResolvedKeybindingsConfig;
@@ -226,65 +212,41 @@ function invalidEntryIssue(index: number, detail: string): ServerConfigIssue {
   };
 }
 
-/**
- * Keybindings - Service tag for keybinding configuration operations.
- */
 export class Keybindings extends Context.Service<
   Keybindings,
   {
-    /**
-     * Start the keybindings runtime and attach file watching.
-     *
-     * Safe to call multiple times. The first successful call establishes the
-     * runtime; later calls await the same startup.
-     */
     readonly start: Effect.Effect<void, KeybindingsConfigError>;
 
-    /**
-     * Await keybindings runtime readiness.
-     *
-     * Readiness means the config directory exists, the watcher is attached, the
-     * startup sync has completed, and the current snapshot has been loaded.
-     */
     readonly ready: Effect.Effect<void, KeybindingsConfigError>;
 
-    /**
-     * Ensure the on-disk keybindings file exists and includes all default
-     * commands so newly-added defaults are backfilled on startup.
-     */
     readonly syncDefaultKeybindingsOnStartup: Effect.Effect<void, KeybindingsConfigError>;
 
-    /**
-     * Load runtime keybindings state along with non-fatal configuration issues.
-     */
     readonly loadConfigState: Effect.Effect<KeybindingsConfigState, KeybindingsConfigError>;
 
-    /**
-     * Read the latest keybindings snapshot from cache/disk.
-     */
     readonly getSnapshot: Effect.Effect<KeybindingsConfigState, KeybindingsConfigError>;
 
-    /**
-     * Stream of keybindings config change events.
-     */
     readonly streamChanges: Stream.Stream<KeybindingsChangeEvent>;
 
+    readonly revalidate: Effect.Effect<void, KeybindingsConfigError>;
+
+    /** Acquire before reading a snapshot to buffer changes until the stream starts. */
+    readonly subscribeChanges: Effect.Effect<
+      Stream.Stream<KeybindingsChangeEvent>,
+      never,
+      Scope.Scope
+    >;
+
     /**
-     * Upsert a keybinding rule and persist the resulting configuration.
-     *
      * Writes config atomically and enforces the max rule count by truncating
      * oldest entries when needed.
      */
     readonly upsertKeybindingRule: (
       input: ServerUpsertKeybindingInput,
-    ) => Effect.Effect<ResolvedKeybindingsConfig, KeybindingsConfigError>;
+    ) => Effect.Effect<KeybindingsConfigState, KeybindingsConfigError>;
 
-    /**
-     * Remove a single persisted keybinding rule by exact key/command/when match.
-     */
     readonly removeKeybindingRule: (
       input: ServerRemoveKeybindingInput,
-    ) => Effect.Effect<ResolvedKeybindingsConfig, KeybindingsConfigError>;
+    ) => Effect.Effect<KeybindingsConfigState, KeybindingsConfigError>;
   }
 >()("t3/keybindings") {}
 
@@ -295,12 +257,17 @@ const make = Effect.gen(function* () {
   const upsertSemaphore = yield* Semaphore.make(1);
   const resolvedConfigCacheKey = "resolved" as const;
   const changesPubSub = yield* PubSub.unbounded<KeybindingsChangeEvent>();
+  const lastEmittedStateRef = yield* Ref.make<KeybindingsConfigState | null>(null);
   const startedRef = yield* Ref.make(false);
   const startedDeferred = yield* Deferred.make<void, KeybindingsConfigError>();
   const watcherScope = yield* Scope.make("sequential");
   yield* Effect.addFinalizer(() => Scope.close(watcherScope, Exit.void));
-  const emitChange = (configState: KeybindingsConfigState) =>
-    PubSub.publish(changesPubSub, configState).pipe(Effect.asVoid);
+  const emitChange = Effect.fn("keybindings.emitChange")(function* (
+    configState: KeybindingsConfigState,
+  ) {
+    yield* Ref.set(lastEmittedStateRef, configState);
+    yield* PubSub.publish(changesPubSub, configState);
+  });
 
   const readConfigExists = fs.exists(keybindingsConfigPath).pipe(
     Effect.mapError(
@@ -324,8 +291,10 @@ const make = Effect.gen(function* () {
     ),
   );
 
+  // Entries this build cannot decode, such as a typo or a command from a newer
+  // build, are written back unchanged so editing another shortcut keeps them.
   const loadWritableCustomKeybindingsConfig = Effect.fn(function* (): Effect.fn.Return<
-    readonly KeybindingRule[],
+    ReadonlyArray<{ readonly value: unknown; readonly rule: KeybindingRule | null }>,
     KeybindingsConfigError
   > {
     if (!(yield* readConfigExists)) {
@@ -344,29 +313,16 @@ const make = Effect.gen(function* () {
       ),
     );
 
-    return yield* Effect.forEach(rawConfig, (entry) =>
-      Effect.gen(function* () {
-        const decodedRule = decodeKeybindingRuleExit(entry);
-        if (decodedRule._tag === "Failure") {
-          yield* Effect.logWarning("ignoring invalid keybinding entry", {
-            path: keybindingsConfigPath,
-            entry,
-            error: Cause.pretty(decodedRule.cause),
-          });
-          return null;
-        }
-        const resolved = decodeResolvedKeybindingFromConfigExit(decodedRule.value);
-        if (resolved._tag === "Failure") {
-          yield* Effect.logWarning("ignoring invalid keybinding entry", {
-            path: keybindingsConfigPath,
-            entry,
-            error: Cause.pretty(resolved.cause),
-          });
-          return null;
-        }
-        return decodedRule.value;
-      }),
-    ).pipe(Effect.map(Array.filter(Predicate.isNotNull)));
+    return rawConfig.map((entry) => {
+      const decodedRule = decodeKeybindingRuleExit(entry);
+      if (
+        decodedRule._tag === "Success" &&
+        decodeResolvedKeybindingFromConfigExit(decodedRule.value)._tag === "Success"
+      ) {
+        return { value: decodedRule.value, rule: decodedRule.value };
+      }
+      return { value: entry, rule: null };
+    });
   });
 
   const loadRuntimeCustomKeybindingsConfig = Effect.fn(function* (): Effect.fn.Return<
@@ -424,7 +380,6 @@ const make = Effect.gen(function* () {
     return { keybindings, issues };
   });
 
-  // One applied migration id per line, next to the config file.
   const appliedMigrationsPath = path.join(
     path.dirname(keybindingsConfigPath),
     "keybindings-migrations",
@@ -450,8 +405,8 @@ const make = Effect.gen(function* () {
       ),
     );
 
-  const writeConfigAtomically = (rules: readonly KeybindingRule[]) => {
-    return encodeKeybindingsConfigPrettyJson(rules).pipe(
+  const writeConfigAtomically = (entries: ReadonlyArray<unknown>) => {
+    return encodeRawKeybindingsEntriesPrettyJson(entries).pipe(
       Effect.map((encoded) => `${encoded}\n`),
       Effect.flatMap((encoded) =>
         writeFileStringAtomically({
@@ -480,7 +435,6 @@ const make = Effect.gen(function* () {
     })),
   );
 
-  // A failed read is not kept: the next read retries instead of replaying the failure.
   const resolvedConfigCache = yield* Cache.makeWith<
     typeof resolvedConfigCacheKey,
     KeybindingsConfigState,
@@ -492,11 +446,25 @@ const make = Effect.gen(function* () {
 
   const loadConfigStateFromCacheOrDisk = Cache.get(resolvedConfigCache, resolvedConfigCacheKey);
 
+  const reloadConfigState = Effect.gen(function* () {
+    yield* Cache.invalidate(resolvedConfigCache, resolvedConfigCacheKey);
+    return yield* loadConfigStateFromCacheOrDisk;
+  });
+
+  const reloadAndEmit = Effect.gen(function* () {
+    const configState = yield* reloadConfigState;
+    yield* emitChange(configState);
+    return configState;
+  });
+
   const revalidateAndEmit = upsertSemaphore.withPermits(1)(
     Effect.gen(function* () {
-      yield* Cache.invalidate(resolvedConfigCache, resolvedConfigCacheKey);
-      const configState = yield* loadConfigStateFromCacheOrDisk;
-      yield* emitChange(configState);
+      const previousState = yield* Ref.get(lastEmittedStateRef);
+      const configState = yield* reloadConfigState;
+      if (!(previousState && isSameKeybindingsConfigState(previousState, configState))) {
+        yield* emitChange(configState);
+      }
+      return configState;
     }),
   );
 
@@ -558,12 +526,14 @@ const make = Effect.gen(function* () {
         }
         missingDefaults.push(defaultRule);
       }
-      // The loop above backfills whole missing commands. Late defaults join
-      // an untouched earlier default, when their shortcut is still free.
       for (const { alongside, rule } of pendingLateDefaults) {
         if (
           customConfig.some((entry) => isSameKeybindingRule(entry, alongside)) &&
-          !customConfig.some((entry) => hasSameShortcutContext(entry, rule))
+          !customConfig.some(
+            (entry) =>
+              hasSameShortcutContext(entry, rule) ||
+              isSameKeybindingRule(entry, { ...rule, when: "false" }),
+          )
         ) {
           missingDefaults.push(rule);
         }
@@ -592,8 +562,7 @@ const make = Effect.gen(function* () {
         }
       }
 
-      // Startup backfill must never evict persisted user rules: append only
-      // the defaults that fit and skip the rest.
+      // Put defaults before persisted rules so custom shortcuts win overlapping conditions.
       const availableSlots = Math.max(0, MAX_KEYBINDINGS_COUNT - customConfig.length);
       const defaultsToAppend = missingDefaults.slice(0, availableSlots);
       const skippedDefaults = missingDefaults.slice(availableSlots);
@@ -605,9 +574,8 @@ const make = Effect.gen(function* () {
         });
       }
       if (defaultsToAppend.length > 0) {
-        yield* writeConfigAtomically([...customConfig, ...defaultsToAppend]);
+        yield* writeConfigAtomically([...defaultsToAppend, ...customConfig]);
       }
-      // A late default skipped at max entries stays pending for a later start.
       const settledLateDefaults = pendingLateDefaults.filter(
         (late) => !skippedDefaults.includes(late.rule),
       );
@@ -639,9 +607,7 @@ const make = Effect.gen(function* () {
 
     const revalidateAndEmitSafely = revalidateAndEmit.pipe(Effect.ignoreCause({ log: true }));
 
-    // Debounce watch events so the file is fully written before we read it.
-    // Editors emit multiple events per save (truncate, write, rename) and
-    // `fs.watch` can fire before the content has been flushed to disk.
+    // Saves emit multiple events; fs.watch may fire before content is flushed.
     const debouncedKeybindingsEvents = fs.watch(keybindingsConfigDir).pipe(
       Stream.filter((event) => {
         return (
@@ -671,7 +637,8 @@ const make = Effect.gen(function* () {
       yield* startWatcher;
       yield* syncDefaultKeybindingsOnStartup;
       yield* Cache.invalidate(resolvedConfigCache, resolvedConfigCacheKey);
-      yield* loadConfigStateFromCacheOrDisk;
+      const initialState = yield* loadConfigStateFromCacheOrDisk;
+      yield* Ref.set(lastEmittedStateRef, initialState);
     });
 
     const startupExit = yield* Effect.exit(startup);
@@ -689,70 +656,61 @@ const make = Effect.gen(function* () {
     syncDefaultKeybindingsOnStartup,
     loadConfigState: loadConfigStateFromCacheOrDisk,
     getSnapshot: loadConfigStateFromCacheOrDisk,
+    revalidate: revalidateAndEmit,
     get streamChanges() {
       return Stream.fromPubSub(changesPubSub);
+    },
+    get subscribeChanges() {
+      return PubSub.subscribe(changesPubSub).pipe(Effect.map(Stream.fromSubscription));
     },
     upsertKeybindingRule: (input) =>
       upsertSemaphore.withPermits(1)(
         Effect.gen(function* () {
           const customConfig = yield* loadWritableCustomKeybindingsConfig();
-          const rule = keybindingRuleFromUpsertInput(input);
+          const rule = keybindingRuleFromInput(input);
           const replaceTarget = replaceTargetFromUpsertInput(input);
+          const siblingDefaults =
+            rule.when === "false" &&
+            replaceTarget &&
+            !customConfig.some(({ rule: entry }) => entry?.command === rule.command)
+              ? DEFAULT_KEYBINDINGS.filter(
+                  (entry) =>
+                    entry.command === rule.command && !isSameKeybindingRule(entry, replaceTarget),
+                ).map((entry) => ({ value: entry, rule: entry }))
+              : [];
+          const retainedConfig = customConfig.filter(({ rule: entry }) => {
+            if (!entry) return true;
+            return (
+              (!replaceTarget || !isSameKeybindingRule(entry, replaceTarget)) &&
+              !isSameKeybindingRule(entry, rule)
+            );
+          });
+          const availableSlots = MAX_KEYBINDINGS_COUNT - siblingDefaults.length - 1;
           const nextConfig = [
-            ...customConfig.filter((entry) => {
-              if (replaceTarget) {
-                return (
-                  !isSameKeybindingRule(entry, replaceTarget) && !isSameKeybindingRule(entry, rule)
-                );
-              }
-              return !isSameKeybindingRule(entry, rule);
-            }),
-            rule,
+            ...siblingDefaults,
+            ...retainedConfig.slice(-availableSlots),
+            { value: rule, rule },
           ];
-          const cappedConfig =
-            nextConfig.length > MAX_KEYBINDINGS_COUNT
-              ? nextConfig.slice(-MAX_KEYBINDINGS_COUNT)
-              : nextConfig;
-          if (nextConfig.length > MAX_KEYBINDINGS_COUNT) {
+          if (retainedConfig.length > availableSlots) {
             yield* Effect.logWarning("truncating keybindings config to max entries", {
               path: keybindingsConfigPath,
               maxEntries: MAX_KEYBINDINGS_COUNT,
             });
           }
-          yield* writeConfigAtomically(cappedConfig);
-          const nextResolved = mergeWithDefaultKeybindings(
-            compileResolvedKeybindingsConfig(cappedConfig),
-          );
-          yield* Cache.set(resolvedConfigCache, resolvedConfigCacheKey, {
-            keybindings: nextResolved,
-            issues: [],
-          });
-          yield* emitChange({
-            keybindings: nextResolved,
-            issues: [],
-          });
-          return nextResolved;
+          yield* writeConfigAtomically(nextConfig.map(({ value }) => value));
+          return yield* reloadAndEmit;
         }),
       ),
     removeKeybindingRule: (input) =>
       upsertSemaphore.withPermits(1)(
         Effect.gen(function* () {
           const customConfig = yield* loadWritableCustomKeybindingsConfig();
-          const target = keybindingRuleFromRemoveInput(input);
-          const nextConfig = customConfig.filter((entry) => !isSameKeybindingRule(entry, target));
-          yield* writeConfigAtomically(nextConfig);
-          const nextResolved = mergeWithDefaultKeybindings(
-            compileResolvedKeybindingsConfig(nextConfig),
+          const target = keybindingRuleFromInput(input);
+          const nextConfig = customConfig.filter(
+            ({ rule }) => !rule || !isSameKeybindingRule(rule, target),
           );
-          yield* Cache.set(resolvedConfigCache, resolvedConfigCacheKey, {
-            keybindings: nextResolved,
-            issues: [],
-          });
-          yield* emitChange({
-            keybindings: nextResolved,
-            issues: [],
-          });
-          return nextResolved;
+          yield* writeConfigAtomically(nextConfig.map(({ value }) => value));
+          return yield* reloadAndEmit;
         }),
       ),
   } satisfies Keybindings["Service"];

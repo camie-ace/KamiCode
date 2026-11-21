@@ -36,20 +36,8 @@ const DOCUMENT_EXTENSIONS = new Set(
   WORKSPACE_DOCUMENT_FILE_EXTENSIONS.map((extension) => extension.replace(/^\./u, "")),
 );
 const BROWSER_DOCUMENT_EXTENSIONS = new Set(["htm", "html", "pdf"]);
-const MEDIA_EXTENSIONS = new Set([
-  ...IMAGE_EXTENSIONS,
-  ...GIF_EXTENSIONS,
-  ...VIDEO_EXTENSIONS,
-  ...BROWSER_DOCUMENT_EXTENSIONS,
-  ...DOCUMENT_EXTENSIONS,
-]);
-
 function normalizeMediaExtension(extension: string): string {
   return extension.toLowerCase().replace(/^\./, "");
-}
-
-function isSupportedMediaExtension(extension: string): boolean {
-  return MEDIA_EXTENSIONS.has(normalizeMediaExtension(extension));
 }
 
 function mediaKindForExtension(extension: string): MediaArtifactKind {
@@ -126,32 +114,4 @@ export function assistantMessageReferencesAssetPath(text: string, targetPath: st
   }
 
   return false;
-}
-
-export function createMediaArtifact(input: {
-  readonly id: string;
-  readonly target: string;
-  readonly source: MediaArtifactSource;
-  readonly title: string;
-  readonly extension: string;
-  readonly sizeBytes?: number;
-  readonly modifiedAt?: string;
-  readonly score?: number;
-}): MediaArtifact | null {
-  const extension = normalizeMediaExtension(input.extension);
-  if (!isSupportedMediaExtension(extension)) {
-    return null;
-  }
-
-  return {
-    id: input.id,
-    kind: mediaKindForExtension(extension),
-    source: input.source,
-    title: input.title,
-    path: input.target,
-    extension,
-    ...(input.sizeBytes !== undefined ? { sizeBytes: input.sizeBytes } : {}),
-    ...(input.modifiedAt !== undefined ? { modifiedAt: input.modifiedAt } : {}),
-    ...(input.score !== undefined ? { score: input.score } : {}),
-  };
 }

@@ -19,7 +19,7 @@ import {
 } from "@t3tools/client-runtime/state/runtime";
 import { useNavigate } from "@tanstack/react-router";
 import { ChevronDownIcon, ClockIcon, PlayIcon, RefreshCwIcon, SettingsIcon } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 
 import { usePrimaryEnvironmentId } from "../state/environments";
 import { projectTriggerEnvironment } from "../state/projectTriggers";
@@ -131,7 +131,7 @@ function projectRefKey(input: ProjectTriggersSettingsFocus): string {
   return `${input.environmentId}:${input.projectId}`;
 }
 
-export function writeProjectTriggersSettingsFocus(input: ProjectTriggersSettingsFocus): void {
+function writeProjectTriggersSettingsFocus(input: ProjectTriggersSettingsFocus): void {
   if (typeof window === "undefined") return;
   window.sessionStorage.setItem(PROJECT_TRIGGERS_SETTINGS_FOCUS_KEY, JSON.stringify(input));
 }
@@ -276,138 +276,135 @@ export function useProjectTriggerActions() {
     reportFailure: false,
   });
 
-  return useMemo(
-    () => ({
-      listProjectTriggers: async (input: {
-        readonly environmentId: EnvironmentId;
-        readonly projectId: ProjectId;
-      }): Promise<readonly ProjectTrigger[]> => {
-        const result = unwrapCommandResult(
-          await listCommand({
-            environmentId: input.environmentId,
-            input: { projectId: input.projectId },
-          }),
-        );
-        return result.triggers.map(toProjectTrigger);
-      },
-      createProjectTrigger: async (input: {
-        readonly environmentId: EnvironmentId;
-        readonly trigger: ProjectTriggerCreateInput;
-      }): Promise<ProjectTrigger> => {
-        const result = unwrapCommandResult(
-          await createCommand({
-            environmentId: input.environmentId,
-            input: {
-              projectId: input.trigger.projectId,
-              name: input.trigger.name,
-              description: input.trigger.description,
-              enabled: input.trigger.enabled,
-              schedule: toContractSchedule(input.trigger),
-              threadTemplate: toContractThreadTemplate(input.trigger),
+  return (() => ({
+    listProjectTriggers: async (input: {
+      readonly environmentId: EnvironmentId;
+      readonly projectId: ProjectId;
+    }): Promise<readonly ProjectTrigger[]> => {
+      const result = unwrapCommandResult(
+        await listCommand({
+          environmentId: input.environmentId,
+          input: { projectId: input.projectId },
+        }),
+      );
+      return result.triggers.map(toProjectTrigger);
+    },
+    createProjectTrigger: async (input: {
+      readonly environmentId: EnvironmentId;
+      readonly trigger: ProjectTriggerCreateInput;
+    }): Promise<ProjectTrigger> => {
+      const result = unwrapCommandResult(
+        await createCommand({
+          environmentId: input.environmentId,
+          input: {
+            projectId: input.trigger.projectId,
+            name: input.trigger.name,
+            description: input.trigger.description,
+            enabled: input.trigger.enabled,
+            schedule: toContractSchedule(input.trigger),
+            threadTemplate: toContractThreadTemplate(input.trigger),
+          },
+        }),
+      );
+      return toProjectTrigger(result.trigger);
+    },
+    createThreadRecurringSchedule: async (input: {
+      readonly environmentId: EnvironmentId;
+      readonly schedule: ThreadRecurringScheduleCreateInput;
+    }): Promise<ProjectTrigger> => {
+      const schedule = input.schedule;
+      const result = unwrapCommandResult(
+        await createCommand({
+          environmentId: input.environmentId,
+          input: {
+            projectId: schedule.projectId,
+            name: schedule.name,
+            description: "Recurring message",
+            enabled: true,
+            target: { kind: "thread", threadId: schedule.threadId },
+            firstRunAt: schedule.firstRunAt,
+            schedule: {
+              kind: "cron",
+              expression: schedule.schedule,
+              timezone: schedule.timezone,
+              runtime: toRuntimeTarget(schedule.executionLocation),
             },
-          }),
-        );
-        return toProjectTrigger(result.trigger);
-      },
-      createThreadRecurringSchedule: async (input: {
-        readonly environmentId: EnvironmentId;
-        readonly schedule: ThreadRecurringScheduleCreateInput;
-      }): Promise<ProjectTrigger> => {
-        const schedule = input.schedule;
-        const result = unwrapCommandResult(
-          await createCommand({
-            environmentId: input.environmentId,
-            input: {
-              projectId: schedule.projectId,
-              name: schedule.name,
-              description: "Recurring message",
-              enabled: true,
-              target: { kind: "thread", threadId: schedule.threadId },
-              firstRunAt: schedule.firstRunAt,
-              schedule: {
-                kind: "cron",
-                expression: schedule.schedule,
-                timezone: schedule.timezone,
-                runtime: toRuntimeTarget(schedule.executionLocation),
-              },
-              threadTemplate: {
-                prompt: schedule.prompt,
-                attachments: [...schedule.attachments],
-                modelSelection: schedule.modelSelection,
-                runtimeMode: schedule.runtimeMode,
-                interactionMode: schedule.interactionMode,
-              },
+            threadTemplate: {
+              prompt: schedule.prompt,
+              attachments: [...schedule.attachments],
+              modelSelection: schedule.modelSelection,
+              runtimeMode: schedule.runtimeMode,
+              interactionMode: schedule.interactionMode,
             },
-          }),
-        );
-        return toProjectTrigger(result.trigger);
-      },
-      updateProjectTrigger: async (input: {
-        readonly environmentId: EnvironmentId;
-        readonly trigger: ProjectTriggerUpdateInput;
-      }): Promise<ProjectTrigger> => {
-        const result = unwrapCommandResult(
-          await updateCommand({
-            environmentId: input.environmentId,
-            input: {
-              triggerId: input.trigger.triggerId,
-              patch: {
-                name: input.trigger.patch.name,
-                description: input.trigger.patch.description,
-                enabled: input.trigger.patch.enabled,
-                schedule: toContractSchedule(input.trigger.patch),
-                threadTemplate: toContractThreadTemplate(input.trigger.patch),
-              },
+          },
+        }),
+      );
+      return toProjectTrigger(result.trigger);
+    },
+    updateProjectTrigger: async (input: {
+      readonly environmentId: EnvironmentId;
+      readonly trigger: ProjectTriggerUpdateInput;
+    }): Promise<ProjectTrigger> => {
+      const result = unwrapCommandResult(
+        await updateCommand({
+          environmentId: input.environmentId,
+          input: {
+            triggerId: input.trigger.triggerId,
+            patch: {
+              name: input.trigger.patch.name,
+              description: input.trigger.patch.description,
+              enabled: input.trigger.patch.enabled,
+              schedule: toContractSchedule(input.trigger.patch),
+              threadTemplate: toContractThreadTemplate(input.trigger.patch),
             },
-          }),
-        );
-        return toProjectTrigger(result.trigger);
-      },
-      deleteProjectTrigger: async (input: {
-        readonly environmentId: EnvironmentId;
-        readonly trigger: ProjectTriggerDeleteInput;
-      }): Promise<void> => {
-        unwrapCommandResult(
-          await deleteCommand({
-            environmentId: input.environmentId,
-            input: { triggerId: input.trigger.triggerId },
-          }),
-        );
-      },
-      runProjectTriggerNow: async (input: {
-        readonly environmentId: EnvironmentId;
-        readonly trigger: ProjectTriggerRunNowInput;
-      }): Promise<ProjectTriggerRunNowResult> => {
-        const result = unwrapCommandResult(
-          await fireCommand({
-            environmentId: input.environmentId,
-            input: { triggerId: input.trigger.triggerId },
-          }),
-        );
-        return {
-          runId: result.run.id,
-          startedAt: result.run.startedAt ?? result.run.createdAt,
-        };
-      },
-      listProjectTriggerRuns: async (input: {
-        readonly environmentId: EnvironmentId;
-        readonly triggerId: ProjectTriggerId;
-        readonly limit?: number;
-      }): Promise<readonly ProjectTriggerRunRecord[]> => {
-        const result = unwrapCommandResult(
-          await listRunsCommand({
-            environmentId: input.environmentId,
-            input: {
-              triggerId: input.triggerId,
-              ...(input.limit === undefined ? {} : { limit: input.limit }),
-            },
-          }),
-        );
-        return result.runs;
-      },
-    }),
-    [createCommand, deleteCommand, fireCommand, listCommand, listRunsCommand, updateCommand],
-  );
+          },
+        }),
+      );
+      return toProjectTrigger(result.trigger);
+    },
+    deleteProjectTrigger: async (input: {
+      readonly environmentId: EnvironmentId;
+      readonly trigger: ProjectTriggerDeleteInput;
+    }): Promise<void> => {
+      unwrapCommandResult(
+        await deleteCommand({
+          environmentId: input.environmentId,
+          input: { triggerId: input.trigger.triggerId },
+        }),
+      );
+    },
+    runProjectTriggerNow: async (input: {
+      readonly environmentId: EnvironmentId;
+      readonly trigger: ProjectTriggerRunNowInput;
+    }): Promise<ProjectTriggerRunNowResult> => {
+      const result = unwrapCommandResult(
+        await fireCommand({
+          environmentId: input.environmentId,
+          input: { triggerId: input.trigger.triggerId },
+        }),
+      );
+      return {
+        runId: result.run.id,
+        startedAt: result.run.startedAt ?? result.run.createdAt,
+      };
+    },
+    listProjectTriggerRuns: async (input: {
+      readonly environmentId: EnvironmentId;
+      readonly triggerId: ProjectTriggerId;
+      readonly limit?: number;
+    }): Promise<readonly ProjectTriggerRunRecord[]> => {
+      const result = unwrapCommandResult(
+        await listRunsCommand({
+          environmentId: input.environmentId,
+          input: {
+            triggerId: input.triggerId,
+            ...(input.limit === undefined ? {} : { limit: input.limit }),
+          },
+        }),
+      );
+      return result.runs;
+    },
+  }))();
 }
 
 export function formatProjectTriggerFireTime(value: string | null | undefined): string {
@@ -457,7 +454,7 @@ interface ProjectTriggersControlProps {
   readonly onOpenProjectSettings?: (() => void) | undefined;
 }
 
-export default function ProjectTriggersControl({
+function ProjectTriggersControlContent({
   environmentId,
   projectId,
   projectName,
@@ -467,7 +464,7 @@ export default function ProjectTriggersControl({
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const { listProjectTriggers, runProjectTriggerNow } = useProjectTriggerActions();
   const [triggers, setTriggers] = useState<readonly ProjectTrigger[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
+  const [isLoading, setIsLoading] = useState(Boolean(projectId));
   const [loadError, setLoadError] = useState<string | null>(null);
   const [pendingTriggerId, setPendingTriggerId] = useState<ProjectTriggerId | null>(null);
   const executionLocation = resolveProjectTriggerExecutionLocation(
@@ -476,7 +473,7 @@ export default function ProjectTriggersControl({
   );
   const executionLocationLabel = projectTriggerExecutionLocationLabel(executionLocation);
 
-  const refreshTriggers = useCallback(async () => {
+  const refreshTriggers = async () => {
     if (!projectId) {
       setTriggers([]);
       return;
@@ -493,23 +490,39 @@ export default function ProjectTriggersControl({
       );
     } catch (error) {
       setTriggers([]);
-      setLoadError(error instanceof Error ? error.message : "Failed to load project triggers.");
+      setLoadError(projectTriggerLoadFailure(error));
     } finally {
       setIsLoading(false);
     }
-  }, [environmentId, listProjectTriggers, projectId]);
+  };
 
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- Fetch this destination's triggers and discard responses after its keyed control unmounts.
   useEffect(() => {
-    void refreshTriggers();
-  }, [refreshTriggers]);
+    if (!projectId) return;
+    let canceled = false;
+    void listProjectTriggers({ environmentId, projectId }).then(
+      (next) => {
+        if (canceled) return;
+        setTriggers(
+          [...next].filter((trigger) => trigger.targetThreadId === null).sort(compareNextFire),
+        );
+        setIsLoading(false);
+      },
+      (error: unknown) => {
+        if (canceled) return;
+        setLoadError(projectTriggerLoadFailure(error));
+        setIsLoading(false);
+      },
+    );
+    return () => {
+      canceled = true;
+    };
+  }, [environmentId, projectId, listProjectTriggers]);
 
-  const primaryTrigger = useMemo(
-    () =>
-      triggers.find((trigger) => trigger.enabled) ?? (triggers.length > 0 ? triggers[0]! : null),
-    [triggers],
-  );
+  const primaryTrigger = (() =>
+    triggers.find((trigger) => trigger.enabled) ?? (triggers.length > 0 ? triggers[0]! : null))();
 
-  const openSettings = useCallback(() => {
+  const openSettings = () => {
     if (projectId) {
       writeProjectTriggersSettingsFocus({ environmentId, projectId });
     }
@@ -521,44 +534,33 @@ export default function ProjectTriggersControl({
       to: "/settings/projects",
       search: { project: undefined, machine: undefined },
     });
-  }, [environmentId, navigate, onOpenProjectSettings, projectId]);
+  };
 
-  const runTrigger = useCallback(
-    async (trigger: ProjectTrigger) => {
-      if (!projectId || pendingTriggerId) return;
-      setPendingTriggerId(trigger.id);
-      try {
-        await runProjectTriggerNow({
-          environmentId,
-          trigger: {
-            projectId,
-            triggerId: trigger.id,
-          },
-        });
-        toastManager.add({
-          type: "success",
-          title: "Trigger started",
-          description: `${trigger.name} was sent to ${projectTriggerExecutionLocationLabel(
-            trigger.executionLocation ?? executionLocation,
-          )}.`,
-        });
-        void refreshTriggers();
-      } catch (error) {
-        toastTriggerError("Failed to run trigger", error);
-      } finally {
-        setPendingTriggerId(null);
-      }
-    },
-    [
-      environmentId,
-      executionLocation,
-      executionLocationLabel,
-      pendingTriggerId,
-      projectId,
-      refreshTriggers,
-      runProjectTriggerNow,
-    ],
-  );
+  const runTrigger = async (trigger: ProjectTrigger) => {
+    if (!projectId || pendingTriggerId) return;
+    setPendingTriggerId(trigger.id);
+    try {
+      await runProjectTriggerNow({
+        environmentId,
+        trigger: {
+          projectId,
+          triggerId: trigger.id,
+        },
+      });
+      toastManager.add({
+        type: "success",
+        title: "Trigger started",
+        description: `${trigger.name} was sent to ${projectTriggerExecutionLocationLabel(
+          trigger.executionLocation ?? executionLocation,
+        )}.`,
+      });
+      void refreshTriggers();
+    } catch (error) {
+      toastTriggerError("Failed to run trigger", error);
+    } finally {
+      setPendingTriggerId(null);
+    }
+  };
 
   if (!projectId) {
     return null;
@@ -666,4 +668,17 @@ export default function ProjectTriggersControl({
       </Menu>
     </Group>
   );
+}
+
+export default function ProjectTriggersControl(props: ProjectTriggersControlProps) {
+  return (
+    <ProjectTriggersControlContent
+      key={JSON.stringify([props.environmentId, props.projectId])}
+      {...props}
+    />
+  );
+}
+
+function projectTriggerLoadFailure(error: unknown) {
+  return error instanceof Error ? error.message : "Failed to load project triggers.";
 }

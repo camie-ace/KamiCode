@@ -5,6 +5,8 @@ import {
   type PreviewStreamHostSetup,
   type PreviewViewportSetting,
 } from "@t3tools/contracts";
+import { mFallback, msg } from "gt-i18n";
+import type { MFunctionType } from "gt-i18n/types";
 
 export const PREVIEW_STREAM_BASE_PATH = "/api/preview-stream";
 
@@ -26,19 +28,23 @@ export interface PreviewStreamControl {
   };
 }
 
-/** Status line shown above a viewer; `null` control means the socket is not connected. */
-export const previewStreamControlLabel = (control: PreviewStreamControl | null): string =>
+export const previewStreamControlLabel = (
+  control: PreviewStreamControl | null,
+  resolve: MFunctionType = mFallback,
+): string =>
   !control
-    ? "Connecting..."
+    ? resolve(msg("Connecting..."))
     : !control.canOperate
-      ? "Read-only"
+      ? resolve(msg("Read-only"))
       : control.controller === "you"
-        ? "You have control"
+        ? resolve(msg("You have control"))
         : control.controller === "agent"
-          ? "Agent has control"
+          ? resolve(msg("Agent has control"))
           : control.controller === "another-viewer"
-            ? "Another viewer has control"
-            : "Watching";
+            ? resolve(msg("Another viewer has control"))
+            : resolve(
+                msg("Watching", { $context: "preview stream status, viewing without control" }),
+              );
 
 const isPreviewStreamDialog = (value: unknown): value is PreviewStreamControl["dialog"] =>
   value === null ||
@@ -50,7 +56,7 @@ const isPreviewStreamDialog = (value: unknown): value is PreviewStreamControl["d
     "defaultValue" in value &&
     typeof value.defaultValue === "string");
 
-/** Client-to-server messages. Coordinates are page CSS px. */
+/** Coordinates are page CSS px. */
 export type PreviewStreamInput =
   | { readonly type: "takeControl" }
   | { readonly type: "releaseControl" }
@@ -91,7 +97,7 @@ export type PreviewStreamInput =
   | { readonly type: "navigate"; readonly url: string }
   | { readonly type: "history"; readonly delta: -1 | 1 }
   | { readonly type: "reload"; readonly ignoreCache?: boolean }
-  /** Asks whether the page point takes text. Touch viewers send it on touch start. */
+  | { readonly type: "stopLoading" }
   | { readonly type: "probe"; readonly x: number; readonly y: number };
 
 export interface PreviewStreamDownload {
@@ -103,11 +109,9 @@ export interface PreviewStreamDownload {
 
 export interface PreviewStreamFileChooser {
   readonly multiple: boolean;
-  /** The input's `accept` attribute, ready for a local `<input type=file>`. */
   readonly accept: string;
   /** POST multipart `file` parts here; an empty form cancels the page's picker. */
   readonly uploadUrl: string;
-  /** Cookie sessions must send credentials with the upload. */
   readonly credentials: boolean;
 }
 
@@ -124,7 +128,6 @@ const previewStreamUploadUrl = (
     target.access,
   );
 
-/** Sends files to a page's open picker. Rejects when the server refuses them. */
 export async function uploadPreviewStreamFiles(
   chooser: PreviewStreamFileChooser,
   files: ReadonlyArray<Blob & { readonly name?: string }>,
@@ -139,7 +142,7 @@ export async function uploadPreviewStreamFiles(
   if (!response.ok) throw new Error((await response.text()) || "The upload was refused.");
 }
 
-const previewStreamDownloadUrl = (
+export const previewStreamDownloadUrl = (
   target: Pick<PreviewStreamTarget, "access" | "threadId" | "tabId">,
   id: string,
 ): string =>
@@ -152,14 +155,12 @@ const previewStreamDownloadUrl = (
     target.access,
   );
 
-/** Answer to a `probe`, echoing its point. */
 export interface PreviewStreamProbe {
   readonly x: number;
   readonly y: number;
   readonly editable: boolean;
 }
 
-/** Where an agent action is about to land, in page CSS pixels. */
 export interface PreviewStreamPointer {
   readonly phase: "move" | "click";
   readonly x: number;
@@ -167,7 +168,6 @@ export interface PreviewStreamPointer {
   readonly sequence: number;
 }
 
-/** CDP modifier bitmask: Alt 1, Ctrl 2, Meta 4, Shift 8. */
 export const previewStreamModifiers = (event: {
   readonly altKey: boolean;
   readonly ctrlKey: boolean;
@@ -191,31 +191,23 @@ export interface PreviewStreamTarget {
 }
 
 export interface PreviewStreamEvents {
-  /** One complete JPEG frame. */
   readonly onFrame: (jpeg: ArrayBuffer) => void;
   readonly onViewport: (viewport: PreviewStreamViewport) => void;
   readonly onProbe?: (probe: PreviewStreamProbe) => void;
-  /** The agent's cursor moved to, or clicked at, a page point. */
   readonly onPointer?: (pointer: PreviewStreamPointer) => void;
   readonly onControl?: (control: PreviewStreamControl) => void;
-  /** Text the page just copied or cut while this viewer had control. */
   readonly onClipboard?: (text: string) => void;
-  /** A file the page downloaded while this viewer had control. */
   readonly onDownload?: (download: PreviewStreamDownload) => void;
-  /** The page opened a file picker (`null` once answered or replaced). */
+  readonly onPopup?: (tabId: string) => void;
   readonly onFileChooser?: (chooser: PreviewStreamFileChooser | null) => void;
-  /** Input sent while disconnected is dropped. */
   readonly onConnectedChange: (connected: boolean) => void;
   /** The upgrade was refused; refresh access and start a new client. */
   readonly onUnauthorized: () => void;
-  /** The tab was closed on the server. The client has stopped. */
   readonly onGone?: () => void;
-  /** The server's browser cannot start until its host is set up. The client has stopped. */
   readonly onHostSetup?: (setup: PreviewStreamHostSetup) => void;
 }
 
 export interface PreviewStreamClient {
-  /** False when the socket is not open and the message was dropped. */
   readonly send: (input: PreviewStreamInput) => boolean;
   readonly stop: () => void;
 }
@@ -239,6 +231,13 @@ export function createPreviewStreamClient(
   let failures = 0;
   let control: PreviewStreamControl | null = null;
   let fileChooser: string | null = null;
+
+  // The server re-offers a picker still open, under a new id, when this viewer reattaches.
+  const withdrawFileChooser = () => {
+    if (fileChooser === null) return;
+    fileChooser = null;
+    events.onFileChooser?.(null);
+  };
 
   const connect = () => {
     if (stopped) return;
@@ -286,6 +285,7 @@ export function createPreviewStreamClient(
         accept,
         phase,
         sequence,
+        tabId,
       } = message as Record<string, unknown>;
       if (
         type === "fileChooser" &&
@@ -312,6 +312,8 @@ export function createPreviewStreamClient(
         typeof sequence === "number"
       ) {
         events.onPointer?.({ phase, x, y, sequence });
+      } else if (type === "popup" && typeof tabId === "string") {
+        events.onPopup?.(tabId);
       } else if (type === "clipboard" && typeof text === "string") {
         events.onClipboard?.(text);
       } else if (
@@ -359,6 +361,7 @@ export function createPreviewStreamClient(
       if (socket !== ws) return;
       socket = null;
       control = null;
+      withdrawFileChooser();
       if (opened) events.onConnectedChange(false);
       if (stopped) return;
       if (event.code === 4404) {
@@ -398,6 +401,7 @@ export function createPreviewStreamClient(
       const ws = socket;
       socket = null;
       control = null;
+      withdrawFileChooser();
       ws?.close();
     },
   };
@@ -433,7 +437,6 @@ export function createPreviewFramePainter(
         bitmap.close();
         onPainted?.();
       })
-      // A frame that fails to decode is skipped; the next one repaints.
       .catch(() => undefined)
       .finally(() => {
         decoding = false;
@@ -455,7 +458,6 @@ export function createPreviewFramePainter(
   };
 }
 
-/** A malformed reason still stops the viewer and offers the usual command. */
 const decodeHostSetup = (reason: string): PreviewStreamHostSetup => {
   try {
     const value = JSON.parse(reason) as Partial<PreviewStreamHostSetup>;
@@ -469,8 +471,18 @@ const decodeHostSetup = (reason: string): PreviewStreamHostSetup => {
   return { need: "sandbox", command: "sudo npx t3 browser setup" };
 };
 
-/** What a viewer tells the person; `command` is shown beside it, ready to copy. */
-export const previewStreamHostSetupMessage = (setup: PreviewStreamHostSetup) =>
+export const previewStreamHostSetupMessage = (
+  setup: PreviewStreamHostSetup,
+  resolve: MFunctionType = mFallback,
+) =>
   setup.need === "sandbox"
-    ? "This server's host blocks the sandbox its browser runs in. Run this once on the host, then try again:"
-    : "This server's host is missing libraries its browser needs. Run this once on the host, then try again:";
+    ? resolve(
+        msg(
+          "This server's host blocks the sandbox its browser runs in. Run this once on the host, then try again:",
+        ),
+      )
+    : resolve(
+        msg(
+          "This server's host is missing libraries its browser needs. Run this once on the host, then try again:",
+        ),
+      );

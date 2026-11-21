@@ -1,3 +1,4 @@
+import * as Schema from "effect/Schema";
 import type {
   AppendSharedThreadMessageInput,
   ClaimSharedProjectInviteInput,
@@ -34,18 +35,21 @@ import type {
   UpsertSharedSshCredentialInput,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
-import * as Data from "effect/Data";
+
 import type * as Effect from "effect/Effect";
 
 import type { EventSinkV2 } from "../../orchestration-v2/EventSink.ts";
 import type * as ProcessRunner from "../../processRunner.ts";
 import type { AuthenticatedUser } from "../../userAuth/Services/UserAuth.ts";
 
-export class SharedProjectsError extends Data.TaggedError("SharedProjectsError")<{
-  readonly message: string;
-  readonly status?: 400 | 401 | 403 | 404 | 409 | 500;
-  readonly cause?: unknown;
-}> {}
+export class SharedProjectsError extends Schema.TaggedError<SharedProjectsError>()(
+  "SharedProjectsError",
+  {
+    message: Schema.String,
+    status: Schema.optionalKey(Schema.Literals([400, 401, 403, 404, 409, 500])),
+    cause: Schema.optionalKey(Schema.Unknown),
+  },
+) {}
 
 export interface SharedProjectsShape {
   readonly listForUser: (

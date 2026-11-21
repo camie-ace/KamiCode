@@ -1,5 +1,3 @@
-import * as NodeOS from "node:os";
-
 import type { ServerProviderSkill } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -9,35 +7,23 @@ import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import { parse as parseYamlDocument } from "yaml";
 
-/**
- * The home directory the agent expands `~` against, matching Python's
- * `os.path.expanduser` in the launch environment T3 hands the process:
- * `USERPROFILE`, then `HOMEDRIVE` + `HOMEPATH`, on Windows and `HOME`
- * elsewhere. Values are used verbatim; a path may contain spaces.
- */
+/** Match Python os.path.expanduser: USERPROFILE, then HOMEDRIVE+HOMEPATH on Windows; HOME elsewhere. */
 export function resolveAntigravityUserHome(
   platform: NodeJS.Platform,
   environment: NodeJS.ProcessEnv,
+  home: string,
 ): string {
   if (platform === "win32") {
     if (environment.USERPROFILE) return environment.USERPROFILE;
     if (environment.HOMEDRIVE && environment.HOMEPATH) {
       return `${environment.HOMEDRIVE}${environment.HOMEPATH}`;
     }
-    return NodeOS.homedir();
+    return home;
   }
-  return environment.HOME || NodeOS.homedir();
+  return environment.HOME || home;
 }
 
-/**
- * The agent's two user-global skill directories under a Gemini home, in
- * native precedence order: `config/skills` is shared with the Antigravity IDE
- * and CLI, and `antigravity-cli/skills` is where the `agy` CLI installs
- * skills. The agent resolves both under `GEMINI_HOME`, which T3 points at a
- * private profile, so the profile links these back to the user's `~/.gemini`.
- * `~/.agents/skills` is not read: the agent only treats `.agents/skills` as a
- * project directory.
- */
+/** Link private GEMINI_HOME skills to ~/.gemini; ~/.agents/skills is ignored because .agents/skills is project-only. */
 export function antigravityUserSkillDirectories(
   path: Path.Path,
   geminiHome: string,
@@ -51,6 +37,8 @@ export function antigravityUserSkillDirectories(
 const MAX_SKILL_BYTES = 1_000_000;
 const MAX_SCAN_BYTES = 8_000_000;
 const MAX_SCAN_ENTRIES = 10_000;
+// Typical frontmatter fits in one chunk, so most skills cost about this much of the scan budget.
+const SKILL_READ_CHUNK_BYTES = 1024;
 
 const SkillFrontmatter = Schema.Struct({
   name: Schema.optional(Schema.NullOr(Schema.String)),
@@ -120,8 +108,29 @@ function skillPathSortKey(entry: string) {
   );
 }
 
-/** Read only regular skill files, with a byte limit that applies during the read. */
-const readSkill = Effect.fn("readAntigravitySkill")(function* (
+const DASH = 0x2d;
+
+/** Finds the byte offset after the second `---`, as parseSkillFrontmatter's indexOf calls do. */
+function makeFrontmatterEndFinder() {
+  let bytesSeen = 0;
+  let dashes = 0;
+  let markers = 0;
+  return (chunk: Uint8Array) => {
+    for (const byte of chunk) {
+      bytesSeen += 1;
+      dashes = byte === DASH ? dashes + 1 : 0;
+      if (dashes === 3) {
+        dashes = 0;
+        markers += 1;
+        if (markers === 2) return bytesSeen;
+      }
+    }
+    return undefined;
+  };
+}
+
+/** Reads through the frontmatter only, so skill bodies do not spend the scan budget. */
+const readSkillFrontmatter = Effect.fn("readAntigravitySkill")(function* (
   skillPath: string,
   budget: ScanBudget,
 ) {
@@ -130,33 +139,30 @@ const readSkill = Effect.fn("readAntigravitySkill")(function* (
   if (info?.type !== "File") return undefined;
 
   const byteLimit = Math.min(MAX_SKILL_BYTES, budget.remainingBytes);
-  if (info.size > BigInt(byteLimit)) {
-    return yield* new AntigravitySkillsProbeError({
-      reason: "scan-budget-exhausted",
-      path: skillPath,
-    });
-  }
+  const findFrontmatterEnd = makeFrontmatterEndFinder();
+  let frontmatterEnd: number | undefined;
   const chunks = yield* readIfPresent(
-    fileSystem.stream(skillPath, { bytesToRead: byteLimit + 1 }).pipe(Stream.runCollect),
+    fileSystem
+      .stream(skillPath, { bytesToRead: byteLimit + 1, chunkSize: SKILL_READ_CHUNK_BYTES })
+      .pipe(
+        Stream.takeUntil((chunk) => (frontmatterEnd = findFrontmatterEnd(chunk)) !== undefined),
+        Stream.runCollect,
+      ),
     skillPath,
   );
   if (chunks === undefined) return undefined;
   const bytes = Buffer.concat(chunks);
-  if (bytes.byteLength > byteLimit) {
+  budget.remainingBytes -= bytes.byteLength;
+  if ((frontmatterEnd ?? bytes.byteLength) > byteLimit) {
     return yield* new AntigravitySkillsProbeError({
       reason: "scan-budget-exhausted",
       path: skillPath,
     });
   }
-  budget.remainingBytes -= bytes.byteLength;
-  return bytes.toString("utf8");
+  return bytes.toString("utf8", 0, frontmatterEnd);
 });
 
-/**
- * Match the official ACP's explicit skill roots. The first valid same-name skill
- * wins. Each root loads its own SKILL.md or those in its immediate subdirectories.
- * Read failures remain typed so workspace snapshots do not cache partial results.
- */
+/** Keep read errors typed so workspace snapshots cannot cache partial results. */
 export const discoverAntigravitySkills = Effect.fn("discoverAntigravitySkills")(function* (input: {
   readonly cwd: string;
   readonly userHome: string;
@@ -206,7 +212,7 @@ export const discoverAntigravitySkills = Effect.fn("discoverAntigravitySkills")(
     if (skillFileName !== undefined) {
       if (!skillFileName.endsWith(".md")) return;
       const skillPath = path.join(directory, skillFileName);
-      const contents = yield* readSkill(skillPath, budget);
+      const contents = yield* readSkillFrontmatter(skillPath, budget);
       if (contents === undefined) return;
       const skill = parseSkillFrontmatter(contents, skillFileName);
       if (!skill || skillsByName.has(skill.name)) return;

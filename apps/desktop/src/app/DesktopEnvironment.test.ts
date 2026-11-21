@@ -1,9 +1,9 @@
+import * as Option from "effect/Option";
 import * as NodePath from "@effect/platform-node/NodePath";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, describe, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import * as Option from "effect/Option";
 
 import * as DesktopEnvironment from "./DesktopEnvironment.ts";
 import * as DesktopConfig from "./DesktopConfig.ts";
@@ -95,7 +95,6 @@ describe("DesktopEnvironment", () => {
       assert.equal(toPortablePath(environment.backendEntryPath), "/repo/apps/server/dist/bin.mjs");
       assert.equal(toPortablePath(environment.backendCwd), "/repo");
       assert.equal(environment.appUserModelId, "tech.camie.kamicode.dev");
-      assert.equal(environment.linuxWmClass, "kamicode-dev");
       assert.equal(environment.linuxDesktopEntryName, "kamicode-dev.desktop");
       assert.deepEqual(
         Option.map(environment.devServerUrl, (url) => url.href),
@@ -206,7 +205,6 @@ describe("DesktopEnvironment", () => {
       assert.equal(toPortablePath(environment.stateDir), "/Users/alice/.kamicode/userdata");
       assert.equal(environment.appUserModelId, "tech.camie.kamicode");
       assert.equal(environment.linuxDesktopEntryName, "kamicode.desktop");
-      assert.equal(environment.linuxWmClass, "kamicode");
     }),
   );
 

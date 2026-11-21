@@ -18,6 +18,8 @@ const layer = it.layer(
   ProjectTriggerRepositoryLive.pipe(Layer.provideMerge(SqlitePersistence.layerMemory)),
 );
 
+const encodeEffectJsonValue = Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown));
+
 layer("ProjectTriggerRepository", (it) => {
   it.effect(
     "claims due triggers, schedules a run, recovers an expired run claim, and marks dispatch",
@@ -276,7 +278,7 @@ layer("ProjectTriggerRepository", (it) => {
       ] as const) {
         yield* sql`INSERT INTO orchestration_v2_projection_threads
           (thread_id, project_id, title, default_provider, runtime_mode, interaction_mode, created_at, updated_at, archived_at, deleted_at, payload_json)
-          VALUES (${threadId}, ${projectId}, 'Scheduled thread', 'codex', 'full-access', 'default', '2026-09-11T09:00:00.000Z', '2026-09-11T09:00:00.000Z', ${"archivedAt" in lifecycle ? lifecycle.archivedAt : null}, ${"deletedAt" in lifecycle ? lifecycle.deletedAt : null}, ${yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(lifecycle)})`;
+          VALUES (${threadId}, ${projectId}, 'Scheduled thread', 'codex', 'full-access', 'default', '2026-09-11T09:00:00.000Z', '2026-09-11T09:00:00.000Z', ${"archivedAt" in lifecycle ? lifecycle.archivedAt : null}, ${"deletedAt" in lifecycle ? lifecycle.deletedAt : null}, ${yield* encodeEffectJsonValue(lifecycle)})`;
       }
 
       const makeTrigger = (name: string, targetThreadId: ThreadId) => ({

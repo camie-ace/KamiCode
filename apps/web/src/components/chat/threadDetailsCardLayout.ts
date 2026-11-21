@@ -1,6 +1,10 @@
 import type { PreviewMiniPlayerFrame } from "../preview/previewMiniPlayerLayout";
 import { DETAILS_CARD_CLEARANCE } from "./chatCanvasLayout";
 
+export const THREAD_DETAILS_CARD_GAP = 12;
+// Keep in sync with --thread-details-panel-width.
+const THREAD_DETAILS_CARD_WIDTH = 280;
+
 export function resolveThreadDetailsCardDensity(
   height: number,
   content: { full: number; compact: number },
@@ -10,37 +14,41 @@ export function resolveThreadDetailsCardDensity(
   return "essential";
 }
 
-/**
- * The card pins to the top right while a readable chat lane fits beside it.
- * The chat canvas decides whether chat moves over to make room.
- */
 export function resolveThreadDetailsCardLayout({
   container,
+  narrowestWidth = container.width,
   lane,
   frame,
   overlapsDetailsCard = false,
+  topInset = 0,
 }: {
   container: { width: number; height: number };
+  // While a panel animates the container, the card fits only if it fits at both ends.
+  narrowestWidth?: number;
   lane: { padding: number; minChatWidth: number };
   frame: PreviewMiniPlayerFrame | null;
   overlapsDetailsCard?: boolean;
+  topInset?: number;
 }) {
-  const gap = 12;
-  // Keep in sync with --thread-details-panel-width, which sizes the popover.
-  const width = 280;
+  const gap = THREAD_DETAILS_CARD_GAP;
+  const width = THREAD_DETAILS_CARD_WIDTH;
   const x = container.width - width - gap;
-  if (x - DETAILS_CARD_CLEARANCE - lane.padding < lane.minChatWidth) return null;
-  // Resizing consumes the height above the player. Dragging first tries to
-  // clear the full card and folds it only when there is no readable placement.
+  // The transition ends are sampled once, so a resize mid-animation can leave them
+  // wider than the container is now.
+  const fitWidth = Math.min(narrowestWidth, container.width);
+  if (fitWidth - width - gap - DETAILS_CARD_CLEARANCE - lane.padding < lane.minChatWidth)
+    return null;
+  const y = gap + topInset;
   const height =
     overlapsDetailsCard && frame && frame.x + frame.width > x - gap && frame.x < x + width + gap
-      ? Math.min(container.height - gap * 2, frame.y - gap * 2)
-      : container.height - gap * 2;
+      ? Math.min(container.height - y - gap, frame.y - y - gap)
+      : container.height - y - gap;
   if (height < 160) return null;
   return {
     x,
+    right: gap,
     width,
-    y: gap,
+    y,
     height,
   } as const;
 }

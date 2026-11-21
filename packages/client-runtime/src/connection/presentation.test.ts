@@ -2,19 +2,21 @@ import { EnvironmentId } from "@t3tools/contracts";
 import { describe, expect, it } from "@effect/vitest";
 import * as Option from "effect/Option";
 
-import { BearerConnectionProfile, type ConnectionCatalogEntry } from "./catalog.ts";
+import {
+  BearerConnectionProfile,
+  type ConnectionCatalogEntry,
+  type ConnectionRoute,
+} from "./catalog.ts";
 import {
   BearerConnectionTarget,
-  ConnectionBlockedError,
   ConnectionTransientError,
+  RelayConnectionTarget,
   type SupervisorConnectionState,
 } from "./model.ts";
 import {
-  connectionCatalogDisplayUrl,
-  environmentMcpUrl,
   connectionStatusText,
   connectionStatusTitle,
-  presentEnvironmentConnection,
+  environmentMcpUrl,
   presentConnectionState,
 } from "./presentation.ts";
 
@@ -48,49 +50,74 @@ function supervisorState(overrides: Partial<SupervisorConnectionState>): Supervi
     generation: 0,
     lastFailure: null,
     retryAt: null,
+    refusedRouteIds: [],
     ...overrides,
   };
 }
 
 describe("connection presentation", () => {
-  it("labels a blocked protocol as unsupported", () => {
-    const connection = presentConnectionState(
-      supervisorState({
-        phase: "blocked",
-        lastFailure: new ConnectionBlockedError({
-          reason: "unsupported",
-          detail: "Update your app.",
-        }),
-      }),
-    );
-    expect(connection.phase).toBe("unsupported");
-    expect(connection.error).toBe("Update your app.");
-    expect(connectionStatusText(connection)).toBe("Client not supported");
-  });
-
-  it("preserves profile display information without exposing credentials", () => {
-    expect(connectionCatalogDisplayUrl(ENTRY)).toBe("https://environment.example.test");
-  });
-
-  it("offers an MCP address only where an MCP client can sign in", () => {
-    expect(environmentMcpUrl({ entry: ENTRY })).toBe("https://environment.example.test/mcp");
-    const withBase = (httpBaseUrl: string): ConnectionCatalogEntry => ({
+  it("copies the T3 Connect MCP address first, then the route this device is connected over", () => {
+    const route = (connectionId: string, httpBaseUrl: string): ConnectionRoute => {
+      const target = new BearerConnectionTarget({ ...TARGET, connectionId });
+      return {
+        target,
+        profile: Option.some(
+          new BearerConnectionProfile({
+            connectionId,
+            environmentId: TARGET.environmentId,
+            label: TARGET.label,
+            httpBaseUrl,
+            wsBaseUrl: httpBaseUrl.replace(/^http/, "ws"),
+          }),
+        ),
+      };
+    };
+    const lan = route("lan", "http://192.168.4.53:3773/");
+    const tailnet = route("tailnet", "http://100.115.1.44:3773/");
+    const serve = route("serve", "https://machine.tailnet.ts.net/");
+    const entry: ConnectionCatalogEntry = {
       ...ENTRY,
-      profile: Option.some(
-        new BearerConnectionProfile({
-          connectionId: TARGET.connectionId,
-          environmentId: TARGET.environmentId,
-          label: TARGET.label,
-          httpBaseUrl,
-          wsBaseUrl: httpBaseUrl.replace(/^http/, "ws"),
-        }),
-      ),
-    });
-    expect(environmentMcpUrl({ entry: withBase("http://127.0.0.1:3773/") })).toBe(
-      "http://127.0.0.1:3773/mcp",
+      target: lan.target,
+      profile: lan.profile,
+      alternateRoutes: [tailnet, serve],
+    };
+
+    expect(environmentMcpUrl({ entry, connectedTarget: tailnet.target })).toBe(
+      "http://100.115.1.44:3773/mcp",
     );
-    // A plain-http LAN or tailnet address is refused by MCP clients' token checks.
-    expect(environmentMcpUrl({ entry: withBase("http://100.81.102.68:3773") })).toBeNull();
+    expect(environmentMcpUrl({ entry })).toBe("http://192.168.4.53:3773/mcp");
+    expect(
+      environmentMcpUrl({
+        entry,
+        connectedTarget: lan.target,
+        relayHttpBaseUrl: "https://tunnel.example.test",
+      }),
+    ).toBe("https://tunnel.example.test/mcp");
+  });
+
+  // regression: #16909 Copy MCP URL falls back to an alternate route when the relay route has no address
+  it("passes over routes without an address of their own", () => {
+    const relay = new RelayConnectionTarget({
+      environmentId: TARGET.environmentId,
+      label: TARGET.label,
+    });
+    const entry: ConnectionCatalogEntry = {
+      ...ENTRY,
+      target: relay,
+      profile: Option.none(),
+      alternateRoutes: [{ target: ENTRY.target, profile: ENTRY.profile }],
+    };
+
+    expect(environmentMcpUrl({ entry, connectedTarget: relay })).toBe(
+      "https://environment.example.test/mcp",
+    );
+    expect(
+      environmentMcpUrl({
+        entry,
+        connectedTarget: relay,
+        relayHttpBaseUrl: "https://tunnel.example.test",
+      }),
+    ).toBe("https://tunnel.example.test/mcp");
   });
 
   it("distinguishes initial connection, reconnect, and retry errors", () => {
@@ -134,76 +161,33 @@ describe("connection presentation", () => {
       error: "Disconnected.",
       traceId: "trace-1",
     });
-  });
-
-  it("preserves the latest failure while the next attempt is active", () => {
-    expect(
-      presentEnvironmentConnection(
-        supervisorState({
-          phase: "connecting",
-          stage: "opening",
-          attempt: 2,
-          lastFailure: new ConnectionTransientError({
-            reason: "transport",
-            detail: "Relay connection timed out.",
-            traceId: "trace-retry",
-          }),
+    const awaitingApproval = presentConnectionState(
+      supervisorState({
+        phase: "backoff",
+        attempt: 1,
+        retryAt: 1,
+        lastFailure: new ConnectionTransientError({
+          reason: "approval-pending",
+          detail: "Approve this device on Mac mini. It shows code K7QM-2XFD.",
+          traceId: "trace-2",
         }),
-      ),
-    ).toEqual({
-      phase: "reconnecting",
-      error: "Relay connection timed out.",
-      traceId: "trace-retry",
-    });
-  });
-
-  it("combines reconnect progress with the latest failure", () => {
-    const connection = {
-      phase: "reconnecting",
-      error: "Relay request timed out.",
-      traceId: "trace-retry",
-    } as const;
-    expect(connectionStatusText(connection)).toBe(
-      "Failed to connect. Reconnecting... Reason: Relay request timed out.",
+      }),
     );
-    expect(connectionStatusTitle(connection)).toBe("Failed to connect. Reconnecting...");
-  });
-
-  it("presents the supervisor's offline state without consulting shell state", () => {
-    expect(
-      presentEnvironmentConnection(
-        supervisorState({
-          network: "offline",
-          phase: "offline",
-          stage: null,
-        }),
-      ),
-    ).toEqual({
-      phase: "offline",
-      error: null,
-      traceId: null,
+    expect(awaitingApproval).toEqual({
+      phase: "reconnecting",
+      error: "Approve this device on Mac mini. It shows code K7QM-2XFD.",
+      traceId: "trace-2",
+      awaitingApproval: true,
     });
-  });
-
-  it("presents a connected supervisor snapshot as connected", () => {
-    expect(
-      presentEnvironmentConnection(
-        supervisorState({
-          phase: "connected",
-          stage: null,
-          generation: 1,
-        }),
-      ),
-    ).toEqual({
-      phase: "connected",
-      error: null,
-      traceId: null,
-    });
+    expect(connectionStatusText(awaitingApproval)).toBe(
+      "Approve this device on Mac mini. It shows code K7QM-2XFD.",
+    );
+    expect(connectionStatusTitle(awaitingApproval)).toBe("Waiting for approval");
   });
 
   it("preserves an explicitly available environment while offline", () => {
     expect(
-      presentEnvironmentConnection(
+      presentConnectionState(
         supervisorState({
           desired: false,
           network: "offline",

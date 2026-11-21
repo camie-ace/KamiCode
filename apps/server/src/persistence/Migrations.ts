@@ -1,18 +1,12 @@
-/**
- * Migration runner with an inline loader.
- *
- * Uses Migrator.make with fromRecord to define migrations inline.
- * All migrations are statically imported - no dynamic file system loading.
- *
- * `runMigrations` is called by the SQLite persistence layer at startup, so the
- * schema is always up to date before the application starts.
- */
-
 import * as Migrator from "effect/sql/Migrator";
 import * as Effect from "effect/Effect";
 import * as SqlClient from "effect/sql/SqlClient";
+import {
+  DATABASE_MIGRATION_PROGRESS_MESSAGE,
+  DATABASE_MIGRATIONS_FINISHED_MESSAGE,
+  DATABASE_MIGRATIONS_STARTED_MESSAGE,
+} from "@t3tools/shared/databaseMigrationLog";
 
-// Import all migrations statically
 import Migration0001 from "./Migrations/001_OrchestrationEvents.ts";
 import Migration0002 from "./Migrations/002_OrchestrationCommandReceipts.ts";
 import Migration0003 from "./Migrations/003_CheckpointDiffBlobs.ts";
@@ -89,17 +83,47 @@ import Migration0074 from "./Migrations/074_ImportKamiQueuedMessages.ts";
 import Migration0073 from "./Migrations/056_RemoveRedundantProjectionIndexes.ts";
 import Migration0075 from "./Migrations/057_ScheduledTaskWebhooks.ts";
 import Migration0076 from "./Migrations/058_WebhookRelayDeliveries.ts";
+import Migration0077 from "./Migrations/059_McpAppModelContext.ts";
+import Migration0078 from "./Migrations/060_ThreadSnapshotWindowIndexes.ts";
+import Migration0079 from "./Migrations/061_PullRequestReviewGuides.ts";
+import Migration0080 from "./Migrations/062_ThreadFailureLookupIndex.ts";
+import Migration0081 from "./Migrations/063_DropUnusedV1Projections.ts";
+import Migration0082 from "./Migrations/064_CanonicalizeThreadPullRequestLinks.ts";
+import Migration0083 from "./Migrations/065_CodexUsageNativeTurnIndex.ts";
+import Migration0084 from "./Migrations/066_RepairClientSettlementTimestamps.ts";
+import Migration0085 from "./Migrations/067_WebhookDedupe.ts";
+import Migration0086 from "./Migrations/068_ShellStopRequestIndex.ts";
+import Migration0087 from "./Migrations/069_ThreadMessageSearch.ts";
+import Migration0088 from "./Migrations/070_PeerLinks.ts";
+import Migration0089 from "./Migrations/071_PeerLinkFence.ts";
+import Migration0090 from "./Migrations/072_WaitingLinkRequestIndex.ts";
+import Migration0091 from "./Migrations/073_ActiveTurnItemIndexes.ts";
+import Migration0092 from "./Migrations/074_ExcludeAttachmentPlaceholdersFromSearch.ts";
+import Migration0093 from "./Migrations/075_SubagentDeliveryState.ts";
+import Migration0094 from "./Migrations/076_ProjectionProjectsPinArchive.ts";
+import Migration0095 from "./Migrations/077_RepairBooleanSettledOverride.ts";
+import Migration0096 from "./Migrations/078_DropOrchestrationEventCorrelationIndex.ts";
+import Migration0097 from "./Migrations/079_DelegatedRecoveryIndexes.ts";
+import Migration0098 from "./Migrations/080_ScheduledTaskThreadMode.ts";
+import Migration0099 from "./Migrations/081_ProjectionMessageSearchText.ts";
+import Migration0100 from "./Migrations/082_TurnItemConversationIndex.ts";
+import Migration0101 from "./Migrations/083_CommandReadIndexes.ts";
+import Migration0102 from "./Migrations/084_LastExecutedRunIndex.ts";
+import Migration0103 from "./Migrations/085_TurnItemCounts.ts";
+import Migration0104 from "./Migrations/086_QueuedTurnInputIndex.ts";
+import Migration0105 from "./Migrations/087_ProjectionProjectsCustomTitle.ts";
+import Migration0106 from "./Migrations/088_TurnItemTypeStatusIndex.ts";
+import Migration0107 from "./Migrations/089_ShellThreadReadIndexes.ts";
+import Migration0108 from "./Migrations/090_AuthConnectDevices.ts";
+import Migration0109 from "./Migrations/091_AuthConnectDeniedRequests.ts";
+import Migration0110 from "./Migrations/092_QueuedTurnInputIndexJsonValid.ts";
+import Migration0111 from "./Migrations/093_ProviderTurnAttemptIndex.ts";
+import Migration0112 from "./Migrations/094_TurnItemMessageOrdinalIndex.ts";
+import Migration0113 from "./Migrations/095_TurnItemInlineWorkOutput.ts";
+import Migration0114 from "./Migrations/096_RepairStaleTitleRegeneration.ts";
+import Migration0115 from "./Migrations/097_IssueTrackerBindings.ts";
+import Migration0116 from "./Migrations/098_ActiveShellIndexIndexes.ts";
 
-/**
- * Migration loader with all migrations defined inline.
- *
- * Key format: "{id}_{name}" where:
- * - id: numeric migration ID (determines execution order)
- * - name: descriptive name for the migration
- *
- * Uses Migrator.fromRecord which parses the key format and
- * returns migrations sorted by ID.
- */
 export const migrationEntries = [
   [1, "OrchestrationEvents", Migration0001],
   [2, "OrchestrationCommandReceipts", Migration0002],
@@ -187,6 +211,46 @@ export const migrationEntries = [
   [74, "ImportKamiQueuedMessages", Migration0074],
   [75, "ScheduledTaskWebhooks", Migration0075],
   [76, "WebhookRelayDeliveries", Migration0076],
+  [77, "McpAppModelContext", Migration0077],
+  [78, "ThreadSnapshotWindowIndexes", Migration0078],
+  [79, "PullRequestReviewGuides", Migration0079],
+  [80, "ThreadFailureLookupIndex", Migration0080],
+  [81, "DropUnusedV1Projections", Migration0081],
+  [82, "CanonicalizeThreadPullRequestLinks", Migration0082],
+  [83, "CodexUsageNativeTurnIndex", Migration0083],
+  [84, "RepairClientSettlementTimestamps", Migration0084],
+  [85, "WebhookDedupe", Migration0085],
+  [86, "ShellStopRequestIndex", Migration0086],
+  [87, "ThreadMessageSearch", Migration0087],
+  [88, "PeerLinks", Migration0088],
+  [89, "PeerLinkFence", Migration0089],
+  [90, "WaitingLinkRequestIndex", Migration0090],
+  [91, "ActiveTurnItemIndexes", Migration0091],
+  [92, "ExcludeAttachmentPlaceholdersFromSearch", Migration0092],
+  [93, "SubagentDeliveryState", Migration0093],
+  [94, "ProjectionProjectsPinArchive", Migration0094],
+  [95, "RepairBooleanSettledOverride", Migration0095],
+  [96, "DropOrchestrationEventCorrelationIndex", Migration0096],
+  [97, "DelegatedRecoveryIndexes", Migration0097],
+  [98, "ScheduledTaskThreadMode", Migration0098],
+  [99, "ProjectionMessageSearchText", Migration0099],
+  [100, "TurnItemConversationIndex", Migration0100],
+  [101, "CommandReadIndexes", Migration0101],
+  [102, "LastExecutedRunIndex", Migration0102],
+  [103, "TurnItemCounts", Migration0103],
+  [104, "QueuedTurnInputIndex", Migration0104],
+  [105, "ProjectionProjectsCustomTitle", Migration0105],
+  [106, "TurnItemTypeStatusIndex", Migration0106],
+  [107, "ShellThreadReadIndexes", Migration0107],
+  [108, "AuthConnectDevices", Migration0108],
+  [109, "AuthConnectDeniedRequests", Migration0109],
+  [110, "QueuedTurnInputIndexJsonValid", Migration0110],
+  [111, "ProviderTurnAttemptIndex", Migration0111],
+  [112, "TurnItemMessageOrdinalIndex", Migration0112],
+  [113, "TurnItemInlineWorkOutput", Migration0113],
+  [114, "RepairStaleTitleRegeneration", Migration0114],
+  [115, "IssueTrackerBindings", Migration0115],
+  [116, "ActiveShellIndexIndexes", Migration0116],
 ] as const;
 
 export const migrationManifest = migrationEntries.map(([id, name]) => [id, name] as const);
@@ -200,26 +264,76 @@ const makeMigrationLoader = (throughId?: number) =>
     ),
   );
 
-/**
- * Migrator run function - no schema dumping needed
- * Uses the base Migrator.make without platform dependencies
- */
+const FIRST_V2_MIGRATION_ID = 72;
+
+export function skippedV2Migrations(
+  recorded: ReadonlyArray<{ readonly id: number; readonly name: string }>,
+  throughId?: number,
+): string[] {
+  const latestRecordedId = Math.max(0, ...recorded.map((row) => row.id));
+  const recordedNames = new Map(recorded.map((row) => [row.id, row.name]));
+  return migrationManifest.flatMap(([id, name]) => {
+    if (
+      id < FIRST_V2_MIGRATION_ID ||
+      id > latestRecordedId ||
+      (throughId !== undefined && id > throughId)
+    )
+      return [];
+    const recordedName = recordedNames.get(id);
+    return recordedName === name ? [] : [`${id}_${name} (recorded: ${recordedName ?? "nothing"})`];
+  });
+}
+
+// Migrators skip ids up to the highest recorded; reject collisions that would skip V2 schema.
+const assertV2MigrationsCanRun = Effect.fn("assertV2MigrationsCanRun")(function* (
+  throughId?: number,
+) {
+  const sql = yield* SqlClient.SqlClient;
+  const tables = yield* sql`
+    SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'effect_sql_migrations'
+  `;
+  if (tables.length === 0) return;
+  const recorded = yield* sql<{
+    readonly migration_id: number;
+    readonly name: string;
+  }>`SELECT migration_id, name FROM effect_sql_migrations`;
+  const skipped = skippedV2Migrations(
+    recorded.map((row) => ({ id: row.migration_id, name: row.name })),
+    throughId,
+  );
+  const latestRecordedId = Math.max(0, ...recorded.map((row) => row.migration_id));
+  if (skipped.length === 0) return;
+  return yield* new Migrator.MigrationError({
+    kind: "BadState",
+    message: `This database's migration history would skip required schema migrations: ${skipped.join(", ")}. The migrator skips every id up to the highest recorded id (${latestRecordedId}), regardless of name. It was probably written by a different build. Start the build that wrote it, or report this migration history so an upgrade path can be added.`,
+  });
+});
+
+const latestMigrationId = Math.max(...migrationEntries.map(([id]) => id));
+
+// Mirrors the Migrator, which runs only ids above the highest recorded, plus the V2-preview reconciliation.
+export const hasPendingMigrations = Effect.fn("hasPendingMigrations")(function* () {
+  const sql = yield* SqlClient.SqlClient;
+  const tables = yield* sql`
+    SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'effect_sql_migrations'
+  `;
+  if (tables.length === 0) return true;
+  const rows = yield* sql<{ readonly latestId: number | null; readonly previewRows: number }>`
+    SELECT
+      MAX(migration_id) AS latestId,
+      SUM(name = 'OrchestrationV2' AND migration_id != 72) AS previewRows
+    FROM effect_sql_migrations
+  `;
+  const row = rows[0];
+  return (row?.latestId ?? 0) < latestMigrationId || (row?.previewRows ?? 0) > 0;
+});
+
 const run = Migrator.make({});
 
 export interface RunMigrationsOptions {
   readonly toMigrationInclusive?: number | undefined;
 }
 
-/**
- * Run all pending migrations.
- *
- * Creates the migrations tracking table (effect_sql_migrations) if it doesn't exist,
- * then runs any migrations with ID greater than the latest recorded migration.
- *
- * Returns array of [id, name] tuples for migrations that were run.
- *
- * @returns Effect containing array of executed migrations
- */
 export const runMigrations = Effect.fn("runMigrations")(function* ({
   toMigrationInclusive,
 }: RunMigrationsOptions = {}) {
@@ -242,16 +356,48 @@ export const runMigrations = Effect.fn("runMigrations")(function* ({
       });
     }
   }
-  const executedMigrations = yield* run({ loader: makeMigrationLoader(toMigrationInclusive) });
+  // The desktop waits past its readiness budget until the finished line follows this one.
+  const hasPending = yield* hasPendingMigrations();
+  if (hasPending) yield* Effect.log(DATABASE_MIGRATIONS_STARTED_MESSAGE);
+  const includesV2 =
+    toMigrationInclusive === undefined || toMigrationInclusive >= FIRST_V2_MIGRATION_ID;
+  // The reconcile takes the write lock; CLI startup must not contend with the server for a no-op.
+  if (includesV2) {
+    yield* assertV2MigrationsCanRun(toMigrationInclusive);
+  }
+  const ledger = yield* sql`
+    SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'effect_sql_migrations'
+  `;
+  const [latest] =
+    ledger.length === 0
+      ? []
+      : yield* sql<{
+          readonly id: number | null;
+        }>`SELECT MAX(migration_id) AS id FROM effect_sql_migrations`;
+  const latestRecordedId = latest?.id ?? 0;
+  const pending = migrationEntries.filter(
+    ([id]) =>
+      id > latestRecordedId && (toMigrationInclusive === undefined || id <= toMigrationInclusive),
+  );
+  // One transaction per migration: an index build on a large database can take minutes, and a
+  // restart then resumes after the last finished migration instead of rolling all of them back.
+  const executedMigrations: Array<readonly [id: number, name: string]> = [];
+  for (const [index, [id, name]] of pending.entries()) {
+    if (latestRecordedId > 0) {
+      yield* Effect.log(DATABASE_MIGRATION_PROGRESS_MESSAGE).pipe(
+        Effect.annotateLogs({
+          migration: `${id}_${name}`,
+          progress: `${index + 1} of ${pending.length}`,
+        }),
+      );
+    }
+    executedMigrations.push(...(yield* run({ loader: makeMigrationLoader(id) })));
+  }
   const migrations = executedMigrations.map(([id, name]) => `${id}_${name}`);
   yield* migrations.length === 0
     ? Effect.logDebug("Database schema is current")
-    : Effect.log("Migrations ran successfully").pipe(Effect.annotateLogs({ migrations }));
+    : Effect.log(DATABASE_MIGRATIONS_FINISHED_MESSAGE).pipe(Effect.annotateLogs({ migrations }));
 
-  // The migrator keys on migration_id: a database that recorded a different
-  // migration under a shared id (local or fork builds) keeps that id and
-  // silently skips this build's migration at it. Surface the divergence so the
-  // skipped schema change is diagnosable.
   const recorded = yield* sql<{
     readonly migration_id: number;
     readonly name: string;

@@ -1,4 +1,10 @@
 import {
+  type ImportSharedThreadInput,
+  type OrchestrationV2DomainEvent,
+  type OrchestrationV2TurnItem,
+  type SharedSessionSnapshot,
+} from "@t3tools/contracts";
+import {
   ChatAttachment,
   CheckpointId,
   CheckpointRef,
@@ -13,11 +19,6 @@ import {
   IsoDateTime,
   ProviderInteractionMode,
   RuntimeMode,
-  type ImportSharedThreadInput,
-  type ImportSharedThreadResult,
-  type OrchestrationV2DomainEvent,
-  type OrchestrationV2TurnItem,
-  type SharedSessionSnapshot,
 } from "@t3tools/contracts";
 // @effect-diagnostics-next-line nodeBuiltinImport:off -- The synchronous snapshot event builder generates IDs before its atomic event append.
 import * as NodeCrypto from "node:crypto";
@@ -25,7 +26,7 @@ import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import * as EventSink from "../orchestration-v2/EventSink.ts";
-import * as ProcessRunner from "../processRunner.ts";
+
 import {
   prepareSharedThreadImportBranch,
   sharedImportStashLabel,
@@ -39,6 +40,17 @@ const SharedSnapshotPlan = Schema.Struct({
   implementedAt: Schema.optional(Schema.NullOr(IsoDateTime)),
 });
 
+const decodeUnknownSyncModelSelection = Schema.decodeUnknownSync(ModelSelection);
+
+const decodeUnknownOptionRuntimeMode = Schema.decodeUnknownOption(RuntimeMode);
+
+const decodeUnknownOptionProviderInteractionMode =
+  Schema.decodeUnknownOption(ProviderInteractionMode);
+
+const decodeUnknownOptionSharedSnapshotPlan = Schema.decodeUnknownOption(SharedSnapshotPlan);
+
+const decodeOptionChatAttachment = Schema.decodeOption(ChatAttachment);
+
 /** A shared snapshot is inert history: importing never resumes another user's queued work. */
 export function sharedSnapshotEvents(input: {
   snapshot: SharedSessionSnapshot;
@@ -50,11 +62,9 @@ export function sharedSnapshotEvents(input: {
   now: DateTime.Utc;
 }): OrchestrationV2DomainEvent[] {
   const { snapshot, threadId, now } = input;
-  const modelSelection = Schema.decodeUnknownSync(ModelSelection)(snapshot.modelSelection);
-  const runtimeMode = Schema.decodeUnknownOption(RuntimeMode)(snapshot.runtimeMode);
-  const interactionMode = Schema.decodeUnknownOption(ProviderInteractionMode)(
-    snapshot.interactionMode,
-  );
+  const modelSelection = decodeUnknownSyncModelSelection(snapshot.modelSelection);
+  const runtimeMode = decodeUnknownOptionRuntimeMode(snapshot.runtimeMode);
+  const interactionMode = decodeUnknownOptionProviderInteractionMode(snapshot.interactionMode);
   const events: OrchestrationV2DomainEvent[] = [
     {
       id: EventId.make(NodeCrypto.randomUUID()),
@@ -111,7 +121,7 @@ export function sharedSnapshotEvents(input: {
     const at = DateTime.makeUnsafe(message.createdAt);
     const updatedAt = DateTime.makeUnsafe(message.completedAt ?? message.createdAt);
     const attachments = message.attachments.flatMap((attachment) => {
-      const decoded = Schema.decodeUnknownOption(ChatAttachment)(attachment);
+      const decoded = decodeOptionChatAttachment(attachment);
       return decoded._tag === "Some" ? [decoded.value] : [];
     });
     events.push({
@@ -228,7 +238,7 @@ export function sharedSnapshotEvents(input: {
     return nodeId;
   };
   for (const rawPlan of snapshot.proposedPlans) {
-    const decoded = Schema.decodeUnknownOption(SharedSnapshotPlan)(rawPlan);
+    const decoded = decodeUnknownOptionSharedSnapshotPlan(rawPlan);
     if (decoded._tag === "None") continue;
     const plan = decoded.value;
     const at = DateTime.makeUnsafe(plan.createdAt);
@@ -350,24 +360,22 @@ export function sharedSnapshotEvents(input: {
   return events;
 }
 
-export const importSharedThreadSnapshot = (input: {
-  readonly request: ImportSharedThreadInput;
-  readonly title: string;
-  readonly snapshot: SharedSessionSnapshot;
-  readonly sourceSharedThreadId: string;
-  readonly targetProjectCwd?: string | undefined;
-}): Effect.Effect<
-  ImportSharedThreadResult,
-  SharedProjectsError,
-  EventSink.EventSinkV2 | ProcessRunner.ProcessRunner
-> =>
-  Effect.gen(function* () {
+const decodeUnknownEffectModelSelection = Schema.decodeUnknownEffect(ModelSelection);
+
+export const importSharedThreadSnapshot = Effect.fn("importSharedThreadSnapshot")(
+  function* (input: {
+    readonly request: ImportSharedThreadInput;
+    readonly title: string;
+    readonly snapshot: SharedSessionSnapshot;
+    readonly sourceSharedThreadId: string;
+    readonly targetProjectCwd?: string | undefined;
+  }) {
     const eventSink = yield* EventSink.EventSinkV2;
     const now = yield* DateTime.now;
     const importedThreadId = ThreadId.make(NodeCrypto.randomUUID());
     const importedTitle = `Imported: ${(input.snapshot.title || input.title).trim() || "shared session"}`;
     // Validate before touching the checkout.
-    yield* Schema.decodeUnknownEffect(ModelSelection)(input.snapshot.modelSelection).pipe(
+    yield* decodeUnknownEffectModelSelection(input.snapshot.modelSelection).pipe(
       Effect.mapError(
         (cause) =>
           new SharedProjectsError({
@@ -442,4 +450,5 @@ export const importSharedThreadSnapshot = (input: {
       stashedChanges: preparedBranch.stashedChanges,
       stashName: preparedBranch.stashName,
     };
-  });
+  },
+);

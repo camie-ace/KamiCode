@@ -1,3 +1,4 @@
+import * as HostProcess from "@t3tools/shared/HostProcess";
 import {
   AppendSharedThreadMessageInput,
   AuthOrchestrationOperateScope,
@@ -61,29 +62,27 @@ import { UserAuth, UserAuthError, type AuthenticatedUser } from "../userAuth/Ser
 import { importSharedThreadSnapshot } from "./importSharedThreadSnapshot.ts";
 import { SharedProjects, SharedProjectsError } from "./Services/SharedProjects.ts";
 
-const respondToSharedProjectsError = (error: SharedProjectsError) =>
-  Effect.gen(function* () {
-    if ((error.status ?? 500) >= 500) {
-      yield* Effect.logError("shared projects route failed", {
-        message: error.message,
-        cause: error.cause,
-      });
-    }
-    return HttpServerResponse.jsonUnsafe(
-      { error: error.message },
-      { status: error.status ?? 500, headers: browserApiCorsHeaders },
-    );
-  });
-
-const authenticateSharedProjectUser = (scope: AuthEnvironmentScope) =>
-  Effect.gen(function* () {
-    const { request, session } = yield* authenticateEnvironmentRequestWithScope(scope);
-    const userAuth = yield* UserAuth;
-    return yield* userAuth.authenticateEnvironmentSession({
-      request,
-      environmentSessionId: session.sessionId,
+const respondToSharedProjectsError = Effect.fn("execute")(function* (error: SharedProjectsError) {
+  if ((error.status ?? 500) >= 500) {
+    yield* Effect.logError("shared projects route failed", {
+      message: error.message,
+      cause: error.cause,
     });
+  }
+  return HttpServerResponse.jsonUnsafe(
+    { error: error.message },
+    { status: error.status ?? 500, headers: browserApiCorsHeaders },
+  );
+});
+
+const authenticateSharedProjectUser = Effect.fn("execute")(function* (scope: AuthEnvironmentScope) {
+  const { request, session } = yield* authenticateEnvironmentRequestWithScope(scope);
+  const userAuth = yield* UserAuth;
+  return yield* userAuth.authenticateEnvironmentSession({
+    request,
+    environmentSessionId: session.sessionId,
   });
+});
 
 const projectIdFromQuery = Effect.gen(function* () {
   const request = yield* HttpServerRequest.HttpServerRequest;
@@ -152,12 +151,12 @@ const hostedErrorMessage = (payload: unknown, fallback: string): string => {
   return fallback;
 };
 
-const hostedCollabConfigFromUrlAndToken = (input: {
-  readonly url: string;
-  readonly token: string;
-  readonly invalidUrlMessage: string;
-}): Effect.Effect<HostedCollabConfig, SharedProjectsError> =>
-  Effect.gen(function* () {
+const hostedCollabConfigFromUrlAndToken = Effect.fn("hostedCollabConfigFromUrlAndToken")(
+  function* (input: {
+    readonly url: string;
+    readonly token: string;
+    readonly invalidUrlMessage: string;
+  }) {
     const parsed = yield* Effect.try({
       try: () => new URL(input.url),
       catch: (cause) =>
@@ -177,13 +176,15 @@ const hostedCollabConfigFromUrlAndToken = (input: {
       baseUrl: parsed.toString().replace(/\/$/u, ""),
       token: input.token,
     } satisfies HostedCollabConfig;
-  });
+  },
+);
 
 const hostedCollabConfig = Effect.gen(function* () {
   const request = yield* HttpServerRequest.HttpServerRequest;
   const requestedProfileId = request.headers[SHARED_COLLAB_PROFILE_HEADER]?.trim() ?? "";
-  const rawUrl = process.env.T3CODE_COLLAB_SERVER_URL?.trim() ?? "";
-  const token = process.env.T3CODE_COLLAB_SERVER_TOKEN?.trim() ?? "";
+  const env = yield* HostProcess.Environment;
+  const rawUrl = env.T3CODE_COLLAB_SERVER_URL?.trim() ?? "";
+  const token = env.T3CODE_COLLAB_SERVER_TOKEN?.trim() ?? "";
   const serverSettings = yield* ServerSettingsService;
   const settings = yield* serverSettings.getSettings.pipe(
     Effect.mapError(
@@ -293,80 +294,73 @@ const hostedIdentityHeaders = (user: AuthenticatedUser, token: string): Record<s
 
 const decodeHostedPayloadJson = Schema.decodeEffect(Schema.fromJsonString(Schema.Unknown));
 
-const hostedSharedProjectRequest = <T>(input: {
+const hostedSharedProjectRequest = Effect.fn("hostedSharedProjectRequest")(function* <T>(input: {
   readonly user: AuthenticatedUser;
   readonly method: "GET" | "POST";
   readonly path: string;
   readonly query?: HostedCollabQuery;
   readonly body?: unknown;
-}): Effect.Effect<
-  T | null,
-  SharedProjectsError,
-  HttpClient.HttpClient | HttpServerRequest.HttpServerRequest | ServerSettingsService
-> =>
-  Effect.gen(function* () {
-    const config = yield* hostedCollabConfig;
-    if (config === null) {
-      return null;
+}) {
+  const config = yield* hostedCollabConfig;
+  if (config === null) {
+    return null;
+  }
+  const url = new URL(input.path, `${config.baseUrl}/`);
+  for (const [key, value] of Object.entries(input.query ?? {})) {
+    if (value !== null && value !== undefined) {
+      url.searchParams.set(key, String(value));
     }
-    const url = new URL(input.path, `${config.baseUrl}/`);
-    for (const [key, value] of Object.entries(input.query ?? {})) {
-      if (value !== null && value !== undefined) {
-        url.searchParams.set(key, String(value));
-      }
-    }
-    const httpClient = yield* HttpClient.HttpClient;
-    const request = HttpClientRequest.make(input.method)(url, {
-      headers: hostedIdentityHeaders(input.user, config.token),
-    }).pipe(
-      input.body === undefined
-        ? (request) => request
-        : HttpClientRequest.bodyJsonUnsafe(input.body),
-    );
-    const response = yield* httpClient.execute(request).pipe(
-      Effect.mapError(
-        (cause) =>
-          new SharedProjectsError({
-            message: "Hosted collaboration server is not reachable.",
-            status: 500,
-            cause,
-          }),
+  }
+  const httpClient = yield* HttpClient.HttpClient;
+  const request = HttpClientRequest.make(input.method)(url, {
+    headers: hostedIdentityHeaders(input.user, config.token),
+  }).pipe(
+    input.body === undefined ? (request) => request : HttpClientRequest.bodyJsonUnsafe(input.body),
+  );
+  const response = yield* httpClient.execute(request).pipe(
+    Effect.mapError(
+      (cause) =>
+        new SharedProjectsError({
+          message: "Hosted collaboration server is not reachable.",
+          status: 500,
+          cause,
+        }),
+    ),
+  );
+  const text = yield* response.text.pipe(
+    Effect.mapError(
+      (cause) =>
+        new SharedProjectsError({
+          message: "Could not read hosted collaboration server response.",
+          status: 500,
+          cause,
+        }),
+    ),
+  );
+  const payload =
+    text.trim().length === 0
+      ? null
+      : yield* decodeHostedPayloadJson(text).pipe(
+          Effect.mapError(
+            (cause) =>
+              new SharedProjectsError({
+                message: "Hosted collaboration server returned invalid JSON.",
+                status: 500,
+                cause,
+              }),
+          ),
+        );
+  if (response.status < 200 || response.status >= 300) {
+    return yield* new SharedProjectsError({
+      message: hostedErrorMessage(
+        payload,
+        `Hosted collaboration server request failed with HTTP ${response.status}.`,
       ),
-    );
-    const text = yield* response.text.pipe(
-      Effect.mapError(
-        (cause) =>
-          new SharedProjectsError({
-            message: "Could not read hosted collaboration server response.",
-            status: 500,
-            cause,
-          }),
-      ),
-    );
-    const payload =
-      text.trim().length === 0
-        ? null
-        : yield* decodeHostedPayloadJson(text).pipe(
-            Effect.mapError(
-              (cause) =>
-                new SharedProjectsError({
-                  message: "Hosted collaboration server returned invalid JSON.",
-                  status: 500,
-                  cause,
-                }),
-            ),
-          );
-    if (response.status < 200 || response.status >= 300) {
-      return yield* new SharedProjectsError({
-        message: hostedErrorMessage(
-          payload,
-          `Hosted collaboration server request failed with HTTP ${response.status}.`,
-        ),
-        status: hostedStatus(response.status),
-      });
-    }
-    return payload as T;
-  });
+      status: hostedStatus(response.status),
+    });
+  }
+  return payload as T;
+});
 
 const withSharedProjectErrorHandling = <R>(
   effect: Effect.Effect<HttpServerResponseModule.HttpServerResponse, SharedProjectsRouteError, R>,

@@ -1,3 +1,4 @@
+import * as DocumentText from "../provider/DocumentText.ts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { expect, it } from "@effect/vitest";
 import { ChatAttachmentId, ProjectTriggerId, type ChatAttachment } from "@t3tools/contracts";
@@ -11,7 +12,7 @@ import { captureTriggerAttachments } from "./attachments.ts";
 
 const testLayer = ServerConfig.layerTest(process.cwd(), {
   prefix: "kami-trigger-attachments-",
-}).pipe(Layer.provideMerge(NodeServices.layer));
+}).pipe(Layer.provideMerge(DocumentText.layer), Layer.provideMerge(NodeServices.layer));
 it.effect("keeps scheduled uploads after draft release and preserves inline media metadata", () =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;

@@ -1,5 +1,6 @@
 import { useAtomValue } from "@effect/atom-react";
 import type { EnvironmentId, ProviderInstanceId } from "@t3tools/contracts";
+import { T, useGT, useMessages } from "gt-react";
 
 import { useEnvironmentQuery } from "../../state/query";
 import { EMPTY_SERVER_PROVIDERS, serverEnvironment } from "../../state/server";
@@ -9,7 +10,6 @@ import { ProviderAuthenticationSection } from "./ProviderAuthenticationSection";
 import { SettingsGroup } from "./SettingsGroup";
 import { SettingsRow } from "./settingsLayout";
 
-/** Sign-in uses the saved instance's environment and credentials, just like chat. */
 export function ProviderWizardAuthenticationStep({
   environmentId,
   environmentLabel,
@@ -21,11 +21,13 @@ export function ProviderWizardAuthenticationStep({
   readonly instanceId: ProviderInstanceId;
   readonly onFinish: () => void;
 }) {
+  const gt = useGT();
   const providers =
     useAtomValue(serverEnvironment.providersValueAtom(environmentId)) ?? EMPTY_SERVER_PROVIDERS;
   const provider = providers.find((candidate) => candidate.instanceId === instanceId);
   const query = useEnvironmentQuery(
     serverEnvironment.providerAuthState({ environmentId, input: { instanceId } }),
+    useMessages(),
   );
   const auth = query.data;
   const active =
@@ -57,18 +59,18 @@ export function ProviderWizardAuthenticationStep({
             />
           ) : (
             <SettingsRow
-              title="Account"
+              title={gt("Account")}
               description={
                 isDiscovering
-                  ? "Discovering sign-in methods…"
+                  ? gt("Discovering sign-in methods…")
                   : (query.error ??
                     auth?.message ??
-                    "No in-app sign-in advertised. Follow the provider's docs to finish setup.")
+                    gt("No in-app sign-in advertised. Follow the provider's docs to finish setup."))
               }
               control={
                 isDiscovering ? (
                   <Button disabled size="sm" variant="outline">
-                    Sign in
+                    <T>Sign in</T>
                   </Button>
                 ) : provider?.setup?.documentationUrl ? (
                   <Button
@@ -78,7 +80,7 @@ export function ProviderWizardAuthenticationStep({
                       <a href={provider.setup.documentationUrl} target="_blank" rel="noreferrer" />
                     }
                   >
-                    Open docs
+                    <T>Open docs</T>
                   </Button>
                 ) : undefined
               }
@@ -93,7 +95,7 @@ export function ProviderWizardAuthenticationStep({
           disabled={active}
           onClick={onFinish}
         >
-          {signedIn ? "Done" : "Skip for now"}
+          {signedIn ? gt("Done") : gt("Skip for now")}
         </Button>
       </WizardFooter>
     </>

@@ -1,6 +1,60 @@
-import type { SshDeviceHostConfig } from "@t3tools/contracts";
+import type { EnvironmentId, SshDeviceHostConfig } from "@t3tools/contracts";
+import { msg } from "gt-react";
 
-/** Apply one host change without replacing another environment's host list. */
+import { m } from "../../i18n/messages";
+
+export interface DeviceHostEnvironment {
+  readonly environmentId: EnvironmentId;
+  readonly label: string;
+  readonly hosts: ReadonlyArray<SshDeviceHostConfig>;
+}
+
+export interface DeviceHostGroup {
+  readonly host: SshDeviceHostConfig;
+  readonly members: Array<{
+    readonly environmentId: EnvironmentId;
+    readonly label: string;
+    readonly host: SshDeviceHostConfig;
+  }>;
+}
+
+/** Only combine matching configurations; ambiguous identities keep their machine's list. */
+export function groupDeviceHosts(
+  environments: ReadonlyArray<DeviceHostEnvironment>,
+): ReadonlyArray<DeviceHostGroup> | null {
+  const groups = new Map<string, DeviceHostGroup>();
+  const identities = new Map<string, string>();
+  const configurations = new Map<string, string>();
+  for (const environment of environments) {
+    const destinations = new Set<string>();
+    for (const host of environment.hosts) {
+      const destination = JSON.stringify([host.target, host.port, host.identityFile]);
+      const configuration = JSON.stringify([host.label, host.target, host.port, host.identityFile]);
+      const previousConfiguration = identities.get(host.id);
+      const targetConfiguration = configurations.get(host.target);
+      const group = groups.get(destination);
+      if (
+        destinations.has(destination) ||
+        (previousConfiguration !== undefined && previousConfiguration !== configuration) ||
+        (targetConfiguration !== undefined && targetConfiguration !== configuration)
+      ) {
+        return null;
+      }
+      destinations.add(destination);
+      identities.set(host.id, configuration);
+      configurations.set(host.target, configuration);
+      const member = {
+        environmentId: environment.environmentId,
+        label: environment.label,
+        host,
+      };
+      if (group) group.members.push(member);
+      else groups.set(destination, { host, members: [member] });
+    }
+  }
+  return [...groups.values()];
+}
+
 export function updateDeviceHosts(
   hosts: ReadonlyArray<SshDeviceHostConfig>,
   host: SshDeviceHostConfig,
@@ -15,13 +69,15 @@ export function updateDeviceHosts(
     const matches = hosts.filter((candidate) => sameDestination(candidate, destination));
     if (matches.length > 1) {
       throw new Error(
-        "Multiple hosts match this SSH destination. Select the environment to edit its hosts.",
+        m(
+          msg(
+            "Multiple hosts match this SSH destination. Select the environment to edit its hosts.",
+          ),
+        ),
       );
     }
     return matches[0];
   };
-  // A retry can encounter the updated destination on an environment that
-  // already saved, including one with a different environment-local host ID.
   const existing =
     hosts.find((candidate) => candidate.id === original.id) ??
     findDestination(original) ??

@@ -15,6 +15,7 @@ import * as Fiber from "effect/Fiber";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
+import * as PlatformError from "effect/PlatformError";
 import * as Queue from "effect/Queue";
 import * as Tracer from "effect/Tracer";
 import {
@@ -24,63 +25,130 @@ import {
   HttpRouter,
   HttpServerResponse,
 } from "effect/http";
+import { ASSET_ROUTE_PREFIX } from "./assets/AssetAccess.ts";
+import { ATTACHMENT_UPLOAD_ROUTE_PREFIX } from "./assets/AttachmentUpload.ts";
 import { openMediaFile } from "./assets/MediaFile.ts";
 
+import {
+  injectMcpAppCsp,
+  injectMcpAppCookieBootstrap,
+  injectMcpAppThemeBootstrap,
+  MCP_APP_MAX_HTML_BYTES,
+} from "@t3tools/shared/mcpApp";
 import { ORCHESTRATION_PROTOCOL_HEADER } from "@t3tools/contracts";
+import { FILE_PREVIEW_SCROLL_SCRIPT } from "@t3tools/shared/htmlRender";
 
 import * as ServerConfig from "./config.ts";
 
 import {
-  assetResponseHeaders,
-  assetFileResponse,
-  downloadContentDisposition,
   isLoopbackHostname,
   listTestHarnessRuns,
   resolveDevRedirectUrl,
   resolveHttpByteRange,
   resolveTestHarnessArtifactPath,
   resolveTestHarnessTraceViewerAssetPath,
-  withUntracedRequests,
+  assetResponseHeaders,
+  assetFileResponse,
+  downloadContentDisposition,
 } from "./http.ts";
 import { createBrowserHarnessProjectKey } from "./testing/browserHarness.ts";
 import * as ServerHttp from "./http.ts";
-describe("untraced requests", () => {
-  it.effect("drops the HTTP server span for browser trace exports, query string included", () => {
-    const spanNames: Array<string> = [];
-    return Effect.gen(function* () {
-      const layerRoutes = Layer.effectDiscard(
-        Effect.gen(function* () {
-          const router = yield* HttpRouter.HttpRouter;
-          yield* router.add("POST", "/api/observability/v1/traces", HttpServerResponse.empty());
-          yield* router.add("GET", "/api/environment", HttpServerResponse.empty());
-        }),
-      );
-      const services = yield* Layer.build(
-        withUntracedRequests(HttpRouter.serve(layerRoutes, { disableListenLog: true })).pipe(
-          Layer.provideMerge(NodeHttpServer.layerTest),
-        ),
-      );
-      const client = Context.get(services, HttpClient.HttpClient);
 
-      yield* client.post("/api/observability/v1/traces");
-      yield* client.post("/api/observability/v1/traces?x=1");
-      expect(spanNames).toEqual([]);
+describe("MCP app asset responses", () => {
+  it.effect(
+    "transforms existing snapshots only with explicit render intent and fresh metadata",
+    () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const directory = yield* fs.makeTempDirectoryScoped({ prefix: "t3-mcp-theme-" });
+        const file = path.join(directory, "app.html");
+        const html = injectMcpAppCsp(
+          "<html><head><script>vendor()</script></head><body>☃</body></html>",
+          undefined,
+        );
+        yield* fs.writeFileString(file, html);
+        for (const method of ["GET", "HEAD"] as const) {
+          const response = HttpServerResponse.toWeb(
+            yield* assetFileResponse(
+              { path: file, mimeType: "text/html", renderIntent: "mcp-app" },
+              "bytes=0-1",
+              undefined,
+              method,
+            ),
+          );
+          const expected = injectMcpAppCookieBootstrap(injectMcpAppThemeBootstrap(html));
+          expect(response.status).toBe(200);
+          expect(response.headers.get("content-length")).toBe(
+            String(new TextEncoder().encode(expected).byteLength),
+          );
+          expect(response.headers.get("etag")).toBeNull();
+          expect(response.headers.get("last-modified")).toBeNull();
+          expect(response.headers.get("content-security-policy")).toBe(
+            "sandbox allow-scripts allow-forms allow-popups allow-downloads",
+          );
+          expect(yield* Effect.promise(() => response.text())).toBe(
+            method === "HEAD" ? "" : expected,
+          );
+        }
+        for (const download of [false, true]) {
+          const response = HttpServerResponse.toWeb(
+            yield* assetFileResponse({
+              path: file,
+              mimeType: "text/html",
+              download,
+              ...(download ? { renderIntent: "mcp-app" as const } : {}),
+            }),
+          );
+          expect(yield* Effect.promise(() => response.text())).toBe(html);
+        }
+      }).pipe(Effect.provide(layerFileResponse)),
+  );
 
-      yield* client.get("/api/environment");
-      expect(spanNames).toContain("http.server GET");
-    }).pipe(
-      Effect.scoped,
-      Effect.provideService(
-        Tracer.Tracer,
-        Tracer.make({
-          span: (options) => {
-            if (options.kind === "server") spanNames.push(options.name);
-            return new Tracer.NativeSpan(options);
-          },
-        }),
-      ),
-    );
-  });
+  it.effect("rejects oversized captures before transforming them", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const directory = yield* fs.makeTempDirectoryScoped({ prefix: "t3-mcp-theme-size-" });
+      const file = path.join(directory, "app.html");
+      yield* fs.writeFileString(file, "x".repeat(MCP_APP_MAX_HTML_BYTES + 128 * 1024 + 1));
+      const response = yield* assetFileResponse({ path: file, renderIntent: "mcp-app" });
+      expect(response.status).toBe(413);
+    }).pipe(Effect.provide(layerFileResponse)),
+  );
+});
+
+describe("workspace page preview responses", () => {
+  it.effect("append the scroll script only to inline HTML previews", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const directory = yield* fs.makeTempDirectoryScoped({ prefix: "t3-file-preview-" });
+      const page = path.join(directory, "report.html");
+      const style = path.join(directory, "report.css");
+      const html = "<!doctype html><html><body>☃</body></html>";
+      yield* fs.writeFileString(page, html);
+      yield* fs.writeFileString(style, "body{}");
+      const read = (asset: Parameters<typeof assetFileResponse>[0]) =>
+        assetFileResponse(asset).pipe(
+          Effect.flatMap((response) =>
+            Effect.promise(() => HttpServerResponse.toWeb(response).text()),
+          ),
+        );
+      const response = HttpServerResponse.toWeb(
+        yield* assetFileResponse({ path: page, renderIntent: "file-preview" }, "bytes=0-1"),
+      );
+      const expected = html + FILE_PREVIEW_SCROLL_SCRIPT;
+      expect(response.status).toBe(200);
+      expect(response.headers.get("content-length")).toBe(
+        String(new TextEncoder().encode(expected).byteLength),
+      );
+      expect(yield* Effect.promise(() => response.text())).toBe(expected);
+      expect(yield* read({ path: page, renderIntent: "file-preview", download: true })).toBe(html);
+      expect(yield* read({ path: page })).toBe(html);
+      expect(yield* read({ path: style, renderIntent: "file-preview" })).toBe("body{}");
+    }).pipe(Effect.provide(layerFileResponse)),
+  );
 });
 
 describe("browser API CORS", () => {
@@ -129,6 +197,104 @@ describe("browser API CORS", () => {
   });
 });
 
+describe("untraced requests", () => {
+  it.effect("keeps signed asset and upload URLs out of HTTP server spans", () =>
+    Effect.gen(function* () {
+      const serverSpans: Array<string> = [];
+      const layerTracer = Layer.succeed(
+        Tracer.Tracer,
+        Tracer.make({
+          span: (options) => {
+            if (options.kind === "server") serverSpans.push(options.name);
+            return new Tracer.NativeSpan(options);
+          },
+        }),
+      );
+      const layerRoutes = Layer.effectDiscard(
+        Effect.gen(function* () {
+          const router = yield* HttpRouter.HttpRouter;
+          yield* router.add("GET", `${ASSET_ROUTE_PREFIX}/*`, HttpServerResponse.empty());
+          yield* router.add(
+            "POST",
+            `${ATTACHMENT_UPLOAD_ROUTE_PREFIX}/*`,
+            HttpServerResponse.empty(),
+          );
+          yield* router.add("GET", "/api/environment", HttpServerResponse.empty());
+        }),
+      );
+      const services = yield* Layer.build(
+        HttpRouter.serve(layerRoutes, { disableListenLog: true, disableLogger: true }).pipe(
+          ServerHttp.withUntracedRequests,
+          Layer.provideMerge(NodeHttpServer.layerTest),
+          Layer.provide(layerTracer),
+        ),
+      );
+      const client = Context.get(services, HttpClient.HttpClient);
+
+      // Each URL is a bearer credential: url.full and url.path would carry it.
+      for (const request of [
+        HttpClientRequest.get(`${ASSET_ROUTE_PREFIX}/payload.signature/image.png`),
+        HttpClientRequest.get(`${ASSET_ROUTE_PREFIX}/payload.signature/image.png?v=1`),
+        HttpClientRequest.post(`${ATTACHMENT_UPLOAD_ROUTE_PREFIX}/payload.signature`),
+        HttpClientRequest.post(`${ATTACHMENT_UPLOAD_ROUTE_PREFIX}/payload.signature?v=1`),
+        HttpClientRequest.head(`${ASSET_ROUTE_PREFIX}/payload.signature/image.png`),
+      ]) {
+        expect((yield* client.execute(request)).status).toBe(204);
+      }
+      expect(serverSpans).toEqual([]);
+
+      expect((yield* client.execute(HttpClientRequest.get("/api/environment"))).status).toBe(204);
+      expect(serverSpans).toEqual(["GET"]);
+
+      for (const path of [
+        `${ASSET_ROUTE_PREFIX}-other/file`,
+        `${ATTACHMENT_UPLOAD_ROUTE_PREFIX}-other/token`,
+      ]) {
+        expect((yield* client.execute(HttpClientRequest.get(path))).status).toBe(404);
+      }
+      expect(serverSpans).toEqual(["GET", "GET", "GET"]);
+    }).pipe(Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("starts a separate trace for each request, not the server's lifetime trace", () =>
+    Effect.gen(function* () {
+      const requestSpans: Array<Tracer.NativeSpan> = [];
+      const layerTracer = Layer.succeed(
+        Tracer.Tracer,
+        Tracer.make({
+          span: (options) => {
+            const span = new Tracer.NativeSpan(options);
+            if (options.kind === "server") requestSpans.push(span);
+            return span;
+          },
+        }),
+      );
+      const layerRoutes = Layer.effectDiscard(
+        Effect.gen(function* () {
+          const router = yield* HttpRouter.HttpRouter;
+          yield* router.add("GET", "/api/environment", HttpServerResponse.empty());
+        }),
+      );
+      const services = yield* Layer.build(
+        HttpRouter.serve(layerRoutes, { disableListenLog: true, disableLogger: true }).pipe(
+          ServerHttp.withRootRequestSpans,
+          Layer.provideMerge(NodeHttpServer.layerTest),
+        ),
+      ).pipe(Effect.withSpan("server.lifetime"), Effect.provide(layerTracer));
+      // Without a traceparent header, the server alone decides each request's parent.
+      const client = Context.get(services, HttpClient.HttpClient);
+
+      for (let i = 0; i < 2; i++) {
+        yield* client
+          .execute(HttpClientRequest.get("/api/environment"))
+          .pipe(Effect.provideService(HttpClient.TracerPropagationEnabled, false));
+      }
+      expect(requestSpans.map((span) => span.parent._tag)).toEqual(["None", "None"]);
+      expect(new Set(requestSpans.map((span) => span.traceId)).size).toBe(2);
+    }).pipe(Effect.provide(NodeServices.layer)),
+  );
+});
+
 const layerFileResponse = Layer.mergeAll(NodeHttpPlatform.layer, NodeServices.layer);
 
 const makeStaticRequest = Effect.fn("HttpTest.makeStaticRequest")(function* (
@@ -141,9 +307,7 @@ const makeStaticRequest = Effect.fn("HttpTest.makeStaticRequest")(function* (
     ServerHttp.layerStaticAndDevRoute,
     ServerHttp.layerHttpCompression,
   ).pipe(Layer.provideMerge(NodeHttpPlatform.layer));
-  // HttpRouter.serve reuses services from the layers around it before the
-  // app's own, and NodeHttpServer.layerTest brings a real FileSystem, so the
-  // caller's FileSystem and static directory go between the two.
+  // HttpRouter.serve prefers outer services; inject the test FileSystem between it and NodeHttpServer.layerTest.
   const services = yield* Layer.build(
     HttpRouter.serve(layerApp, { disableListenLog: true }).pipe(
       Layer.provideMerge(ServerConfig.layer({ ...config, staticDir, devUrl })),
@@ -231,6 +395,107 @@ it.layer(
     }),
   );
 
+  it.effect("serves static files without handles and skips fallback reads for HEAD and 304", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const staticDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-static-no-open-" });
+      const filePath = path.join(staticDir, "app.txt");
+      const body = "packaged asset";
+      yield* fs.writeFileString(filePath, body);
+      let reads = 0;
+      // Electron asar files can be statted and read even when opening a handle fails.
+      const fileSystem = FileSystem.FileSystem.of({
+        ...fs,
+        open: (candidate, options) =>
+          candidate === filePath
+            ? Effect.fail(
+                PlatformError.systemError({
+                  _tag: "NotFound",
+                  module: "FileSystem",
+                  method: "open",
+                  pathOrDescriptor: candidate,
+                }),
+              )
+            : fs.open(candidate, options),
+        readFile: (candidate) =>
+          Effect.gen(function* () {
+            if (candidate === filePath) reads += 1;
+            return yield* fs.readFile(candidate);
+          }),
+      });
+      const request = yield* makeStaticRequest(staticDir).pipe(
+        Effect.provideService(FileSystem.FileSystem, fileSystem),
+      );
+
+      const get = yield* request("/app.txt");
+      expect(get.status).toBe(200);
+      expect(yield* get.text).toBe(body);
+      expect(reads).toBeGreaterThan(0);
+      const readsAfterGet = reads;
+      const head = yield* request("/app.txt", { method: "HEAD" });
+      expect(head.status).toBe(200);
+      expect(yield* head.text).toBe("");
+      expect(reads).toBe(readsAfterGet);
+      const unchanged = yield* request("/app.txt", {
+        headers: { "if-none-match": get.headers["etag"]! },
+      });
+      expect(unchanged.status).toBe(304);
+      expect(yield* unchanged.text).toBe("");
+      expect(reads).toBe(readsAfterGet);
+    }),
+  );
+
+  it.effect("serves replacement bytes with matching static fallback length and validators", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const staticDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-static-replaced-" });
+      const filePath = path.join(staticDir, "app.txt");
+      const before = DateTime.toDateUtc(DateTime.makeUnsafe("1985-10-26T08:15:00.000Z"));
+      const after = DateTime.toDateUtc(DateTime.makeUnsafe("2015-10-21T16:29:00.000Z"));
+      const replacement = "the replacement asset";
+      const replacementPath = path.join(staticDir, "replacement.txt");
+      yield* fs.writeFileString(filePath, "old");
+      yield* fs.utimes(filePath, before, before);
+      yield* fs.writeFileString(replacementPath, replacement);
+      yield* fs.utimes(replacementPath, after, after);
+      let replaceOnOpen = false;
+      const fileSystem = FileSystem.FileSystem.of({
+        ...fs,
+        open: (candidate, options) =>
+          Effect.gen(function* () {
+            if (candidate !== filePath) return yield* fs.open(candidate, options);
+            if (replaceOnOpen) {
+              yield* fs.rename(replacementPath, filePath);
+              replaceOnOpen = false;
+            }
+            return yield* PlatformError.systemError({
+              _tag: "NotFound",
+              module: "FileSystem",
+              method: "open",
+              pathOrDescriptor: candidate,
+            });
+          }),
+      });
+      const request = yield* makeStaticRequest(staticDir).pipe(
+        Effect.provideService(FileSystem.FileSystem, fileSystem),
+      );
+      const initial = yield* request("/app.txt", { headers: { "accept-encoding": "identity" } });
+      expect(yield* initial.text).toBe("old");
+
+      replaceOnOpen = true;
+      const response = yield* request("/app.txt", { headers: { "accept-encoding": "identity" } });
+      expect(response.status).toBe(200);
+      expect(response.headers).toMatchObject({
+        "content-length": String(Buffer.byteLength(replacement)),
+        "last-modified": after.toUTCString(),
+      });
+      expect(response.headers["etag"]).not.toBe(initial.headers["etag"]);
+      expect(yield* response.text).toBe(replacement);
+    }),
+  );
+
   it.effect("serves changed HTML when deployments preserve its size and timestamp", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
@@ -257,6 +522,8 @@ it.layer(
         expect(response.status).toBe(200);
         expect(yield* response.text).toBe(nextHtml);
         expect(response.headers["cache-control"]).toBe("no-cache");
+        expect(response.headers["content-security-policy"]).toBe("frame-ancestors 'none'");
+        expect(response.headers["x-frame-options"]).toBe("DENY");
         expect(response.headers["etag"]).toBeUndefined();
         expect(response.headers["last-modified"]).toBeUndefined();
       }
@@ -418,7 +685,6 @@ describe("video asset byte ranges", () => {
         ] as const) {
           const file = yield* openMediaFile(canonicalPath);
           if (!file) throw new Error("Expected an opened media file");
-          // Model a sparse file beyond the native stream's numeric addressing limit.
           const info = yield* Effect.promise(() => file.handle.stat({ bigint: true }));
           info.size = size;
           const statSpy = vi.spyOn(file.handle, "stat").mockResolvedValue(info);
@@ -442,46 +708,6 @@ describe("video asset byte ranges", () => {
       }).pipe(Effect.provide(layerFileResponse)),
   );
 
-  it.effect("streams guarded file ranges, including suffixes and conditional requests", () =>
-    Effect.gen(function* () {
-      const fs = yield* FileSystem.FileSystem;
-      const path = yield* Path.Path;
-      const directory = yield* fs.makeTempDirectoryScoped({ prefix: "t3-guarded-range-" });
-      const filePath = path.join(directory, "clip.mp4");
-      yield* fs.writeFileString(filePath, "0123456789");
-      const canonicalPath = yield* fs.realPath(filePath);
-      for (const [range, ifRange, expected, status, contentRange] of [
-        [undefined, undefined, "0123456789", 200, null],
-        ["bytes=0-1", undefined, "01", 206, "bytes 0-1/10"],
-        ["bytes=4-", undefined, "456789", 206, "bytes 4-9/10"],
-        ["bytes=-3", undefined, "789", 206, "bytes 7-9/10"],
-        ["bytes=-999999999999999999999999", undefined, "0123456789", 206, "bytes 0-9/10"],
-        ["bytes=10-", undefined, "", 416, "bytes */10"],
-        ["bytes=0-1", '"old-etag"', "0123456789", 200, null],
-        ["bytes=0-1", "", "0123456789", 200, null],
-      ] as const) {
-        const file = yield* openMediaFile(canonicalPath);
-        if (!file) throw new Error("Expected an opened media file");
-        const response = HttpServerResponse.toWeb(
-          yield* assetFileResponse(
-            { path: canonicalPath, file, mimeType: "video/mp4" },
-            range,
-            ifRange,
-          ),
-        );
-        expect(response.status).toBe(status);
-        expect(response.headers.get("accept-ranges")).toBe("bytes");
-        expect(response.headers.get("content-range")).toBe(contentRange);
-        expect(response.headers.get("cache-control")).toBe("private, no-store");
-        expect(response.headers.get("etag")).toBeNull();
-        expect(response.headers.get("last-modified")).toBeNull();
-        if (status !== 416)
-          expect(response.headers.get("content-length")).toBe(String(expected.length));
-        expect(yield* Effect.promise(() => response.text())).toBe(expected);
-      }
-    }).pipe(Effect.provide(layerFileResponse)),
-  );
-
   it.effect("keeps attachment media out of the cache once its signed URL expires", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
@@ -490,8 +716,6 @@ describe("video asset byte ranges", () => {
       const filePath = path.join(directory, "audio.wav");
       yield* fs.writeFileString(filePath, "RIFF");
       const canonicalPath = yield* fs.realPath(filePath);
-      // An attachment is read straight from disk, so it carries no opened host file. Its URL is
-      // signed and short-lived; a cached copy would outlive the grant that served it.
       const response = HttpServerResponse.toWeb(
         yield* assetFileResponse({ path: canonicalPath, mimeType: "audio/wav" }),
       );
@@ -594,9 +818,22 @@ describe("video asset byte ranges", () => {
       const image = HttpServerResponse.toWeb(
         yield* assetFileResponse({ path: file, mimeType: "image/png" }, "bytes=0-1"),
       );
-      expect(image.status).toBe(200);
-      expect(image.headers.has("accept-ranges")).toBe(false);
-      expect(yield* Effect.promise(() => image.text())).toBe("0123456789");
+      expect(image.status).toBe(206);
+      expect(image.headers.get("accept-ranges")).toBe("bytes");
+      expect(yield* Effect.promise(() => image.text())).toBe("01");
+      for (const mimeType of ["text/plain", "text/csv", "application/octet-stream"]) {
+        for (const [range, expected, status] of [
+          ["bytes=2-5", "2345", 206],
+          ["bytes=-3", "789", 206],
+          ["bytes=10-", "", 416],
+        ] as const) {
+          const result = HttpServerResponse.toWeb(
+            yield* assetFileResponse({ path: file, mimeType }, range),
+          );
+          expect(result.status).toBe(status);
+          expect(yield* Effect.promise(() => result.text())).toBe(expected);
+        }
+      }
     }).pipe(Effect.provide(layerFileResponse)),
   );
 
@@ -653,6 +890,94 @@ describe("video asset byte ranges", () => {
       expect(empty.headers.get("content-range")).toBe("bytes */0");
     }).pipe(Effect.provide(layerFileResponse)),
   );
+});
+
+describe("assetResponseHeaders", () => {
+  it("sandboxes SVG assets", () => {
+    expect(assetResponseHeaders("/attachments/user-image.svg")).toMatchObject({
+      "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; sandbox",
+      "X-Content-Type-Options": "nosniff",
+    });
+    expect(assetResponseHeaders("/attachments/user-image.SVG")).toHaveProperty(
+      "Content-Security-Policy",
+    );
+  });
+  it("serves inline attachment documents with their declared mime type", () => {
+    expect(
+      assetResponseHeaders("/attachments/upload.bin", { mimeType: "application/pdf" }),
+    ).toMatchObject({
+      "Content-Type": "application/pdf",
+    });
+    expect(
+      assetResponseHeaders("/attachments/upload.bin", { mimeType: "text/html" }),
+    ).toMatchObject({
+      "Content-Type": "text/html; charset=utf-8",
+      "Content-Security-Policy": "sandbox allow-scripts allow-forms allow-popups allow-downloads",
+    });
+  });
+
+  it("downloads uploaded documents without executing their content", () => {
+    expect(assetResponseHeaders("/attachments/upload.html", { download: true })).toMatchObject({
+      "Content-Disposition": "attachment",
+      "Content-Security-Policy": "default-src 'none'; sandbox",
+      "Content-Type": "application/octet-stream",
+    });
+  });
+
+  it("serves the real filename and mime type when the claims carry them", () => {
+    expect(
+      assetResponseHeaders("/attachments/thread-1-abc-pdf.pdf", {
+        download: true,
+        fileName: "Q3 report.pdf",
+        mimeType: "application/pdf",
+      }),
+    ).toMatchObject({
+      "Content-Disposition": 'attachment; filename="Q3 report.pdf"',
+      "Content-Security-Policy": "default-src 'none'; sandbox",
+      "Content-Type": "application/pdf",
+    });
+  });
+
+  it("keeps renderable mime types as octet-stream downloads", () => {
+    for (const mimeType of [
+      "text/html",
+      "text/xml",
+      "image/svg+xml",
+      "application/xhtml+xml",
+      "application/rss+xml",
+      "APPLICATION/XML",
+      "IMAGE/SVG+XML",
+      "application/xml-dtd",
+      "application/xml-external-parsed-entity",
+      "not a mime",
+    ]) {
+      expect(
+        assetResponseHeaders("/attachments/upload.bin", { download: true, mimeType }),
+      ).toHaveProperty("Content-Type", "application/octet-stream");
+    }
+  });
+});
+
+describe("downloadContentDisposition", () => {
+  it("quotes plain names and strips quotes and control characters", () => {
+    expect(downloadContentDisposition("report.pdf")).toBe('attachment; filename="report.pdf"');
+    expect(downloadContentDisposition('we"ird\n.pdf')).toBe('attachment; filename="we_ird_.pdf"');
+  });
+
+  it("adds an RFC 5987 encoded name for non-ASCII filenames", () => {
+    expect(downloadContentDisposition("répört.pdf")).toBe(
+      `attachment; filename="r_p_rt.pdf"; filename*=UTF-8''r%C3%A9p%C3%B6rt.pdf`,
+    );
+    expect(downloadContentDisposition("résumé'(*).pdf")).toBe(
+      `attachment; filename="r_sum_'(*).pdf"; filename*=UTF-8''r%C3%A9sum%C3%A9%27%28%2A%29.pdf`,
+    );
+  });
+
+  it("does not throw on unpaired surrogates in the filename", () => {
+    expect(downloadContentDisposition("bad\ud800name.pdf")).toBe(
+      `attachment; filename="bad_name.pdf"; filename*=UTF-8''bad%EF%BF%BDname.pdf`,
+    );
+  });
 });
 
 describe("http dev routing", () => {
@@ -852,132 +1177,5 @@ describe("test harness run history", () => {
         cwd: NodePath.join(NodeOS.tmpdir(), "missing-project"),
       }),
     ).resolves.toEqual({ runs: [] });
-  });
-});
-
-describe("assetResponseHeaders", () => {
-  it("sandboxes SVG assets", () => {
-    expect(assetResponseHeaders("/attachments/user-image.svg")).toMatchObject({
-      "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; sandbox",
-      "X-Content-Type-Options": "nosniff",
-    });
-    expect(assetResponseHeaders("/attachments/user-image.SVG")).toHaveProperty(
-      "Content-Security-Policy",
-    );
-  });
-
-  it("does not apply document policy to raster images", () => {
-    expect(assetResponseHeaders("/attachments/user-image.png")).toEqual({
-      "Cache-Control": "private, max-age=3600",
-      "X-Content-Type-Options": "nosniff",
-    });
-  });
-
-  it("serves inline videos with their declared mime type", () => {
-    expect(
-      assetResponseHeaders("/attachments/demo.bin", {
-        mimeType: 'video/mp4; codecs="avc1.42E01E"',
-      }),
-    ).toEqual({
-      "Cache-Control": "private, max-age=3600",
-      "Content-Type": "video/mp4",
-      "X-Content-Type-Options": "nosniff",
-    });
-  });
-  it("serves inline attachment documents with their declared mime type", () => {
-    expect(
-      assetResponseHeaders("/attachments/upload.bin", { mimeType: "application/pdf" }),
-    ).toMatchObject({
-      "Content-Type": "application/pdf",
-    });
-    expect(
-      assetResponseHeaders("/attachments/upload.bin", { mimeType: "text/html" }),
-    ).toMatchObject({
-      "Content-Type": "text/html; charset=utf-8",
-      "Content-Security-Policy": "sandbox allow-scripts allow-forms allow-popups",
-    });
-  });
-  it("serves HTML assets as utf-8 inside a sandboxed origin", () => {
-    for (const path of ["/workspace/page.html", "/workspace/PAGE.HTM", "/tmp/report.html"]) {
-      expect(assetResponseHeaders(path)).toMatchObject({
-        "Content-Type": "text/html; charset=utf-8",
-        "Content-Security-Policy": "sandbox allow-scripts allow-forms allow-popups",
-      });
-    }
-  });
-
-  it("downloads uploaded documents without executing their content", () => {
-    expect(assetResponseHeaders("/attachments/upload.html", { download: true })).toMatchObject({
-      "Content-Disposition": "attachment",
-      "Content-Security-Policy": "default-src 'none'; sandbox",
-      "Content-Type": "application/octet-stream",
-    });
-  });
-
-  it("serves the real filename and mime type when the claims carry them", () => {
-    expect(
-      assetResponseHeaders("/attachments/thread-1-abc-pdf.pdf", {
-        download: true,
-        fileName: "Q3 report.pdf",
-        mimeType: "application/pdf",
-      }),
-    ).toMatchObject({
-      "Content-Disposition": 'attachment; filename="Q3 report.pdf"',
-      "Content-Security-Policy": "default-src 'none'; sandbox",
-      "Content-Type": "application/pdf",
-    });
-  });
-
-  it("keeps renderable mime types as octet-stream downloads", () => {
-    for (const mimeType of [
-      "text/html",
-      "text/xml",
-      "image/svg+xml",
-      "application/xhtml+xml",
-      "application/rss+xml",
-      "APPLICATION/XML",
-      "IMAGE/SVG+XML",
-      "application/xml-dtd",
-      "application/xml-external-parsed-entity",
-      "not a mime",
-    ]) {
-      expect(
-        assetResponseHeaders("/attachments/upload.bin", { download: true, mimeType }),
-      ).toHaveProperty("Content-Type", "application/octet-stream");
-    }
-  });
-
-  it("preserves official Office Open XML mime types", () => {
-    for (const mimeType of [
-      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-      "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-    ]) {
-      expect(
-        assetResponseHeaders("/attachments/upload.bin", { download: true, mimeType }),
-      ).toHaveProperty("Content-Type", mimeType);
-    }
-  });
-});
-
-describe("downloadContentDisposition", () => {
-  it("quotes plain names and strips quotes and control characters", () => {
-    expect(downloadContentDisposition("report.pdf")).toBe('attachment; filename="report.pdf"');
-    expect(downloadContentDisposition('we"ird\n.pdf')).toBe('attachment; filename="we_ird_.pdf"');
-  });
-
-  it("adds an RFC 5987 encoded name for non-ASCII filenames", () => {
-    expect(downloadContentDisposition("répört.pdf")).toBe(
-      `attachment; filename="r_p_rt.pdf"; filename*=UTF-8''r%C3%A9p%C3%B6rt.pdf`,
-    );
-    expect(downloadContentDisposition("résumé'(*).pdf")).toBe(
-      `attachment; filename="r_sum_'(*).pdf"; filename*=UTF-8''r%C3%A9sum%C3%A9%27%28%2A%29.pdf`,
-    );
-  });
-
-  it("does not throw on unpaired surrogates in the filename", () => {
-    expect(downloadContentDisposition("bad\ud800name.pdf")).toBe(
-      `attachment; filename="bad_name.pdf"; filename*=UTF-8''bad%EF%BF%BDname.pdf`,
-    );
   });
 });

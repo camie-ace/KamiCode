@@ -41,11 +41,9 @@ describe("makeDrainableWorker", () => {
         yield* worker.enqueue("interrupt");
         yield* worker.enqueue("ok");
 
-        // A stopped worker never drains; its exit settles the race instead of a hang.
         yield* Effect.raceFirst(worker.drain, Fiber.await(yield* Deferred.await(workerFiber)));
 
         expect(processed).toEqual(["ok"]);
-        // The item that interrupted itself was cancelled, not failed.
         expect(loggedErrors).toEqual(["typed failure", "defect"]);
       }),
     ).pipe(Effect.provide(loggerLayer));
@@ -75,7 +73,6 @@ describe("makeDrainableWorker", () => {
       expect(processed).toEqual(["block"]);
       expect(loggedErrors).toEqual([]);
 
-      // Queued and late items are dropped with the queue, so drain resolves at once.
       yield* worker.enqueue("after close");
       const drained = yield* Effect.forkChild(worker.drain, { startImmediately: true });
       expect(drained.pollUnsafe()).toEqual(Exit.void);
@@ -83,52 +80,50 @@ describe("makeDrainableWorker", () => {
     }).pipe(Effect.provide(loggerLayer));
   });
 
-  it.live("waits for work enqueued during active processing before draining", () =>
-    Effect.scoped(
-      Effect.gen(function* () {
-        const processed: string[] = [];
-        const firstStarted = yield* Deferred.make<void>();
-        const releaseFirst = yield* Deferred.make<void>();
-        const secondStarted = yield* Deferred.make<void>();
-        const releaseSecond = yield* Deferred.make<void>();
+  it.effect("waits for work enqueued during active processing before draining", () =>
+    Effect.gen(function* () {
+      const processed: string[] = [];
+      const firstStarted = yield* Deferred.make<void>();
+      const releaseFirst = yield* Deferred.make<void>();
+      const secondStarted = yield* Deferred.make<void>();
+      const releaseSecond = yield* Deferred.make<void>();
 
-        const worker = yield* makeDrainableWorker((item: string) =>
-          Effect.gen(function* () {
-            if (item === "first") {
-              yield* Deferred.succeed(firstStarted, undefined).pipe(Effect.orDie);
-              yield* Deferred.await(releaseFirst);
-            }
+      const worker = yield* makeDrainableWorker((item: string) =>
+        Effect.gen(function* () {
+          if (item === "first") {
+            yield* Deferred.succeed(firstStarted, undefined).pipe(Effect.orDie);
+            yield* Deferred.await(releaseFirst);
+          }
 
-            if (item === "second") {
-              yield* Deferred.succeed(secondStarted, undefined).pipe(Effect.orDie);
-              yield* Deferred.await(releaseSecond);
-            }
+          if (item === "second") {
+            yield* Deferred.succeed(secondStarted, undefined).pipe(Effect.orDie);
+            yield* Deferred.await(releaseSecond);
+          }
 
-            processed.push(item);
-          }),
-        );
+          processed.push(item);
+        }),
+      );
 
-        yield* worker.enqueue("first");
-        yield* Deferred.await(firstStarted);
+      yield* worker.enqueue("first");
+      yield* Deferred.await(firstStarted);
 
-        const drained = yield* Deferred.make<void>();
-        yield* Effect.forkChild(
-          worker.drain.pipe(
-            Effect.tap(() => Deferred.succeed(drained, undefined).pipe(Effect.orDie)),
-          ),
-        );
+      const drained = yield* Deferred.make<void>();
+      yield* Effect.forkChild(
+        worker.drain.pipe(
+          Effect.tap(() => Deferred.succeed(drained, undefined).pipe(Effect.orDie)),
+        ),
+      );
 
-        yield* worker.enqueue("second");
-        yield* Deferred.succeed(releaseFirst, undefined);
-        yield* Deferred.await(secondStarted);
+      yield* worker.enqueue("second");
+      yield* Deferred.succeed(releaseFirst, undefined);
+      yield* Deferred.await(secondStarted);
 
-        expect(yield* Deferred.isDone(drained)).toBe(false);
+      expect(yield* Deferred.isDone(drained)).toBe(false);
 
-        yield* Deferred.succeed(releaseSecond, undefined);
-        yield* Deferred.await(drained);
+      yield* Deferred.succeed(releaseSecond, undefined);
+      yield* Deferred.await(drained);
 
-        expect(processed).toEqual(["first", "second"]);
-      }),
-    ),
+      expect(processed).toEqual(["first", "second"]);
+    }),
   );
 });

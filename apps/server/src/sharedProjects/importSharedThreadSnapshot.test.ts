@@ -22,7 +22,7 @@ const stores = Layer.mergeAll(EventStore.layer, ProjectionStore.layer, EffectOut
 );
 const testLayer = EventSink.layer.pipe(Layer.provideMerge(stores));
 const at = "2026-10-06T10:00:00.000Z";
-const snapshot = Schema.decodeUnknownSync(SharedSessionSnapshot)({
+const snapshot = Schema.decodeSync(SharedSessionSnapshot)({
   version: 1,
   capturedAt: at,
   sourceEnvironmentId: "source",
@@ -109,6 +109,8 @@ const snapshot = Schema.decodeUnknownSync(SharedSessionSnapshot)({
   excludedCategories: [],
 });
 
+const isOrchestrationV2DomainEvent = Schema.is(OrchestrationV2DomainEvent);
+
 it.effect(
   "imports complete shared history without runnable work or source checkpoint handles",
   () =>
@@ -125,7 +127,7 @@ it.effect(
         cwd: "/tmp/shared-work",
         now: DateTime.makeUnsafe(at),
       });
-      for (const event of events) assert.isTrue(Schema.is(OrchestrationV2DomainEvent)(event));
+      for (const event of events) assert.isTrue(isOrchestrationV2DomainEvent(event));
       yield* sink.write({ events });
       const projection = yield* projections.getThreadProjection(threadId);
       assert.strictEqual(projection.thread.interactionMode, "workflow");

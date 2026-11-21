@@ -7,7 +7,7 @@ import * as Schema from "effect/Schema";
 import { Command, Flag } from "effect/cli";
 
 import * as ServerConfig from "../config.ts";
-import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
+import { Platform as HostProcessPlatform } from "@t3tools/shared/HostProcess";
 import { resolveBaseDir } from "../os-jank.ts";
 import { isProcessAlive, readPersistedServerRuntimeState } from "../serverRuntimeState.ts";
 import { compactDatabaseOffline, inspectDatabaseStorage } from "../storage/DatabaseCompaction.ts";
@@ -49,7 +49,10 @@ const compactDatabaseCommand = Command.make("compact-database", {
       const paths = yield* ServerConfig.deriveServerPaths(baseDir, undefined, {
         baseDirIsExplicit: Option.isSome(baseDirOption),
       });
-      const before = yield* Effect.tryPromise(() => inspectDatabaseStorage(paths.dbPath));
+      const before = yield* Effect.tryPromise({
+        try: () => inspectDatabaseStorage(paths.dbPath),
+        catch: (cause) => new StorageCommandOperationError({ cause }),
+      });
       if (!apply) {
         yield* Console.log(encodeJson({ mode: "audit", ...before }));
         return;
@@ -66,10 +69,15 @@ const compactDatabaseCommand = Command.make("compact-database", {
         "database-rollback",
         `${timestamp}-pre-compaction`,
       );
-      const installed = yield* Effect.tryPromise(() =>
-        compactDatabaseOffline({ databasePath: paths.dbPath, rollbackDirectory, hostPlatform }),
-      );
-      const after = yield* Effect.tryPromise(() => inspectDatabaseStorage(paths.dbPath));
+      const installed = yield* Effect.tryPromise({
+        try: () =>
+          compactDatabaseOffline({ databasePath: paths.dbPath, rollbackDirectory, hostPlatform }),
+        catch: (cause) => new StorageCommandOperationError({ cause }),
+      });
+      const after = yield* Effect.tryPromise({
+        try: () => inspectDatabaseStorage(paths.dbPath),
+        catch: (cause) => new StorageCommandOperationError({ cause }),
+      });
       yield* Console.log(
         encodeJson({
           mode: "applied",
@@ -88,3 +96,8 @@ export const storageCommand = Command.make("storage").pipe(
   Command.withDescription("Audit and maintain bounded KamiCode-owned storage."),
   Command.withSubcommands([compactDatabaseCommand]),
 );
+
+class StorageCommandOperationError extends Schema.TaggedError<StorageCommandOperationError>()(
+  "StorageCommandOperationError",
+  { cause: Schema.Defect() },
+) {}

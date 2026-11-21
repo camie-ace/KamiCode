@@ -15,7 +15,7 @@ import {
   ZoomOutIcon,
   XIcon,
 } from "lucide-react";
-import { memo, useCallback, useEffect, useMemo, useState } from "react";
+import { memo, useEffect, useState } from "react";
 
 import { useOptionalAssetUrl } from "~/assets/assetUrls";
 import { useComposerDraftStore, type ComposerAttachment, type DraftId } from "~/composerDraftStore";
@@ -84,9 +84,13 @@ export const MediaArtifactCard = memo(function MediaArtifactCard({
   onInteract,
 }: MediaArtifactCardProps) {
   const [viewerOpen, setViewerOpen] = useState(false);
-  const [previewFailed, setPreviewFailed] = useState(false);
-  const [pathCopied, setPathCopied] = useState(false);
-  const [imageCopied, setImageCopied] = useState(false);
+  const [failedPreviewKey, setFailedPreviewKey] = useState<string | null>(null);
+  const [pathCopiedId, setPathCopiedId] = useState<string | null>(null);
+  const pathCopied = pathCopiedId === artifact.id;
+  const setPathCopied = (copied: boolean) => setPathCopiedId(copied ? artifact.id : null);
+  const [imageCopiedId, setImageCopiedId] = useState<string | null>(null);
+  const imageCopied = imageCopiedId === artifact.id;
+  const setImageCopied = (copied: boolean) => setImageCopiedId(copied ? artifact.id : null);
   const directPreviewUrl = artifact.previewUrl ?? artifact.url ?? null;
   const resolvedAssetUrl = useOptionalAssetUrl(
     environmentId,
@@ -98,11 +102,11 @@ export const MediaArtifactCard = memo(function MediaArtifactCard({
           path: artifact.path,
         },
   );
-  useEffect(() => {
-    setPreviewFailed(false);
-  }, [artifact.id, directPreviewUrl, resolvedAssetUrl]);
+  const previewKey = JSON.stringify([artifact.id, directPreviewUrl, resolvedAssetUrl]);
+  const previewFailed = failedPreviewKey === previewKey;
   const previewUrl = directPreviewUrl ?? resolvedAssetUrl;
   const addAttachments = useComposerDraftStore((store) => store.addAttachments);
+  const addFiles = useComposerDraftStore((store) => store.addFiles);
   const displayPath = mediaArtifactReference(artifact);
   const isPreviewableKind = isPreviewableMediaArtifactKind(artifact.kind);
   const isImageLike = isImageMediaArtifactKind(artifact.kind);
@@ -126,11 +130,8 @@ export const MediaArtifactCard = memo(function MediaArtifactCard({
   });
   const canOpenExternal = Boolean(externalTarget);
   const canOpenFile = isFile && canOpenExternal;
-  const metadataRows = useMemo(
-    () => buildMetadataRows(artifact, displayPath, undefined, 6),
-    [artifact, displayPath],
-  );
-  const compactMetadata = useMemo(() => buildCompactMetadata(artifact), [artifact]);
+  const metadataRows = (() => buildMetadataRows(artifact, displayPath, undefined, 6))();
+  const compactMetadata = (() => buildCompactMetadata(artifact))();
   const previewUnavailableMessage = previewFailed
     ? "Preview failed to load."
     : isFile
@@ -148,12 +149,7 @@ export const MediaArtifactCard = memo(function MediaArtifactCard({
     revealLabel,
   });
 
-  useEffect(() => {
-    setPathCopied(false);
-    setImageCopied(false);
-  }, [artifact.id]);
-
-  const copyPath = useCallback(() => {
+  const copyPath = () => {
     if (!navigator.clipboard?.writeText) {
       toastManager.add(
         stackedThreadToast({
@@ -180,9 +176,9 @@ export const MediaArtifactCard = memo(function MediaArtifactCard({
       },
     );
     onInteract?.(artifact);
-  }, [artifact, displayPath, onInteract]);
+  };
 
-  const copyImage = useCallback(() => {
+  const copyImage = () => {
     if (!previewUrl || !canCopyImage) {
       toastManager.add(
         stackedThreadToast({
@@ -210,9 +206,9 @@ export const MediaArtifactCard = memo(function MediaArtifactCard({
       },
     );
     onInteract?.(artifact);
-  }, [artifact, canCopyImage, onInteract, previewUrl]);
+  };
 
-  const openExternally = useCallback(() => {
+  const openExternally = () => {
     if (!externalTarget) return;
     const desktopBridge = getDesktopBridge();
     const localApi = readLocalApi();
@@ -236,9 +232,9 @@ export const MediaArtifactCard = memo(function MediaArtifactCard({
       );
     });
     onInteract?.(artifact);
-  }, [artifact, externalTarget, onInteract]);
+  };
 
-  const revealMedia = useCallback(() => {
+  const revealMedia = () => {
     if (!artifact.path || !canReveal) return;
     const localApi = readLocalApi();
     if (!localApi) return;
@@ -265,9 +261,9 @@ export const MediaArtifactCard = memo(function MediaArtifactCard({
       },
     );
     onInteract?.(artifact);
-  }, [artifact, canReveal, onInteract]);
+  };
 
-  const useInChat = useCallback(() => {
+  const addToChat = () => {
     if (!composerTarget || !previewUrl || (!isImageLike && !isVideo)) return;
     void fetch(previewUrl)
       .then(async (response) => {
@@ -289,7 +285,11 @@ export const MediaArtifactCard = memo(function MediaArtifactCard({
           previewUrl: URL.createObjectURL(file),
           file,
         };
-        addAttachments(composerTarget, [attachment]);
+        if (attachment.type === "video") {
+          addFiles(composerTarget, [{ ...attachment, type: "file" }]);
+        } else {
+          addAttachments(composerTarget, [attachment]);
+        }
       })
       .catch((error: unknown) => {
         toastManager.add(
@@ -301,24 +301,13 @@ export const MediaArtifactCard = memo(function MediaArtifactCard({
         );
       });
     onInteract?.(artifact);
-  }, [
-    addAttachments,
-    artifact,
-    artifact.extension,
-    artifact.kind,
-    artifact.title,
-    composerTarget,
-    isImageLike,
-    isVideo,
-    onInteract,
-    previewUrl,
-  ]);
+  };
 
-  const openViewer = useCallback(() => {
+  const openViewer = () => {
     if (!canOpenViewer) return;
     onInteract?.(artifact);
     setViewerOpen(true);
-  }, [artifact, canOpenViewer, onInteract]);
+  };
 
   const viewer =
     viewerOpen && previewUrl ? (
@@ -336,7 +325,7 @@ export const MediaArtifactCard = memo(function MediaArtifactCard({
         onCopyPath={copyPath}
         onOpenExternal={openExternally}
         onReveal={revealMedia}
-        onUseInChat={useInChat}
+        onUseInChat={addToChat}
         onClose={() => setViewerOpen(false)}
       />
     ) : null;
@@ -372,7 +361,7 @@ export const MediaArtifactCard = memo(function MediaArtifactCard({
                 alt={artifact.title}
                 className="h-full w-full object-cover"
                 loading="lazy"
-                onError={() => setPreviewFailed(true)}
+                onError={() => setFailedPreviewKey(previewKey)}
               />
             ) : canRenderPreview && isVideo ? (
               <video
@@ -380,7 +369,7 @@ export const MediaArtifactCard = memo(function MediaArtifactCard({
                 className="h-full w-full bg-black object-cover"
                 muted
                 preload="metadata"
-                onError={() => setPreviewFailed(true)}
+                onError={() => setFailedPreviewKey(previewKey)}
               />
             ) : isFile ? (
               <PreviewUnavailableState
@@ -466,7 +455,7 @@ export const MediaArtifactCard = memo(function MediaArtifactCard({
                         size="xs"
                         variant="secondary"
                         disabled={!canUseInChat}
-                        onClick={useInChat}
+                        onClick={addToChat}
                       />
                     }
                   >
@@ -579,7 +568,7 @@ export const MediaArtifactCard = memo(function MediaArtifactCard({
               alt={artifact.title}
               className={cn("h-full w-full object-contain", compact ? "max-h-20" : "max-h-48")}
               loading="lazy"
-              onError={() => setPreviewFailed(true)}
+              onError={() => setFailedPreviewKey(previewKey)}
             />
           ) : canRenderPreview && isVideo ? (
             <video
@@ -590,7 +579,7 @@ export const MediaArtifactCard = memo(function MediaArtifactCard({
               )}
               muted
               preload="metadata"
-              onError={() => setPreviewFailed(true)}
+              onError={() => setFailedPreviewKey(previewKey)}
             />
           ) : isFile ? (
             <PreviewUnavailableState
@@ -727,7 +716,7 @@ export const MediaArtifactCard = memo(function MediaArtifactCard({
                       size="xs"
                       variant="outline"
                       disabled={!canUseInChat}
-                      onClick={useInChat}
+                      onClick={addToChat}
                     />
                   }
                 >
@@ -820,15 +809,17 @@ function MediaArtifactViewer(props: {
     setZoom((value) => Math.max(0.5, Number((value - 0.25).toFixed(2))));
   };
 
+  const onClose = props.onClose;
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- Register the viewer's window-level Escape listener and remove it on unmount.
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
-        props.onClose();
+        onClose();
       }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [props.onClose]);
+  }, [onClose]);
 
   return (
     <div
