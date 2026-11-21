@@ -684,6 +684,8 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
           t3Home: "/tmp/t3-bootstrap-home",
           noBrowser: true,
           desktopBootstrapToken: "desktop-token",
+          desktopBrowserFd: undefined,
+          desktopBrowserControlFd: undefined,
           desktopTelemetryFd: 4,
           desktopTelemetryControlFd: 5,
           tailscaleServeEnabled: false,
@@ -733,6 +735,9 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
       expect(resolved).toEqual({
         logLevel: "Info",
         ...defaultObservabilityConfig,
+        otlpTracesSource: "bootstrap",
+        otlpMetricsSource: "bootstrap",
+        otlpLogsSource: "bootstrap",
         otlpTracesUrl: "http://localhost:4318/v1/traces",
         otlpMetricsUrl: "http://localhost:4318/v1/metrics",
         otlpLogsUrl: "http://localhost:4318/v1/logs",
@@ -753,6 +758,8 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
         ...defaultSpeechTranscriptionConfig,
         startupPresentation: "browser",
         desktopBootstrapToken: "desktop-token",
+        desktopBrowserFd: undefined,
+        desktopBrowserControlFd: undefined,
         desktopTelemetryFd: 4,
         desktopTelemetryControlFd: 5,
         resourceMonitorPath: undefined,
@@ -1242,12 +1249,12 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
         );
 
       expect(yield* resolvePort({ port: Option.none() })).toBe(50_123);
-      expect(selected).toEqual([3773]);
+      expect(selected).toEqual([3873]);
       expect(yield* resolvePort({ port: Option.some(8788) })).toBe(8788);
       expect(
         yield* resolvePort({ mode: Option.some("desktop" as const), port: Option.none() }),
-      ).toBe(3773);
-      expect(selected).toEqual([3773]);
+      ).toBe(3873);
+      expect(selected).toEqual([3873]);
     }),
   );
 

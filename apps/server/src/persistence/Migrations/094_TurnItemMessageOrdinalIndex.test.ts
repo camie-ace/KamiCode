@@ -44,7 +44,7 @@ it.effect("migrates over a message whose payload is not JSON, and takes one afte
 
     assert.deepEqual(
       (yield* runMigrations({ toMigrationInclusive: 112 })).map(([id]) => id),
-      [94],
+      [112],
     );
     yield* insertTurnItem("bad-2", "thread-a", 3, "user_message", "{not json");
     yield* insertTurnItem("ok-2", "thread-a", 4, "assistant_message", '{"messageId":"m1"}');

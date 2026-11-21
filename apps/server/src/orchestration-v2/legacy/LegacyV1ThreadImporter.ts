@@ -89,7 +89,7 @@ interface LegacyActivityRow {
   readonly summary: string;
   readonly payload_json: string;
   readonly created_at: string;
-  readonly sequence: number;
+  readonly sequence: number | null;
   readonly ordinal: number;
 }
 
@@ -319,7 +319,7 @@ function activityEvent(row: LegacyActivityRow): OrchestrationV2DomainEvent {
     summary: row.summary,
     payload: parseJson(row.payload_json),
     turnId: row.turn_id === null ? null : TurnId.make(row.turn_id),
-    sequence: row.sequence,
+    sequence: row.sequence ?? undefined,
     createdAt: row.created_at,
   });
   return {

@@ -399,7 +399,7 @@ describe("movedSettingsPath", () => {
 it("finds the hosted browser proxy", () => {
   expect(searchSettings("hosted browser proxy")[0]).toMatchObject({
     id: "hosted-browser-proxy",
-    to: "/settings/integrations",
+    to: "/settings/browser",
     targetId: "browser",
   });
 });

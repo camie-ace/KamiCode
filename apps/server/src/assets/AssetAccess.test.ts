@@ -423,7 +423,7 @@ describe("AssetAccess", () => {
   );
 
   it.effect(
-    "rejects draft media escapes and disallowed types without enabling non-draft media",
+    "rejects draft media escapes and disallowed types and permits authorized thread media",
     () =>
       Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem;
@@ -431,14 +431,14 @@ describe("AssetAccess", () => {
         const directory = yield* fs.makeTempDirectoryScoped({ prefix: "t3-draft-boundary-" });
         const root = path.join(directory, "workspace");
         yield* fs.makeDirectory(root);
-        for (const name of ["video.mp4", "audio.wav", "secret.txt"]) {
+        for (const name of ["video.mp4", "audio.wav", "secret.exe"]) {
           yield* fs.writeFileString(path.join(root, name), "workspace bytes");
           yield* fs.writeFileString(path.join(directory, name), "outside bytes");
         }
         for (const [requestedPath, tag] of [
           ["../video.mp4", "AssetWorkspacePathValidationError"],
           ["../audio.wav", "AssetWorkspacePathValidationError"],
-          ["secret.txt", "AssetPreviewTypeValidationError"],
+          ["secret.exe", "AssetPreviewTypeValidationError"],
         ] as const) {
           const error = yield* issueAssetUrl({
             resource: { _tag: "draft-workspace-file", cwd: root, path: requestedPath },
@@ -447,11 +447,11 @@ describe("AssetAccess", () => {
           expect(error._tag).toBe(tag);
         }
         for (const name of ["video.mp4", "audio.wav"]) {
-          const error = yield* issueAssetUrl({
+          const asset = yield* issueAssetUrl({
             resource: { _tag: "workspace-file", threadId: ThreadId.make("thread-1"), path: name },
             workspaceRoot: root,
-          }).pipe(Effect.flip);
-          expect(error._tag).toBe("AssetPreviewTypeValidationError");
+          });
+          expect(asset.relativeUrl).toMatch(/^\/api\/assets\//u);
         }
       }).pipe(Effect.provide(layerTest)),
   );
@@ -466,7 +466,7 @@ describe("AssetAccess", () => {
         const root = path.join(directory, "workspace");
         yield* fs.makeDirectory(root);
         const outside = path.join(directory, "outside.mp4");
-        const secret = path.join(root, "secret.txt");
+        const secret = path.join(root, "secret.exe");
         yield* fs.writeFileString(outside, "outside bytes");
         yield* fs.writeFileString(secret, "private bytes");
         for (const [name, target] of [
@@ -1323,6 +1323,7 @@ describe("AssetAccess", () => {
       expect(yield* resolveAsset(token, "report.html")).toEqual({
         kind: "file",
         path: canonicalHtmlPath,
+        renderIntent: "file-preview",
       });
       expect(yield* resolveAsset(token, "report.css")).toEqual({
         kind: "file",
@@ -1384,6 +1385,7 @@ describe("AssetAccess", () => {
       expect(yield* resolveAsset(token, "report.html")).toEqual({
         kind: "file",
         path: canonicalHtmlPath,
+        renderIntent: "file-preview",
       });
     }).pipe(Effect.provide(layerTest)),
   );

@@ -975,9 +975,6 @@ describe("orchestration v2 legacy v1 cutover", () => {
         assert.include(firstBoot.authSessionColumnNames, "client_surface");
         assert.include(firstBoot.authSessionColumnNames, "client_app_version");
 
-        assert.notInclude(firstBoot.authSessionColumnNames, "client_surface");
-        assert.notInclude(firstBoot.authSessionColumnNames, "client_app_version");
-
         // Full row contents of the legacy recovery tables survive migration
         // and continuation unchanged, not just their counts.
         assert.deepStrictEqual(

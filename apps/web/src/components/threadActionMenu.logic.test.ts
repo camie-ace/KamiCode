@@ -46,6 +46,7 @@ describe("buildThreadActionMenuItems", () => {
             "regenerate-title",
             "auto-settle",
             "archive",
+            "lock",
             "delete",
           ]
         : [
@@ -56,6 +57,7 @@ describe("buildThreadActionMenuItems", () => {
             "regenerate-title",
             "auto-settle",
             "archive",
+            "lock",
             "delete",
           ];
       expect(items.filter((item) => item.disabled).map((item) => item.id)).toEqual(expected);

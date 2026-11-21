@@ -742,7 +742,7 @@ jobs:
             appimage=$(ls "$GITHUB_WORKSPACE"/release/*.AppImage)
             chmod +x "$appimage"
             (cd "$RUNNER_TEMP" && "$appimage" --appimage-extract >/dev/null)
-            xvfb-run -a "${check[@]}" --executable "$RUNNER_TEMP/squashfs-root/t3code"
+            xvfb-run -a "${check[@]}" --executable "$RUNNER_TEMP/squashfs-root/kamicode"
           fi
 
       - name: Upload launch check output

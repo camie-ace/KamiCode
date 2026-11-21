@@ -109,14 +109,11 @@ describe("workspace file previews", () => {
     "image.png.ts",
     "image.png#notes.exe",
     "image%2Epng",
-    "report.docx#notes.txt",
     "report.xlsx?download=1",
     "slides%2Epptx",
     "report.docm",
     "guide.epub?download=1",
-    "analysis.ipynb#notes.txt",
     "report.odt.ts",
-    "slides.ppt",
   ])("rejects non-preview path %s", (path) => {
     expect(isWorkspacePreviewEntryPath(path)).toBe(false);
   });
@@ -223,6 +220,9 @@ describe("KamiCode document and media previews", () => {
     "recording.webm",
     "spreadsheet?draft.xlsx",
     "image.png#notes.txt",
+    "report.docx#notes.txt",
+    "analysis.ipynb#notes.txt",
+    "slides.ppt",
   ])("opens literal path %s", (path) => {
     expect(isWorkspaceExactFilePreviewPath(path)).toBe(true);
     expect(isWorkspacePreviewEntryPath(path)).toBe(true);

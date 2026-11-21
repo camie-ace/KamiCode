@@ -44,6 +44,7 @@ it.effect("idle sweeps skip SQL until the next wake time or a relevant event", (
           }),
           Layer.mock(ServerSettings.ServerSettingsService)({
             getSettings: Effect.succeed({
+              providerWaterfall: { enabled: false, sequence: [] },
               autoResumeLimitedThreads: true,
               snoozeLimitedThreads: false,
             } as never),

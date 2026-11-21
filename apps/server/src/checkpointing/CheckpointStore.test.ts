@@ -521,8 +521,11 @@ it.layer(layerTest)("CheckpointStore.layer", (it) => {
           checkpointRef: refs.fromCheckpointRef,
         });
 
-        yield* checkpointStore.captureCheckpoint({ cwd: tmp, checkpointRef: refs.toCheckpointRef });
-        expect(yield* checkpointStore.listAuthoredPaths(refs)).toBeNull();
+        const unchanged = checkpointRefForThreadTurn(threadId, 99);
+        yield* checkpointStore.captureCheckpoint({ cwd: tmp, checkpointRef: unchanged });
+        expect(
+          yield* checkpointStore.listAuthoredPaths({ ...refs, toCheckpointRef: unchanged }),
+        ).toBeNull();
 
         yield* git(tmp, ["merge", "upstream", "--no-edit"], { allowNonZeroExit: true });
         yield* writeTextFile(NodePath.join(tmp, "shared.txt"), "upstream\n");
@@ -605,9 +608,9 @@ it.layer(layerTest)("CheckpointStore.layer", (it) => {
           yield* initRepoWithCommit(tmp);
           const checkpointStore = yield* CheckpointStore.CheckpointStore;
           const threadId = ThreadId.make("checkpoint-branch-switch");
-          const [first, second, third] = [0, 1, 2].map((turn) =>
+          const [first, second, committedRef, third] = [0, 1, 2, 3].map((turn) =>
             checkpointRefForThreadTurn(threadId, turn),
-          ) as [CheckpointRef, CheckpointRef, CheckpointRef];
+          ) as [CheckpointRef, CheckpointRef, CheckpointRef, CheckpointRef];
           const changedSince = (fromCheckpointRef: CheckpointRef, toCheckpointRef: CheckpointRef) =>
             Effect.gen(function* () {
               const refs = { cwd: tmp, fromCheckpointRef, toCheckpointRef };
@@ -647,17 +650,17 @@ it.layer(layerTest)("CheckpointStore.layer", (it) => {
           yield* git(tmp, ["commit", "-m", "work on b"]);
           yield* checkpointStore.captureCheckpoint({
             cwd: tmp,
-            checkpointRef: second,
-            previousCheckpointRef: first,
+            checkpointRef: committedRef,
+            previousCheckpointRef: second,
           });
           yield* git(tmp, ["reset", "--hard", "HEAD~1"]);
           yield* checkpointStore.captureCheckpoint({
             cwd: tmp,
             checkpointRef: third,
-            previousCheckpointRef: second,
+            previousCheckpointRef: committedRef,
           });
 
-          const reset = yield* changedSince(second, third);
+          const reset = yield* changedSince(committedRef, third);
           expect(reset.patch).toContain("--- a/b.txt\n+++ /dev/null");
           expect(reset.authored).toEqual(new Set(["README.md", "b.txt"]));
         }),

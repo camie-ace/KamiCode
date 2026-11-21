@@ -82,6 +82,7 @@ const management = Layer.unwrap(
     const projections = yield* ProjectionStore.ProjectionStoreV2;
     return Layer.mock(ThreadManagementService.ThreadManagementService)({
       ensureLegacyTranscript: () => Effect.void,
+      getThreadShell: (id) => projections.getThreadShell(id).pipe(Effect.orDie),
       getThreadSnapshot: (id) => projections.getThreadSnapshot(id).pipe(Effect.orDie),
       getThreadSnapshotWindow: (id, options) =>
         projections.getThreadSnapshotWindow(id, options).pipe(Effect.orDie),

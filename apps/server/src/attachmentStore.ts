@@ -230,10 +230,13 @@ export function attachmentRelativePath(attachment: ChatAttachment): string | nul
       return `${attachment.id}${extension}`;
     }
     case "file": {
-      const extension = inferGenericFileExtension({
-        mimeType: attachment.mimeType,
-        fileName: attachment.name,
-      });
+      const signedExtension = parseAttachmentFileExtension(attachment.id);
+      const extension = signedExtension
+        ? `.${signedExtension.toLowerCase()}`
+        : inferGenericFileExtension({
+            mimeType: attachment.mimeType,
+            fileName: attachment.name,
+          });
       return `${attachment.id}${extension}`;
     }
     default:

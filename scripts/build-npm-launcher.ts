@@ -46,18 +46,20 @@ export function npmLauncherPackageManifest(version: string, databaseMigration: n
   };
 }
 
-/** Highest server migration id, from the `NNN_Name.ts` files the server registers. */
+// KamiCode's ledger IDs differ from the upstream migration filenames.
 const latestServerMigrationId = Effect.fn("latestServerMigrationId")(function* () {
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
-  const dir = yield* path.fromFileUrl(
-    new URL("../apps/server/src/persistence/Migrations/", import.meta.url),
+  const source = yield* fs.readFileString(
+    yield* path.fromFileUrl(
+      new URL("../apps/server/src/persistence/Migrations.ts", import.meta.url),
+    ),
   );
-  const ids = (yield* fs.readDirectory(dir)).flatMap((name) => {
-    const id = /^(\d+)_\w+\.ts$/.exec(name)?.[1];
-    return id === undefined ? [] : [Number(id)];
-  });
-  return Math.max(0, ...ids);
+  const entries =
+    source.split("export const migrationEntries = [")[1]?.split("] as const")[0] ?? "";
+  const ids = Array.from(entries.matchAll(/^\s*\[(\d+),/gm), (match) => Number(match[1]));
+  if (ids.length === 0) return yield* Effect.die(new Error("Server migration ledger is missing."));
+  return Math.max(...ids);
 });
 
 export const buildNpmLauncher = Effect.fn("buildNpmLauncher")(function* (input: {

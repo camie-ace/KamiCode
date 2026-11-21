@@ -11,7 +11,7 @@ import { _electron, type ElectronApplication } from "playwright-core";
 
 // A snapshot from an older build on purpose: the packaged server must migrate it forward, as it
 // does for every upgrading user. It holds one project and two threads, nothing else.
-const FIXTURE_DB = NodePath.join(import.meta.dirname, "fixtures/desktop-launch/statev2.sqlite");
+const FIXTURE_DB = NodePath.join(import.meta.dirname, "fixtures/desktop-launch/kamicode-v1.sqlite");
 const THREAD_TITLE = "Release launch check";
 const THREAD_MESSAGE = "The release opens and shows this thread.";
 const STEP_TIMEOUT_MS = 60_000;
@@ -34,7 +34,7 @@ const artifactsDir = NodePath.resolve(values["artifacts-dir"] ?? "desktop-launch
 const home = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-desktop-launch-"));
 const t3Home = NodePath.join(home, "t3");
 NodeFS.mkdirSync(NodePath.join(t3Home, "userdata"), { recursive: true });
-NodeFS.copyFileSync(FIXTURE_DB, NodePath.join(t3Home, "userdata/statev2.sqlite"));
+NodeFS.copyFileSync(FIXTURE_DB, NodePath.join(t3Home, "userdata/state.sqlite"));
 
 let step = "launching the app";
 let app: ElectronApplication | undefined;

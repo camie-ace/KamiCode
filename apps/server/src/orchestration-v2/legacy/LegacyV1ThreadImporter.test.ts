@@ -533,7 +533,7 @@ it.layer(layerTest)("LegacyV1ThreadImporter", (it) => {
       yield* sql`INSERT INTO projection_thread_activities
         (activity_id, thread_id, turn_id, tone, kind, summary, payload_json, created_at, sequence)
         VALUES
-        ('legacy-workflow', ${threadId}, NULL, 'info', 'workflow.started', 'Workflow started', '{"title":"Migration verification","laneIds":["verify"]}', '2026-01-01T12:00:00.000Z', 10),
+        ('legacy-workflow', ${threadId}, NULL, 'info', 'workflow.started', 'Workflow started', '{"title":"Migration verification","laneIds":["verify"]}', '2026-01-01T12:00:00.000Z', NULL),
         ('legacy-evidence', ${threadId}, NULL, 'info', 'test.evidence', 'Browser evidence saved', '{"runId":"evidence-run","path":"screenshots/result.png"}', '2026-01-03T12:00:00.000Z', 20)`;
 
       assert.equal(yield* importer.pendingThreadCount, 1);
@@ -694,10 +694,10 @@ it.layer(layerTest)("LegacyV1ThreadImporter", (it) => {
 
       const activities = projection.turnItems.filter((item) => item.type === "kami_activity");
       assert.deepStrictEqual(
-        activities.map((item) => [item.activity.kind, item.ordinal]),
+        activities.map((item) => [item.activity.kind, item.ordinal, item.activity.sequence]),
         [
-          ["workflow.started", 2],
-          ["test.evidence", 5],
+          ["workflow.started", 2, undefined],
+          ["test.evidence", 5, 20],
         ],
       );
       assert.deepStrictEqual(activities[1]?.activity.payload, {

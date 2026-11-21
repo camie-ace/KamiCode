@@ -19,6 +19,7 @@ const legacyReaders = ["orchestration-v2/legacy/", "persistence/Migrations/"] as
 const legacyReaderFiles: Record<string, string> = {
   // Offline maintenance preserves retained V1 history until lazy import finishes.
   "storage/DatabaseCompaction.ts": "offline compaction of retained V1 history",
+  "persistence/DatabaseMaintenance.ts": "checks retained V1 history before removing its backup",
   // Provider history for settings migration reads V1 thread sessions once at load.
   "serverSettings.ts": "one-time provider history for settings migration",
 };

@@ -239,6 +239,41 @@ import { deriveActivePlanState } from "../workflowPlans";
 
 import { findLatestProposedPlan } from "../workflowPlans";
 import { Atom } from "effect/reactivity";
+// Registry-held atoms must not close over ChatView's render frame and its transcript.
+function makeWorkflowChildCompletionsAtom(
+  environmentId: EnvironmentId,
+  parentThread: Thread | null,
+  activities: ReadonlyArray<OrchestrationThreadActivity>,
+) {
+  return Atom.make((get): WorkflowChildCompletionObservation[] =>
+    parentThread === null
+      ? []
+      : workflowChildCompletionObservations({
+          parentThread,
+          activities,
+          childThreadForId: (id) =>
+            get(environmentThreadDetails.threadAtom(scopeThreadRef(environmentId, id))),
+        }),
+  );
+}
+
+function makeWorkflowLaneRunDetailsAtom(
+  environmentId: EnvironmentId,
+  parentThread: Thread | null,
+  activities: ReadonlyArray<OrchestrationThreadActivity>,
+) {
+  return Atom.make((get): WorkflowLaneRunDetail[] =>
+    parentThread === null
+      ? []
+      : workflowLaneRunDetails({
+          parentThread,
+          activities,
+          childThreadForId: (id) =>
+            get(environmentThreadDetails.threadAtom(scopeThreadRef(environmentId, id))),
+        }),
+  );
+}
+
 function workflowChildCompletionObservations(input: {
   parentThread: Thread;
   activities: ReadonlyArray<OrchestrationThreadActivity>;
@@ -3627,39 +3662,12 @@ export default function ChatView(props: ChatViewProps) {
 
   const sidebarProposedPlan = (() => findLatestProposedPlan(serverProjection, null))();
 
-  const workflowChildCompletionsAtom = (() =>
-    Atom.make((get): WorkflowChildCompletionObservation[] => {
-      if (!activeThread) return [];
-      return workflowChildCompletionObservations({
-        parentThread: activeThread,
-        activities: threadActivities,
-        childThreadForId: (childThreadId) =>
-          get(
-            environmentThreadDetails.threadAtom(
-              scopeThreadRef(activeThread.environmentId, childThreadId),
-            ),
-          ),
-      });
-    }).pipe(Atom.withLabel(`workflow-child-completions:${routeThreadKey}`)))();
-
-  const workflowChildCompletions = useAtomValue(workflowChildCompletionsAtom);
-
-  const workflowLaneRunDetailsAtom = (() =>
-    Atom.make((get): WorkflowLaneRunDetail[] => {
-      if (!activeThread) return [];
-      return workflowLaneRunDetails({
-        parentThread: activeThread,
-        activities: threadActivities,
-        childThreadForId: (childThreadId) =>
-          get(
-            environmentThreadDetails.threadAtom(
-              scopeThreadRef(activeThread.environmentId, childThreadId),
-            ),
-          ),
-      });
-    }).pipe(Atom.withLabel(`workflow-lane-run-details:${routeThreadKey}`)))();
-
-  const workflowLaneRunDetailsForSidebar = useAtomValue(workflowLaneRunDetailsAtom);
+  const workflowChildCompletions = useAtomValue(
+    makeWorkflowChildCompletionsAtom(environmentId, activeThread, threadActivities),
+  );
+  const workflowLaneRunDetailsForSidebar = useAtomValue(
+    makeWorkflowLaneRunDetailsAtom(environmentId, activeThread, threadActivities),
+  );
 
   const workflowSidebarActive = interactionMode === "workflow";
 

@@ -329,20 +329,17 @@ function paginateBranches(input: {
 
 function parseWorktreeBranchPaths(stdout: string): ReadonlyMap<string, string> {
   const worktreePaths = new Map<string, string>();
-  const fields = stdout.split("\0");
-
-  // `for-each-ref` terminates each formatted record with a newline in addition
-  // to the explicit NUL fields. Ref names cannot contain newlines, so remove
-  // exactly that record separator while preserving worktree paths verbatim.
-  for (let index = 0; index + 1 < fields.length; index += 2) {
-    const rawRefName = fields[index] ?? "";
-    const fullRefName = index === 0 ? rawRefName : rawRefName.replace(/^\r?\n/, "");
-    const worktreePath = fields[index + 1] ?? "";
-    if (fullRefName.startsWith("refs/heads/") && worktreePath.length > 0) {
-      worktreePaths.set(fullRefName.slice("refs/heads/".length), worktreePath);
+  for (const record of stdout.split("\0\0")) {
+    const fields = record.split("\0");
+    const worktree = fields.find((field) => field.startsWith("worktree "));
+    const branch = fields.find((field) => field.startsWith("branch refs/heads/"));
+    if (worktree && branch && !fields.some((field) => field.startsWith("prunable"))) {
+      worktreePaths.set(
+        branch.slice("branch refs/heads/".length),
+        worktree.slice("worktree ".length),
+      );
     }
   }
-
   return worktreePaths;
 }
 
